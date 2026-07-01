@@ -1,0 +1,64 @@
+# ---- Private planning / design set (never publish) ----
+# Maintained privately per README — planned/unreleased features stay off the
+# public repo. Keep these local-only; never `git add -f` them.
+Build-Prompts-Guide.md
+prd.md
+product-roadmap.md
+product-vision.md
+vision.json
+gtm.md
+Freally-Capture-Competition-Guide-Features.md
+*[Pp]rompt*.md
+
+# ---- Rust ----
+/target
+**/target
+# Cargo.lock IS committed (app workspace — reproducible builds + cargo-audit)
+*.pdb
+
+# ---- Tauri ----
+/src-tauri/target
+/src-tauri/gen
+/src-tauri/WixTools
+
+# ---- Node / Vite UI ----
+/ui/node_modules
+/ui/dist
+/ui/.vite
+node_modules
+dist
+.vite
+*.tsbuildinfo
+
+# ---- Editors / OS / agents ----
+.claude/
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Local artifacts (never commit) ----
+# recordings, replays, exported clips, fetched binaries/models
+*.frec
+*.mp4
+*.mkv
+*.mov
+*.webm
+/recordings
+/replays
+# on-demand, non-bundled components fetched to local caches
+/.cache/ffmpeg
+/.cache/models
+*.gguf
+*.onnx
+
+# ---- Secrets / local config ----
+.env
+.env.*
+*.key
+*.pem
+# local user config / stream keys must never be committed
+/local
+secrets.json

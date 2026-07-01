@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freally Capture — Releases &amp; Updates</title>
+    <meta
+      name="description"
+      content="Freally Capture — a local-first, cross-platform live-streaming &amp; recording studio (OBS-class). Scenes, a GPU compositor, multistream, virtual camera, replay buffer — one clean app, no accounts, no cloud."
+    />
+    <link rel="icon" type="image/png" href="freally-icon.png" />
+    <link rel="apple-touch-icon" href="freally-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
+      <h1>Freally Capture</h1>
+      <p class="tagline">Record and stream like a studio — scenes, sources, multistream, one clean app.</p>
+      <p class="sub">
+        A local-first, cross-platform live-streaming &amp; recording studio (OBS-class): a real-time GPU
+        scene compositor, multi-track recording, and multistream to every platform at once — entirely on
+        your machine. No accounts, no telemetry, no cloud.
+      </p>
+    </header>
+
+    <main>
+      <!-- Feature highlights -->
+      <section class="features-grid" aria-label="Feature highlights">
+        <div class="feature">
+          <span class="ic" aria-hidden="true">🎬</span>
+          <h3>Owned GPU compositor</h3>
+          <p>Build scenes from sources — display, window, webcam, browser, media — and compose them live on the GPU (wgpu) with per-source filters and transitions.</p>
+        </div>
+        <div class="feature">
+          <span class="ic" aria-hidden="true">📡</span>
+          <h3>Multistream, direct</h3>
+          <p>Go live to Twitch, YouTube, Kick and more — several at once (Pro) — over RTMP/RTMPS/SRT/WHIP, straight from your machine. No restream server.</p>
+        </div>
+        <div class="feature">
+          <span class="ic" aria-hidden="true">⏺️</span>
+          <h3>Multi-track recording</h3>
+          <p>Record with your GPU's hardware encoder (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) — or the owned lossless freally-video codec — on up to 6 audio tracks.</p>
+        </div>
+        <div class="feature">
+          <span class="ic" aria-hidden="true">📷</span>
+          <h3>Virtual camera</h3>
+          <p>Turn your produced scene into a webcam for Zoom, Meet, or Discord — plus a webcam virtual background, all on-device.</p>
+        </div>
+        <div class="feature">
+          <span class="ic" aria-hidden="true">⏪</span>
+          <h3>Replay buffer</h3>
+          <p>Keep a rolling buffer and save the last N seconds with a hotkey — cross-vendor, on the owned codec, without interrupting your stream.</p>
+        </div>
+        <div class="feature">
+          <span class="ic" aria-hidden="true">🔒</span>
+          <h3>Local-first, no account</h3>
+          <p>No login, no telemetry, no cloud. The only thing that leaves your machine is the stream you chose to send. First-class on Windows, macOS &amp; Linux.</p>
+        </div>
+      </section>
+
+      <!-- Current status / latest -->
+      <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">Planning</span>
+            <span class="date">Project started Jun 30, 2026</span>
+          </div>
+          <span class="future" aria-disabled="true">Downloads available in future releases</span>
+        </div>
+
+        <h2>In development — building toward 0.70.0 (studio MVP)</h2>
+        <p class="summary">
+          Freally Capture is in active planning and early development. The first public build (0.70.0)
+          will build GPU-composited scenes, record multi-track with a hardware encoder (plus the owned
+          lossless freally-video codec), run a virtual camera, and stream single-target to Twitch,
+          YouTube, Kick, and more — on Windows, macOS, and Linux. There are no downloads yet.
+        </p>
+
+        <h3>What the first public build will do</h3>
+        <ul class="features">
+          <li>Build scenes from sources (display, window, webcam, capture card, browser, media, image, text, color, audio) on an owned wgpu GPU compositor, with per-source filters (chroma key, color correction, LUT, blur, sharpen).</li>
+          <li>Record multi-track to mp4/mkv/mov/webm via hardware encoders (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) with an x264 fallback — or fully lossless in the owned freally-video format.</li>
+          <li>Go live single-target over RTMP/RTMPS to Twitch/YouTube/Kick/Facebook/Trovo/custom, with auto-reconnect and a configurable stream delay.</li>
+          <li>Studio Mode (preview/program) with cut/fade/slide/stinger transitions, a virtual camera output, global hotkeys, profiles + scene collections, and a live stats dock.</li>
+          <li>No account, no telemetry, no cloud — your stream goes direct to the platform.</li>
+        </ul>
+
+        <p class="note">
+          Simultaneous multistream to several platforms, SRT/WHIP, the webcam virtual background, the
+          replay-buffer presets, and the WebSocket remote-control API arrive in the 0.85.0 and 1.0.0
+          milestones. Until installers are published, this page shows
+          <em>"Downloads available in future releases."</em>
+        </p>
+      </article>
+
+      <!-- Roadmap to 1.0.0 -->
+      <section class="roadmap">
+        <h2>Roadmap to 1.0.0</h2>
+        <ol class="timeline">
+          <li>
+            <span class="badge upcoming">0.10.0</span>
+            <div>
+              <strong>Foundation &amp; repo</strong>
+              <p>The Tauri v2 + React studio shell over the owned Rust workspace, the CI matrix, and the governance + site scaffold.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.25.0</span>
+            <div>
+              <strong>Capture core</strong>
+              <p>Per-OS screen/window capture (DXGI/WGC, ScreenCaptureKit, PipeWire portal) and webcam, live in the program preview.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.40.0</span>
+            <div>
+              <strong>Compositor + scenes/sources</strong>
+              <p>The owned wgpu GPU compositor, the scene/source model, the source set, and the video filter chain (chroma key, color, LUT, blur).</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.55.0</span>
+            <div>
+              <strong>Audio mixer + recording</strong>
+              <p>The audio graph (up to 6 tracks, denoise/gate/compressor/EQ, LUFS), and multi-track recording with hardware encoders + the owned lossless codec.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.70.0</span>
+            <div>
+              <strong>Studio MVP — first public</strong>
+              <p>Single-target streaming with reconnect, Studio Mode + transitions, the virtual camera, global hotkeys, profiles, the stats dock, and the offline license.</p>
+            </div>
+            <span class="soon">First public</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.85.0</span>
+            <div>
+              <strong>Multistream / SRT / WHIP + virtual background</strong>
+              <p>Simultaneous multistream to many targets (Pro), SRT/WHIP, vertical/multi-canvas, replay-buffer presets, and the webcam virtual background.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">1.0.0</span>
+            <div>
+              <strong>Remote API, scripting, game capture &amp; launch</strong>
+              <p>The WebSocket remote-control API + browser docks, Lua/JS scripting + plugins, game capture, signed installers, full localization (18 languages), and accessibility.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <p>© 2026 Mike Weaver — All Rights Reserved · free core · local-first · no account · your stream never routes through our cloud</p>
+      <p>
+        <a href="https://github.com/MikesRuthless12/freally-capture">GitHub</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/releases">All releases</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/blob/main/LICENSE">License</a> ·
+        <a href="documentation.html">Documentation</a> ·
+        <a href="changelog.html">Changelog</a>
+      </p>
+    </footer>
+  </body>
+</html>

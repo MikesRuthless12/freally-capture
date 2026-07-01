@@ -1,0 +1,87 @@
+# Freally Capture — Cargo workspace
+#
+# A local-first, cross-platform live-streaming & recording studio (OBS-class).
+# The `src-tauri` app crate hosts the Tauri v2 shell + the React/TypeScript control UI;
+# the owned engine lives in the library crates under `crates/`.
+#
+# © 2026 Mike Weaver (Havoc Software) — All Rights Reserved. Proprietary, source-available.
+
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",        # `freally-capture` — Tauri v2 app crate (UI bridge, profiles, license, hotkeys, i18n)
+    "crates/capture",   # per-OS screen/window/(game) capture behind a `Capture` interface
+    "crates/sources",   # source model: webcam/capture-card, browser, media, image, text, color, audio, segmentation
+    "crates/compositor", # OWNED wgpu GPU compositor: transforms, blend modes, filter chain, scene transitions
+    "crates/scene",     # OWNED scene/source/filter data model (+ serde, scripting hooks)
+    "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
+    "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
+    "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+authors = ["Mike Weaver <mythodikalone@gmail.com>"]
+license = "LicenseRef-Proprietary"   # see LICENSE — proprietary, source-available, All Rights Reserved
+repository = "https://github.com/MikesRuthless12/freally-capture"
+publish = false
+
+# Shared dependency versions for the workspace. Crates opt in with
+# `dep = { workspace = true }`. (Structure-only scaffold; pin exact versions when building.)
+[workspace.dependencies]
+# Core / async
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+parking_lot = "0.12"
+
+# Tauri shell (app crate)
+tauri = { version = "2", features = [] }
+tauri-build = "2"
+
+# GPU compositor
+wgpu = "0.20"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.28"
+
+# Capture (per-OS)
+windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture
+objc2 = "0.5"           # macOS: ScreenCaptureKit bindings
+ashpd = "0.9"           # Linux: PipeWire portal
+nokhwa = "0.10"         # webcam / capture card
+
+# Audio
+cpal = "0.15"
+nnnoiseless = "0.5"     # RNNoise denoise
+
+# Inference (DeepFilterNet denoise + selfie segmentation) — models fetched on demand
+ort = "2"
+tract-onnx = "0.21"
+
+# Text sources (reuse Freally Snipper font concepts)
+rustybuzz = "0.18"
+
+# Streaming / remote API
+tungstenite = "0.23"
+
+# Licensing / config / hotkeys / i18n
+ed25519-dalek = "2"
+directories = "5"
+global-hotkey = "0.6"
+fluent = "0.16"
+
+# Wire codecs (NOT bundled — fetched on demand, hash-verified, behind the encode interface)
+# ffmpeg-sidecar = "1"    # or ffmpeg-next, decided in P4.4
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

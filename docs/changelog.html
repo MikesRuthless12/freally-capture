@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freally Capture — Changelog</title>
+    <meta
+      name="description"
+      content="The Freally Capture changelog and roadmap to 1.0.0. No releases yet — the app is in planning."
+    />
+    <link rel="icon" type="image/png" href="freally-icon.png" />
+    <link rel="apple-touch-icon" href="freally-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
+      <h1>Changelog</h1>
+      <p class="sub">Every Freally Capture release will land here. The app is in planning — no releases yet.</p>
+    </header>
+
+    <main>
+      <!-- Unreleased -->
+      <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">Unreleased</span>
+            <span class="date">Planning · started Jun 30, 2026</span>
+          </div>
+          <span class="future" aria-disabled="true">Downloads available in future releases</span>
+        </div>
+
+        <h2>Unreleased — in development</h2>
+        <p class="summary">
+          Freally Capture is in active planning and early development. There are no public releases yet.
+          This page will list each version as it ships, newest first, with its downloads. The current
+          plan is the roadmap to 1.0.0 below.
+        </p>
+
+        <h3>Planned for the first public build (0.70.0 — Studio MVP)</h3>
+        <ul class="features">
+          <li>Build scenes from sources on the owned wgpu GPU compositor, with per-source filters and transitions.</li>
+          <li>Multi-track recording via hardware encoders (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264 fallback, plus the owned lossless freally-video codec.</li>
+          <li>Single-target live streaming (RTMP/RTMPS) to Twitch/YouTube/Kick/Facebook/Trovo/custom, with auto-reconnect and stream delay.</li>
+          <li>Studio Mode (preview/program) + transitions, a virtual camera, global hotkeys, profiles + scene collections, and a live stats dock.</li>
+          <li>No account, no telemetry, no cloud — streams go direct to the platform.</li>
+        </ul>
+
+        <p class="note">
+          The detailed build plan is maintained privately. Until installers are published, the
+          <a href="index.html">Releases page</a> shows
+          <em>"Downloads available in future releases."</em>
+        </p>
+      </article>
+
+      <!-- Roadmap to 1.0.0 -->
+      <section class="roadmap">
+        <h2>Roadmap to 1.0.0</h2>
+        <ol class="timeline">
+          <li>
+            <span class="badge upcoming">0.10.0</span>
+            <div>
+              <strong>Foundation &amp; repo</strong>
+              <p>Tauri v2 + React studio shell over the owned Rust workspace, CI matrix, packaging + site scaffold.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.25.0</span>
+            <div>
+              <strong>Capture core</strong>
+              <p>Per-OS screen/window capture and webcam, live in the program preview.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.40.0</span>
+            <div>
+              <strong>Compositor + scenes/sources</strong>
+              <p>The owned wgpu compositor, the scene/source model, the source set, and the video filter chain.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.55.0</span>
+            <div>
+              <strong>Audio mixer + recording</strong>
+              <p>The audio graph (6 tracks, denoise/gate/compressor/EQ, LUFS) and multi-track recording with hardware encoders + the owned lossless codec.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.70.0</span>
+            <div>
+              <strong>Studio MVP — first public</strong>
+              <p>Single-target streaming + reconnect, Studio Mode + transitions, the virtual camera, hotkeys, profiles, the stats dock, and the offline license.</p>
+            </div>
+            <span class="soon">First public</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.85.0</span>
+            <div>
+              <strong>Multistream / SRT / WHIP + virtual background</strong>
+              <p>Simultaneous multistream to many targets (Pro), SRT/WHIP, vertical/multi-canvas, replay presets, and the webcam virtual background.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+          <li>
+            <span class="badge upcoming">1.0.0</span>
+            <div>
+              <strong>Remote API, scripting, game capture &amp; launch</strong>
+              <p>WebSocket remote API + browser docks, Lua/JS scripting + plugins, game capture, signed installers, full localization (18 languages), and accessibility.</p>
+            </div>
+            <span class="soon">Coming soon</span>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer>
+      <p>© 2026 Mike Weaver — All Rights Reserved · free core · local-first · no account · your stream never routes through our cloud</p>
+      <p>
+        <a href="https://github.com/MikesRuthless12/freally-capture">GitHub</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/releases">All releases</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/blob/main/LICENSE">License</a> ·
+        <a href="documentation.html">Documentation</a> ·
+        <a href="changelog.html" aria-current="page">Changelog</a>
+      </p>
+    </footer>
+  </body>
+</html>

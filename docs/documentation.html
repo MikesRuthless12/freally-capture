@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freally Capture — Documentation</title>
+    <meta
+      name="description"
+      content="Documentation hub for Freally Capture — every project document, plus how to build scenes, record, go live, multistream, and run the virtual camera."
+    />
+    <link rel="icon" type="image/png" href="freally-icon.png" />
+    <link rel="apple-touch-icon" href="freally-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* ---- Two-column doc layout ---- */
+      .doc-layout {
+        display: flex;
+        gap: 2rem;
+        align-items: flex-start;
+        max-width: 1150px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .doc-toc {
+        position: sticky;
+        top: 90px;
+        flex: 0 0 230px;
+        align-self: flex-start;
+      }
+
+      .doc-toc nav {
+        background: linear-gradient(180deg, var(--panel-2), var(--panel));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px 10px;
+      }
+
+      .doc-toc .toc-label {
+        display: block;
+        padding: .25rem .6rem .6rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .doc-toc a {
+        display: block;
+        padding: .35rem .6rem;
+        text-decoration: none;
+        border-left: 2px solid transparent;
+        color: #c7d1e0;
+        font-size: 0.92rem;
+        border-radius: 0 6px 6px 0;
+        transition: color 0.12s, border-left-color 0.12s, background 0.12s;
+      }
+
+      .doc-toc a:hover,
+      .doc-toc a.active {
+        border-left-color: var(--accent);
+        color: var(--accent);
+        background: rgba(110, 168, 254, 0.07);
+      }
+
+      .doc-body {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .doc-body section {
+        margin-bottom: 2.5rem;
+        background: linear-gradient(180deg, var(--panel-2), var(--panel));
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 28px 32px;
+        box-shadow: 0 12px 50px rgba(0, 0, 0, 0.35);
+      }
+
+      .doc-body section h2 {
+        margin: 0 0 6px;
+        font-size: 1.55rem;
+        font-weight: 700;
+      }
+
+      .doc-body section .section-intro {
+        color: #c7d1e0;
+        font-size: 1.02rem;
+        margin: 0 0 22px;
+      }
+
+      /* ---- Document index cards ---- */
+      .doc-index {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .doc-index li {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+
+      .doc-index a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 1rem;
+      }
+
+      .doc-index a:hover {
+        text-decoration: underline;
+      }
+
+      .doc-index p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 0.93rem;
+      }
+
+      .doc-index .priv {
+        display: inline-block;
+        margin-left: 8px;
+        font-size: 0.72rem;
+        color: var(--muted);
+        border: 1px dashed var(--border);
+        border-radius: 999px;
+        padding: 1px 8px;
+        vertical-align: middle;
+      }
+
+      /* ---- Step lists ---- */
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        counter-reset: step;
+      }
+
+      .steps > li {
+        counter-increment: step;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 13px 0;
+        border-bottom: 1px solid rgba(40, 54, 80, 0.45);
+      }
+
+      .steps > li:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .steps > li::before {
+        content: counter(step);
+        flex: 0 0 28px;
+        height: 28px;
+        line-height: 28px;
+        text-align: center;
+        background: rgba(110, 168, 254, 0.12);
+        border: 1px solid rgba(110, 168, 254, 0.3);
+        border-radius: 50%;
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 700;
+        margin-top: 1px;
+      }
+
+      .steps > li > span {
+        flex: 1;
+        color: #d4dcea;
+        font-size: 0.98rem;
+        line-height: 1.6;
+      }
+
+      .steps > li > span strong {
+        color: var(--text);
+      }
+
+      .doc-body h3 {
+        margin: 26px 0 10px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      kbd {
+        display: inline-block;
+        padding: 2px 7px;
+        font-family: "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 0.85em;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+      }
+
+      .tip {
+        margin: 18px 0 0;
+        padding: 12px 16px;
+        background: rgba(110, 168, 254, 0.07);
+        border-left: 3px solid var(--accent);
+        border-radius: 0 8px 8px 0;
+        color: #c7d1e0;
+        font-size: 0.93rem;
+        line-height: 1.55;
+      }
+
+      .tip strong {
+        color: var(--accent);
+      }
+
+      .warn {
+        margin: 18px 0 0;
+        padding: 12px 16px;
+        background: rgba(255, 200, 80, 0.06);
+        border-left: 3px solid #f0b429;
+        border-radius: 0 8px 8px 0;
+        color: #c7d1e0;
+        font-size: 0.93rem;
+        line-height: 1.55;
+      }
+
+      .warn strong {
+        color: #f0b429;
+      }
+
+      @media (max-width: 820px) {
+        .doc-layout {
+          flex-direction: column;
+        }
+
+        .doc-toc {
+          position: static;
+          flex: none;
+          width: 100%;
+        }
+
+        .doc-toc nav {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0 4px;
+          padding: 12px 10px;
+        }
+
+        .doc-toc .toc-label {
+          width: 100%;
+          padding-bottom: .35rem;
+        }
+
+        .doc-toc a {
+          border-left: none;
+          border-bottom: 2px solid transparent;
+          border-radius: 6px;
+          padding: .3rem .55rem;
+          font-size: 0.85rem;
+        }
+
+        .doc-toc a:hover,
+        .doc-toc a.active {
+          border-left-color: transparent;
+          border-bottom-color: var(--accent);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
+      <h1>Documentation</h1>
+      <p class="sub">The document hub for Freally Capture — every project document, plus how to build scenes, record, go live, and run the virtual camera.</p>
+    </header>
+
+    <div class="doc-layout">
+
+      <!-- ===== LEFT: Sticky table of contents ===== -->
+      <aside class="doc-toc">
+        <nav aria-label="Page sections">
+          <span class="toc-label">On this page</span>
+          <a href="#documents">Document index</a>
+          <a href="#getting-started">Getting started</a>
+          <a href="#build-a-scene">Build a scene</a>
+          <a href="#filters">Filters &amp; transitions</a>
+          <a href="#audio">Audio mixer</a>
+          <a href="#record">Record</a>
+          <a href="#go-live">Go live</a>
+          <a href="#multistream">Multistream (Pro)</a>
+          <a href="#virtual-camera">Virtual camera</a>
+          <a href="#replay">Replay buffer</a>
+          <a href="#remote">Remote control</a>
+          <a href="#settings">Settings &amp; license</a>
+          <a href="#privacy">Privacy</a>
+        </nav>
+      </aside>
+
+      <!-- ===== RIGHT: Content ===== -->
+      <main class="doc-body" id="doc-main">
+
+        <!-- Document index -->
+        <section id="documents">
+          <h2>Document index</h2>
+          <p class="section-intro">Freally Capture's planning &amp; design set. The strategy/spec documents are maintained privately and are not published in the public repository; this index is the canonical map of them, plus the public governance documents that ship with the app.</p>
+
+          <ul class="doc-index">
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/README.md">README.md</a><p>What Freally Capture is, the planned stack, editions, per-OS build &amp; release notes, and its relationship to Freally Snipper.</p></li>
+            <li><a href="#">vision.json</a><span class="priv">private</span><p>The structured product vision (PLAID schema): creator, purpose, audience, business model, brand, and tech stack.</p></li>
+            <li><a href="#">product-vision.md</a><span class="priv">private</span><p>Vision &amp; mission, user research, product strategy (incl. the Snipper-vs-Capture positioning), brand strategy, and the Havoc design direction with hex tokens.</p></li>
+            <li><a href="#">prd.md</a><span class="priv">private</span><p>The product requirements document: architecture (capture → wgpu compositor → encode → {file, stream} + audio graph), data model, the Tauri-command + WebSocket-remote API spec, user stories, functional &amp; non-functional requirements, UI/UX, licensing/payments, edge cases.</p></li>
+            <li><a href="#">product-roadmap.md</a><span class="priv">private</span><p>The canonical spec + phased plan (0.10.0 → 1.0.0): build philosophy, ownership posture, per-phase goals/demos/tasks, the Definition of Done, and the release ladder.</p></li>
+            <li><a href="#">Build-Prompts-Guide.md</a><span class="priv">private</span><p>The ordered build prompts (PX.Y) that implement each roadmap phase, each with acceptance criteria, the 13-step Definition of Done, the privacy/honesty/no-console-window invariants, and the honest-caveats appendix.</p></li>
+            <li><a href="#">Freally-Capture-Competition-Guide-Features.md</a><span class="priv">private</span><p>An exhaustive, coded feature menu vs OBS / Streamlabs / XSplit / Twitch Studio — parity plus the Freally edge (clean UX, owned compositor/codec, privacy, cross-platform, suite integration).</p></li>
+            <li><a href="#">gtm.md</a><span class="priv">private</span><p>The go-to-market playbook: market context, launch plan, channels (r/obs, r/Twitch, r/streaming, HN, YouTube), content, metrics, budget, and risks.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/LICENSE">LICENSE</a><p>Proprietary, source-available — © 2026 Mike Weaver, All Rights Reserved. Read + build/run for personal evaluation only.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/SECURITY.md">SECURITY.md</a><p>The security policy and how to report a vulnerability privately, plus the per-surface security posture.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/PRIVACY.md">PRIVACY.md</a><p>The privacy policy (DRAFT): no accounts, no telemetry, capture stays local, streams go only to the targets you set.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/EULA.md">EULA.md</a><p>The end-user license agreement (DRAFT): the intended terms of use, your-content responsibility, and the codec/patent notice.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a><p>Attribution for bundled, downloaded, and driven components (ffmpeg/wire codecs, wgpu, RNNoise, MediaPipe, hardware encoders) and the owned-component note.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/CHANGELOG.md">CHANGELOG.md</a><p>The Keep-a-Changelog history. Currently "Unreleased" — the roadmap to 1.0.0.</p></li>
+            <li><a href="changelog.html">changelog.html</a><p>The public Releases &amp; Updates changelog page (this site).</p></li>
+          </ul>
+
+          <div class="tip"><strong>Note:</strong> Documents marked <em>private</em> are part of the planning set kept out of the public repository. This page links them for reference and keeps the full set discoverable; the public governance documents link to their files on GitHub.</div>
+        </section>
+
+        <!-- Getting started -->
+        <section id="getting-started">
+          <h2>Getting started</h2>
+          <p class="section-intro">Freally Capture is in planning — there are no downloads yet. When the first public build (0.70.0) ships, this is how you'll get going. The steps below describe the planned workflow.</p>
+
+          <div class="warn"><strong>Status:</strong> pre-development. The app is not built yet — <strong>downloads will be available in future releases.</strong> Watch the <a href="index.html" style="color:var(--accent)">Releases page</a> for the first build.</div>
+
+          <h3>Windows / macOS / Linux (planned)</h3>
+          <ol class="steps">
+            <li><span>Download your platform's installer from the Releases page (Windows <strong>.msi/.exe</strong>, macOS <strong>.dmg</strong>, Linux <strong>AppImage/.deb/.rpm/Flatpak</strong>) and install it. The Windows build is a GUI app with no console window.</span></li>
+            <li><span>Launch Freally Capture. It opens to a clean studio — a program preview, and Scenes, Sources, Mixer, and Controls docks. No account, no login.</span></li>
+            <li><span>On <strong>macOS</strong>, grant <strong>Screen Recording</strong> (and Camera/Microphone if you'll use them) in System Settings → Privacy &amp; Security, then relaunch. On <strong>Linux (Wayland)</strong>, capture goes through the desktop portal — you'll pick the source to share.</span></li>
+            <li><span>Add your first source (see "Build a scene") and you're ready to record or go live.</span></li>
+          </ol>
+        </section>
+
+        <!-- Build a scene -->
+        <section id="build-a-scene">
+          <h2>Build a scene</h2>
+          <p class="section-intro">A scene is a stack of sources composed on the GPU. Sources can be shared across scenes.</p>
+
+          <ol class="steps">
+            <li><span>In the <strong>Sources</strong> rail, click <strong>Add Source</strong> and pick a type: <strong>Display</strong>, <strong>Window</strong>, <strong>Game</strong>, <strong>Webcam / Capture Card</strong>, <strong>Browser</strong>, <strong>Media</strong>, <strong>Image</strong>, <strong>Text</strong>, <strong>Color</strong>, or <strong>Audio</strong>.</span></li>
+            <li><span>Add a <strong>Display Capture</strong> — the program preview fills with your screen.</span></li>
+            <li><span>Add a <strong>Webcam</strong> source, then drag it on the canvas to a corner and resize it with the handles.</span></li>
+            <li><span>Add an <strong>Image</strong> or <strong>Browser</strong> overlay on top. Reorder sources in the rail to set their z-order (top of the list = front).</span></li>
+            <li><span>Create more scenes in the <strong>Scenes</strong> rail (e.g. "Starting Soon", "Gameplay", "BRB") and switch between them.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> A source added to one scene can be reused in others — change its properties once and it updates everywhere it appears.</div>
+        </section>
+
+        <!-- Filters & transitions -->
+        <section id="filters">
+          <h2>Filters &amp; transitions</h2>
+          <p class="section-intro">Stack per-source filters on the GPU, and choose how scenes cut to each other.</p>
+
+          <h3>Add a chroma key</h3>
+          <ol class="steps">
+            <li><span>Right-click a source (e.g. a green-screen webcam or overlay) and choose <strong>Filters</strong>.</span></li>
+            <li><span>Add <strong>Chroma Key</strong>. Adjust <strong>key color</strong>, <strong>similarity</strong>, <strong>smoothness</strong>, and <strong>spill</strong> — the keyed color vanishes live on the canvas.</span></li>
+            <li><span>Add more filters as needed (<strong>Color Correction</strong>, <strong>LUT</strong>, <strong>Blur</strong>, <strong>Mask</strong>, <strong>Sharpen</strong>). Drag to reorder the chain.</span></li>
+          </ol>
+
+          <h3>Set a transition</h3>
+          <ol class="steps">
+            <li><span>In <strong>Controls</strong>, open the transition picker and choose <strong>Cut</strong>, <strong>Fade</strong>, <strong>Slide</strong>, <strong>Swipe</strong>, <strong>Stinger</strong>, or <strong>Luma Wipe</strong>, and set a duration.</span></li>
+            <li><span>For a <strong>Stinger</strong>, pick the media and the transition point; for a <strong>Luma Wipe</strong>, pick the gradient and softness.</span></li>
+            <li><span>Switch scenes to see the transition play. In Studio Mode, the transition runs when you commit Preview → Program.</span></li>
+          </ol>
+        </section>
+
+        <!-- Audio -->
+        <section id="audio">
+          <h2>Audio mixer</h2>
+          <p class="section-intro">Mix every audio source, route to up to 6 tracks, and clean up your mic — all live.</p>
+          <ol class="steps">
+            <li><span>Each audio source appears as a channel strip in the <strong>Mixer</strong> — name, VU meter, fader, mute, monitor, filters, and track dots (1–6).</span></li>
+            <li><span>Drag a fader to set level; click <strong>mute</strong> or <strong>monitor</strong> as needed; assign the source to any subset of the 6 tracks.</span></li>
+            <li><span>Open a source's <strong>filters</strong> and add <strong>Denoise</strong> (RNNoise/DeepFilterNet), <strong>Noise Gate</strong>, <strong>Compressor</strong>, <strong>Limiter</strong>, <strong>EQ</strong>, or <strong>Gain</strong>.</span></li>
+            <li><span>Bind a <strong>push-to-talk</strong> or <strong>push-to-mute</strong> hotkey; watch the <strong>LUFS</strong> meter for program loudness.</span></li>
+          </ol>
+          <div class="warn"><strong>macOS note:</strong> macOS doesn't hand apps "what you hear" on its own. Use ScreenCaptureKit audio (macOS 13+) where available, or install a virtual device such as BlackHole and select it as your system-audio source. Freally Capture guides you and keeps recording even if a source can't open.</div>
+        </section>
+
+        <!-- Record -->
+        <section id="record">
+          <h2>Record</h2>
+          <p class="section-intro">Record your program feed multi-track with your GPU's hardware encoder, or fully lossless in the owned codec.</p>
+          <ol class="steps">
+            <li><span>In <strong>Settings → Encoder / Recording</strong>, pick an encoder. Freally Capture detects <strong>NVENC / Quick Sync / AMF / VAAPI / VideoToolbox</strong> and selects the best; <strong>x264</strong> (CPU) is always available as a fallback.</span></li>
+            <li><span>Choose a container — <strong>mp4 / mkv / mov / webm</strong> — or the owned <strong>freally-video</strong> lossless format (no external tool needed).</span></li>
+            <li><span>Assign sources to audio tracks (up to 6) so you can separate mic, system, and guests in post. Optionally enable <strong>file splitting</strong> and <strong>record a separate-track local copy while streaming</strong>.</span></li>
+            <li><span>Click <strong>Start Recording</strong> in <strong>Controls</strong>. A green <strong>REC</strong> dot shows the duration and track count. Click <strong>Stop</strong> to finalize the file.</span></li>
+          </ol>
+          <div class="warn"><strong>Codec note:</strong> mp4 with H.264/AAC (and HEVC/AV1) uses patent-encumbered codecs provided by <strong>ffmpeg</strong>, which is <em>not bundled</em> — Freally Capture fetches it on demand and verifies it the first time you need it. The owned <strong>freally-video</strong> lossless path needs nothing fetched.</div>
+        </section>
+
+        <!-- Go live -->
+        <section id="go-live">
+          <h2>Go live</h2>
+          <p class="section-intro">Broadcast direct to a platform over RTMP/RTMPS — your stream goes straight from your machine, never through a server we run.</p>
+          <ol class="steps">
+            <li><span>Open <strong>Settings → Stream</strong> and click <strong>Add target</strong>. Pick <strong>Twitch</strong>, <strong>YouTube</strong>, <strong>Kick</strong>, <strong>Facebook</strong>, <strong>Trovo</strong>, or <strong>Custom RTMP</strong>.</span></li>
+            <li><span>Paste your <strong>stream key</strong> (stored locally, masked) and set the bitrate/encoder for that service.</span></li>
+            <li><span>Click <strong>Go Live</strong> in <strong>Controls</strong>. The <strong>LIVE</strong> indicator glows and the stats dock shows your bitrate, dropped frames, and stream health.</span></li>
+            <li><span>If your connection blips, Freally Capture <strong>auto-reconnects</strong>. Your local recording keeps running regardless of stream state. Set a <strong>stream delay</strong> if you want one.</span></li>
+            <li><span>Click <strong>End Stream</strong> to stop.</span></li>
+          </ol>
+        </section>
+
+        <!-- Multistream -->
+        <section id="multistream">
+          <h2>Multistream (Pro)</h2>
+          <p class="section-intro">Stream to several platforms at the same time — direct from your machine, no restream server, no subscription.</p>
+          <ol class="steps">
+            <li><span>With <strong>Pro</strong> active, add two or more stream targets in <strong>Settings → Stream</strong> and enable each.</span></li>
+            <li><span>Set per-service encoder settings if a platform needs a different bitrate.</span></li>
+            <li><span>Click <strong>Go Live</strong> — you broadcast to all enabled targets at once. The stats dock shows each target's health and bitrate.</span></li>
+            <li><span>Optionally record a separate-track local copy at the same time, and save replays with the replay hotkey while you stream.</span></li>
+          </ol>
+          <div class="tip"><strong>Free vs Pro:</strong> Single-target streaming, recording, and the virtual camera are free. Simultaneous multistream to many targets (and SRT/WHIP, advanced filters/scripting, replay presets, premium stingers, and remote-control automation) are Pro — a one-time license, no subscription.</div>
+        </section>
+
+        <!-- Virtual camera -->
+        <section id="virtual-camera">
+          <h2>Virtual camera</h2>
+          <p class="section-intro">Turn your produced scene into a webcam for any video-call app.</p>
+          <ol class="steps">
+            <li><span>Click <strong>Start Virtual Camera</strong> in <strong>Controls</strong>. Freally Capture registers a system camera named <strong>"Freally Capture Virtual Camera"</strong>.</span></li>
+            <li><span>In Zoom, Meet, Discord, or Teams, choose that camera in the video settings — your composed program feed becomes the webcam.</span></li>
+            <li><span>Click <strong>Stop Virtual Camera</strong> to remove the device.</span></li>
+          </ol>
+          <div class="warn"><strong>Linux note:</strong> the virtual camera uses <strong>v4l2loopback</strong>, a kernel module you install once. Freally Capture guides you through it and never installs system components silently. macOS uses a bundled, notarized CoreMediaIO plugin.</div>
+        </section>
+
+        <!-- Replay buffer -->
+        <section id="replay">
+          <h2>Replay buffer</h2>
+          <p class="section-intro">Keep a rolling buffer so a hotkey saves the moment that just happened.</p>
+          <ol class="steps">
+            <li><span>Click <strong>Start Replay Buffer</strong> in <strong>Controls</strong>. Freally Capture keeps the last N seconds in a bounded buffer.</span></li>
+            <li><span>Bind a global <strong>Save Replay</strong> hotkey in Settings.</span></li>
+            <li><span>Press the hotkey to save the last N seconds to a file — without interrupting your stream or main recording. A "Replay saved" toast confirms it.</span></li>
+          </ol>
+        </section>
+
+        <!-- Remote control -->
+        <section id="remote">
+          <h2>Remote control</h2>
+          <p class="section-intro">Drive the studio from a Stream Deck or Companion-style controller — off by default, password-protected, on your machine.</p>
+          <ol class="steps">
+            <li><span>Open <strong>Settings → Remote Control</strong> and enable the <strong>WebSocket API</strong> (off by default). Set a <strong>password</strong>.</span></li>
+            <li><span>It binds to <kbd>127.0.0.1</kbd> by default; LAN access is an explicit opt-in.</span></li>
+            <li><span>Point a Companion / Stream Deck client at the shown WebSocket URL. You can switch scenes, commit transitions, toggle mutes, start/stop recording, and save replays from hardware buttons.</span></li>
+          </ol>
+        </section>
+
+        <!-- Settings & license -->
+        <section id="settings">
+          <h2>Settings &amp; license</h2>
+          <p class="section-intro">Profiles, scene collections, hotkeys, language, and your Pro license.</p>
+          <ol class="steps">
+            <li><span><strong>Profiles &amp; scene collections:</strong> keep separate setups (e.g. "Streaming" vs "Local recording") and switch them without restarting.</span></li>
+            <li><span><strong>Hotkeys:</strong> bind a global hotkey to every action — scene switch, transition, Go Live, record, save replay, mute, push-to-talk, virtual camera.</span></li>
+            <li><span><strong>Language:</strong> pick from 18 languages (English first); the UI updates immediately, with full RTL for Arabic.</span></li>
+            <li><span><strong>License:</strong> Free needs no account. To unlock Pro, click <strong>Upgrade to Pro</strong> (opens checkout in your browser), then paste the emailed key into <strong>Settings → License</strong> and click <strong>Activate</strong> — verified offline, no restart.</span></li>
+          </ol>
+        </section>
+
+        <!-- Privacy -->
+        <section id="privacy">
+          <h2>Privacy</h2>
+          <p class="section-intro">Freally Capture is local-first and account-free. Here is exactly what it does and does not do with your data.</p>
+          <ol class="steps">
+            <li><span><strong>No account, no cloud, no telemetry.</strong> The app never requires a login and never sends your scenes, recordings, or any usage data to any server.</span></li>
+            <li><span><strong>Streams go direct.</strong> Your broadcast goes from your machine straight to the platforms you configured — there is no restream server we run.</span></li>
+            <li><span><strong>Recordings stay on your device.</strong> They are written to the folder you choose. Nothing is uploaded.</span></li>
+            <li><span><strong>Stream keys are local.</strong> They are stored on your machine, masked in the UI, and sent only to the service you stream to.</span></li>
+            <li><span><strong>Nothing bundled but the engine.</strong> ffmpeg (for the wire codecs the platforms require) and the optional virtual-background model are not bundled — they're fetched on demand and verified, and the app shows you what it will fetch.</span></li>
+            <li><span>For the full policy, see <a href="https://github.com/MikesRuthless12/freally-capture/blob/main/PRIVACY.md" style="color:var(--accent)">PRIVACY.md</a> on GitHub.</span></li>
+          </ol>
+        </section>
+
+      </main>
+    </div>
+
+    <footer>
+      <p>© 2026 Mike Weaver — All Rights Reserved · free core · local-first · no account · your stream never routes through our cloud</p>
+      <p>
+        <a href="https://github.com/MikesRuthless12/freally-capture">GitHub</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/releases">All releases</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-capture/blob/main/LICENSE">License</a> ·
+        <a href="documentation.html" aria-current="page">Documentation</a> ·
+        <a href="changelog.html">Changelog</a>
+      </p>
+    </footer>
+
+    <script>
+      (function () {
+        var links = document.querySelectorAll('.doc-toc a');
+        var sections = [];
+        links.forEach(function (a) {
+          var id = a.getAttribute('href').replace('#', '');
+          var el = document.getElementById(id);
+          if (el) sections.push({ id: id, el: el, a: a });
+        });
+
+        function onScroll() {
+          var active = sections[0];
+          for (var i = 0; i < sections.length; i++) {
+            if (sections[i].el.getBoundingClientRect().top <= 120) {
+              active = sections[i];
+            }
+          }
+          links.forEach(function (a) { a.classList.remove('active'); });
+          if (active) active.a.classList.add('active');
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true });
+        onScroll();
+      })();
+    </script>
+  </body>
+</html>

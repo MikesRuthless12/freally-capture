@@ -1,0 +1,172 @@
+# Freally Capture
+
+A **local-first**, **cross-platform** live-streaming & recording **studio** (OBS-class) for **Windows,
+macOS, and Linux** — by [Havoc Software](https://github.com/mikesruthless12). Build a scene from sources,
+compose it on the **GPU**, **record** multi-track, and **go live** — to **several platforms at once** —
+all from **one clean app**. Scenes · sources · a real-time **wgpu compositor** · filters & transitions ·
+**Studio Mode** · multi-track recording (hardware encoders + the **owned `freally-video`** lossless
+codec) · broadcasting & **multistream** over RTMP/RTMPS/SRT/WHIP · a **virtual camera** · a **replay
+buffer** · a **WebSocket remote API**. **No accounts, no telemetry, no cloud** — the only thing that
+leaves your machine is the stream you chose to send.
+
+> **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
+
+> **Status: pre-development (planning).** This public repository holds the **public site** (`docs/`) and
+> project info. The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide,
+> and go-to-market plan) is **maintained privately** and is not published here. The application itself
+> is not built yet — **downloads will be available in future releases.**
+
+> **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
+> machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
+> telemetry**, and **no cloud restreaming we run** — your stream goes **direct to the platform**. The
+> only network actions are the **stream targets you configure**, an optional **license check**, an
+> optional **update check**, and the on-demand download of two clearly-labeled, non-bundled components:
+> **ffmpeg** (for the patent-encumbered wire codecs the platforms require) and a **selfie-segmentation
+> model** (only if you turn on webcam virtual background). See [`PRIVACY.md`](PRIVACY.md) and
+> [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+## What it does
+
+1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, text, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur, mask, sharpen) and scene **transitions** (cut/fade/slide/stinger/luma-wipe).
+2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
+3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
+4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — and on **Pro**, **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
+5. **Extras** — a **virtual camera** (your produced feed as a webcam in Zoom/Meet/Discord), a webcam **virtual background**, a rolling **replay buffer** with a save hotkey, **global hotkeys** for everything, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, **scripting** (Lua/JS), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
+
+It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
+local and account-free, the same on all three desktop OSes, and integrated with the Freally suite.
+
+## Relationship to Freally Snipper
+
+Freally Capture is the **sibling** of **Freally Snipper** in the Freally suite — they share owned
+technology but do different jobs:
+
+- **[Freally Snipper](https://github.com/MikesRuthless12/freally-snipper)** = screenshots + quick screen recording + image/video **editing** (the capture-and-edit tool).
+- **Freally Capture** = the **live production / streaming studio** (OBS-class): a real-time scene compositor, live broadcasting/multistream, a virtual camera, a replay buffer, and multi-track recording (the go-live tool).
+
+They share the owned **`freally-video`** codec (Capture: lossless local recording; Snipper: default
+`.fvid` record format) and overlay-object/font concepts, plus the Havoc theme and the privacy invariants
+— but they are **deliberately separate, focused apps**. Capture is the dedicated, full-depth home for
+live production.
+
+## License (important)
+
+Freally Capture is **proprietary, source-available** software — **© 2026 Mike Weaver. All Rights
+Reserved.** The source is **public so you can read it and build/run it for your own personal
+evaluation**, but it is **not open source**: you may not copy, modify, redistribute, or reuse it. See
+[`LICENSE`](LICENSE). Bundled third-party components keep their own licenses — see
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). The pre-built application is free to download and run
+(Free tier); **Pro** is a one-time license that unlocks the extras.
+
+## Security & privacy
+
+**Local-first and account-free** — no accounts, no cloud, no telemetry; composition/recording/streaming
+run on your machine and your stream goes direct to the platform. To report a vulnerability, see
+[`SECURITY.md`](SECURITY.md) (please report **privately**, not via a public issue). The intended terms of
+use are in [`EULA.md`](EULA.md) and the privacy policy in [`PRIVACY.md`](PRIVACY.md) (both DRAFT pending
+legal review).
+
+## Planned stack
+
+**Tauri v2** shell + **React + TypeScript (Vite)** control UI (Havoc dark) · a **Rust** Cargo workspace
+(the `src-tauri` app crate + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`,
+`sources`, `scene`) · the GPU compositor on **`wgpu`** · per-OS capture (**Windows** DXGI +
+Windows.Graphics.Capture, **macOS** ScreenCaptureKit, **Linux** PipeWire portal + X11) · webcam via
+**`nokhwa`** · audio via **`cpal`** (+ **RNNoise**/DeepFilterNet denoise) · the **owned `freally-video`**
+lossless codec · hardware encoders (**NVENC/Quick Sync/AMF/VAAPI/VideoToolbox**) + **x264** fallback · a
+clearly-labeled, on-demand **ffmpeg** bridge for the patent-encumbered wire codecs · the **WebSocket
+remote API** via **`tungstenite`** · offline **Ed25519** license keys · **Stripe**/PayPal one-time Pro
+keys · the **Tauri bundler** per-OS installers.
+
+## Editions
+
+- **Free** — full scenes/sources/compositor, all core video + audio filters, multi-track recording (hardware encoders + `freally-video` lossless), **single-target** live streaming (RTMP/RTMPS), the **virtual camera**, Studio Mode + core transitions, and a basic replay save. The core promise — build a scene, record, and go live — is free for everyone.
+- **Pro** *(one-time license, like Copy That)* — **multistream to many targets**, **SRT/WHIP**, advanced filters/scripting/plugins, **replay-buffer presets**, **premium stinger + luma-wipe packs**, **remote-control automation**, **vertical/multi-canvas output**, and priority support. Unlocked by an offline signed key — no account required.
+
+## Requirements (planned)
+
+- [Rust](https://rustup.rs) (stable; pinned via `rust-toolchain.toml`) + Node (for the Vite UI).
+- A GPU with up-to-date drivers (the `wgpu` compositor uses the GPU; x264 CPU fallback exists).
+- **Linux only** — system libraries for the GUI/webview, PipeWire capture, audio, and webcam:
+  ```sh
+  sudo apt-get install -y \
+    pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
+    libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
+    libpipewire-0.3-dev libwayland-dev libegl-dev \
+    libasound2-dev libpulse-dev libv4l-dev libdbus-1-dev libclang-dev
+  ```
+  (`libv4l-dev` is for the webcam; `v4l2loopback` is needed for the **virtual camera** on Linux.)
+
+## Build & run (planned)
+
+```sh
+# UI + Tauri app
+npm install                      # install the React/Vite UI deps
+npm run tauri dev                # run the studio (dev build; keeps a console for logs)
+npm run tauri build              # optimized per-OS installer (Windows .exe has NO console window)
+```
+
+```sh
+# Rust workspace checks (mirror CI)
+cargo fmt --all -- --check                   # format check
+cargo clippy --all-targets -- -D warnings    # lint (warnings = errors)
+cargo test                                   # tests (incl. compositor golden frames)
+```
+
+These mirror exactly what CI runs (`.github/workflows/ci.yml`) on Windows, macOS, and Linux.
+
+> **Windows release = GUI app, no console window.** `src-tauri/src/main.rs` keeps
+> `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` and the release job builds
+> `--release`, so the shipped `.exe` never pops a terminal (only *debug* builds keep the console, for
+> logs).
+
+## Packaging & releases (planned)
+
+The Tauri bundler produces a per-OS installable artifact. Pushing a version tag triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds the app on all three OSes,
+packages each, and opens a **draft GitHub Release** with the downloadable installers (reviewed, then the
+**agent publishes for Mike** — Mike never clicks Publish):
+
+| OS | Produces | Notes |
+|----|----------|-------|
+| Windows | `.msi` / `.exe` (NSIS) | GUI app, no console window |
+| macOS | `.app` / `.dmg` | **notarized**; ships the **CoreMediaIO virtual-camera plugin** |
+| Linux | AppImage / `.deb` / `.rpm` / Flatpak | virtual camera needs `v4l2loopback` |
+
+Signed/notarized installers and a self-hosted auto-updater arrive in **Phase 8 — Distribution**.
+
+A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Publish it via
+**Settings → Pages → Deploy from a branch → `main` / `docs`** to serve it at
+`https://mikesruthless12.github.io/freally-capture/`.
+
+## Workspace layout
+
+```
+.
+├── README.md                # this file
+├── CHANGELOG.md             # Keep a Changelog
+├── SECURITY.md              # security policy
+├── PRIVACY.md               # privacy policy (DRAFT)
+├── EULA.md                  # end-user license agreement (DRAFT)
+├── THIRD-PARTY-NOTICES.md   # bundled / downloaded / driven components
+├── LICENSE                  # proprietary, source-available — All Rights Reserved
+├── Cargo.toml               # Rust workspace (src-tauri + crates/*)
+├── src-tauri/               # `freally-capture` app crate (Tauri v2)
+├── crates/                  # owned: capture, compositor (wgpu), encode, stream, audio, sources, scene
+├── ui/                      # React + TypeScript control UI (Vite)
+└── docs/                    # GitHub Pages site (Releases & Updates + Documentation)
+```
+
+> The planning, spec, roadmap, build-prompts, and go-to-market documents are kept **private** and are deliberately **not** part of this public repository.
+
+## Roadmap
+
+The detailed build plan is maintained privately. Public release ladder:
+**0.10.0** (foundation) → 0.25 (capture core) → 0.40 (compositor + scenes/sources) → 0.55 (audio +
+recording) → **0.70 (studio MVP — first public: single-target streaming + virtual cam)** → 0.85
+(multistream/SRT/WHIP + virtual background) → **1.0.0**. Progress is published on the
+[project site](https://mikesruthless12.github.io/freally-capture/).
+
+---
+
+© 2026 Havoc Software · Mike Weaver &lt;mythodikalone@gmail.com&gt; · All Rights Reserved · _Project started: June 30th, 2026 · Downloads available in future releases._

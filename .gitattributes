@@ -1,0 +1,43 @@
+# Normalize line endings: let Git decide text vs binary, LF in the repo.
+* text=auto eol=lf
+
+# Explicit text types
+*.rs        text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.json      text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.wgsl      text eol=lf
+LICENSE     text eol=lf
+
+# Windows-specific scripts keep CRLF
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary assets (never diff or normalize)
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.frec      binary
+*.mp4       binary
+*.mkv       binary
+*.mov       binary
+*.webm      binary
+*.gguf      binary
+*.onnx      binary
+*.cube      binary
+*.ttf       binary
+*.otf       binary
+
+# Treat the docs site as web content
+docs/**     linguist-documentation
