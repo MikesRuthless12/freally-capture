@@ -5,14 +5,15 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 1 (capture core, 0.25.0) is complete. Early development builds are
-> downloadable from each release; the **studio MVP — the first build meant for everyday use — arrives
-> at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
+> **Status: in development.** Phase 2 (compositor + scenes/sources, 0.40.0) is complete. Early
+> development builds are downloadable from each release; the **studio MVP — the first build meant for
+> everyday use — arrives at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-Phase 2 (compositor + scenes/sources → 0.40.0) is in progress on the
-`phase-2-compositor-scenes` branch. Landed so far:
+_Nothing yet — 0.55.0 (audio + recording) is next._
+
+## [0.40.0] — 2026-07-02 (Compositor + scenes/sources)
 
 ### Added
 - **The owned wgpu GPU compositor** (`fcap-compositor`): every visible scene item composes
