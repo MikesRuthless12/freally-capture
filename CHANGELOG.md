@@ -5,12 +5,47 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 0 (foundation, 0.10.0) is complete; the app is not yet published —
-> **downloads will be available in future releases.** The release ladder below tracks the plan to 1.0.0.
+> **Status: in development.** Phase 1 (capture core, 0.25.0) is complete. Early development builds are
+> downloadable from each release; the **studio MVP — the first build meant for everyday use — arrives
+> at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-_Nothing yet — 0.25.0 (capture core) is next._
+_Nothing yet — 0.40.0 (compositor + scenes/sources) is next._
+
+## [0.25.0] — 2026-07-01 (Capture core)
+
+### Added
+- **Per-OS screen & window capture** behind the owned `fcap-capture` interface, yielding timestamped,
+  GPU-uploadable frames through a latest-wins channel with an honest dropped-frame count:
+  - **Windows** — DXGI Desktop Duplication for displays (with mouse-pointer blending; duplication
+    excludes the cursor) and **Windows.Graphics.Capture** for individual windows (Windows 10 1903+),
+    surviving display-mode switches and window resizes.
+  - **macOS** — **ScreenCaptureKit** (displays + windows, macOS 12.3+); the Screen-Recording
+    permission is requested up front, and a denial shows an **Open Screen Recording settings**
+    deep-link instead of a silent black frame. (Bundle minimum raised 12.0 → 12.3 —
+    ScreenCaptureKit does not exist below 12.3.)
+  - **Linux** — the **ScreenCast portal** (`ashpd` → PipeWire) on Wayland, where the *system dialog*
+    picks the screen or window (the only capture Wayland allows — the picker says so plainly), plus
+    a direct **X11** path (screens + `_NET_CLIENT_LIST` windows) on X sessions.
+- **Webcam / capture-card** sources via `nokhwa` (Media Foundation / AVFoundation / V4L2): device
+  enumeration, per-device format listing (resolution / fps / wire format), live RGBA frames, and the
+  macOS camera-permission flow (`NSCameraUsageDescription` bundled).
+- **Live program preview**: the Sources rail's “+” now works — Display Capture, Window Capture, and
+  Video Capture Device pickers; the selected source renders live in the program preview with a
+  label / resolution / measured-fps / dropped-frames overlay. The pipe is in-process end to end
+  (capture → JPEG → the app-private `preview://` scheme → canvas) — frames never touch a socket or
+  disk. Direct draw proves the pipe; the wgpu compositor takes over at 0.40.0.
+- **Live-hardware smoke tests** (kept `--ignored` on headless CI): display, window, and webcam
+  capture verified with real frames on real hardware.
+
+### Security / privacy
+- Preview frames stay **in-process** (a custom URI scheme — no localhost socket, no temp files); the
+  posture is unchanged: zero outbound network calls, no accounts, no telemetry.
+- OS permission denials (macOS Screen Recording / Camera) surface honestly with a settings deep-link.
+- New third-party notices: `pipewire` + `x11rb` (Linux capture) and `mozjpeg` (webcam MJPEG decode) +
+  `jpeg-encoder` (preview encode) — the latter two carry the **IJG** license, now acknowledged in
+  `THIRD-PARTY-NOTICES.md` and allowed in `deny.toml`.
 
 ## [0.10.0] — 2026-07-01 (Foundation & repo)
 
@@ -53,3 +88,5 @@ _Nothing yet — 0.25.0 (capture core) is next._
 - Accessibility (keyboard-first, screen-reader-labeled, high-contrast) and UI localization into 18 languages (`ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk vi zh-CN`, English first, RTL Arabic); onboarding + templates.
 
 [Unreleased]: https://github.com/MikesRuthless12/freally-capture/commits/main
+[0.25.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.25.0
+[0.10.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.10.0

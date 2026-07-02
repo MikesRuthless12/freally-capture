@@ -8,6 +8,7 @@ const invokeCalls: Array<{ cmd: string; args: unknown }> = [];
 const mockState = vi.hoisted(() => ({ failSettingsSet: false }));
 
 vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string, protocol: string) => `${protocol}://localhost/${path}`,
   invoke: (cmd: string, args?: unknown) => {
     invokeCalls.push({ cmd, args });
     switch (cmd) {

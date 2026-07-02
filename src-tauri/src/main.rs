@@ -11,9 +11,12 @@
 
 mod commands;
 mod events;
+mod preview;
 mod settings;
 
+use preview::PreviewState;
 use settings::SettingsStore;
+use tauri::Manager;
 
 fn main() {
     // Version banner on launch (visible in dev consoles and CI logs; the
@@ -28,10 +31,29 @@ fn main() {
 
     tauri::Builder::default()
         .manage(settings)
+        .manage(PreviewState::default())
+        // The preview frame pipe: the UI polls `preview://` for the newest
+        // JPEG. In-process only — frames never touch a socket or disk — and
+        // CORS-pinned to the app's own origins.
+        .register_uri_scheme_protocol("preview", |ctx, request| {
+            let origin = request
+                .headers()
+                .get("origin")
+                .and_then(|value| value.to_str().ok());
+            ctx.app_handle()
+                .state::<PreviewState>()
+                .protocol_response(origin)
+        })
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::settings_get,
-            commands::settings_set
+            commands::settings_set,
+            commands::capture_list_sources,
+            commands::video_devices_list,
+            commands::video_device_formats,
+            commands::preview_start,
+            commands::preview_stop,
+            commands::open_privacy_settings
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());

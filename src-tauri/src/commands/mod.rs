@@ -4,9 +4,12 @@
 //! shapes — keep them in lockstep.
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::preview::{PreviewSource, PreviewState, VideoFormatDto};
 use crate::settings::{Settings, SettingsStore};
+use fcap_capture::SourceKind;
+use fcap_sources::video_device;
 
 /// One linked core crate, as reported by [`health`].
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +83,144 @@ pub fn settings_set(store: State<'_, SettingsStore>, settings: Settings) -> Resu
     store
         .set(settings)
         .map_err(|err| format!("could not save settings: {err}"))
+}
+
+// ---------------------------------------------------------------------------
+// Capture + preview (Phase 1)
+// ---------------------------------------------------------------------------
+
+/// One capturable screen/window source, as the UI picker shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureSourceDto {
+    pub id: String,
+    /// "display" | "window" | "portal"
+    pub kind: &'static str,
+    pub label: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Enumerate screen/window capture sources. On Wayland this is exactly one
+/// portal entry — the system dialog picks the real source (honest by design).
+/// Async: the first call on macOS can block on the permission prompt.
+#[tauri::command]
+pub async fn capture_list_sources() -> Result<Vec<CaptureSourceDto>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        fcap_capture::list_sources()
+            .map(|sources| {
+                sources
+                    .into_iter()
+                    .map(|source| CaptureSourceDto {
+                        id: source.id,
+                        kind: match source.kind {
+                            SourceKind::Display => "display",
+                            SourceKind::Window => "window",
+                            SourceKind::Portal => "portal",
+                        },
+                        label: source.label,
+                        width: source.width,
+                        height: source.height,
+                    })
+                    .collect()
+            })
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| format!("capture listing task failed: {err}"))?
+}
+
+/// One webcam / capture card.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoDeviceDto {
+    pub id: String,
+    pub name: String,
+}
+
+/// Enumerate webcams / capture cards.
+#[tauri::command]
+pub async fn video_devices_list() -> Result<Vec<VideoDeviceDto>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        video_device::list_video_devices()
+            .map(|devices| {
+                devices
+                    .into_iter()
+                    .map(|device| VideoDeviceDto {
+                        id: device.id,
+                        name: device.name,
+                    })
+                    .collect()
+            })
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| format!("device listing task failed: {err}"))?
+}
+
+/// List a device's formats (opens the device briefly).
+#[tauri::command]
+pub async fn video_device_formats(device_id: String) -> Result<Vec<VideoFormatDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        video_device::list_video_formats(&device_id)
+            .map(|formats| {
+                formats
+                    .into_iter()
+                    .map(|format| VideoFormatDto {
+                        width: format.width,
+                        height: format.height,
+                        fps: format.fps,
+                        fourcc: format.fourcc,
+                    })
+                    .collect()
+            })
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| format!("format listing task failed: {err}"))?
+}
+
+/// Start previewing a source. Non-blocking: progress arrives on the
+/// `preview` event (`waiting` → `live` / `error`), keyed by `source_key`.
+#[tauri::command]
+pub fn preview_start(
+    app: AppHandle,
+    state: State<'_, PreviewState>,
+    source: PreviewSource,
+    source_key: String,
+) {
+    state.start(&app, source, source_key);
+}
+
+/// Stop the running preview (idempotent).
+#[tauri::command]
+pub fn preview_stop(app: AppHandle, state: State<'_, PreviewState>) {
+    state.stop(&app);
+}
+
+/// macOS: deep-link the user to the Privacy pane they need after a denial.
+/// `pane` is "screenRecording" or "camera".
+#[tauri::command]
+pub fn open_privacy_settings(pane: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let anchor = match pane.as_str() {
+            "camera" => "Privacy_Camera",
+            _ => "Privacy_ScreenCapture",
+        };
+        std::process::Command::new("open")
+            .arg(format!(
+                "x-apple.systempreferences:com.apple.preference.security?{anchor}"
+            ))
+            .spawn()
+            .map_err(|err| format!("could not open System Settings: {err}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pane;
+        Err("privacy settings deep-links only exist on macOS".to_string())
+    }
 }
 
 #[cfg(test)]

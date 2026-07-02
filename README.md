@@ -11,12 +11,13 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — Phase 0 (foundation, 0.10.0) complete.** The cross-platform studio shell
-> builds and runs (Tauri v2 + React over the owned Rust workspace, with CI and the release scaffold);
-> capture, the compositor, audio, recording, and streaming land phase by phase per the ladder below.
+> **Status: in development — Phase 1 (capture core, 0.25.0) complete.** Real capture is in: per-OS
+> screen/window capture (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux
+> ScreenCast portal + X11) and webcams/capture cards, live in the program preview. The compositor,
+> audio, recording, and streaming land phase by phase per the ladder below.
 > The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
 > go-to-market plan) is **maintained privately** and is not published here.
-> **Downloads will be available in future releases.**
+> **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
@@ -70,7 +71,8 @@ legal review).
 
 ## Stack
 
-> The **Tauri v2 + React shell, the workspace, CI, and packaging are built** (Phase 0); the engine
+> The **Tauri v2 + React shell, the workspace, CI, and packaging are built** (Phase 0), and **per-OS
+> capture (screens, windows, webcams) is live in the preview** (Phase 1); the remaining engine
 > pieces below land per the release ladder.
 
 **Tauri v2** shell + **React + TypeScript (Vite)** control UI (Havoc dark) · a **Rust** Cargo workspace
@@ -170,11 +172,11 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 ## Roadmap
 
 The detailed build plan is maintained privately. Public release ladder:
-**0.10.0** (foundation — **done**) → 0.25 (capture core) → 0.40 (compositor + scenes/sources) → 0.55 (audio +
-recording) → **0.70 (studio MVP — first public: single-target streaming + virtual cam)** → 0.85
-(multistream/SRT/WHIP + scene/source/encoder depth) → **1.0.0**. Progress is published on the
-[project site](https://mikesruthless12.github.io/freally-capture/).
+**0.10.0** (foundation — **done**) → **0.25** (capture core — **done**) → 0.40 (compositor +
+scenes/sources) → 0.55 (audio + recording) → **0.70 (studio MVP — single-target streaming + virtual
+cam)** → 0.85 (multistream/SRT/WHIP + scene/source/encoder depth) → **1.0.0**. Progress is published
+on the [project site](https://mikesruthless12.github.io/freally-capture/).
 
 ---
 
-© 2026 Havoc Software · Mike Weaver &lt;mythodikalone@gmail.com&gt; · All Rights Reserved · _Project started: June 30th, 2026 · Downloads available in future releases._
+© 2026 Havoc Software · Mike Weaver &lt;mythodikalone@gmail.com&gt; · All Rights Reserved · _Project started: June 30th, 2026 · Early development builds on the [releases page](https://github.com/MikesRuthless12/freally-capture/releases); studio MVP at 0.70.0._
