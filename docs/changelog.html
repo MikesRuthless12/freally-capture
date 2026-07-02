@@ -6,7 +6,7 @@
     <title>Freally Capture — Changelog</title>
     <meta
       name="description"
-      content="The Freally Capture changelog and roadmap to 1.0.0. No releases yet — the app is in planning."
+      content="The Freally Capture changelog and roadmap to 1.0.0. Early development builds are downloadable per release; the studio MVP lands at 0.70.0."
     />
     <link rel="icon" type="image/png" href="freally-icon.png" />
     <link rel="apple-touch-icon" href="freally-icon.png" />
@@ -16,18 +16,54 @@
     <header class="hero">
       <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
       <h1>Changelog</h1>
-      <p class="sub">Every Freally Capture release will land here. The app is in planning — no releases yet.</p>
+      <p class="sub">Every Freally Capture release lands here. Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.</p>
     </header>
 
     <main>
-      <!-- 0.10.0 -->
+      <!-- 0.25.0 -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.25.0</span>
+            <span class="date">Jul 1, 2026 · Capture core</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.25.0">Download v0.25.0</a>
+        </div>
+
+        <h2>0.25.0 — Capture core (done)</h2>
+        <p class="summary">
+          Real capture is in. Screens, windows, and webcams stream live into the program preview on all
+          three OSes: Windows via DXGI Desktop Duplication (displays, with the mouse pointer blended in)
+          and Windows.Graphics.Capture (windows); macOS via ScreenCaptureKit (12.3+), with the
+          Screen-Recording permission requested honestly and a Settings deep-link on denial; Linux via
+          the ScreenCast portal on Wayland — the system dialog picks the screen or window, the only
+          capture Wayland allows — plus a direct X11 path. Webcams and capture cards enumerate with
+          per-device formats and stream live. The preview pipe is in-process end to end: frames never
+          touch a socket or disk.
+        </p>
+
+        <h3>Highlights</h3>
+        <ul class="features">
+          <li>Display Capture, Window Capture, and Video Capture Device pickers in the Sources rail — the selected source previews live with a resolution / fps / dropped-frames overlay.</li>
+          <li>Per-OS capture behind one owned interface, with an honest dropped-frame count and permission flows that never pretend (macOS deep-links to the right Privacy pane; the Wayland picker explains portal-only capture).</li>
+          <li>Windows mouse-pointer blending in display capture; window capture survives resizes and display-mode switches.</li>
+          <li>Everything stays local — no accounts, no telemetry, zero outbound network calls.</li>
+        </ul>
+
+        <p class="note">
+          This is an early development build: capture and the live preview work; the GPU compositor,
+          audio mixer, recording, and streaming arrive in the milestones below.
+        </p>
+      </article>
+
+      <!-- 0.10.0 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.10.0</span>
             <span class="date">Jul 1, 2026 · Foundation &amp; repo</span>
           </div>
-          <span class="future" aria-disabled="true">Downloads available in future releases</span>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.10.0">Download v0.10.0</a>
         </div>
 
         <h2>0.10.0 — Foundation &amp; repo (done)</h2>
@@ -35,8 +71,7 @@
           The cross-platform studio shell is built: a Tauri v2 + React (Havoc dark) UI over the owned
           Rust workspace (capture/compositor/scene/audio/encode/stream crates), the typed UI↔core
           bridge with a live stats feed, a persisted settings store, the 3-OS CI matrix, per-OS
-          packaging (the Windows build is a GUI app with no console window), and this site. Installers
-          are not published yet — downloads arrive with the studio MVP milestones.
+          packaging (the Windows build is a GUI app with no console window), and this site.
         </p>
 
         <h3>Planned for the first public build (0.70.0 — Studio MVP)</h3>
@@ -49,9 +84,7 @@
         </ul>
 
         <p class="note">
-          The detailed build plan is maintained privately. Until installers are published, the
-          <a href="index.html">Releases page</a> shows
-          <em>"Downloads available in future releases."</em>
+          The detailed build plan is maintained privately; the public ladder lives in the roadmap below.
         </p>
       </article>
 
@@ -68,12 +101,12 @@
             <span class="soon">Done — Jul 1, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.25.0</span>
+            <span class="badge">0.25.0</span>
             <div>
               <strong>Capture core</strong>
               <p>Per-OS screen/window capture and webcam, live in the program preview.</p>
             </div>
-            <span class="soon">Coming soon</span>
+            <span class="soon">Done — Jul 1, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">0.40.0</span>

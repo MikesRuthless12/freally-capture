@@ -36,8 +36,11 @@ remediate before any public disclosure.
   on-device and sent **directly** to each platform you configured; there is no restream relay we run.
 - **Capture surface:** screen / window / game / webcam frames stay **in-process** and go only to the
   recording file (the folder you choose), the streams you configured, and the virtual camera. The
-  unavoidable OS-capture `unsafe` (DXGI/ScreenCaptureKit/v4l2) is isolated behind small, audited modules
-  in `crates/capture`; the rest of the core is `#![forbid(unsafe_code)]`.
+  live preview is served over an **app-private custom URI scheme** (`preview://`) inside the webview —
+  no localhost socket, no temp files. OS capture permissions (macOS Screen Recording / Camera) are
+  requested honestly and a denial is surfaced, never worked around. The unavoidable OS-capture
+  `unsafe` (DXGI/WGC/ScreenCaptureKit) is isolated behind small, audited modules in `crates/capture`
+  (the Linux path is entirely safe Rust); the rest of the core is `#![forbid(unsafe_code)]`.
 - **Stream keys / service credentials:** stored **locally** in your profile (the OS config dir), masked
   in the UI, and sent **only** to the streaming service you are broadcasting to. They are never
   transmitted anywhere else and never logged.
@@ -58,8 +61,8 @@ remediate before any public disclosure.
 - **Subprocess execution:** where ffmpeg is invoked as a subprocess, arguments are passed as an **argv
   vector (no shell)**, and temp files use per-process-unique names removed after use.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
-  advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
-  project matures.
+  advisories; `cargo audit` and `cargo deny` run in CI on every push, and documented-ignore entries in
+  `deny.toml` are limited to unmaintained-class advisories with no reachable vulnerability.
 - **No secrets** are bundled or logged; `.env` and config files are treated as sensitive.
 
 Thank you for helping keep Freally Capture and its users safe.
