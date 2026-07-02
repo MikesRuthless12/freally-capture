@@ -76,6 +76,7 @@ pub fn settings_get(store: State<'_, SettingsStore>) -> Settings {
 /// Replace and persist the settings.
 #[tauri::command]
 pub fn settings_set(store: State<'_, SettingsStore>, settings: Settings) -> Result<(), String> {
+    settings.validate()?;
     store
         .set(settings)
         .map_err(|err| format!("could not save settings: {err}"))

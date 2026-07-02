@@ -14,6 +14,10 @@ export default function App() {
   const [core, setCore] = useState<Health | null>(null);
   const [coreError, setCoreError] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
+  // The stats dock renders only after settings settle (loaded or failed), so
+  // a persisted "off" never flashes visible on launch.
+  const [settingsSettled, setSettingsSettled] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,23 +31,32 @@ export default function App() {
       });
     settingsGet()
       .then((loaded) => {
-        if (!cancelled) setSettings(loaded);
+        if (!cancelled) {
+          setSettings(loaded);
+          setSettingsSettled(true);
+        }
       })
       .catch(() => {
         // Without the core, the UI just keeps its defaults (nothing persists).
+        if (!cancelled) setSettingsSettled(true);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const showStats = settings?.showStatsDock ?? true;
+  const showStats = settingsSettled && (settings?.showStatsDock ?? true);
 
   const toggleStatsDock = () => {
     if (!settings) return;
+    const previous = settings;
     const next = { ...settings, showStatsDock: !settings.showStatsDock };
     setSettings(next);
+    setSaveError(null);
     settingsSet(next).catch((err) => {
+      // Roll back so the UI never claims a state the disk doesn't have.
+      setSettings(previous);
+      setSaveError("Couldn't save settings — the change won't survive a restart.");
       console.error("could not persist settings:", err);
     });
   };
@@ -55,6 +68,11 @@ export default function App() {
           Freally Capture
         </span>
         <div className="flex items-center gap-3">
+          {saveError && (
+            <span role="alert" className="text-xs text-amber-400">
+              {saveError}
+            </span>
+          )}
           <button
             type="button"
             onClick={toggleStatsDock}

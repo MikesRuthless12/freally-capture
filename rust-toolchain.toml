@@ -1,11 +1,11 @@
-# Pin the Rust toolchain so every machine + CI builds Freally Capture identically.
+# Pin the EXACT Rust toolchain so every machine + CI builds Freally Capture
+# identically — and so a new stable's clippy lints can never turn CI red with
+# zero code changes (the rust-1.96 drift bit the sibling repos). Bump this
+# deliberately, as its own validated change.
+#
+# profile "minimal" + no targets keeps CI installs small; the release workflow
+# adds each job's cross-compile target explicitly (rustup target add).
 [toolchain]
-channel = "stable"
+channel = "1.96.1"
 components = ["rustfmt", "clippy"]
-targets = [
-    "x86_64-pc-windows-msvc",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-]
-profile = "default"
+profile = "minimal"

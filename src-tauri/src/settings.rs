@@ -8,9 +8,10 @@
 //! own locally-scoped handling.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -36,19 +37,48 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    /// Reject values a well-behaved frontend never sends — keeps a buggy (or
+    /// compromised) webview from persisting junk. BCP-47 tags are short ASCII.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.language.is_empty()
+            || self.language.len() > 35
+            || !self
+                .language
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("invalid language tag".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// Thread-safe handle to the settings file, managed as Tauri state.
 pub struct SettingsStore {
-    path: PathBuf,
+    /// `None` only when no OS config dir could be resolved (no home
+    /// directory) — the store then lives in memory for the session.
+    path: Option<PathBuf>,
     current: Mutex<Settings>,
 }
 
 impl SettingsStore {
     /// Open the store in the OS config dir, materializing the file with
-    /// defaults on first run.
+    /// defaults on first run. With no resolvable home directory the store
+    /// degrades to in-memory defaults instead of failing startup.
     pub fn load_default() -> Self {
-        let dirs = ProjectDirs::from("com", "Freally", "Freally Capture")
-            .expect("no home directory — cannot locate the OS config dir");
-        Self::load_from(dirs.config_dir().join("settings.json"))
+        match ProjectDirs::from("com", "Freally", "Freally Capture") {
+            Some(dirs) => Self::load_from(dirs.config_dir().join("settings.json")),
+            None => {
+                eprintln!(
+                    "settings: no home directory — running with in-memory defaults (nothing persists)"
+                );
+                Self {
+                    path: None,
+                    current: Mutex::new(Settings::default()),
+                }
+            }
+        }
     }
 
     /// Open the store at an explicit path (missing file → defaults; corrupt
@@ -56,17 +86,15 @@ impl SettingsStore {
     /// successful save overwrites it).
     pub fn load_from(path: PathBuf) -> Self {
         let current = read_settings(&path);
+        let first_run = !path.exists();
         let store = Self {
-            path,
+            path: Some(path),
             current: Mutex::new(current),
         };
-        if !store.path.exists() {
+        if first_run {
             // First run: write the defaults so the file is discoverable.
             if let Err(err) = store.persist() {
-                eprintln!(
-                    "settings: could not create {} ({err}); running with in-memory defaults",
-                    store.path.display()
-                );
+                eprintln!("settings: could not create the settings file ({err}); running with in-memory defaults");
             }
         }
         store
@@ -87,9 +115,16 @@ impl SettingsStore {
     }
 
     fn persist(&self) -> io::Result<()> {
+        let Some(path) = &self.path else {
+            // In-memory mode (no home directory) — announced at startup.
+            return Ok(());
+        };
+        // Hold the lock across the write so concurrent saves serialize and
+        // the file always reflects a complete snapshot.
+        let guard = self.lock();
         let json =
-            serde_json::to_string_pretty(&*self.lock()).expect("settings always serialize to JSON");
-        write_atomic(&self.path, &json)
+            serde_json::to_string_pretty(&*guard).expect("settings always serialize to JSON");
+        write_atomic(path, &json)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Settings> {
@@ -124,15 +159,35 @@ fn read_settings(path: &Path) -> Settings {
     }
 }
 
-/// Write via a sibling temp file + rename so the settings file is always
-/// either the old or the new complete content, never a truncated mix.
+/// Write via a unique sibling temp file + fsync + rename so the settings
+/// file is always either the old or the new complete content — across app
+/// crashes and (best-effort) power loss — and concurrent writers (e.g. a
+/// second app instance) never collide on the temp path.
 fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, content)?;
-    fs::rename(&tmp, path)
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_extension(format!("{}.{nanos}.tmp", std::process::id()));
+
+    let result = (|| {
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(content.as_bytes())?;
+        // Flush data before the rename so a power cut can't leave a
+        // truncated file behind the metadata commit. (Directory fsync is
+        // not portable to Windows; the file sync is the practical bound.)
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&tmp, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -185,6 +240,23 @@ mod tests {
         let store = SettingsStore::load_from(path.clone());
         assert_eq!(store.get(), Settings::default());
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn validate_bounds_the_language_tag() {
+        let ok = Settings {
+            language: "pt-BR".to_owned(),
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+
+        for bad in ["", "a".repeat(36).as_str(), "en\u{202e}", "en;rm"] {
+            let settings = Settings {
+                language: bad.to_owned(),
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "should reject {bad:?}");
+        }
     }
 
     #[test]

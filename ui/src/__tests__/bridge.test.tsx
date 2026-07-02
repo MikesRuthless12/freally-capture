@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type PushHandler = (event: { payload: unknown }) => void;
 const listeners = new Map<string, PushHandler>();
 const invokeCalls: Array<{ cmd: string; args: unknown }> = [];
+const mockState = vi.hoisted(() => ({ failSettingsSet: false }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => {
@@ -20,7 +21,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "settings_get":
         return Promise.resolve({ language: "en", showStatsDock: true });
       case "settings_set":
-        return Promise.resolve(null);
+        return mockState.failSettingsSet
+          ? Promise.reject(new Error("disk full"))
+          : Promise.resolve(null);
       default:
         return Promise.reject(new Error(`unexpected command ${cmd}`));
     }
@@ -40,6 +43,7 @@ describe("UI ↔ core bridge", () => {
   beforeEach(() => {
     listeners.clear();
     invokeCalls.length = 0;
+    mockState.failSettingsSet = false;
   });
 
   it("renders the health report from the core", async () => {
@@ -76,5 +80,22 @@ describe("UI ↔ core bridge", () => {
       expect(call!.args).toEqual({ settings: { language: "en", showStatsDock: false } });
     });
     expect(screen.queryByRole("region", { name: "Stats" })).not.toBeInTheDocument();
+  });
+
+  it("rolls the toggle back and surfaces an error when persisting fails", async () => {
+    mockState.failSettingsSet = true;
+    render(<App />);
+    const toggle = await screen.findByRole("button", { name: /stats on/i });
+
+    act(() => {
+      toggle.click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save settings/i);
+    });
+    // Rolled back: the dock is still visible and the toggle still reads "on".
+    expect(screen.getByRole("region", { name: "Stats" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /stats on/i })).toBeInTheDocument();
   });
 });
