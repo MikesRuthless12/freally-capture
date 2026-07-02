@@ -1,0 +1,123 @@
+# Release — free-first (no paid signing service, no Apple Developer cert).
+#
+# Triggered by v*.*.* tags. Builds the per-OS installers on the free GitHub
+# runners and opens a DRAFT GitHub Release with them attached — the exact
+# assets the docs/ site's download links point at. Publishing the draft is
+# the agent's job after verification (Mike never clicks Publish).
+#
+# - Windows: MSI + NSIS, unsigned (SmartScreen reputation clears with
+#   downloads). The release .exe is a GUI app with NO console window —
+#   verify against the shipped binary every release.
+# - macOS:   .app/.dmg, ad-hoc signed (APPLE_SIGNING_IDENTITY=-);
+#   right-click → Open on first launch. Intel is cross-compiled on the
+#   Apple-Silicon runner (macos-13 is chronically scarce).
+# - Linux:   AppImage + .deb + .rpm.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dry-run (build artifacts only, no release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build (${{ matrix.target.label }})
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            rust-target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - os: macos-latest
+            label: macos-aarch64
+            rust-target: aarch64-apple-darwin
+            bundles: app,dmg
+          - os: macos-latest
+            label: macos-x86_64
+            rust-target: x86_64-apple-darwin
+            bundles: app,dmg
+          - os: windows-latest
+            label: windows-x86_64
+            rust-target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux prerequisites
+        if: matrix.target.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf \
+            libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libpipewire-0.3-dev libwayland-dev libasound2-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target.rust-target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tauri build (release, ${{ matrix.target.bundles }})
+        env:
+          # Ad-hoc codesign on macOS — free; Gatekeeper shows right-click →
+          # Open on first launch. Paid notarization is a Phase 8 upgrade.
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri -- build --target ${{ matrix.target.rust-target }} --bundles ${{ matrix.target.bundles }}
+
+      - name: Stage installers
+        shell: bash
+        run: |
+          mkdir -p release-staging
+          find "target/${{ matrix.target.rust-target }}/release/bundle" -type f \
+            \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \
+               -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
+            -exec cp {} release-staging/ \;
+          ls -la release-staging
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.target.label }}
+          path: release-staging/*
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-bundles
+          merge-multiple: true
+
+      - name: Draft the release with all installers
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: all-bundles/**
