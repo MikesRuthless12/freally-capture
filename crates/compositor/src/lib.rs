@@ -60,14 +60,45 @@ mod tests {
         );
     }
 
+    /// One GPU device at a time: cargo runs tests on parallel threads, and
+    /// ~20 concurrent devices exhaust the memory budget of CI's software
+    /// rasterizers (WARP failed exactly that way). Each test's compositor
+    /// carries this guard, so devices are created and dropped serially.
+    static GPU_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct TestCompositor {
+        comp: Compositor,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl std::ops::Deref for TestCompositor {
+        type Target = Compositor;
+        fn deref(&self) -> &Compositor {
+            &self.comp
+        }
+    }
+
+    impl std::ops::DerefMut for TestCompositor {
+        fn deref_mut(&mut self) -> &mut Compositor {
+            &mut self.comp
+        }
+    }
+
     /// GPU-backed tests skip (loudly) on machines with no adapter at all —
     /// CI stays green; real coverage runs wherever a GPU or software
     /// rasterizer exists (Windows WARP, Linux lavapipe, macOS Metal).
-    fn compositor(width: u32, height: u32) -> Option<Compositor> {
+    fn compositor(width: u32, height: u32) -> Option<TestCompositor> {
+        // A panicked test poisons the lock; the () state can't be corrupt.
+        let guard = GPU_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match Compositor::new(width, height) {
-            Ok(compositor) => {
-                eprintln!("compositor test adapter: {}", compositor.adapter_summary());
-                Some(compositor)
+            Ok(comp) => {
+                eprintln!("compositor test adapter: {}", comp.adapter_summary());
+                Some(TestCompositor {
+                    comp,
+                    _guard: guard,
+                })
             }
             Err(CompositorError::NoAdapter) => {
                 eprintln!("SKIPPED: no GPU adapter available on this machine");
