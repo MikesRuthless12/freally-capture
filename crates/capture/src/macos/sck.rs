@@ -13,7 +13,11 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
 use objc2_core_media::{CMSampleBuffer, CMTime, CMTimeFlags};
-use objc2_core_video::{CVImageBuffer, CVPixelBuffer, CVPixelBufferLockFlags};
+use objc2_core_video::{
+    CVImageBuffer, CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
+    CVPixelBufferGetHeight, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
+    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+};
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamDelegate,
@@ -181,18 +185,18 @@ impl CaptureOutput {
         // SAFETY: lock → read (base/stride/dims) → copy out → unlock; the
         // base pointer is only used inside the lock window.
         unsafe {
-            let _ = pixel.lock_base_address(CVPixelBufferLockFlags::ReadOnly);
-            let base = pixel.base_address();
-            let width = pixel.width() as u32;
-            let height = pixel.height() as u32;
-            let stride = pixel.bytes_per_row() as u32;
+            let _ = CVPixelBufferLockBaseAddress(pixel, CVPixelBufferLockFlags::ReadOnly);
+            let base = CVPixelBufferGetBaseAddress(pixel);
+            let width = CVPixelBufferGetWidth(pixel) as u32;
+            let height = CVPixelBufferGetHeight(pixel) as u32;
+            let stride = CVPixelBufferGetBytesPerRow(pixel) as u32;
             if base.is_null() || width == 0 || height == 0 || stride < width * 4 {
-                let _ = pixel.unlock_base_address(CVPixelBufferLockFlags::ReadOnly);
+                let _ = CVPixelBufferUnlockBaseAddress(pixel, CVPixelBufferLockFlags::ReadOnly);
                 return;
             }
             let len = stride as usize * height as usize;
             let data = std::slice::from_raw_parts(base as *const u8, len).to_vec();
-            let _ = pixel.unlock_base_address(CVPixelBufferLockFlags::ReadOnly);
+            let _ = CVPixelBufferUnlockBaseAddress(pixel, CVPixelBufferLockFlags::ReadOnly);
             sender.send(Frame {
                 width,
                 height,
@@ -262,7 +266,8 @@ fn run_inner(target: Target, sender: &FrameSender, stop: &AtomicBool) -> Result<
     let width = width.max(2) & !1;
     let height = height.max(2) & !1;
 
-    let config = SCStreamConfiguration::new();
+    // SAFETY: plain +new on the configuration class.
+    let config = unsafe { SCStreamConfiguration::new() };
     // SAFETY: property setters on a fresh configuration object.
     unsafe {
         config.setWidth(width as usize);
@@ -328,7 +333,7 @@ fn start_capture_blocking(stream: &SCStream) -> Result<(), CaptureError> {
         let _ = tx.send(info);
     });
     // SAFETY: SCK invokes the completion block exactly once.
-    unsafe { stream.startCaptureWithCompletionHandler(&block) };
+    unsafe { stream.startCaptureWithCompletionHandler(Some(&*block)) };
     match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(None) => Ok(()),
         Ok(Some(info)) => Err(info.into_capture_error("startCapture")),
@@ -342,6 +347,6 @@ fn stop_capture_blocking(stream: &SCStream) {
         let _ = tx.send(());
     });
     // SAFETY: SCK invokes the completion block exactly once; best-effort.
-    unsafe { stream.stopCaptureWithCompletionHandler(&block) };
+    unsafe { stream.stopCaptureWithCompletionHandler(Some(&*block)) };
     let _ = rx.recv_timeout(Duration::from_secs(2));
 }

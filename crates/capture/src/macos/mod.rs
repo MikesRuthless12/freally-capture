@@ -26,17 +26,15 @@ const DISPLAY_PREFIX: &str = "display:";
 const WINDOW_PREFIX: &str = "window:";
 
 /// Check (and, once, request) the Screen-Recording permission.
+/// (The CG access functions are safe wrappers in objc2-core-graphics.)
 fn ensure_permission() -> Result<(), CaptureError> {
-    // SAFETY: plain permission query/request calls with no arguments.
-    unsafe {
-        if CGPreflightScreenCaptureAccess() {
-            return Ok(());
-        }
-        // Shows the system prompt the first time; returns false immediately
-        // if the user has already denied (they must flip it in Settings).
-        if CGRequestScreenCaptureAccess() {
-            return Ok(());
-        }
+    if CGPreflightScreenCaptureAccess() {
+        return Ok(());
+    }
+    // Shows the system prompt the first time; returns false immediately
+    // if the user has already denied (they must flip it in Settings).
+    if CGRequestScreenCaptureAccess() {
+        return Ok(());
     }
     Err(CaptureError::PermissionDenied)
 }
