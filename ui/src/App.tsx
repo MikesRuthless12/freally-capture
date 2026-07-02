@@ -1,16 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { health, previewStart, previewStop, settingsGet, settingsSet } from "./api/commands";
-import { onPreview } from "./api/events";
-import type { Health, PreviewSource, PreviewStatus, Settings } from "./api/types";
+import {
+  health,
+  settingsGet,
+  settingsSet,
+  studioAddExistingSource,
+  studioAddItem,
+  studioGet,
+  studioRemoveItem,
+  studioReorderItem,
+  studioSetItemLocked,
+  studioSetItemTransform,
+  studioSetItemVisible,
+} from "./api/commands";
+import { onProgram, onStudio } from "./api/events";
+import type {
+  Health,
+  ItemId,
+  ProgramStatus,
+  Settings,
+  SourceId,
+  SourceSettings,
+  StudioDto,
+  Transform,
+} from "./api/types";
+import { FiltersDialog } from "./components/FiltersDialog";
+import { PropertiesDialog } from "./components/PropertiesDialog";
 import { ControlsDock } from "./panels/ControlsDock";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { ScenesRail } from "./panels/ScenesRail";
-import { SourcesRail, type AddedSource } from "./panels/SourcesRail";
+import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
 
-let nextSourceKey = 0;
+type OpenDialog =
+  { kind: "filters"; itemId: ItemId } | { kind: "properties"; sourceId: SourceId } | null;
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
 export default function App() {
@@ -21,14 +45,13 @@ export default function App() {
   // a persisted "off" never flashes visible on launch.
   const [settingsSettled, setSettingsSettled] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [sources, setSources] = useState<AddedSource[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({ state: "idle" });
-  // Mirrors activeKey for the event listener (registered once on mount):
-  // stale events from a superseded pump carry the old sourceKey and must not
-  // overwrite the newly selected source's status. Updated synchronously in
-  // the add/select/remove handlers (events can beat React's re-render).
-  const activeKeyRef = useRef<string | null>(null);
+
+  const [studio, setStudio] = useState<StudioDto | null>(null);
+  const [program, setProgram] = useState<ProgramStatus | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
+  const [dialog, setDialog] = useState<OpenDialog>(null);
+  // Ignore stale event echoes while a drag streams newer transforms.
+  const localRevision = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,61 +71,138 @@ export default function App() {
         }
       })
       .catch(() => {
-        // Without the core, the UI just keeps its defaults (nothing persists).
         if (!cancelled) setSettingsSettled(true);
       });
-    const unlisten = onPreview((status) => {
+    studioGet()
+      .then((dto) => {
+        if (!cancelled) {
+          localRevision.current = dto.revision;
+          setStudio(dto);
+        }
+      })
+      .catch(() => undefined);
+    const unlistenStudio = onStudio((dto) => {
       if (cancelled) return;
-      // Keyed events must match the active card; unkeyed ones (idle) always apply.
-      if (status.sourceKey && status.sourceKey !== activeKeyRef.current) return;
-      setPreviewStatus(status);
+      // Optimistic local edits (drags) may be ahead of the echo.
+      if (dto.revision >= localRevision.current) {
+        localRevision.current = dto.revision;
+        setStudio(dto);
+      }
+    }).catch(() => undefined);
+    const unlistenProgram = onProgram((status) => {
+      if (!cancelled) setProgram(status);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
-      void unlisten.then((fn) => fn?.());
+      void unlistenStudio.then((fn) => fn?.());
+      void unlistenProgram.then((fn) => fn?.());
     };
   }, []);
 
-  const addSource = useCallback((source: PreviewSource, label: string) => {
-    const key = `src-${nextSourceKey++}`;
-    setSources((current) => [...current, { key, label, source }]);
-    setActiveKey(key);
-    // Synchronously, not just at re-render: the pump's first event can
-    // arrive before React commits, and it must not be filtered out.
-    activeKeyRef.current = key;
-    previewStart(source, key).catch((err) => console.error("preview start failed:", err));
-  }, []);
-
-  const selectSource = useCallback(
-    (key: string) => {
-      const entry = sources.find((added) => added.key === key);
-      if (!entry) return;
-      // Clicking the active card is a no-op while it works — but when it
-      // errored (e.g. a permission was just granted), a click retries it.
-      if (key === activeKey && previewStatus.state !== "error") return;
-      setActiveKey(key);
-      activeKeyRef.current = key;
-      previewStart(entry.source, key).catch((err) => console.error("preview start failed:", err));
-    },
-    [sources, activeKey, previewStatus.state],
+  const collection = studio?.collection ?? null;
+  const activeScene = useMemo(
+    () => collection?.scenes.find((scene) => scene.id === collection.activeScene) ?? null,
+    [collection],
   );
 
-  const removeSource = useCallback(
-    (key: string) => {
-      setSources((current) => current.filter((added) => added.key !== key));
-      if (key === activeKey) {
-        setActiveKey(null);
-        activeKeyRef.current = null;
-        previewStop().catch(() => undefined);
-      }
+  // Selection follows reality (derived, not synced): it only counts while it
+  // names an item of the active scene.
+  const effectiveSelection =
+    selectedItem && activeScene?.items.some((item) => item.id === selectedItem)
+      ? selectedItem
+      : null;
+
+  const addItem = useCallback(
+    (settings: SourceSettings, name?: string) => {
+      if (!activeScene) return;
+      studioAddItem(activeScene.id, settings, name)
+        .then((added) => setSelectedItem(added.itemId))
+        .catch((err) => console.error("add item failed:", err));
     },
-    [activeKey],
+    [activeScene],
   );
 
-  const activeSource = sources.find((added) => added.key === activeKey)?.source;
-  const activeKind = activeSource?.kind;
-  // Cameras are exclusive — the picker must not probe one that's live.
-  const liveWebcamId = activeSource?.kind === "webcam" ? activeSource.id : undefined;
+  const addExisting = useCallback(
+    (sourceId: SourceId) => {
+      if (!activeScene) return;
+      studioAddExistingSource(activeScene.id, sourceId)
+        .then((itemId) => setSelectedItem(itemId))
+        .catch((err) => console.error("add existing source failed:", err));
+    },
+    [activeScene],
+  );
+
+  const removeItem = useCallback(
+    (itemId: ItemId) => {
+      if (!activeScene) return;
+      studioRemoveItem(activeScene.id, itemId).catch((err) =>
+        console.error("remove item failed:", err),
+      );
+    },
+    [activeScene],
+  );
+
+  const moveItem = useCallback(
+    (itemId: ItemId, toIndex: number) => {
+      if (!activeScene) return;
+      studioReorderItem(activeScene.id, itemId, toIndex).catch((err) =>
+        console.error("reorder item failed:", err),
+      );
+    },
+    [activeScene],
+  );
+
+  const setVisible = useCallback(
+    (itemId: ItemId, visible: boolean) => {
+      if (!activeScene) return;
+      studioSetItemVisible(activeScene.id, itemId, visible).catch((err) =>
+        console.error("visibility toggle failed:", err),
+      );
+    },
+    [activeScene],
+  );
+
+  const setLocked = useCallback(
+    (itemId: ItemId, locked: boolean) => {
+      if (!activeScene) return;
+      studioSetItemLocked(activeScene.id, itemId, locked).catch((err) =>
+        console.error("lock toggle failed:", err),
+      );
+    },
+    [activeScene],
+  );
+
+  /** Handle drags: patch locally for instant feedback, then persist. */
+  const setItemTransform = useCallback(
+    (itemId: ItemId, transform: Transform) => {
+      if (!activeScene) return;
+      const sceneId = activeScene.id;
+      localRevision.current += 1;
+      setStudio((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          collection: {
+            ...current.collection,
+            scenes: current.collection.scenes.map((scene) =>
+              scene.id === sceneId
+                ? {
+                    ...scene,
+                    items: scene.items.map((item) =>
+                      item.id === itemId ? { ...item, transform, pendingFit: false } : item,
+                    ),
+                  }
+                : scene,
+            ),
+          },
+        };
+      });
+      studioSetItemTransform(sceneId, itemId, transform).catch((err) =>
+        console.error("transform update failed:", err),
+      );
+    },
+    [activeScene],
+  );
 
   const showStats = settingsSettled && (settings?.showStatsDock ?? true);
 
@@ -119,6 +219,15 @@ export default function App() {
       console.error("could not persist settings:", err);
     });
   };
+
+  const dialogItem =
+    dialog?.kind === "filters"
+      ? (activeScene?.items.find((item) => item.id === dialog.itemId) ?? null)
+      : null;
+  const dialogSource =
+    dialog?.kind === "properties"
+      ? (collection?.sources.find((source) => source.id === dialog.sourceId) ?? null)
+      : null;
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
@@ -152,17 +261,31 @@ export default function App() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_240px] gap-2">
-          <ScenesRail />
-          <PreviewPanel status={previewStatus} os={core?.os} activeKind={activeKind} />
+        <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-2">
+          <ScenesRail collection={collection} />
+          <PreviewPanel
+            collection={collection}
+            scene={activeScene}
+            program={program}
+            selectedItem={effectiveSelection}
+            onSelect={setSelectedItem}
+            onItemTransform={setItemTransform}
+          />
           <SourcesRail
-            sources={sources}
-            activeKey={activeKey}
-            status={previewStatus}
-            liveWebcamId={liveWebcamId}
-            onAdd={addSource}
-            onSelect={selectSource}
-            onRemove={removeSource}
+            collection={collection}
+            scene={activeScene}
+            program={program}
+            os={core?.os}
+            selectedItem={effectiveSelection}
+            onSelect={setSelectedItem}
+            onAdd={addItem}
+            onAddExisting={addExisting}
+            onRemove={removeItem}
+            onMove={moveItem}
+            onSetVisible={setVisible}
+            onSetLocked={setLocked}
+            onOpenFilters={(itemId) => setDialog({ kind: "filters", itemId })}
+            onOpenProperties={(sourceId) => setDialog({ kind: "properties", sourceId })}
           />
         </div>
         <div
@@ -175,6 +298,20 @@ export default function App() {
           {showStats && <StatsDock />}
         </div>
       </main>
+
+      {dialog?.kind === "filters" && activeScene && dialogItem && (
+        <FiltersDialog
+          sceneId={activeScene.id}
+          item={dialogItem}
+          sourceName={
+            collection?.sources.find((source) => source.id === dialogItem.source)?.name ?? "Source"
+          }
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "properties" && dialogSource && (
+        <PropertiesDialog source={dialogSource} os={core?.os} onClose={() => setDialog(null)} />
+      )}
     </div>
   );
 }
