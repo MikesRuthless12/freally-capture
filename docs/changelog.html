@@ -20,8 +20,43 @@
     </header>
 
     <main>
-      <!-- 0.25.0 -->
+      <!-- 0.40.0 -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.40.0</span>
+            <span class="date">Jul 2, 2026 · Compositor + scenes/sources</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.40.0">Download v0.40.0</a>
+        </div>
+
+        <h2>0.40.0 — Compositor + scenes/sources (done)</h2>
+        <p class="summary">
+          The heart of the studio is in. Every scene composes on the owned wgpu GPU compositor —
+          per-item move/scale/rotate/crop, seven blend modes, sustained 60 fps at 1080p — driven by
+          the owned scene/source model: scenes share sources, items stack by z-order, and the whole
+          collection autosaves locally and restores on launch. Each item carries an ordered on-GPU
+          filter chain: chroma key (with spill suppression), color correction, LUT (.cube), blur,
+          image mask, sharpen, scroll, and crop, all live-editable.
+        </p>
+
+        <h3>Highlights</h3>
+        <ul class="features">
+          <li>Scenes and Sources rails work end to end: create/rename/reorder scenes; add displays, windows, webcams, images, colors, and text; toggle visibility, lock, and stack order; share one source across scenes.</li>
+          <li>Pixel-accurate on-canvas editing — drag, scale from corners or edges, rotate (with 15° snapping), and Alt-drag any edge to crop, straight on the program preview.</li>
+          <li>The Text source ships the complete Noto Sans family in the app (upright + italic + Arabic + Hebrew, every weight) with real shaping and RTL — text renders identically on every machine.</li>
+          <li>Honest per-source status (starting / live / error) and honest limits: a machine with no usable GPU says so instead of freezing.</li>
+          <li>Everything stays local — scene collections are plain JSON on your disk; frames never touch a socket.</li>
+        </ul>
+
+        <p class="note">
+          This is an early development build: scenes, capture, and the compositor work; the audio
+          mixer, recording, and streaming arrive in the milestones below.
+        </p>
+      </article>
+
+      <!-- 0.25.0 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.25.0</span>
@@ -109,12 +144,12 @@
             <span class="soon">Done — Jul 1, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.40.0</span>
+            <span class="badge">0.40.0</span>
             <div>
               <strong>Compositor + scenes/sources</strong>
-              <p>The owned wgpu compositor, the scene/source model, the source set, and the video filter chain.</p>
+              <p>The owned wgpu compositor, the scene/source model, the source set (incl. bundled Noto text), and the on-GPU video filter chain.</p>
             </div>
-            <span class="soon">Coming soon</span>
+            <span class="soon">Done — Jul 2, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">0.55.0</span>

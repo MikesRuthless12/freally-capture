@@ -1,8 +1,9 @@
 /**
  * Typed mirrors of the Rust bridge payloads.
  *
- * Keep in lockstep with `src-tauri/src/commands/mod.rs`,
- * `src-tauri/src/events.rs`, and `src-tauri/src/settings.rs`.
+ * Keep in lockstep with `src-tauri/src/commands/`, `src-tauri/src/events.rs`,
+ * `src-tauri/src/studio.rs`, `src-tauri/src/settings.rs`, and the scene model
+ * in `crates/scene` (serde camelCase on every shape).
  */
 
 /** One linked core crate, as reported by `health`. */
@@ -34,7 +35,7 @@ export type StatsPayload = {
 };
 
 // ---------------------------------------------------------------------------
-// Capture + preview (Phase 1)
+// Capture pickers (Phase 1)
 // ---------------------------------------------------------------------------
 
 /**
@@ -67,28 +68,178 @@ export type VideoFormat = {
   fourcc: string;
 };
 
-/** What to preview — mirrors the Rust `PreviewSource` enum (tag = `kind`). */
-export type PreviewSource =
-  | { kind: "display"; id: string; label: string }
-  | { kind: "window"; id: string; label: string }
-  | { kind: "portal"; label?: string }
-  | { kind: "webcam"; id: string; label: string; format?: VideoFormat };
+// ---------------------------------------------------------------------------
+// The scene model (Phase 2 — mirrors crates/scene)
+// ---------------------------------------------------------------------------
 
-export type PreviewErrorCode =
+export type SceneId = string;
+export type SourceId = string;
+export type ItemId = string;
+export type FilterId = string;
+
+/** Straight (unpremultiplied) RGBA, 0–255 per channel. */
+export type Rgba = { r: number; g: number; b: number; a: number };
+
+/** Pixels cut from each edge of the source (pre-scale). */
+export type Crop = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Where an item sits: `x`/`y` place the (cropped) content's **center** in
+ * canvas px; scales multiply the cropped size; rotation is degrees clockwise
+ * about that center. Mirrors `crates/compositor/src/transform.rs` — the
+ * on-canvas handles depend on this exact math.
+ */
+export type Transform = {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+  crop: Crop;
+};
+
+export type BlendMode =
+  "normal" | "additive" | "subtract" | "screen" | "multiply" | "lighten" | "darken";
+
+export const BLEND_MODES: BlendMode[] = [
+  "normal",
+  "additive",
+  "subtract",
+  "screen",
+  "multiply",
+  "lighten",
+  "darken",
+];
+
+export type TextAlign = "left" | "center" | "right";
+
+export type VideoDeviceFormat = {
+  width: number;
+  height: number;
+  fps: number;
+  fourcc: string;
+};
+
+/** Per-kind source settings (serde tag = `kind`). */
+export type SourceSettings =
+  | { kind: "display"; captureId: string; label: string }
+  | { kind: "window"; captureId: string; label: string }
+  | { kind: "portal" }
+  | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
+  | { kind: "image"; path: string }
+  | { kind: "color"; color: Rgba; width: number; height: number }
+  | {
+      kind: "text";
+      text: string;
+      fontFamily?: string | null;
+      fontFile?: string | null;
+      sizePx: number;
+      color: Rgba;
+      align: TextAlign;
+      lineSpacing: number;
+      forceRtl: boolean;
+      wrapWidth?: number | null;
+    };
+
+export type SourceKindName = SourceSettings["kind"];
+
+/** One shared source: identity + name + flattened settings. */
+export type Source = { id: SourceId; name: string } & SourceSettings;
+
+/** One filter's parameters (serde tag = `type`). */
+export type FilterKind =
+  | { type: "chromaKey"; key: Rgba; similarity: number; smoothness: number; spill: number }
+  | {
+      type: "colorCorrection";
+      gamma: number;
+      brightness: number;
+      contrast: number;
+      saturation: number;
+      hueShift: number;
+      opacity: number;
+    }
+  | { type: "lut"; path: string; amount: number }
+  | { type: "blur"; radius: number }
+  | { type: "mask"; path: string; mode: "alpha" | "luma"; invert: boolean }
+  | { type: "sharpen"; amount: number }
+  | { type: "scroll"; speedX: number; speedY: number }
+  | { type: "crop"; left: number; top: number; right: number; bottom: number };
+
+export type FilterTypeName = FilterKind["type"];
+
+/** One filter instance in an item's chain. */
+export type Filter = { id: FilterId; enabled: boolean } & FilterKind;
+
+/** One placement of a source in a scene. */
+export type SceneItem = {
+  id: ItemId;
+  source: SourceId;
+  visible: boolean;
+  locked: boolean;
+  blend: BlendMode;
+  transform: Transform;
+  /** True until the first frame auto-fits the item (engine-managed). */
+  pendingFit: boolean;
+  filters: Filter[];
+};
+
+/** One scene: ordered items, index = z-order, `items[0]` bottom-most. */
+export type Scene = {
+  id: SceneId;
+  name: string;
+  items: SceneItem[];
+};
+
+/** The whole model (the on-disk scene-collection format). */
+export type Collection = {
+  formatVersion: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  sources: Source[];
+  scenes: Scene[];
+  activeScene: SceneId;
+};
+
+/** The `studio` event / `studio_get` payload. */
+export type StudioDto = {
+  revision: number;
+  collection: Collection;
+};
+
+/** What `studio_add_item` created. */
+export type AddedItem = {
+  sourceId: SourceId;
+  itemId: ItemId;
+};
+
+// ---------------------------------------------------------------------------
+// The `program` event (compose-loop health)
+// ---------------------------------------------------------------------------
+
+export type SourceRuntimeState = "waiting" | "live" | "error";
+
+export type SourceRuntimeErrorCode =
   "permission" | "cancelled" | "notFound" | "unsupported" | "stopped" | "backend";
 
-/** The `preview` push-event payload (state changes + a 1 Hz live update). */
-export type PreviewStatus = {
-  state: "idle" | "waiting" | "live" | "error";
-  /** The Sources-rail card this status belongs to. */
-  sourceKey?: string;
-  label?: string;
+/** Live status of one source (keyed by source id). */
+export type SourceRuntime = {
+  state: SourceRuntimeState;
   width?: number;
   height?: number;
-  /** Measured preview frame rate (frames received in the last second). */
   fps?: number;
-  /** Frames overwritten before the preview consumed them. */
-  dropped?: number;
-  errorCode?: PreviewErrorCode;
+  errorCode?: SourceRuntimeErrorCode;
   errorMessage?: string;
+};
+
+/** The `program` push event: compose fps + per-source states (≥1 Hz). */
+export type ProgramStatus = {
+  /** "noGpu" is honest: no adapter at all — the canvas cannot compose. */
+  state: "starting" | "running" | "noGpu";
+  width: number;
+  height: number;
+  fps: number;
+  renderMicros: number;
+  adapter: string;
+  dropped: number;
+  sources: Record<string, SourceRuntime>;
 };

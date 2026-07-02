@@ -159,11 +159,12 @@ fn read_settings(path: &Path) -> Settings {
     }
 }
 
-/// Write via a unique sibling temp file + fsync + rename so the settings
-/// file is always either the old or the new complete content — across app
-/// crashes and (best-effort) power loss — and concurrent writers (e.g. a
-/// second app instance) never collide on the temp path.
-fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
+/// Write via a unique sibling temp file + fsync + rename so the file is
+/// always either the old or the new complete content — across app crashes
+/// and (best-effort) power loss — and concurrent writers (e.g. a second app
+/// instance) never collide on the temp path. Shared with the studio's
+/// scene-collection persistence.
+pub(crate) fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }

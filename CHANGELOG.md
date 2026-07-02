@@ -5,13 +5,65 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 1 (capture core, 0.25.0) is complete. Early development builds are
-> downloadable from each release; the **studio MVP — the first build meant for everyday use — arrives
-> at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
+> **Status: in development.** Phase 2 (compositor + scenes/sources, 0.40.0) is complete. Early
+> development builds are downloadable from each release; the **studio MVP — the first build meant for
+> everyday use — arrives at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-_Nothing yet — 0.40.0 (compositor + scenes/sources) is next._
+_Nothing yet — 0.55.0 (audio + recording) is next._
+
+## [0.40.0] — 2026-07-02 (Compositor + scenes/sources)
+
+### Added
+- **The owned wgpu GPU compositor** (`fcap-compositor`): every visible scene item composes
+  back-to-front into the program frame with per-item **move/scale/rotate/crop** (one authoritative,
+  unit-tested transform), all seven **blend modes** (normal/additive/subtract/screen/multiply/
+  lighten/darken as fixed-function blend states), stride-aware BGRA/RGBA uploads with no CPU
+  swizzle, and a headless readback path. Golden tests assert real GPU pixels and skip loudly on
+  adapterless machines; the hardware perf gate holds **60 fps at 1080p with 4 sources**
+  (5.2 ms/frame measured on an RTX 4070).
+- **The owned scene/source/filter model** (`fcap-scene`): scenes hold ordered items (index =
+  z-order); sources live in a shared pool and are referenced across scenes; items carry
+  transform/blend/visibility/lock and an ordered filter chain. Serde round-trip tested,
+  unknown-key tolerant, self-repairing on load — this is the scene-collection project format,
+  autosaved (atomic, debounced) to `scene-collection.json` in the OS config dir.
+- **The on-GPU video filter chain**, per item and live-parameterized: **Chroma Key** (with spill
+  suppression), **Color Correction** (gamma/brightness/contrast/saturation/hue/opacity),
+  **LUT** (.cube → 3D lattice), **Blur** (separable gaussian), **Image Mask** (alpha/luma, invert),
+  **Sharpen**, **Scroll** (wrapping ticker), and **Crop** — ordered, toggleable, each verified
+  against rendered pixels. Filters whose file has not loaded are skipped, never rendered black.
+- **New sources**: **Image** (PNG/JPEG/BMP/GIF/WebP…), **Color** (solid block), and **Text** —
+  real shaping via rustybuzz (Arabic joining, ligatures, kerning), UAX #9 bidi RTL, word wrap,
+  alignment, line spacing, anti-aliased tiny-skia rasterization. The **complete Noto Sans family
+  is bundled** (variable fonts: every weight/width, upright + Italic + Arabic + Hebrew; OFL-1.1
+  vendored, provenance pinned + hashed) with **per-run script fallback**, so text renders
+  identically on every machine; system families stay selectable and a font file overrides.
+- **The studio runtime**: capture sessions and static sources reconcile against the active scene
+  every tick; newly added items auto-fit on their first frame; the composed program frame feeds
+  the same in-process `preview://` pipe at ~30 fps while composing at ~60; per-source
+  live/waiting/error status + compose fps flow on the `program` event. A GPU-less machine gets an
+  honest "no GPU" report instead of a frozen canvas.
+- **The studio UI**: working **Scenes** rail (add/select/rename/reorder/remove), a **Sources**
+  rail with visibility/lock/z-order/status per item and an add menu covering every implemented
+  kind (plus cross-scene source sharing), **pixel-accurate on-canvas transform handles** (drag,
+  corner/edge scale, rotate with 15° snap, Alt-drag cropping), a **Filters** dialog (blend mode +
+  the live-editable chain), and per-kind **Properties** dialogs.
+
+### Honest scope notes
+- **Media** (video files) is **folded into the recording phase** (decided 2026-07-02): it rides
+  the wire-codec / hardware-decode architecture (on-demand ffmpeg) — no pure-Rust general video
+  decoder exists, and stubs are against the charter.
+- **Browser source** moves to the streaming-depth phase behind an **offscreen-webview design
+  spike** (Tauri v2 cannot render a webview to a texture cross-platform).
+- **CJK text** uses system fonts for now — Noto CJK (~100 MB) is not bundled; the bundled set
+  covers Latin/Greek/Cyrillic + Arabic + Hebrew.
+
+### Security / privacy
+- The posture is unchanged: composed program frames stay **in-process** behind the CORS-pinned
+  `preview://` scheme; the only file the studio writes is the local scene collection. New
+  third-party dependencies (`wgpu` runtime use, `image`, `tiny-skia`, `fontdb`, `unicode-bidi`,
+  `pollster`) are permissively licensed and recorded in `THIRD-PARTY-NOTICES.md`.
 
 ## [0.25.0] — 2026-07-01 (Capture core)
 

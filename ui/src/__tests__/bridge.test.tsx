@@ -25,6 +25,18 @@ vi.mock("@tauri-apps/api/core", () => ({
         return mockState.failSettingsSet
           ? Promise.reject(new Error("disk full"))
           : Promise.resolve(null);
+      case "studio_get":
+        return Promise.resolve({
+          revision: 1,
+          collection: {
+            formatVersion: 1,
+            canvasWidth: 1920,
+            canvasHeight: 1080,
+            sources: [],
+            scenes: [{ id: "scene-1", name: "Scene", items: [] }],
+            activeScene: "scene-1",
+          },
+        });
       default:
         return Promise.reject(new Error(`unexpected command ${cmd}`));
     }

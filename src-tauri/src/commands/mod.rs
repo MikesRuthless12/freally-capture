@@ -3,13 +3,14 @@
 //! Typed on both sides: `ui/src/api/` mirrors these signatures and payload
 //! shapes — keep them in lockstep.
 
-use serde::Serialize;
-use tauri::{AppHandle, State};
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::preview::{PreviewSource, PreviewState, VideoFormatDto};
 use crate::settings::{Settings, SettingsStore};
 use fcap_capture::SourceKind;
 use fcap_sources::video_device;
+
+pub mod studio;
 
 /// One linked core crate, as reported by [`health`].
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +159,16 @@ pub async fn video_devices_list() -> Result<Vec<VideoDeviceDto>, String> {
     .map_err(|err| format!("device listing task failed: {err}"))?
 }
 
+/// A webcam format offer (mirrors `ui/src/api/types.ts` `VideoFormat`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoFormatDto {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub fourcc: String,
+}
+
 /// List a device's formats (opens the device briefly).
 #[tauri::command]
 pub async fn video_device_formats(device_id: String) -> Result<Vec<VideoFormatDto>, String> {
@@ -178,24 +189,6 @@ pub async fn video_device_formats(device_id: String) -> Result<Vec<VideoFormatDt
     })
     .await
     .map_err(|err| format!("format listing task failed: {err}"))?
-}
-
-/// Start previewing a source. Non-blocking: progress arrives on the
-/// `preview` event (`waiting` → `live` / `error`), keyed by `source_key`.
-#[tauri::command]
-pub fn preview_start(
-    app: AppHandle,
-    state: State<'_, PreviewState>,
-    source: PreviewSource,
-    source_key: String,
-) {
-    state.start(&app, source, source_key);
-}
-
-/// Stop the running preview (idempotent).
-#[tauri::command]
-pub fn preview_stop(app: AppHandle, state: State<'_, PreviewState>) {
-    state.stop(&app);
 }
 
 /// macOS: deep-link the user to the Privacy pane they need after a denial.

@@ -31,6 +31,16 @@ ignore = [
   "RUSTSEC-2025-0098",
   "RUSTSEC-2025-0100",
   "RUSTSEC-2024-0436", # paste — unmaintained proc-macro (nokhwa's webcam tree); no vulnerability
+  "RUSTSEC-2026-0192", # ttf-parser — unmaintained (author archived it); pinned by the rustybuzz +
+                       # fontdb text-shaping stack (Phase 2 Text source). No vulnerability. Revisit
+                       # if/when the shaping stack moves (e.g. to skrifa).
+  # quick-xml 0.39 DoS advisories (quadratic duplicate-attribute check / unbounded namespace
+  # allocation) — reachable only through `plist` inside the Tauri tree, which parses *trusted local
+  # files* (tauri's own build config; the app's Info.plist on macOS), never attacker-controlled
+  # XML. No compatible upgrade exists yet: plist 1.9 pins quick-xml 0.39; the fix lands via a
+  # plist/tauri bump — re-check on every Tauri upgrade.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
 ]
 
 [licenses]
@@ -54,6 +64,17 @@ allow = [
   # permissive; requires the IJG acknowledgment in THIRD-PARTY-NOTICES.md.
   "IJG",
 ]
+
+# Narrow per-crate allowances (kept out of the global list on purpose).
+# Both arrived with the wgpu tree when the Phase 2 compositor made it a real
+# dependency; both licenses are permissive.
+[[licenses.exceptions]]
+name = "hexf-parse"     # CC0 hex-float parser inside wgpu-core's WGSL path
+allow = ["CC0-1.0"]
+
+[[licenses.exceptions]]
+name = "libfuzzer-sys"  # feature-gated fuzzing shim (all-features graph only — never shipped)
+allow = ["NCSA"]
 
 [bans]
 multiple-versions = "warn"
