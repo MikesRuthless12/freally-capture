@@ -14,10 +14,12 @@
 #![forbid(unsafe_code)]
 
 mod compositor;
+pub mod filters;
 mod gpu;
 pub mod transform;
 
 pub use compositor::{Compositor, ProgramFrame};
+pub use filters::{cube::parse_cube, FilterResourceData};
 
 use thiserror::Error;
 
@@ -397,6 +399,474 @@ mod tests {
             comp.upload_frame(source, &bad_stride),
             Err(CompositorError::BadFrame(_))
         ));
+    }
+
+    // -- P2.3: the filter chain ---------------------------------------------
+
+    use fcap_scene::{FilterKind, MaskMode};
+
+    /// The first (and only) item of the collection's active scene.
+    fn only_item(collection: &Collection) -> fcap_scene::ItemId {
+        collection.active_scene().items[0].id
+    }
+
+    /// A 4×4 frame: left half white, right half black.
+    fn half_and_half() -> Frame {
+        let mut data = Vec::new();
+        for _y in 0..4 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    data.extend_from_slice(&[255, 255, 255, 255]);
+                } else {
+                    data.extend_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        Frame {
+            width: 4,
+            height: 4,
+            stride: 16,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn chroma_key_removes_the_keyed_color() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let background = SourceId::new();
+        let keyed = SourceId::new();
+        comp.upload_frame(
+            background,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [200, 0, 0, 255]),
+        )
+        .expect("upload background");
+        comp.upload_frame(
+            keyed,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [0, 255, 0, 255]),
+        )
+        .expect("upload keyed");
+
+        let mut collection =
+            scene_with_item((4, 4), background, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let mut source = Source::new(
+            "keyed",
+            SourceSettings::Color {
+                color: Rgba::WHITE,
+                width: 4,
+                height: 4,
+            },
+        );
+        source.id = keyed;
+        collection.sources.push(source);
+        let item = collection
+            .add_item_with_existing_source(scene, keyed)
+            .expect("add");
+        collection
+            .set_item_transform(scene, item, centered((4, 4)))
+            .expect("transform");
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::ChromaKey {
+                    key: Rgba::new(0, 255, 0, 255),
+                    similarity: 0.4,
+                    smoothness: 0.08,
+                    spill: 0.1,
+                },
+            )
+            .expect("add filter");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        // The pure-green overlay keys out entirely → the background shows.
+        assert_eq!(pixel(&program, 2, 2), [200, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_correction_brightness_and_opacity_apply() {
+        let Some(mut comp) = compositor(2, 2) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(2, 2, PixelFormat::Rgba8, [100, 100, 100, 255]),
+        )
+        .expect("upload");
+        let mut collection = scene_with_item((2, 2), source, centered((2, 2)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        let filter = collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::ColorCorrection {
+                    gamma: 0.0,
+                    brightness: 1.0,
+                    contrast: 0.0,
+                    saturation: 1.0,
+                    hue_shift: 0.0,
+                    opacity: 1.0,
+                },
+            )
+            .expect("add");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 1, 1),
+            [255, 255, 255, 255],
+            "brightness 1 → white"
+        );
+
+        collection
+            .update_filter(
+                scene,
+                item,
+                filter,
+                FilterKind::ColorCorrection {
+                    gamma: 0.0,
+                    brightness: 0.0,
+                    contrast: 0.0,
+                    saturation: 1.0,
+                    hue_shift: 0.0,
+                    opacity: 0.0,
+                },
+            )
+            .expect("update");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 1, 1),
+            [0, 0, 0, 255],
+            "opacity 0 → invisible"
+        );
+    }
+
+    #[test]
+    fn lut_maps_colors_through_the_lattice() {
+        let Some(mut comp) = compositor(2, 2) else {
+            return;
+        };
+        // An inverting 2³ LUT: every corner maps to its complement.
+        let mut cube_text = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 {
+            for g in 0..2 {
+                for r in 0..2 {
+                    cube_text.push_str(&format!("{} {} {}\n", 1 - r, 1 - g, 1 - b));
+                }
+            }
+        }
+        let lut = parse_cube(&cube_text).expect("parse");
+
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(2, 2, PixelFormat::Rgba8, [51, 102, 204, 255]),
+        )
+        .expect("upload");
+        let mut collection = scene_with_item((2, 2), source, centered((2, 2)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        let filter = collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Lut {
+                    path: "test.cube".into(),
+                    amount: 1.0,
+                },
+            )
+            .expect("add");
+        comp.set_filter_resource(filter, &FilterResourceData::Lut3d(lut))
+            .expect("resource");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        let px = pixel(&program, 0, 0);
+        // Inverted (with 8-bit LUT + trilinear tolerance).
+        assert!(
+            (px[0] as i32 - 204).abs() <= 3
+                && (px[1] as i32 - 153).abs() <= 3
+                && (px[2] as i32 - 51).abs() <= 3,
+            "expected ~inverted color, got {px:?}"
+        );
+    }
+
+    #[test]
+    fn unloaded_lut_renders_the_item_unfiltered() {
+        let Some(mut comp) = compositor(2, 2) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(2, 2, PixelFormat::Rgba8, [10, 20, 30, 255]),
+        )
+        .expect("upload");
+        let mut collection = scene_with_item((2, 2), source, centered((2, 2)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Lut {
+                    path: "not-loaded-yet.cube".into(),
+                    amount: 1.0,
+                },
+            )
+            .expect("add");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 1, 1),
+            [10, 20, 30, 255],
+            "skipped, not black"
+        );
+    }
+
+    #[test]
+    fn blur_spreads_and_disabling_it_restores() {
+        let Some(mut comp) = compositor(9, 9) else {
+            return;
+        };
+        // A single bright impulse in the middle of black.
+        let mut data = vec![0u8; 9 * 9 * 4];
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let center = (4 * 9 + 4) * 4;
+        data[center..center + 4].copy_from_slice(&[255, 255, 255, 255]);
+        let frame = Frame {
+            width: 9,
+            height: 9,
+            stride: 36,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &frame).expect("upload");
+        let mut collection = scene_with_item((9, 9), source, centered((9, 9)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        let filter = collection
+            .add_filter(scene, item, FilterKind::Blur { radius: 3.0 })
+            .expect("add");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let blurred = comp.read_program().expect("readback");
+        let center_px = pixel(&blurred, 4, 4);
+        let neighbor = pixel(&blurred, 6, 4);
+        assert!(center_px[0] < 255, "energy spread away from the impulse");
+        assert!(neighbor[0] > 0, "…and into the neighbors");
+        assert_eq!(
+            pixel(&blurred, 6, 4),
+            pixel(&blurred, 2, 4),
+            "gaussian is symmetric"
+        );
+
+        collection
+            .set_filter_enabled(scene, item, filter, false)
+            .expect("disable");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let crisp = comp.read_program().expect("readback");
+        assert_eq!(pixel(&crisp, 4, 4), [255, 255, 255, 255]);
+        assert_eq!(pixel(&crisp, 6, 4), [0, 0, 0, 255], "disabled = identity");
+    }
+
+    #[test]
+    fn mask_gates_alpha_by_the_image() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let background = SourceId::new();
+        let masked = SourceId::new();
+        comp.upload_frame(
+            background,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [200, 0, 0, 255]),
+        )
+        .expect("upload background");
+        comp.upload_frame(
+            masked,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [255, 255, 255, 255]),
+        )
+        .expect("upload masked");
+
+        let mut collection =
+            scene_with_item((4, 4), background, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let mut source = Source::new(
+            "masked",
+            SourceSettings::Color {
+                color: Rgba::WHITE,
+                width: 4,
+                height: 4,
+            },
+        );
+        source.id = masked;
+        collection.sources.push(source);
+        let item = collection
+            .add_item_with_existing_source(scene, masked)
+            .expect("add");
+        collection
+            .set_item_transform(scene, item, centered((4, 4)))
+            .expect("transform");
+        let filter = collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Mask {
+                    path: "mask.png".into(),
+                    mode: MaskMode::Alpha,
+                    invert: false,
+                },
+            )
+            .expect("add filter");
+
+        // Mask image: left half transparent, right half opaque.
+        let mut mask = Vec::new();
+        for _y in 0..4 {
+            for x in 0..4u32 {
+                mask.extend_from_slice(&[255, 255, 255, if x < 2 { 0 } else { 255 }]);
+            }
+        }
+        comp.set_filter_resource(
+            filter,
+            &FilterResourceData::Image {
+                width: 4,
+                height: 4,
+                rgba: mask,
+            },
+        )
+        .expect("resource");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 0, 2),
+            [200, 0, 0, 255],
+            "masked away → background"
+        );
+        assert_eq!(
+            pixel(&program, 3, 2),
+            [255, 255, 255, 255],
+            "kept → overlay"
+        );
+    }
+
+    #[test]
+    fn scroll_wraps_the_content() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &half_and_half()).expect("upload");
+        let mut collection = scene_with_item((4, 4), source, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Scroll {
+                    speed_x: 2.0,
+                    speed_y: 0.0,
+                },
+            )
+            .expect("add");
+
+        // t = 1s → offset = 2px = half the width → halves swap.
+        comp.render(collection.active_scene(), 1.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(pixel(&program, 0, 1), [0, 0, 0, 255], "black scrolled in");
+        assert_eq!(
+            pixel(&program, 3, 1),
+            [255, 255, 255, 255],
+            "white wrapped around"
+        );
+    }
+
+    #[test]
+    fn filter_order_is_respected() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &half_and_half()).expect("upload");
+
+        // A: scroll half a width, then crop to the right half → white.
+        let mut collection = scene_with_item((4, 4), source, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Scroll {
+                    speed_x: 2.0,
+                    speed_y: 0.0,
+                },
+            )
+            .expect("scroll");
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Crop {
+                    left: 2,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+            )
+            .expect("crop");
+        comp.render(collection.active_scene(), 1.0).expect("render");
+        let a = comp.read_program().expect("readback");
+        // The chain output is 2×4, centered → columns 1..3.
+        assert_eq!(
+            pixel(&a, 1, 2),
+            [255, 255, 255, 255],
+            "scroll→crop keeps white"
+        );
+
+        // B: crop to the right half (black), then scroll — still black.
+        let mut collection = scene_with_item((4, 4), source, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Crop {
+                    left: 2,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+            )
+            .expect("crop");
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Scroll {
+                    speed_x: 2.0,
+                    speed_y: 0.0,
+                },
+            )
+            .expect("scroll");
+        comp.render(collection.active_scene(), 1.0).expect("render");
+        let b = comp.read_program().expect("readback");
+        assert_eq!(pixel(&b, 1, 2), [0, 0, 0, 255], "crop→scroll stays black");
     }
 
     /// The Phase 2 budget: 60 fps at 1080p with ≥4 sources. Hardware-gated —
