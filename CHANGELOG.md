@@ -5,19 +5,26 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: pre-development (planning).** Freally Capture is in active planning and early development.
-> There are no public releases yet — **downloads will be available in future releases.** The release
-> ladder below tracks the plan to 1.0.0.
+> **Status: in development.** Phase 0 (foundation, 0.10.0) is complete; the app is not yet published —
+> **downloads will be available in future releases.** The release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-### Planned — 0.10.0 (Foundation & repo)
-- Tauri v2 + React/TypeScript control UI (Havoc dark theme) over a Rust Cargo workspace (`src-tauri` + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`, `sources`, `scene`).
-- The empty studio dock layout (program preview, Scenes/Sources/Mixer/Controls/Stats); a settings store (JSON in the OS config dir).
-- The UI ↔ core Tauri command/event bridge.
-- CI matrix on Windows/macOS/Linux; the Tauri packaging + tag-triggered release scaffold.
-- The proprietary `LICENSE` + governance docs (`SECURITY`, `PRIVACY` (draft), `EULA` (draft), `THIRD-PARTY-NOTICES`) and the seed `docs/` GitHub Pages site.
-- Windows release is a GUI app with **no console window**.
+_Nothing yet — 0.25.0 (capture core) is next._
+
+## [0.10.0] — 2026-07-01 (Foundation & repo)
+
+### Added
+- **Tauri v2 + React 19 / TypeScript / Vite 7 / Tailwind 4** control UI (Havoc dark) over a Rust Cargo workspace: the `freally-capture` app crate + the owned `fcap-*` engine crates (`capture`, `sources`, `compositor`, `scene`, `audio`, `encode`, `stream`), all `#![forbid(unsafe_code)]`.
+- The **studio dock layout** (large program preview, Scenes/Sources rails, Audio Mixer, Controls, Stats) with honest not-yet-implemented states on every control.
+- The **typed UI ↔ core bridge**: `health()` (app + linked core-crate versions), `settings_get`/`settings_set`, and a ~2 Hz `stats` push event rendered live in the stats dock (placeholder data, labeled as such until real sampling in 0.70.0).
+- The **settings store**: JSON in the OS config dir, atomic temp-file+rename writes, corrupt/missing-file fallbacks; the stats-dock toggle persists across runs.
+- **CI matrix** (Windows/macOS/Linux): rustfmt, clippy `-D warnings`, tests, cargo-deny + cargo-audit, UI prettier/eslint/tsc/vitest/build, and per-OS Tauri debug builds; a tag-triggered **release workflow** (per-OS installers → draft GitHub Release).
+- The proprietary `LICENSE` + governance docs and the seed `docs/` GitHub Pages site with the true-alpha badge icon.
+- **Windows release verified**: GUI app with **no console window** (checked on the built binary); MSI + NSIS installers build.
+
+### Security / privacy
+- **Zero outbound network calls** in the app; a strict CSP; the minimal `core:default` capability only; stream keys/secrets are not stored (none exist yet); **no AI/ML anywhere** (charter).
 
 ### Planned — 0.25.0 (Capture core)
 - Per-OS screen/window capture (Windows DXGI + Windows.Graphics.Capture; macOS ScreenCaptureKit; Linux PipeWire portal + X11) behind a `Capture` interface.

@@ -11,10 +11,12 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: pre-development (planning).** This public repository holds the **public site** (`docs/`) and
-> project info. The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide,
-> and go-to-market plan) is **maintained privately** and is not published here. The application itself
-> is not built yet — **downloads will be available in future releases.**
+> **Status: in development — Phase 0 (foundation, 0.10.0) complete.** The cross-platform studio shell
+> builds and runs (Tauri v2 + React over the owned Rust workspace, with CI and the release scaffold);
+> capture, the compositor, audio, recording, and streaming land phase by phase per the ladder below.
+> The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
+> go-to-market plan) is **maintained privately** and is not published here.
+> **Downloads will be available in future releases.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
@@ -66,7 +68,10 @@ run on your machine and your stream goes direct to the platform. To report a vul
 use are in [`EULA.md`](EULA.md) and the privacy policy in [`PRIVACY.md`](PRIVACY.md) (both DRAFT pending
 legal review).
 
-## Planned stack
+## Stack
+
+> The **Tauri v2 + React shell, the workspace, CI, and packaging are built** (Phase 0); the engine
+> pieces below land per the release ladder.
 
 **Tauri v2** shell + **React + TypeScript (Vite)** control UI (Havoc dark) · a **Rust** Cargo workspace
 (the `src-tauri` app crate + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`,
@@ -83,7 +88,7 @@ keys · the **Tauri bundler** per-OS installers.
 - **Free** — full scenes/sources/compositor, all core video + audio filters, multi-track recording (hardware encoders + `freally-video` lossless), **single-target** live streaming (RTMP/RTMPS), the **virtual camera**, Studio Mode + core transitions, and a basic replay save. The core promise — build a scene, record, and go live — is free for everyone.
 - **Pro** *(one-time license, like Copy That)* — **multistream to many targets**, **SRT/WHIP**, advanced filters/scripting/plugins, **replay-buffer presets**, **premium stinger + luma-wipe packs**, **remote-control automation**, **vertical/multi-canvas output**, and priority support. Unlocked by an offline signed key — no account required.
 
-## Requirements (planned)
+## Requirements
 
 - [Rust](https://rustup.rs) (stable; pinned via `rust-toolchain.toml`) + Node (for the Vite UI).
 - A GPU with up-to-date drivers (the `wgpu` compositor uses the GPU; x264 CPU fallback exists).
@@ -97,7 +102,7 @@ keys · the **Tauri bundler** per-OS installers.
   ```
   (`libv4l-dev` is for the webcam; `v4l2loopback` is needed for the **virtual camera** on Linux.)
 
-## Build & run (planned)
+## Build & run
 
 ```sh
 # UI + Tauri app
@@ -120,7 +125,7 @@ These mirror exactly what CI runs (`.github/workflows/ci.yml`) on Windows, macOS
 > `--release`, so the shipped `.exe` never pops a terminal (only *debug* builds keep the console, for
 > logs).
 
-## Packaging & releases (planned)
+## Packaging & releases
 
 The Tauri bundler produces a per-OS installable artifact. Pushing a version tag triggers
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds the app on all three OSes,
@@ -162,7 +167,7 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 ## Roadmap
 
 The detailed build plan is maintained privately. Public release ladder:
-**0.10.0** (foundation) → 0.25 (capture core) → 0.40 (compositor + scenes/sources) → 0.55 (audio +
+**0.10.0** (foundation — **done**) → 0.25 (capture core) → 0.40 (compositor + scenes/sources) → 0.55 (audio +
 recording) → **0.70 (studio MVP — first public: single-target streaming + virtual cam)** → 0.85
 (multistream/SRT/WHIP + scene/source/encoder depth) → **1.0.0**. Progress is published on the
 [project site](https://mikesruthless12.github.io/freally-capture/).

@@ -747,31 +747,31 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fcap-audio"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-capture"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-compositor"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-encode"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-scene"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-sources"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fcap-stream"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "fdeflate"
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "freally-capture"
-version = "0.1.0"
+version = "0.10.0"
 dependencies = [
  "directories",
  "fcap-audio",
