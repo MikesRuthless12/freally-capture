@@ -32,7 +32,12 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`mozjpeg`](https://crates.io/crates/mozjpeg) (via `nokhwa`) | MJPEG webcam-frame decode | IJG AND Zlib AND BSD-3-Clause |
 | [`jpeg-encoder`](https://crates.io/crates/jpeg-encoder) | preview-frame JPEG encoding (the in-app preview pipe) | (MIT OR Apache-2.0) AND IJG |
 | [`cpal`](https://crates.io/crates/cpal) | audio capture + output graph (the filter set, incl. classic-DSP denoise, is owned — no ML) | Apache-2.0 |
-| [`rustybuzz`](https://crates.io/crates/rustybuzz) + [Noto fonts](https://fonts.google.com/noto) | text-source shaping (incl. RTL) + bundled fonts (reused from Freally Snipper) | MIT / SIL OFL 1.1 |
+| [`pollster`](https://crates.io/crates/pollster) | blocking bridge for `wgpu`'s async adapter/readback calls | MIT OR Apache-2.0 |
+| [`image`](https://crates.io/crates/image) | Image-source decode + Image-Mask filter files (PNG/JPEG/BMP/GIF/WebP…) | MIT OR Apache-2.0 |
+| [`rustybuzz`](https://crates.io/crates/rustybuzz) | text-source shaping (Arabic joining, ligatures, kerning; RTL) | MIT |
+| [`unicode-bidi`](https://crates.io/crates/unicode-bidi) | UAX #9 bidirectional line ordering for the Text source | MIT OR Apache-2.0 |
+| [`tiny-skia`](https://crates.io/crates/tiny-skia) | anti-aliased glyph rasterization for the Text source | BSD-3-Clause |
+| [`fontdb`](https://crates.io/crates/fontdb) | system-font discovery (bundled fonts pending — see the roadmap) | MIT |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
 | [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |
