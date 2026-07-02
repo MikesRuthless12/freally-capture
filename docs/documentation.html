@@ -123,17 +123,6 @@
         font-size: 0.93rem;
       }
 
-      .doc-index .priv {
-        display: inline-block;
-        margin-left: 8px;
-        font-size: 0.72rem;
-        color: var(--muted);
-        border: 1px dashed var(--border);
-        border-radius: 999px;
-        padding: 1px 8px;
-        vertical-align: middle;
-      }
-
       /* ---- Step lists ---- */
       .steps {
         list-style: none;
@@ -289,7 +278,7 @@
           <a href="#audio">Audio mixer</a>
           <a href="#record">Record</a>
           <a href="#go-live">Go live</a>
-          <a href="#multistream">Multistream (Pro)</a>
+          <a href="#multistream">Multistream</a>
           <a href="#virtual-camera">Virtual camera</a>
           <a href="#replay">Replay buffer</a>
           <a href="#remote">Remote control</a>
@@ -304,17 +293,10 @@
         <!-- Document index -->
         <section id="documents">
           <h2>Document index</h2>
-          <p class="section-intro">Freally Capture's planning &amp; design set. The strategy/spec documents are maintained privately and are not published in the public repository; this index is the canonical map of them, plus the public governance documents that ship with the app.</p>
+          <p class="section-intro">The public documents that ship with Freally Capture — governance, policies, and this site.</p>
 
           <ul class="doc-index">
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/README.md">README.md</a><p>What Freally Capture is, the planned stack, editions, per-OS build &amp; release notes, and its relationship to Freally Snipper.</p></li>
-            <li><a href="#">vision.json</a><span class="priv">private</span><p>The structured product vision (PLAID schema): creator, purpose, audience, business model, brand, and tech stack.</p></li>
-            <li><a href="#">product-vision.md</a><span class="priv">private</span><p>Vision &amp; mission, user research, product strategy (incl. the Snipper-vs-Capture positioning), brand strategy, and the Havoc design direction with hex tokens.</p></li>
-            <li><a href="#">prd.md</a><span class="priv">private</span><p>The product requirements document: architecture (capture → wgpu compositor → encode → {file, stream} + audio graph), data model, the Tauri-command + WebSocket-remote API spec, user stories, functional &amp; non-functional requirements, UI/UX, licensing/payments, edge cases.</p></li>
-            <li><a href="#">product-roadmap.md</a><span class="priv">private</span><p>The canonical spec + phased plan (0.10.0 → 1.0.0): build philosophy, ownership posture, per-phase goals/demos/tasks, the Definition of Done, and the release ladder.</p></li>
-            <li><a href="#">Build-Prompts-Guide.md</a><span class="priv">private</span><p>The ordered build prompts (PX.Y) that implement each roadmap phase, each with acceptance criteria, the 13-step Definition of Done, the privacy/honesty/no-console-window invariants, and the honest-caveats appendix.</p></li>
-            <li><a href="#">Freally-Capture-Competition-Guide-Features.md</a><span class="priv">private</span><p>An exhaustive, coded feature menu vs OBS / Streamlabs / XSplit / Twitch Studio — parity plus the Freally edge (clean UX, owned compositor/codec, privacy, cross-platform, suite integration).</p></li>
-            <li><a href="#">gtm.md</a><span class="priv">private</span><p>The go-to-market playbook: market context, launch plan, channels (r/obs, r/Twitch, r/streaming, HN, YouTube), content, metrics, budget, and risks.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/LICENSE">LICENSE</a><p>Proprietary, source-available — © 2026 Mike Weaver, All Rights Reserved. Read + build/run for personal evaluation only.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/SECURITY.md">SECURITY.md</a><p>The security policy and how to report a vulnerability privately, plus the per-surface security posture.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/PRIVACY.md">PRIVACY.md</a><p>The privacy policy (DRAFT): no accounts, no telemetry, capture stays local, streams go only to the targets you set.</p></li>
@@ -324,7 +306,6 @@
             <li><a href="changelog.html">changelog.html</a><p>The public Releases &amp; Updates changelog page (this site).</p></li>
           </ul>
 
-          <div class="tip"><strong>Note:</strong> Documents marked <em>private</em> are part of the planning set kept out of the public repository. This page links them for reference and keeps the full set discoverable; the public governance documents link to their files on GitHub.</div>
         </section>
 
         <!-- Getting started -->
@@ -419,15 +400,15 @@
 
         <!-- Multistream -->
         <section id="multistream">
-          <h2>Multistream (Pro)</h2>
-          <p class="section-intro">Stream to several platforms at the same time — direct from your machine, no restream server, no subscription.</p>
+          <h2>Multistream</h2>
+          <p class="section-intro">Stream to several platforms at the same time — direct from your machine, no restream server, completely free.</p>
           <ol class="steps">
-            <li><span>With <strong>Pro</strong> active, add two or more stream targets in <strong>Settings → Stream</strong> and enable each.</span></li>
+            <li><span>Add two or more stream targets in <strong>Settings → Stream</strong> and enable each.</span></li>
             <li><span>Set per-service encoder settings if a platform needs a different bitrate.</span></li>
             <li><span>Click <strong>Go Live</strong> — you broadcast to all enabled targets at once. The stats dock shows each target's health and bitrate.</span></li>
             <li><span>Optionally record a separate-track local copy at the same time, and save replays with the replay hotkey while you stream.</span></li>
           </ol>
-          <div class="tip"><strong>Free vs Pro:</strong> Single-target streaming, recording, and the virtual camera are free. Simultaneous multistream to many targets (and SRT/WHIP, advanced filters/scripting, replay presets, premium stingers, and remote-control automation) are Pro — a one-time license, no subscription.</div>
+          <div class="tip"><strong>Free for everyone:</strong> every feature — multistream, SRT/WHIP, advanced filters/scripting, replay presets, the stinger packs, and remote-control automation — is free. No paid tier, no payments, no ads.</div>
         </section>
 
         <!-- Virtual camera -->
