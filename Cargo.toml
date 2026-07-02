@@ -54,6 +54,7 @@ tauri-build = "2"
 wgpu = "0.20"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.28"
+pollster = "0.3"        # block_on for wgpu's async adapter/device/readback
 
 # Capture (per-OS)
 windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture

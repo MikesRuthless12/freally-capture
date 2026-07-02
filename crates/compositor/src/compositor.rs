@@ -1,0 +1,700 @@
+//! The compositor core: source textures in, one program frame out.
+//!
+//! Every visible item of the active scene is drawn back-to-front into the
+//! offscreen **program texture** — each with its own transform (from
+//! `transform.rs`), blend mode (fixed-function blend state + a small shader
+//! prep so transparent pixels never disturb the canvas), and — from P2.3 —
+//! its filter chain. The program frame then feeds the preview, and in later
+//! phases the encoders and stream.
+//!
+//! Uploads are honest about capture reality: frames arrive BGRA or RGBA with
+//! padded strides; both go straight into a texture of the matching format
+//! (no CPU swizzle on the hot path).
+
+use std::collections::HashMap;
+use std::num::NonZeroU64;
+use std::time::Instant;
+
+use fcap_capture::{Frame, PixelFormat};
+use fcap_scene::{BlendMode, Scene, SourceId};
+
+use crate::gpu::Gpu;
+use crate::transform;
+use crate::CompositorError;
+
+/// The composed program frame, tightly packed RGBA.
+pub struct ProgramFrame {
+    pub width: u32,
+    pub height: u32,
+    /// `width * height * 4` bytes, row-major RGBA.
+    pub data: Vec<u8>,
+}
+
+/// Per-item uniform, mirrored by `shaders/item.wgsl` (`ItemUniform`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ItemUniform {
+    mvp: [[f32; 4]; 4],
+    uv_rect: [f32; 4],
+    size: [f32; 4],
+    misc: [f32; 4],
+}
+
+const ITEM_UNIFORM_SIZE: u64 = std::mem::size_of::<ItemUniform>() as u64;
+const INITIAL_ITEM_CAPACITY: u64 = 16;
+
+/// One uploaded source: its texture and the bind group sampling it.
+struct SourceSlot {
+    texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+}
+
+/// One queued draw for the current render.
+struct Draw {
+    source: SourceId,
+    blend: BlendMode,
+    uniform_offset: u32,
+}
+
+/// Fixed-function blend state + the shader prep mode for a [`BlendMode`].
+fn blend_config(mode: BlendMode) -> (wgpu::BlendState, f32) {
+    use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as Op, BlendState};
+    let color = |src, dst, op| BlendComponent {
+        src_factor: src,
+        dst_factor: dst,
+        operation: op,
+    };
+    // The program canvas stays opaque: destination alpha is preserved for the
+    // non-normal modes and saturates under Normal.
+    let keep_alpha = BlendComponent {
+        src_factor: F::Zero,
+        dst_factor: F::One,
+        operation: Op::Add,
+    };
+    let over_alpha = BlendComponent {
+        src_factor: F::One,
+        dst_factor: F::OneMinusSrcAlpha,
+        operation: Op::Add,
+    };
+    match mode {
+        BlendMode::Normal => (
+            BlendState {
+                color: color(F::SrcAlpha, F::OneMinusSrcAlpha, Op::Add),
+                alpha: over_alpha,
+            },
+            0.0,
+        ),
+        BlendMode::Additive => (
+            BlendState {
+                color: color(F::SrcAlpha, F::One, Op::Add),
+                alpha: keep_alpha,
+            },
+            0.0,
+        ),
+        BlendMode::Subtract => (
+            BlendState {
+                color: color(F::SrcAlpha, F::One, Op::ReverseSubtract),
+                alpha: keep_alpha,
+            },
+            0.0,
+        ),
+        BlendMode::Screen => (
+            BlendState {
+                color: color(F::One, F::OneMinusSrc, Op::Add),
+                alpha: keep_alpha,
+            },
+            1.0,
+        ),
+        BlendMode::Multiply => (
+            BlendState {
+                color: color(F::Dst, F::Zero, Op::Add),
+                alpha: keep_alpha,
+            },
+            2.0,
+        ),
+        BlendMode::Lighten => (
+            BlendState {
+                color: color(F::One, F::One, Op::Max),
+                alpha: keep_alpha,
+            },
+            1.0,
+        ),
+        BlendMode::Darken => (
+            BlendState {
+                color: color(F::One, F::One, Op::Min),
+                alpha: keep_alpha,
+            },
+            2.0,
+        ),
+    }
+}
+
+fn texture_format(format: PixelFormat) -> wgpu::TextureFormat {
+    match format {
+        PixelFormat::Bgra8 => wgpu::TextureFormat::Bgra8Unorm,
+        PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
+    }
+}
+
+/// The program canvas format: RGBA so the readback feeds JPEG/encoders directly.
+const PROGRAM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+pub struct Compositor {
+    gpu: Gpu,
+    canvas_width: u32,
+    canvas_height: u32,
+
+    program: wgpu::Texture,
+    program_view: wgpu::TextureView,
+    readback: Option<wgpu::Buffer>,
+
+    sampler: wgpu::Sampler,
+    uniform_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+    pipelines: Vec<(BlendMode, wgpu::RenderPipeline)>,
+
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind: wgpu::BindGroup,
+    uniform_capacity: u64,
+    uniform_stride: u64,
+
+    sources: HashMap<SourceId, SourceSlot>,
+
+    /// CPU time spent encoding + submitting the last render.
+    last_render_cpu_micros: u64,
+}
+
+impl Compositor {
+    /// Bring up the GPU and the render machinery for a `width`×`height`
+    /// program canvas.
+    pub fn new(width: u32, height: u32) -> Result<Self, CompositorError> {
+        let gpu = Gpu::new()?;
+        Self::with_gpu(gpu, width, height)
+    }
+
+    fn with_gpu(gpu: Gpu, width: u32, height: u32) -> Result<Self, CompositorError> {
+        let device = &gpu.device;
+        let (program, program_view) = Self::make_program_texture(device, width, height);
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fcap item sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fcap item uniforms"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(ITEM_UNIFORM_SIZE),
+                },
+                count: None,
+            }],
+        });
+
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fcap item texture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap item shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/item.wgsl").into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap item pipeline layout"),
+            bind_group_layouts: &[&uniform_layout, &texture_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipelines = BlendMode::ALL
+            .iter()
+            .map(|&mode| {
+                let (blend, _) = blend_config(mode);
+                let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("fcap item pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleStrip,
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: PROGRAM_FORMAT,
+                            blend: Some(blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview: None,
+                });
+                (mode, pipeline)
+            })
+            .collect();
+
+        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let uniform_stride = ITEM_UNIFORM_SIZE.div_ceil(align) * align;
+        let (uniform_buffer, uniform_bind) = Self::make_uniform_buffer(
+            device,
+            &uniform_layout,
+            uniform_stride,
+            INITIAL_ITEM_CAPACITY,
+        );
+
+        Ok(Self {
+            gpu,
+            canvas_width: width.max(1),
+            canvas_height: height.max(1),
+            program,
+            program_view,
+            readback: None,
+            sampler,
+            uniform_layout,
+            texture_layout,
+            pipelines,
+            uniform_buffer,
+            uniform_bind,
+            uniform_capacity: INITIAL_ITEM_CAPACITY,
+            uniform_stride,
+            sources: HashMap::new(),
+            last_render_cpu_micros: 0,
+        })
+    }
+
+    fn make_program_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fcap program"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: PROGRAM_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    fn make_uniform_buffer(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        stride: u64,
+        capacity: u64,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap item uniforms"),
+            size: stride * capacity,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fcap item uniforms"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(ITEM_UNIFORM_SIZE),
+                }),
+            }],
+        });
+        (buffer, bind)
+    }
+
+    /// "<name> (<backend>, <device type>)" of the adapter in use.
+    pub fn adapter_summary(&self) -> &str {
+        &self.gpu.adapter_summary
+    }
+
+    /// CPU cost of the last [`render`](Self::render) (encode + submit).
+    pub fn last_render_cpu_micros(&self) -> u64 {
+        self.last_render_cpu_micros
+    }
+
+    pub fn canvas_size(&self) -> (u32, u32) {
+        (self.canvas_width, self.canvas_height)
+    }
+
+    /// Resize the program canvas (drops the readback buffer; textures for
+    /// sources are untouched).
+    pub fn set_canvas_size(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+        if (width, height) == (self.canvas_width, self.canvas_height) {
+            return;
+        }
+        self.canvas_width = width;
+        self.canvas_height = height;
+        let (program, view) = Self::make_program_texture(&self.gpu.device, width, height);
+        self.program = program;
+        self.program_view = view;
+        self.readback = None;
+    }
+
+    /// The last uploaded size of a source, if any frame arrived yet.
+    pub fn source_size(&self, source: SourceId) -> Option<(u32, u32)> {
+        self.sources
+            .get(&source)
+            .map(|slot| (slot.width, slot.height))
+    }
+
+    /// Drop a source's texture (its item disappeared / its session stopped).
+    pub fn remove_source(&mut self, source: SourceId) {
+        self.sources.remove(&source);
+    }
+
+    /// Drop every source texture not in `keep` (scene switches).
+    pub fn retain_sources(&mut self, keep: &[SourceId]) {
+        self.sources.retain(|id, _| keep.contains(id));
+    }
+
+    /// Upload a captured frame into `source`'s texture, (re)creating it when
+    /// the size or pixel format changed. Rejects frames whose geometry does
+    /// not hold together rather than reading out of bounds.
+    pub fn upload_frame(&mut self, source: SourceId, frame: &Frame) -> Result<(), CompositorError> {
+        if frame.width == 0 || frame.height == 0 {
+            return Err(CompositorError::BadFrame("zero-sized frame".into()));
+        }
+        if frame.stride < frame.width * 4 {
+            return Err(CompositorError::BadFrame(format!(
+                "stride {} shorter than a {}px row",
+                frame.stride, frame.width
+            )));
+        }
+        let needed = frame.stride as usize * frame.height as usize;
+        if frame.data.len() < needed {
+            return Err(CompositorError::BadFrame(format!(
+                "frame holds {} bytes, geometry needs {needed}",
+                frame.data.len()
+            )));
+        }
+        let max_dim = self.gpu.device.limits().max_texture_dimension_2d;
+        if frame.width > max_dim || frame.height > max_dim {
+            return Err(CompositorError::BadFrame(format!(
+                "{}×{} exceeds the adapter's {max_dim}px texture limit",
+                frame.width, frame.height
+            )));
+        }
+
+        let needs_new = match self.sources.get(&source) {
+            Some(slot) => {
+                slot.width != frame.width
+                    || slot.height != frame.height
+                    || slot.format != frame.format
+            }
+            None => true,
+        };
+        if needs_new {
+            let device = &self.gpu.device;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("fcap source"),
+                size: wgpu::Extent3d {
+                    width: frame.width,
+                    height: frame.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture_format(frame.format),
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fcap source"),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            self.sources.insert(
+                source,
+                SourceSlot {
+                    texture,
+                    bind_group,
+                    width: frame.width,
+                    height: frame.height,
+                    format: frame.format,
+                },
+            );
+        }
+
+        let slot = self.sources.get(&source).expect("slot was just ensured");
+        self.gpu.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &slot.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &frame.data[..needed],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(frame.stride),
+                rows_per_image: Some(frame.height),
+            },
+            wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
+    fn ensure_uniform_capacity(&mut self, items: u64) {
+        if items <= self.uniform_capacity {
+            return;
+        }
+        let capacity = items.next_power_of_two();
+        let (buffer, bind) = Self::make_uniform_buffer(
+            &self.gpu.device,
+            &self.uniform_layout,
+            self.uniform_stride,
+            capacity,
+        );
+        self.uniform_buffer = buffer;
+        self.uniform_bind = bind;
+        self.uniform_capacity = capacity;
+    }
+
+    /// Compose `scene` into the program texture. Items render back-to-front
+    /// (`items[0]` first); invisible items, items whose source has produced
+    /// no frame yet, and fully-cropped items are skipped.
+    ///
+    /// `_time_seconds` feeds time-driven filters (Scroll) from P2.3.
+    pub fn render(&mut self, scene: &Scene, _time_seconds: f32) -> Result<(), CompositorError> {
+        let started = Instant::now();
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+
+        // Stage the visible items' uniforms.
+        let mut staging: Vec<u8> = Vec::new();
+        let mut draws: Vec<Draw> = Vec::new();
+        for item in scene.items.iter().filter(|item| item.visible) {
+            let Some(slot) = self.sources.get(&item.source) else {
+                continue; // no frame yet
+            };
+            let Some(content) =
+                transform::content_size(slot.width, slot.height, &item.transform.crop)
+            else {
+                continue; // fully cropped away
+            };
+            let (_, prep) = blend_config(item.blend);
+            let uniform = ItemUniform {
+                mvp: transform::clip_matrix(&item.transform, content, canvas),
+                uv_rect: transform::uv_rect(slot.width, slot.height, &item.transform.crop),
+                size: [content.0, content.1, 0.0, 0.0],
+                misc: [prep, 0.0, 0.0, 0.0],
+            };
+            let offset = draws.len() as u64 * self.uniform_stride;
+            staging.resize(offset as usize, 0);
+            staging.extend_from_slice(bytemuck::bytes_of(&uniform));
+            draws.push(Draw {
+                source: item.source,
+                blend: item.blend,
+                uniform_offset: offset as u32,
+            });
+        }
+
+        self.ensure_uniform_capacity(draws.len() as u64);
+        if !staging.is_empty() {
+            self.gpu
+                .queue
+                .write_buffer(&self.uniform_buffer, 0, &staging);
+        }
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap compose"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap program pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            let mut bound_blend = None;
+            for draw in &draws {
+                if bound_blend != Some(draw.blend) {
+                    let pipeline = self
+                        .pipelines
+                        .iter()
+                        .find(|(mode, _)| *mode == draw.blend)
+                        .map(|(_, pipeline)| pipeline)
+                        .expect("every blend mode has a pipeline");
+                    pass.set_pipeline(pipeline);
+                    bound_blend = Some(draw.blend);
+                }
+                let slot = self
+                    .sources
+                    .get(&draw.source)
+                    .expect("draws reference live slots");
+                pass.set_bind_group(0, &self.uniform_bind, &[draw.uniform_offset]);
+                pass.set_bind_group(1, &slot.bind_group, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        self.last_render_cpu_micros = started.elapsed().as_micros() as u64;
+        Ok(())
+    }
+
+    /// Read the current program texture back to the CPU (tight RGBA rows).
+    /// Blocking — call from the render thread, at the consumer's pace.
+    pub fn read_program(&mut self) -> Result<ProgramFrame, CompositorError> {
+        let width = self.canvas_width;
+        let height = self.canvas_height;
+        let unpadded = width as u64 * 4;
+        let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
+        let size = padded * height as u64;
+
+        // (`map_or`, not `is_none_or` — the declared MSRV is 1.80.)
+        if self
+            .readback
+            .as_ref()
+            .map_or(true, |buffer| buffer.size() != size)
+        {
+            self.readback = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("fcap readback"),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }));
+        }
+        let buffer = self.readback.as_ref().expect("readback buffer ensured");
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap readback"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &self.program,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded as u32),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.gpu.queue.submit(Some(encoder.finish()));
+
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.gpu.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .map_err(|_| CompositorError::Readback("map callback dropped".into()))?
+            .map_err(|err| CompositorError::Readback(err.to_string()))?;
+
+        let mut data = Vec::with_capacity((unpadded * height as u64) as usize);
+        {
+            let mapped = slice.get_mapped_range();
+            for row in 0..height as usize {
+                let start = row * padded as usize;
+                data.extend_from_slice(&mapped[start..start + unpadded as usize]);
+            }
+        }
+        buffer.unmap();
+
+        Ok(ProgramFrame {
+            width,
+            height,
+            data,
+        })
+    }
+}
