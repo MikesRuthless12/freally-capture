@@ -262,6 +262,13 @@ main {
   flex: none;
 }
 
+.dl-note {
+  display: block;
+  padding: 8px 12px 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 /* ---- Future-releases placeholder ---- */
 .future {
   display: inline-flex;
