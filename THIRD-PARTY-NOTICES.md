@@ -37,7 +37,8 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`rustybuzz`](https://crates.io/crates/rustybuzz) | text-source shaping (Arabic joining, ligatures, kerning; RTL) | MIT |
 | [`unicode-bidi`](https://crates.io/crates/unicode-bidi) | UAX #9 bidirectional line ordering for the Text source | MIT OR Apache-2.0 |
 | [`tiny-skia`](https://crates.io/crates/tiny-skia) | anti-aliased glyph rasterization for the Text source | BSD-3-Clause |
-| [`fontdb`](https://crates.io/crates/fontdb) | system-font discovery (bundled fonts pending — see the roadmap) | MIT |
+| [`fontdb`](https://crates.io/crates/fontdb) | font discovery (bundled Noto first, then system fonts) | MIT |
+| [Noto Sans](https://notofonts.github.io) (complete variable family: upright + Italic + Arabic + Hebrew) | the Text source's bundled default fonts — identical rendering on every machine (`crates/sources/fonts/`, provenance + hashes in its README) | SIL OFL 1.1 (vendored as `crates/sources/fonts/OFL.txt`) |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
 | [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |

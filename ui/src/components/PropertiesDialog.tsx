@@ -426,8 +426,9 @@ function TextEditor({
         </label>
       </div>
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-        Rendering uses real shaping (Arabic joining, ligatures) and bidi line ordering. Fonts come
-        from this system until bundled fonts land.
+        Rendering uses real shaping (Arabic joining, ligatures) and bidi line ordering. The bundled
+        Noto Sans family (incl. Arabic/Hebrew) is the default; system families work too. CJK uses
+        system fonts for now.
       </p>
     </div>
   );

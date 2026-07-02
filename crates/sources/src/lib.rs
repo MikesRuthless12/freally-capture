@@ -9,10 +9,11 @@
 //! Webcam / capture-card (Phase 1) lives in [`video_device`]. Phase 2 adds
 //! the static sources: [`image`] (still files, also mask/LUT loading for the
 //! filter chain), [`color`] (solid blocks), and [`text`] (rustybuzz shaping +
-//! bidi RTL + tiny-skia rasterization over system fonts). Media (video files,
-//! hardware-decoded) waits on the Phase 4 wire-codec architecture, and the
-//! Browser source needs an offscreen-webview design — both stay out until
-//! they can be real (no fakes, per the honesty invariant).
+//! bidi RTL + tiny-skia rasterization over the **bundled Noto Sans family**
+//! with per-run script fallback; system fonts stay selectable). Media (video
+//! files, hardware-decoded) rides the Phase 4 wire-codec architecture
+//! (TASK-409), and the Browser source lands with the Phase 6 source depth
+//! after an offscreen-webview spike (TASK-612) — nothing here fakes either.
 
 #![forbid(unsafe_code)]
 

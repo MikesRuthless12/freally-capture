@@ -4,9 +4,16 @@
 //! shapes each run (real shaping — Arabic joining, ligatures, kerning),
 //! **unicode-bidi** orders mixed-direction lines (UAX #9), and the glyph
 //! outlines (via rustybuzz's `ttf-parser`) are filled anti-aliased with
-//! **tiny-skia**. Fonts come from the system via **fontdb** (an explicit
-//! font file overrides); no fonts are bundled yet — bundling is tracked in
-//! the roadmap so rendering is identical across machines.
+//! **tiny-skia**.
+//!
+//! The **complete Noto Sans family is bundled** (variable fonts — every
+//! weight/width — upright + italic, plus Arabic and Hebrew; OFL-1.1, see
+//! `fonts/README.md`), so the default face renders identically on every
+//! machine. System families stay selectable, an explicit font file
+//! overrides, and each run falls back per-script to a bundled face that
+//! actually covers its characters (Arabic text never renders as tofu just
+//! because the picked family is Latin-only). CJK is not bundled (size) and
+//! uses system fonts — said honestly in the fonts README.
 //!
 //! Word wrap happens on the logical text, then each line is reordered
 //! visually — the order the bidi algorithm expects.
@@ -35,7 +42,7 @@ pub enum TextAlign {
 #[derive(Debug, Clone)]
 pub struct TextStyle {
     pub text: String,
-    /// System family; `None` = the platform's sans-serif default.
+    /// Font family; `None` = the bundled Noto Sans (identical everywhere).
     pub font_family: Option<String>,
     /// Explicit font file — overrides `font_family` when set.
     pub font_file: Option<PathBuf>,
@@ -70,6 +77,17 @@ impl Default for TextStyle {
 /// Anti-alias breathing room around the ink.
 const PAD: f32 = 2.0;
 
+/// The bundled Noto Sans complete family (variable fonts; OFL-1.1 — see
+/// `crates/sources/fonts/README.md` for provenance + hashes).
+const NOTO_SANS: &[u8] = include_bytes!("../fonts/NotoSans[wdth,wght].ttf");
+const NOTO_SANS_ITALIC: &[u8] = include_bytes!("../fonts/NotoSans-Italic[wdth,wght].ttf");
+const NOTO_SANS_ARABIC: &[u8] = include_bytes!("../fonts/NotoSansArabic[wdth,wght].ttf");
+const NOTO_SANS_HEBREW: &[u8] = include_bytes!("../fonts/NotoSansHebrew[wdth,wght].ttf");
+
+/// Script-fallback faces tried, in order, for runs the primary face does not
+/// cover (the upright default first — a niche user family may lack Latin).
+const FALLBACK_FONTS: [&[u8]; 3] = [NOTO_SANS, NOTO_SANS_ARABIC, NOTO_SANS_HEBREW];
+
 struct LoadedFont {
     data: Vec<u8>,
     index: u32,
@@ -79,8 +97,23 @@ fn font_database() -> &'static fontdb::Database {
     static DB: OnceLock<fontdb::Database> = OnceLock::new();
     DB.get_or_init(|| {
         let mut db = fontdb::Database::new();
+        // Bundled first — the guaranteed baseline — then whatever the OS has.
+        for data in [
+            NOTO_SANS,
+            NOTO_SANS_ITALIC,
+            NOTO_SANS_ARABIC,
+            NOTO_SANS_HEBREW,
+        ] {
+            db.load_font_data(data.to_vec());
+        }
         db.load_system_fonts();
-        tracing::info!(faces = db.len(), "system font database loaded");
+        // The default face is the bundled one, not whatever "Arial" resolves
+        // to on this machine — identical rendering everywhere.
+        db.set_sans_serif_family("Noto Sans");
+        tracing::info!(
+            faces = db.len(),
+            "font database loaded (bundled Noto + system)"
+        );
         db
     })
 }
@@ -148,16 +181,34 @@ fn resolve_font(style: &TextStyle) -> Result<Arc<LoadedFont>, StaticSourceError>
 }
 
 /// One glyph, positioned relative to its line's left edge and baseline
-/// (y grows *up*, font-style; the rasterizer flips).
+/// (y grows *up*, font-style; the rasterizer flips). `face` indexes the
+/// render's face list — the run's script decides which face shaped it.
 struct ShapedGlyph {
     id: u16,
+    face: usize,
     x: f32,
     y: f32,
 }
 
-/// Shape one direction-uniform run; returns glyphs + the run's advance.
+/// The face (by index) that actually covers `text`: the primary wins when it
+/// can; otherwise the first fallback with a glyph for the run's first
+/// letter. A run nobody covers stays on the primary (honest tofu).
+fn face_for_text(faces: &[rustybuzz::Face<'_>], text: &str) -> usize {
+    let probe = text
+        .chars()
+        .find(|ch| !ch.is_whitespace() && !ch.is_ascii_punctuation());
+    let Some(ch) = probe else { return 0 };
+    faces
+        .iter()
+        .position(|face| face.glyph_index(ch).is_some())
+        .unwrap_or(0)
+}
+
+/// Shape one direction-uniform run with `faces[face_index]`; returns the
+/// run's advance and appends its glyphs.
 fn shape_run(
-    face: &rustybuzz::Face<'_>,
+    faces: &[rustybuzz::Face<'_>],
+    face_index: usize,
     text: &str,
     rtl: bool,
     scale: f32,
@@ -172,7 +223,7 @@ fn shape_run(
         rustybuzz::Direction::LeftToRight
     });
     buffer.guess_segment_properties();
-    let shaped = rustybuzz::shape(face, &[], buffer);
+    let shaped = rustybuzz::shape(&faces[face_index], &[], buffer);
     let mut advance = 0.0;
     for (info, position) in shaped
         .glyph_infos()
@@ -181,6 +232,7 @@ fn shape_run(
     {
         out.push(ShapedGlyph {
             id: info.glyph_id as u16,
+            face: face_index,
             x: pen + advance + position.x_offset as f32 * scale,
             y: position.y_offset as f32 * scale,
         });
@@ -190,14 +242,15 @@ fn shape_run(
 }
 
 /// Measure a slice's advance without keeping the glyphs.
-fn measure(face: &rustybuzz::Face<'_>, text: &str, rtl: bool, scale: f32) -> f32 {
+fn measure(faces: &[rustybuzz::Face<'_>], text: &str, rtl: bool, scale: f32) -> f32 {
     let mut scratch = Vec::new();
-    shape_run(face, text, rtl, scale, 0.0, &mut scratch)
+    let face = face_for_text(faces, text);
+    shape_run(faces, face, text, rtl, scale, 0.0, &mut scratch)
 }
 
 /// Greedy word wrap on the logical paragraph: byte ranges of each line.
 fn wrap_paragraph(
-    face: &rustybuzz::Face<'_>,
+    faces: &[rustybuzz::Face<'_>],
     paragraph: &str,
     rtl: bool,
     scale: f32,
@@ -228,7 +281,7 @@ fn wrap_paragraph(
     let mut line_end = 0usize;
     let mut line_width = 0.0f32;
     for (range, is_space) in tokens {
-        let width = measure(face, &paragraph[range.clone()], rtl, scale);
+        let width = measure(faces, &paragraph[range.clone()], rtl, scale);
         if !is_space && line_end > line_start && line_width + width > max_width {
             lines.push(line_start..line_end);
             line_start = range.start;
@@ -291,15 +344,23 @@ impl OutlineBuilder for GlyphOutline {
 /// (plus a small pad). Empty text yields a 1×1 transparent frame.
 pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
     let font = resolve_font(style)?;
-    let face = rustybuzz::Face::from_slice(&font.data, font.index).ok_or_else(|| {
+    let primary = rustybuzz::Face::from_slice(&font.data, font.index).ok_or_else(|| {
         StaticSourceError::NoFont("the font file could not be parsed".to_string())
     })?;
+    // The face list: the resolved primary, then the bundled script fallbacks
+    // (Noto Sans / Arabic / Hebrew) for runs the primary does not cover.
+    let mut faces = vec![primary];
+    for data in FALLBACK_FONTS {
+        if let Some(face) = rustybuzz::Face::from_slice(data, 0) {
+            faces.push(face);
+        }
+    }
 
     let size = style.size_px.clamp(4.0, 512.0);
-    let scale = size / face.units_per_em() as f32;
-    let ascent = face.ascender() as f32 * scale;
-    let descent = face.descender() as f32 * scale; // typically negative
-    let line_gap = face.line_gap() as f32 * scale;
+    let scale = size / faces[0].units_per_em() as f32;
+    let ascent = faces[0].ascender() as f32 * scale;
+    let descent = faces[0].descender() as f32 * scale; // typically negative
+    let line_gap = faces[0].line_gap() as f32 * scale;
     let natural = (ascent - descent + line_gap).max(size * 0.5);
     let line_height = natural * style.line_spacing.clamp(0.25, 4.0);
 
@@ -319,7 +380,7 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
 
         let line_ranges = match style.wrap_width {
             Some(max) if max > 0 => wrap_paragraph(
-                &face,
+                &faces,
                 paragraph,
                 para_rtl,
                 scale,
@@ -334,7 +395,9 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
             let mut pen = 0.0f32;
             for run in runs {
                 let rtl = levels[run.start].is_rtl();
-                pen += shape_run(&face, &paragraph[run.clone()], rtl, scale, pen, &mut glyphs);
+                let text = &paragraph[run.clone()];
+                let face = face_for_text(&faces, text);
+                pen += shape_run(&faces, face, text, rtl, scale, pen, &mut glyphs);
             }
             lines.push(Line { glyphs, width: pen });
         }
@@ -377,7 +440,7 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
                 dx: left + glyph.x,
                 dy: baseline - glyph.y,
             };
-            face.outline_glyph(GlyphId(glyph.id), &mut outline);
+            faces[glyph.face].outline_glyph(GlyphId(glyph.id), &mut outline);
             if let Some(path) = outline.builder.finish() {
                 pixmap.fill_path(
                     &path,
@@ -530,5 +593,40 @@ mod tests {
         };
         assert_eq!((frame.width, frame.height), (1, 1));
         assert_eq!(frame.data[3], 0);
+    }
+
+    #[test]
+    fn unknown_families_fall_back_to_bundled_noto() {
+        // The bundled family makes NoFont unreachable for family lookups —
+        // render_text is called directly (no skip helper) on purpose.
+        let mut styled = style("Bundled");
+        styled.font_family = Some("Definitely Not A Real Font 123".into());
+        let frame = render_text(&styled).expect("bundled fonts guarantee a render");
+        assert!(ink_count(&frame) > 20, "renders with the bundled Noto Sans");
+    }
+
+    #[test]
+    fn face_selection_covers_scripts_with_the_bundled_fallbacks() {
+        let faces: Vec<rustybuzz::Face<'_>> = [NOTO_SANS, NOTO_SANS_ARABIC, NOTO_SANS_HEBREW]
+            .iter()
+            .filter_map(|data| rustybuzz::Face::from_slice(data, 0))
+            .collect();
+        assert_eq!(faces.len(), 3, "all bundled faces parse");
+        assert_eq!(face_for_text(&faces, "Hello"), 0, "Latin stays primary");
+        assert_eq!(face_for_text(&faces, "سلام"), 1, "Arabic → Noto Sans Arabic");
+        assert_eq!(
+            face_for_text(&faces, "שלום"),
+            2,
+            "Hebrew → Noto Sans Hebrew"
+        );
+        assert_eq!(face_for_text(&faces, "…!?"), 0, "punctuation stays primary");
+    }
+
+    #[test]
+    fn bundled_italic_parses_too() {
+        assert!(
+            rustybuzz::Face::from_slice(NOTO_SANS_ITALIC, 0).is_some(),
+            "the bundled italic face is valid"
+        );
     }
 }

@@ -676,8 +676,8 @@ function TextForm({
           </label>
         </div>
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Font family, alignment, wrapping, and RTL live in the source’s Properties. The system
-          sans-serif is used until bundled fonts land.
+          Font family, alignment, wrapping, and RTL live in the source’s Properties. The bundled
+          Noto Sans (incl. Arabic/Hebrew) is the default — identical on every machine.
         </p>
         <button
           type="button"

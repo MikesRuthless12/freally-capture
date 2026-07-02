@@ -34,8 +34,10 @@ Phase 2 (compositor + scenes/sources → 0.40.0) is in progress on the
   against rendered pixels. Filters whose file has not loaded are skipped, never rendered black.
 - **New sources**: **Image** (PNG/JPEG/BMP/GIF/WebP…), **Color** (solid block), and **Text** —
   real shaping via rustybuzz (Arabic joining, ligatures, kerning), UAX #9 bidi RTL, word wrap,
-  alignment, line spacing, anti-aliased tiny-skia rasterization over system fonts (fontdb), with
-  an explicit font-file override.
+  alignment, line spacing, anti-aliased tiny-skia rasterization. The **complete Noto Sans family
+  is bundled** (variable fonts: every weight/width, upright + Italic + Arabic + Hebrew; OFL-1.1
+  vendored, provenance pinned + hashed) with **per-run script fallback**, so text renders
+  identically on every machine; system families stay selectable and a font file overrides.
 - **The studio runtime**: capture sessions and static sources reconcile against the active scene
   every tick; newly added items auto-fit on their first frame; the composed program frame feeds
   the same in-process `preview://` pipe at ~30 fps while composing at ~60; per-source
@@ -48,12 +50,13 @@ Phase 2 (compositor + scenes/sources → 0.40.0) is in progress on the
   the live-editable chain), and per-kind **Properties** dialogs.
 
 ### Honest scope notes
-- **Media** (video files) waits on the Phase 4 wire-codec architecture (on-demand ffmpeg) — no
-  pure-Rust general video decoder exists, and stubs are against the charter.
-- **Browser source** needs an offscreen-webview design (Tauri v2 cannot render a webview to a
-  texture cross-platform); tracked as its own spike.
-- **Fonts are not bundled yet** — Text uses system fonts until a bundled set (+ license vendoring)
-  lands.
+- **Media** (video files) is **folded into the recording phase** (decided 2026-07-02): it rides
+  the wire-codec / hardware-decode architecture (on-demand ffmpeg) — no pure-Rust general video
+  decoder exists, and stubs are against the charter.
+- **Browser source** moves to the streaming-depth phase behind an **offscreen-webview design
+  spike** (Tauri v2 cannot render a webview to a texture cross-platform).
+- **CJK text** uses system fonts for now — Noto CJK (~100 MB) is not bundled; the bundled set
+  covers Latin/Greek/Cyrillic + Arabic + Hebrew.
 
 ### Security / privacy
 - The posture is unchanged: composed program frames stay **in-process** behind the CORS-pinned
