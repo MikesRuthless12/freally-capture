@@ -1,0 +1,228 @@
+//! Sources — the shared inputs scene items point at.
+//!
+//! A [`Source`] lives in the collection's shared pool and is referenced by
+//! [`crate::SceneItem`]s across any number of scenes: renaming a source or
+//! changing its settings updates every scene that shows it. The variants here
+//! are exactly the source kinds the engine can run today — new kinds are added
+//! alongside their runtime, never ahead of it.
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Stable identity of a shared [`Source`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SourceId(pub Uuid);
+
+impl SourceId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for SourceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// An RGBA color, 8 bits per channel (straight, not premultiplied).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Rgba {
+    pub const WHITE: Rgba = Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+
+    pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+/// A requested webcam capture format (mirrors the device's advertised modes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoDeviceFormat {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub fourcc: String,
+}
+
+/// Horizontal alignment of a text source's lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+fn default_text_size() -> f32 {
+    72.0
+}
+
+fn default_line_spacing() -> f32 {
+    1.0
+}
+
+fn default_color_size() -> u32 {
+    1920
+}
+
+fn default_color_height() -> u32 {
+    1080
+}
+
+/// What a source *is*, plus its per-kind settings.
+///
+/// Serialized with `kind` as the tag — the on-disk scene-collection format.
+/// Every settings field defaults so files from older builds keep loading.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SourceSettings {
+    /// A whole display, captured via the Phase 1 capture pipeline.
+    Display {
+        /// The OS capture id (from `fcap_capture::list_sources`).
+        #[serde(default)]
+        capture_id: String,
+        /// The label the picker showed — re-resolution key if ids shift.
+        #[serde(default)]
+        label: String,
+    },
+    /// One window, captured via the Phase 1 capture pipeline.
+    Window {
+        #[serde(default)]
+        capture_id: String,
+        #[serde(default)]
+        label: String,
+    },
+    /// The Wayland ScreenCast portal — the *system dialog* picks the actual
+    /// screen/window on every (re)start; that honesty is by design.
+    Portal {},
+    /// A webcam / capture card via `fcap-sources`.
+    VideoDevice {
+        #[serde(default)]
+        device_id: String,
+        /// `None` = auto (highest resolution).
+        #[serde(default)]
+        format: Option<VideoDeviceFormat>,
+    },
+    /// A still image file (PNG/JPEG/BMP/GIF-first-frame/WebP…).
+    Image {
+        #[serde(default)]
+        path: String,
+    },
+    /// A solid color block.
+    Color {
+        #[serde(default = "Rgba::default_color")]
+        color: Rgba,
+        #[serde(default = "default_color_size")]
+        width: u32,
+        #[serde(default = "default_color_height")]
+        height: u32,
+    },
+    /// Shaped, rasterized text (rustybuzz shaping, RTL-aware).
+    Text {
+        #[serde(default)]
+        text: String,
+        /// System font family; `None` = the platform default face.
+        #[serde(default)]
+        font_family: Option<String>,
+        /// Explicit font file — overrides `font_family` when set.
+        #[serde(default)]
+        font_file: Option<String>,
+        #[serde(default = "default_text_size")]
+        size_px: f32,
+        #[serde(default = "Rgba::default_text")]
+        color: Rgba,
+        #[serde(default)]
+        align: TextAlign,
+        /// Line height multiplier (1.0 = the font's natural spacing).
+        #[serde(default = "default_line_spacing")]
+        line_spacing: f32,
+        /// Render right-to-left paragraphs (auto-detected; this forces it).
+        #[serde(default)]
+        force_rtl: bool,
+        /// Word-wrap width in px; `None`/0 = never wrap.
+        #[serde(default)]
+        wrap_width: Option<u32>,
+    },
+}
+
+impl Rgba {
+    fn default_color() -> Self {
+        // The Havoc accent blue — a friendly non-black default block.
+        Rgba::new(0x4a, 0x9e, 0xff, 0xff)
+    }
+
+    fn default_text() -> Self {
+        Rgba::WHITE
+    }
+}
+
+impl SourceSettings {
+    /// Machine name of the kind (stable; used for labels + telemetry-free logs).
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            SourceSettings::Display { .. } => "display",
+            SourceSettings::Window { .. } => "window",
+            SourceSettings::Portal {} => "portal",
+            SourceSettings::VideoDevice { .. } => "videoDevice",
+            SourceSettings::Image { .. } => "image",
+            SourceSettings::Color { .. } => "color",
+            SourceSettings::Text { .. } => "text",
+        }
+    }
+
+    /// Human default name for a new source of this kind.
+    pub fn default_name(&self) -> &'static str {
+        match self {
+            SourceSettings::Display { .. } => "Display Capture",
+            SourceSettings::Window { .. } => "Window Capture",
+            SourceSettings::Portal {} => "Screen Capture (Portal)",
+            SourceSettings::VideoDevice { .. } => "Video Capture Device",
+            SourceSettings::Image { .. } => "Image",
+            SourceSettings::Color { .. } => "Color",
+            SourceSettings::Text { .. } => "Text",
+        }
+    }
+}
+
+/// One shared source: identity + display name + settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    pub id: SourceId,
+    pub name: String,
+    #[serde(flatten)]
+    pub settings: SourceSettings,
+}
+
+impl Source {
+    /// A new source with a fresh id. Empty names fall back to the kind's
+    /// default name.
+    pub fn new(name: impl Into<String>, settings: SourceSettings) -> Self {
+        let name = name.into();
+        let name = if name.trim().is_empty() {
+            settings.default_name().to_string()
+        } else {
+            name
+        };
+        Self {
+            id: SourceId::new(),
+            name,
+            settings,
+        }
+    }
+}
