@@ -310,7 +310,7 @@ export default function App() {
         />
       )}
       {dialog?.kind === "properties" && dialogSource && (
-        <PropertiesDialog source={dialogSource} os={core?.os} onClose={() => setDialog(null)} />
+        <PropertiesDialog source={dialogSource} onClose={() => setDialog(null)} />
       )}
     </div>
   );

@@ -12,9 +12,15 @@ use fcap_scene::{Crop, Transform};
 
 /// The item's content size in source pixels after the transform crop.
 /// `None` when the crop consumes the whole source (nothing to draw).
+/// (Chained saturating subtractions — a hostile file's `u32::MAX` crops must
+/// clamp, not overflow the `left + right` sum.)
 pub fn content_size(source_w: u32, source_h: u32, crop: &Crop) -> Option<(f32, f32)> {
-    let w = source_w.saturating_sub(crop.left + crop.right);
-    let h = source_h.saturating_sub(crop.top + crop.bottom);
+    let w = source_w
+        .saturating_sub(crop.left)
+        .saturating_sub(crop.right);
+    let h = source_h
+        .saturating_sub(crop.top)
+        .saturating_sub(crop.bottom);
     if w == 0 || h == 0 {
         None
     } else {
@@ -186,6 +192,18 @@ mod tests {
             left: 6,
             top: 0,
             right: 6,
+            bottom: 0,
+        };
+        assert_eq!(content_size(10, 8, &crop), None);
+    }
+
+    #[test]
+    fn hostile_crop_values_clamp_instead_of_overflowing() {
+        // u32::MAX + 1 would panic in debug builds with a plain `left + right`.
+        let crop = Crop {
+            left: u32::MAX,
+            top: 0,
+            right: 1,
             bottom: 0,
         };
         assert_eq!(content_size(10, 8, &crop), None);

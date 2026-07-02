@@ -31,9 +31,10 @@ fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
     let uv = vec2<f32>(f32((vi << 1u) & 2u), f32(vi & 2u));
     var out: VsOut;
     out.pos = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
-    // Flip v: framebuffer y goes down, uv v goes down too — the flip keeps
-    // pass output aligned with pass input.
-    out.uv = vec2<f32>(uv.x, uv.y);
+    // Flip v: NDC y points up but texture v points down. Without this every
+    // pass writes a vertically mirrored copy and odd-length chains render
+    // upside-down (caught by `filter_passes_preserve_vertical_orientation`).
+    out.uv = vec2<f32>(uv.x, 1.0 - uv.y);
     return out;
 }
 

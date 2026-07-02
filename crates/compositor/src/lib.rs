@@ -795,6 +795,126 @@ mod tests {
         );
     }
 
+    /// A 4×4 frame: top half white, bottom half black — the vertical probe.
+    fn top_and_bottom() -> Frame {
+        let mut data = Vec::new();
+        for y in 0..4u32 {
+            for _x in 0..4 {
+                if y < 2 {
+                    data.extend_from_slice(&[255, 255, 255, 255]);
+                } else {
+                    data.extend_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        Frame {
+            width: 4,
+            height: 4,
+            stride: 16,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn filter_passes_preserve_vertical_orientation() {
+        // Regression: the fullscreen pass must flip v (NDC y-up vs texture
+        // v-down) or every ODD-length chain renders upside-down.
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &top_and_bottom())
+            .expect("upload");
+        let mut collection = scene_with_item((4, 4), source, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        // A neutral one-pass filter: output should equal input, upright.
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::ColorCorrection {
+                    gamma: 0.0,
+                    brightness: 0.0,
+                    contrast: 0.0,
+                    saturation: 1.0,
+                    hue_shift: 0.0,
+                    opacity: 1.0,
+                },
+            )
+            .expect("add");
+
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 1, 0),
+            [255, 255, 255, 255],
+            "top stays white"
+        );
+        assert_eq!(pixel(&program, 1, 3), [0, 0, 0, 255], "bottom stays black");
+    }
+
+    #[test]
+    fn a_shrunken_filter_chain_stays_live() {
+        // Regression: disabling a filter shrinks the pass count; the stale
+        // extra chain texture must not keep being sampled (frozen frame).
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [200, 0, 0, 255]),
+        )
+        .expect("upload");
+        let mut collection = scene_with_item((4, 4), source, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(scene, item, FilterKind::Sharpen { amount: 0.25 })
+            .expect("sharpen");
+        let blur = collection
+            .add_filter(scene, item, FilterKind::Blur { radius: 2.0 })
+            .expect("blur");
+        // 3 passes cached (sharpen + blur H + blur V).
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let _ = comp.read_program().expect("readback");
+
+        // Shrink the chain to 1 pass and change the source color — the
+        // program must show the NEW color, not the frozen pass-2 texture.
+        collection
+            .set_filter_enabled(scene, item, blur, false)
+            .expect("disable blur");
+        comp.upload_frame(
+            source,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [0, 200, 0, 255]),
+        )
+        .expect("upload green");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        let px = pixel(&program, 2, 2);
+        assert!(
+            px[1] > 150 && px[0] < 60,
+            "live green, not a frozen red frame: {px:?}"
+        );
+    }
+
+    #[test]
+    fn oversized_canvas_requests_clamp_to_the_adapter() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        // Must not panic inside wgpu validation; must clamp instead.
+        comp.set_canvas_size(1_000_000, 1_000_000);
+        let (w, h) = comp.canvas_size();
+        assert!(w >= 4 && h >= 4, "still a usable canvas");
+        assert!(w <= 32_768 && h <= 32_768, "clamped to a real limit");
+        comp.render(&Collection::new().active_scene().clone(), 0.0)
+            .expect("still renders");
+    }
+
     #[test]
     fn filter_order_is_respected() {
         let Some(mut comp) = compositor(4, 4) else {

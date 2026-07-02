@@ -16,6 +16,7 @@ import type {
   VideoFormat,
 } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
+import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
 
 const inputClass =
@@ -23,7 +24,6 @@ const inputClass =
 
 type PropertiesDialogProps = {
   source: Source;
-  os?: string;
   onClose: () => void;
 };
 
@@ -137,26 +137,22 @@ function SettingsEditor({
               className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
             />
           </label>
-          <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-            Width
-            <input
-              type="number"
-              min={1}
-              value={draft.width}
-              onChange={(event) => onChange({ ...draft, width: Number(event.target.value) || 1 })}
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-            Height
-            <input
-              type="number"
-              min={1}
-              value={draft.height}
-              onChange={(event) => onChange({ ...draft, height: Number(event.target.value) || 1 })}
-              className={inputClass}
-            />
-          </label>
+          <NumberField
+            label="Width"
+            value={draft.width}
+            min={1}
+            max={16384}
+            onCommit={(width) => onChange({ ...draft, width })}
+            className="flex-1"
+          />
+          <NumberField
+            label="Height"
+            value={draft.height}
+            min={1}
+            max={16384}
+            onCommit={(height) => onChange({ ...draft, height })}
+            className="flex-1"
+          />
         </div>
       );
     case "text":
@@ -350,17 +346,14 @@ function TextEditor({
             className={inputClass}
           />
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[11px] text-havoc-muted">
-          Size (px)
-          <input
-            type="number"
-            min={4}
-            max={512}
-            value={draft.sizePx}
-            onChange={(event) => onChange({ ...draft, sizePx: Number(event.target.value) || 72 })}
-            className={inputClass}
-          />
-        </label>
+        <NumberField
+          label="Size (px)"
+          value={draft.sizePx}
+          min={4}
+          max={512}
+          onCommit={(sizePx) => onChange({ ...draft, sizePx })}
+          className="w-24"
+        />
       </div>
       <div className="flex items-end gap-3">
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
@@ -387,20 +380,15 @@ function TextEditor({
             <option value="right">right</option>
           </select>
         </label>
-        <label className="flex w-24 flex-col gap-1 text-[11px] text-havoc-muted">
-          Line spacing
-          <input
-            type="number"
-            min={0.25}
-            max={4}
-            step={0.05}
-            value={draft.lineSpacing}
-            onChange={(event) =>
-              onChange({ ...draft, lineSpacing: Number(event.target.value) || 1 })
-            }
-            className={inputClass}
-          />
-        </label>
+        <NumberField
+          label="Line spacing"
+          value={draft.lineSpacing}
+          min={0.25}
+          max={4}
+          step={0.05}
+          onCommit={(lineSpacing) => onChange({ ...draft, lineSpacing })}
+          className="w-24"
+        />
       </div>
       <div className="flex items-center gap-4">
         <label className="flex w-40 flex-col gap-1 text-[11px] text-havoc-muted">

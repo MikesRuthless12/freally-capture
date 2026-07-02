@@ -65,6 +65,12 @@ fn default_canvas_height() -> u32 {
     1080
 }
 
+/// The largest canvas edge the model accepts — [`Collection::sanitize`]
+/// clamps to this so a hand-edited file can never ask the GPU for a
+/// 100 000 px program texture (the compositor additionally clamps to the
+/// real adapter limit, which may be smaller).
+pub const MAX_CANVAS_DIMENSION: u32 = 16_384;
+
 /// The root of the model: canvas size, the shared source pool, the scenes,
 /// and which scene is live. This is the project format on disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,6 +123,8 @@ impl Collection {
         if self.canvas_height == 0 {
             self.canvas_height = default_canvas_height();
         }
+        self.canvas_width = self.canvas_width.min(MAX_CANVAS_DIMENSION);
+        self.canvas_height = self.canvas_height.min(MAX_CANVAS_DIMENSION);
         if self.scenes.is_empty() {
             self.scenes.push(Scene::new("Scene"));
         }
@@ -823,6 +831,96 @@ mod tests {
         collection.remove_filter(scene, item, blur).expect("remove");
         let filters = &collection.scene(scene).unwrap().item(item).unwrap().filters;
         assert_eq!(filters.len(), 1);
+    }
+
+    #[test]
+    fn wire_format_uses_camel_case_fields() {
+        // The UI bridge depends on camelCase FIELD names inside the tagged
+        // enums — `rename_all` alone renames only the variant tags, and every
+        // field's serde(default) would silently mask the mismatch.
+        let source = Source::new(
+            "cam",
+            SourceSettings::VideoDevice {
+                device_id: "cam-7".into(),
+                format: None,
+            },
+        );
+        let json = serde_json::to_string(&source).expect("serialize");
+        assert!(json.contains("\"deviceId\":\"cam-7\""), "got: {json}");
+
+        let parsed: SourceSettings =
+            serde_json::from_str(r#"{"kind":"videoDevice","deviceId":"cam-7"}"#).expect("parse");
+        assert_eq!(
+            parsed,
+            SourceSettings::VideoDevice {
+                device_id: "cam-7".into(),
+                format: None,
+            }
+        );
+
+        let display: SourceSettings =
+            serde_json::from_str(r#"{"kind":"display","captureId":"dxgi:0","label":"D1"}"#)
+                .expect("parse");
+        assert_eq!(
+            display,
+            SourceSettings::Display {
+                capture_id: "dxgi:0".into(),
+                label: "D1".into(),
+            }
+        );
+
+        let text_json = serde_json::to_string(&SourceSettings::Text {
+            text: "hi".into(),
+            font_family: None,
+            font_file: None,
+            size_px: 48.0,
+            color: Rgba::WHITE,
+            align: TextAlign::Left,
+            line_spacing: 1.0,
+            force_rtl: false,
+            wrap_width: None,
+        })
+        .expect("serialize");
+        for key in [
+            "\"sizePx\"",
+            "\"fontFamily\"",
+            "\"lineSpacing\"",
+            "\"forceRtl\"",
+            "\"wrapWidth\"",
+        ] {
+            assert!(text_json.contains(key), "missing {key} in {text_json}");
+        }
+
+        let scroll: FilterKind =
+            serde_json::from_str(r#"{"type":"scroll","speedX":120.0,"speedY":-3.0}"#)
+                .expect("parse");
+        assert_eq!(
+            scroll,
+            FilterKind::Scroll {
+                speed_x: 120.0,
+                speed_y: -3.0,
+            }
+        );
+        let cc_json = serde_json::to_string(&FilterKind::ColorCorrection {
+            gamma: 0.0,
+            brightness: 0.0,
+            contrast: 0.0,
+            saturation: 1.0,
+            hue_shift: 15.0,
+            opacity: 1.0,
+        })
+        .expect("serialize");
+        assert!(cc_json.contains("\"hueShift\":15.0"), "got: {cc_json}");
+    }
+
+    #[test]
+    fn sanitize_clamps_an_oversized_canvas() {
+        let mut collection = Collection::new();
+        collection.canvas_width = 100_000;
+        collection.canvas_height = 90_000;
+        collection.sanitize();
+        assert_eq!(collection.canvas_width, MAX_CANVAS_DIMENSION);
+        assert_eq!(collection.canvas_height, MAX_CANVAS_DIMENSION);
     }
 
     #[test]

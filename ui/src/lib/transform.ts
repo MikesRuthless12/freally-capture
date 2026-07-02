@@ -8,9 +8,38 @@
  * cropped size, rotation is degrees clockwise about that center.
  */
 
-import type { Crop, Transform } from "../api/types";
+import type { Crop, Filter, Transform } from "../api/types";
 
 export type Vec2 = { x: number; y: number };
+
+/**
+ * The size the compositor actually composes for an item: the source size
+ * after its enabled Crop *filters* (the only size-changing filter kind),
+ * folded in chain order with the engine's skip semantics (all-zero crops and
+ * crops that would zero an axis contribute nothing). Mirrors
+ * `plan_filter(FilterKind::Crop)` in `crates/compositor/src/filters/mod.rs` —
+ * the transform crop then applies to THIS size, so handles drawn from it stay
+ * glued to the visible pixels.
+ */
+export function effectiveSourceSize(
+  sourceW: number,
+  sourceH: number,
+  filters: Filter[],
+): { w: number; h: number } {
+  let w = sourceW;
+  let h = sourceH;
+  for (const filter of filters) {
+    if (!filter.enabled || filter.type !== "crop") continue;
+    const { left, top, right, bottom } = filter;
+    if (left === 0 && top === 0 && right === 0 && bottom === 0) continue;
+    const outW = w - left - right;
+    const outH = h - top - bottom;
+    if (outW <= 0 || outH <= 0) continue; // the engine skips it too
+    w = outW;
+    h = outH;
+  }
+  return { w, h };
+}
 
 /** Content size after the transform crop; null = fully cropped away. */
 export function contentSize(

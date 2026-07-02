@@ -161,6 +161,11 @@ export function studioUpdateSourceSettings(
   return invoke("studio_update_source_settings", { sourceId, settings });
 }
 
+/** Restart an errored source with unchanged settings (replugged camera…). */
+export function studioRetrySource(sourceId: SourceId): Promise<void> {
+  return invoke("studio_retry_source", { sourceId });
+}
+
 export function studioAddFilter(
   sceneId: SceneId,
   itemId: ItemId,

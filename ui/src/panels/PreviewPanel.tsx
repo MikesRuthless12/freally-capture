@@ -6,6 +6,7 @@ import {
   canvasToLocal,
   contentSize,
   corners as itemCorners,
+  effectiveSourceSize,
   hitTest,
   localToCanvas,
   type Vec2,
@@ -146,11 +147,16 @@ export function PreviewPanel({
     [box, displayScale],
   );
 
-  /** The source resolution the runtime reports (pre-crop). */
+  /**
+   * The item's composed base size: the runtime-reported source resolution
+   * with the item's enabled Crop filters folded in — the compositor draws
+   * the chain output, so the handles must measure against it too.
+   */
   const sourceSize = useCallback(
     (item: SceneItem): { w: number; h: number } | null => {
       const status = program?.sources[item.source];
-      return status?.width && status?.height ? { w: status.width, h: status.height } : null;
+      if (!status?.width || !status?.height) return null;
+      return effectiveSourceSize(status.width, status.height, item.filters);
     },
     [program],
   );
@@ -477,10 +483,16 @@ function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
         scaleX = Math.max(Math.abs(local.x) / (drag.content.w / 2), MIN_SCALE);
         scaleY = Math.max(Math.abs(local.y) / (drag.content.h / 2), MIN_SCALE);
       } else {
-        const halfDiag = Math.hypot(drag.content.w / 2, drag.content.h / 2);
-        const s = Math.max(distance(p, center) / halfDiag, MIN_SCALE);
-        scaleX = s;
-        scaleY = s;
+        // Aspect-preserving: scale BOTH axes by the same factor relative to
+        // the item's *current* scales — a stretched item must not snap to
+        // uniform scale the moment a corner is grabbed.
+        const halfDiag = Math.hypot(
+          (drag.content.w / 2) * t.scaleX,
+          (drag.content.h / 2) * t.scaleY,
+        );
+        const k = distance(p, center) / Math.max(halfDiag, 1e-6);
+        scaleX = Math.max(t.scaleX * k, MIN_SCALE);
+        scaleY = Math.max(t.scaleY * k, MIN_SCALE);
       }
       return { ...t, x: center.x, y: center.y, scaleX, scaleY };
     }

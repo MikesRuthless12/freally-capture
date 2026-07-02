@@ -88,8 +88,15 @@ fn default_color_height() -> u32 {
 ///
 /// Serialized with `kind` as the tag — the on-disk scene-collection format.
 /// Every settings field defaults so files from older builds keep loading.
+/// `rename_all` covers the variant tags only; `rename_all_fields` makes the
+/// variant *fields* camelCase too — the UI sends `captureId`/`deviceId`/…,
+/// and without it serde silently drops them to their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SourceSettings {
     /// A whole display, captured via the Phase 1 capture pipeline.
     Display {

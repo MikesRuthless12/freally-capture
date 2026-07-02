@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { Transform } from "../api/types";
-import { canvasToLocal, contentSize, corners, hitTest } from "../lib/transform";
+import type { Filter, Transform } from "../api/types";
+import {
+  canvasToLocal,
+  contentSize,
+  corners,
+  effectiveSourceSize,
+  hitTest,
+} from "../lib/transform";
 
 /**
  * Parity tests: these numbers mirror `crates/compositor/src/transform.rs`'s
@@ -63,5 +69,34 @@ describe("transform math (Rust parity)", () => {
     // Rotated 90°: the bar now extends vertically.
     expect(hitTest(t, content, { x: 50, y: 68 })).toBe(true);
     expect(hitTest(t, content, { x: 68, y: 50 })).toBe(false);
+  });
+
+  it("effectiveSourceSize folds enabled crop filters like the engine", () => {
+    const crop = (over: Partial<Extract<Filter, { type: "crop" }>>): Filter => ({
+      id: "f",
+      enabled: true,
+      type: "crop",
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      ...over,
+    });
+    // The handles must measure the chain output, not the raw source.
+    expect(effectiveSourceSize(100, 80, [crop({ left: 10, right: 20 })])).toEqual({ w: 70, h: 80 });
+    // Disabled and all-zero crops contribute nothing.
+    expect(effectiveSourceSize(100, 80, [crop({ left: 10, enabled: false })])).toEqual({
+      w: 100,
+      h: 80,
+    });
+    expect(effectiveSourceSize(100, 80, [crop({})])).toEqual({ w: 100, h: 80 });
+    // A crop that would zero an axis is skipped (engine semantics).
+    expect(effectiveSourceSize(100, 80, [crop({ left: 60, right: 60 })])).toEqual({
+      w: 100,
+      h: 80,
+    });
+    // Non-crop filters never change the size.
+    const blur: Filter = { id: "b", enabled: true, type: "blur", radius: 8 };
+    expect(effectiveSourceSize(100, 80, [blur])).toEqual({ w: 100, h: 80 });
   });
 });

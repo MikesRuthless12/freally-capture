@@ -405,7 +405,12 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
 
     let content_width = lines.iter().map(|line| line.width).fold(0.0f32, f32::max);
     let width = (content_width + 2.0 * PAD).ceil() as u32;
-    let height = (lines.len() as f32 * line_height + 2.0 * PAD).ceil() as u32;
+    // Height = the baseline span plus one full ink extent (ascent+|descent|):
+    // the LAST line always needs its descenders, however tight the line
+    // spacing — `n * line_height` clips them for any spacing < 1.
+    let height =
+        ((lines.len().saturating_sub(1)) as f32 * line_height + (ascent - descent) + 2.0 * PAD)
+            .ceil() as u32;
     if content_width <= 0.0 || style.text.trim().is_empty() {
         return Ok(rgba_frame(1, 1, vec![0, 0, 0, 0]));
     }
@@ -593,6 +598,25 @@ mod tests {
         };
         assert_eq!((frame.width, frame.height), (1, 1));
         assert_eq!(frame.data[3], 0);
+    }
+
+    #[test]
+    fn tight_line_spacing_never_clips_the_last_line() {
+        // Regression: height was lines × line_height, which at spacing 0.25
+        // cut the final line (and its descenders) off the pixmap entirely.
+        let mut one = style("gy");
+        one.line_spacing = 0.25;
+        let mut two = style("gy\ngy");
+        two.line_spacing = 0.25;
+        let (Some(single), Some(double)) = (render(&one), render(&two)) else {
+            return;
+        };
+        assert!(
+            ink_count(&double) as f32 >= ink_count(&single) as f32 * 1.5,
+            "the second line's ink is present ({} vs {})",
+            ink_count(&double),
+            ink_count(&single)
+        );
     }
 
     #[test]

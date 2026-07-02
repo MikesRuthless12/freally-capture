@@ -200,8 +200,17 @@ impl Compositor {
         Self::with_gpu(gpu, width, height)
     }
 
+    /// The program canvas may never exceed the adapter's texture limit — an
+    /// oversized (hand-edited) collection clamps instead of panicking the
+    /// render thread inside wgpu validation.
+    fn clamp_canvas(device: &wgpu::Device, size: u32) -> u32 {
+        size.clamp(1, device.limits().max_texture_dimension_2d)
+    }
+
     fn with_gpu(gpu: Gpu, width: u32, height: u32) -> Result<Self, CompositorError> {
         let device = &gpu.device;
+        let width = Self::clamp_canvas(device, width);
+        let height = Self::clamp_canvas(device, height);
         let (program, program_view) = Self::make_program_texture(device, width, height);
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -331,8 +340,8 @@ impl Compositor {
 
         Ok(Self {
             gpu,
-            canvas_width: width.max(1),
-            canvas_height: height.max(1),
+            canvas_width: width,
+            canvas_height: height,
             program,
             program_view,
             readback: None,
@@ -447,10 +456,10 @@ impl Compositor {
     }
 
     /// Resize the program canvas (drops the readback buffer; textures for
-    /// sources are untouched).
+    /// sources are untouched). Oversized requests clamp to the adapter limit.
     pub fn set_canvas_size(&mut self, width: u32, height: u32) {
-        let width = width.max(1);
-        let height = height.max(1);
+        let width = Self::clamp_canvas(&self.gpu.device, width);
+        let height = Self::clamp_canvas(&self.gpu.device, height);
         if (width, height) == (self.canvas_width, self.canvas_height) {
             return;
         }
@@ -693,6 +702,7 @@ impl Compositor {
             let has_chain = !plans.is_empty();
             if has_chain {
                 live_chains.push(item.id);
+                let pass_count = plans.len();
                 for (pass_index, plan) in plans.into_iter().enumerate() {
                     self.ensure_chain_texture(item.id, pass_index, plan.out);
                     let filter_offset = chain_passes.len() as u64 * self.filters.uniform_stride;
@@ -704,6 +714,12 @@ impl Compositor {
                         plan,
                         uniform_offset: filter_offset as u32,
                     });
+                }
+                // A shrunken chain must not leave stale textures behind — the
+                // composite samples chain.last(), which has to be this
+                // frame's final pass, not a leftover from a longer chain.
+                if let Some(chain) = self.chain_cache.get_mut(&item.id) {
+                    chain.truncate(pass_count);
                 }
             }
             draws.push(Draw {

@@ -216,6 +216,16 @@ pub fn studio_update_source_settings(
     })
 }
 
+/// Restart an errored source with unchanged settings (replugged camera,
+/// permission granted after a denial, reopened window).
+#[tauri::command]
+pub fn studio_retry_source(
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+) -> Result<(), String> {
+    state.retry_source(source_id)
+}
+
 // -- filters --------------------------------------------------------------------
 
 #[tauri::command]

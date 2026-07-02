@@ -64,6 +64,11 @@ struct StudioCore {
     revision: u64,
     path: Option<PathBuf>,
     dirty_since: Option<Instant>,
+    /// Per-source retry counters (not persisted): bumping one changes the
+    /// source's reconcile fingerprint, forcing the engine to restart it —
+    /// the recovery path for errored captures (unplugged camera, permission
+    /// granted after a denial, closed window reopened).
+    retry_nonces: HashMap<SourceId, u64>,
 }
 
 /// Tauri-managed handle to the studio model.
@@ -89,6 +94,7 @@ impl StudioState {
                 revision: 1,
                 path,
                 dirty_since: None,
+                retry_nonces: HashMap::new(),
             })),
         }
     }
@@ -97,6 +103,19 @@ impl StudioState {
         self.core
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Force one source to restart on the engine's next tick. No model
+    /// change and nothing persisted — just a reconcile nudge (the recovery
+    /// path for errored captures).
+    pub fn retry_source(&self, source: SourceId) -> Result<(), String> {
+        let mut core = self.lock();
+        if core.collection.source(source).is_none() {
+            return Err("source not found".to_string());
+        }
+        *core.retry_nonces.entry(source).or_insert(0) += 1;
+        core.revision += 1;
+        Ok(())
     }
 
     /// A snapshot for `studio_get` / event payloads.
@@ -317,6 +336,18 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 if app.emit("program", &status).is_err() {
                     return; // app shut down
                 }
+                // Scene edits still work without a GPU — honor the debounced
+                // autosave here too, or a GPU-less session persists nothing
+                // until a clean exit.
+                {
+                    let mut guard = lock_core(&core);
+                    if guard
+                        .dirty_since
+                        .is_some_and(|since| since.elapsed() >= AUTOSAVE_DEBOUNCE)
+                    {
+                        persist(&mut guard);
+                    }
+                }
                 std::thread::sleep(Duration::from_secs(5));
             }
         }
@@ -344,7 +375,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let tick_started = Instant::now();
 
         // -- 1. Snapshot the model (brief lock) --------------------------------
-        let (revision, scene, scene_sources, canvas) = {
+        let (revision, scene, scene_sources, canvas, nonces) = {
             let guard = lock_core(&core);
             (
                 guard.revision,
@@ -367,6 +398,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     guard.collection.canvas_width,
                     guard.collection.canvas_height,
                 ),
+                guard.retry_nonces.clone(),
             )
         };
         compositor.set_canvas_size(canvas.0, canvas.1);
@@ -378,7 +410,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // Stop sessions whose source left the scene or changed settings.
             let mut keep_ids: Vec<SourceId> = Vec::new();
             for source in &scene_sources {
-                let spec = source_spec(&source.settings);
+                // The retry nonce is part of the fingerprint: bumping it is
+                // how an errored source gets restarted with equal settings.
+                let nonce = nonces.get(&source.id).copied().unwrap_or(0);
+                let spec = format!("{}#{nonce}", source_spec(&source.settings));
                 let is_capture = is_capture_backed(&source.settings);
                 if is_capture {
                     let changed = capture_specs.get(&source.id) != Some(&spec);
@@ -387,6 +422,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             slot.session.stop();
                         }
                         starting.remove(&source.id);
+                        // A kind flip (static → capture) sheds the old family.
+                        static_specs.remove(&source.id);
                         compositor.remove_source(source.id);
                         capture_specs.insert(source.id, spec);
                         start_session(source.id, &source.settings, &mut starting);
@@ -396,6 +433,14 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 } else {
                     let changed = static_specs.get(&source.id) != Some(&spec);
                     if changed {
+                        // A kind flip (capture → static) must stop the OS
+                        // pipeline — otherwise the camera stays open and its
+                        // frames keep overwriting the static texture.
+                        if let Some(slot) = sessions.remove(&source.id) {
+                            slot.session.stop();
+                        }
+                        starting.remove(&source.id);
+                        capture_specs.remove(&source.id);
                         static_specs.insert(source.id, spec);
                         let status = match render_static(&source.settings) {
                             Ok(frame) => {
@@ -413,11 +458,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
                 keep_ids.push(source.id);
             }
-            // Sources that left the scene entirely.
+            // Sources that left the scene entirely. capture_specs is part of
+            // the union: an errored capture lives ONLY there (its session is
+            // already gone), and a stale fingerprint would block its restart
+            // when the source re-enters the scene.
             let gone: Vec<SourceId> = sessions
                 .keys()
                 .chain(starting.keys())
                 .chain(static_specs.keys())
+                .chain(capture_specs.keys())
                 .filter(|id| !keep_ids.contains(id))
                 .copied()
                 .collect();

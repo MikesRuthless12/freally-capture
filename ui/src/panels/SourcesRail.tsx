@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   captureListSources,
+  openPrivacySettings,
   studioRenameSource,
+  studioRetrySource,
   videoDeviceFormats,
   videoDevicesList,
 } from "../api/commands";
@@ -18,6 +20,7 @@ import type {
   VideoFormat,
 } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
+import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
 
@@ -68,6 +71,7 @@ export function SourcesRail({
   collection,
   scene,
   program,
+  os,
   selectedItem,
   onSelect,
   onAdd,
@@ -217,25 +221,54 @@ export function SourcesRail({
                       <span className="truncate">{source?.name ?? "(missing source)"}</span>
                     </button>
                   )}
-                  {status && (
+                  {status && status.state === "error" ? (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          studioRetrySource(item.source).catch((err) =>
+                            console.error("source retry failed:", err),
+                          )
+                        }
+                        title={`Retry — ${status.errorMessage ?? "error"}`}
+                        aria-label={`Retry ${source?.name ?? "source"}`}
+                        className="flex items-center gap-1 rounded px-1 text-[10px] text-red-400 hover:text-red-300"
+                      >
+                        <span
+                          aria-label="status: error"
+                          className="h-1.5 w-1.5 rounded-full bg-red-400"
+                        />
+                        ↻
+                      </button>
+                      {status.errorCode === "permission" && os === "macos" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void openPrivacySettings(
+                              source?.kind === "videoDevice" ? "camera" : "screenRecording",
+                            )
+                          }
+                          title="Open the macOS privacy settings for this permission"
+                          aria-label={`Open privacy settings for ${source?.name ?? "source"}`}
+                          className="rounded border border-red-400/40 px-1 text-[9px] text-red-300 hover:border-red-300"
+                        >
+                          settings
+                        </button>
+                      )}
+                    </span>
+                  ) : status ? (
                     <span
                       title={
-                        status.state === "error"
-                          ? (status.errorMessage ?? "error")
-                          : status.state === "live"
-                            ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
-                            : "starting…"
+                        status.state === "live"
+                          ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
+                          : "starting…"
                       }
                       aria-label={`status: ${status.state}`}
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        status.state === "live"
-                          ? "bg-emerald-400"
-                          : status.state === "error"
-                            ? "bg-red-400"
-                            : "bg-amber-300"
+                        status.state === "live" ? "bg-emerald-400" : "bg-amber-300"
                       }`}
                     />
-                  )}
+                  ) : null}
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"
@@ -597,26 +630,22 @@ function ColorForm({
           />
         </label>
         <div className="flex gap-2">
-          <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-            Width
-            <input
-              type="number"
-              min={1}
-              value={width}
-              onChange={(event) => setWidth(Number(event.target.value) || 1)}
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-            Height
-            <input
-              type="number"
-              min={1}
-              value={height}
-              onChange={(event) => setHeight(Number(event.target.value) || 1)}
-              className={inputClass}
-            />
-          </label>
+          <NumberField
+            label="Width"
+            value={width}
+            min={1}
+            max={16384}
+            onCommit={setWidth}
+            className="flex-1"
+          />
+          <NumberField
+            label="Height"
+            value={height}
+            min={1}
+            max={16384}
+            onCommit={setHeight}
+            className="flex-1"
+          />
         </div>
         <button
           type="button"
@@ -663,17 +692,14 @@ function TextForm({
               className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
             />
           </label>
-          <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-            Size (px)
-            <input
-              type="number"
-              min={4}
-              max={512}
-              value={size}
-              onChange={(event) => setSize(Number(event.target.value) || 72)}
-              className={inputClass}
-            />
-          </label>
+          <NumberField
+            label="Size (px)"
+            value={size}
+            min={4}
+            max={512}
+            onCommit={setSize}
+            className="flex-1"
+          />
         </div>
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
           Font family, alignment, wrapping, and RTL live in the source’s Properties. The bundled

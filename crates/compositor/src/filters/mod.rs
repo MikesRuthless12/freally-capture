@@ -318,8 +318,10 @@ pub(crate) fn plan_filter(
             if *left == 0 && *top == 0 && *right == 0 && *bottom == 0 {
                 return None;
             }
-            let out_w = in_size.0.saturating_sub(left + right);
-            let out_h = in_size.1.saturating_sub(top + bottom);
+            // Chained saturating subs — hostile values must clamp, not
+            // overflow the `left + right` sum.
+            let out_w = in_size.0.saturating_sub(*left).saturating_sub(*right);
+            let out_h = in_size.1.saturating_sub(*top).saturating_sub(*bottom);
             if out_w == 0 || out_h == 0 {
                 return None; // cropping everything away = contribute nothing
             }
@@ -329,8 +331,8 @@ pub(crate) fn plan_filter(
             uniform.p0 = [
                 *left as f32 / w,
                 *top as f32 / h,
-                (in_size.0 - right) as f32 / w,
-                (in_size.1 - bottom) as f32 / h,
+                in_size.0.saturating_sub(*right) as f32 / w,
+                in_size.1.saturating_sub(*bottom) as f32 / h,
             ];
             Some(vec![PassPlan {
                 kind: PassKind::Crop,
@@ -773,6 +775,25 @@ mod tests {
             (64, 64),
             0.0,
             &empty
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn hostile_crop_filter_values_clamp_instead_of_overflowing() {
+        // A hand-edited file with u32::MAX crops must plan to "skip", never
+        // panic on the `left + right` sum.
+        assert!(plan_filter(
+            &FilterKind::Crop {
+                left: u32::MAX,
+                top: 0,
+                right: 1,
+                bottom: 0,
+            },
+            FilterId::new(),
+            (64, 32),
+            0.0,
+            &no_resources(),
         )
         .is_none());
     }

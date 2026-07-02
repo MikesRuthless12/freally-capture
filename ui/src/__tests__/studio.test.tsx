@@ -208,6 +208,22 @@ describe("the studio UI", () => {
     expect(screen.getByText("1920×1080")).toBeInTheDocument();
   });
 
+  it("offers retry on an errored source", async () => {
+    render(<App />);
+    await screen.findByText("Face cam");
+    pushProgram({
+      sources: {
+        "src-cam": { state: "error", errorCode: "backend", errorMessage: "device busy" },
+      },
+    });
+    const retry = await screen.findByRole("button", { name: /retry face cam/i });
+    act(() => retry.click());
+    await waitFor(() => {
+      const call = invokeCalls.find((c) => c.cmd === "studio_retry_source");
+      expect(call?.args).toMatchObject({ sourceId: "src-cam" });
+    });
+  });
+
   it("reports a GPU-less machine honestly", async () => {
     render(<App />);
     await screen.findByText("Face cam");

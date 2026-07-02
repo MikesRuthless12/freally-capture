@@ -65,9 +65,15 @@ fn default_sharpen() -> f32 {
 /// One filter's kind + parameters. Tagged by `type` in JSON.
 ///
 /// Ranges are documented per field; the compositor clamps defensively, the UI
-/// keeps its controls inside the same bounds.
+/// keeps its controls inside the same bounds. `rename_all_fields` is
+/// load-bearing: without it `hueShift`/`speedX`/`speedY` from the UI would
+/// silently parse to their defaults (variant-only renaming).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum FilterKind {
     /// Key out a chroma color (green screen).
     ChromaKey {
