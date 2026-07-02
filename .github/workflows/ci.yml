@@ -60,7 +60,11 @@ jobs:
       - name: Run cargo audit
         # Unmaintained-class advisories are warnings here (they don't fail
         # audit); the deny.toml [advisories] ignore list documents each one.
-        run: cargo audit
+        # The two quick-xml DoS advisories are vulnerability-class and must be
+        # ignored explicitly — justified in deny.toml (trusted-local-file
+        # parsing via plist inside the tauri tree; no compatible upgrade until
+        # a plist/tauri bump — re-check on every Tauri upgrade).
+        run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   ui:
     name: UI (prettier + eslint + vitest + build)
