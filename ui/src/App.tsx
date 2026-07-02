@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { health, settingsGet, settingsSet } from "./api/commands";
-import type { Health, Settings } from "./api/types";
+import { health, previewStart, previewStop, settingsGet, settingsSet } from "./api/commands";
+import { onPreview } from "./api/events";
+import type { Health, PreviewSource, PreviewStatus, Settings } from "./api/types";
 import { ControlsDock } from "./panels/ControlsDock";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { ScenesRail } from "./panels/ScenesRail";
-import { SourcesRail } from "./panels/SourcesRail";
+import { SourcesRail, type AddedSource } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
+
+let nextSourceKey = 0;
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
 export default function App() {
@@ -18,6 +21,9 @@ export default function App() {
   // a persisted "off" never flashes visible on launch.
   const [settingsSettled, setSettingsSettled] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [sources, setSources] = useState<AddedSource[]>([]);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({ state: "idle" });
 
   useEffect(() => {
     let cancelled = false;
@@ -40,10 +46,44 @@ export default function App() {
         // Without the core, the UI just keeps its defaults (nothing persists).
         if (!cancelled) setSettingsSettled(true);
       });
+    const unlisten = onPreview((status) => {
+      if (!cancelled) setPreviewStatus(status);
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
+      void unlisten.then((fn) => fn?.());
     };
   }, []);
+
+  const addSource = useCallback((source: PreviewSource, label: string) => {
+    const key = `src-${nextSourceKey++}`;
+    setSources((current) => [...current, { key, label, source }]);
+    setActiveKey(key);
+    previewStart(source, key).catch((err) => console.error("preview start failed:", err));
+  }, []);
+
+  const selectSource = useCallback(
+    (key: string) => {
+      const entry = sources.find((added) => added.key === key);
+      if (!entry || key === activeKey) return;
+      setActiveKey(key);
+      previewStart(entry.source, key).catch((err) => console.error("preview start failed:", err));
+    },
+    [sources, activeKey],
+  );
+
+  const removeSource = useCallback(
+    (key: string) => {
+      setSources((current) => current.filter((added) => added.key !== key));
+      if (key === activeKey) {
+        setActiveKey(null);
+        previewStop().catch(() => undefined);
+      }
+    },
+    [activeKey],
+  );
+
+  const activeKind = sources.find((added) => added.key === activeKey)?.source.kind;
 
   const showStats = settingsSettled && (settings?.showStatsDock ?? true);
 
@@ -95,8 +135,15 @@ export default function App() {
       <main className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_240px] gap-2">
           <ScenesRail />
-          <PreviewPanel />
-          <SourcesRail />
+          <PreviewPanel status={previewStatus} os={core?.os} activeKind={activeKind} />
+          <SourcesRail
+            sources={sources}
+            activeKey={activeKey}
+            status={previewStatus}
+            onAdd={addSource}
+            onSelect={selectSource}
+            onRemove={removeSource}
+          />
         </div>
         <div
           className={`grid h-44 shrink-0 gap-2 ${
