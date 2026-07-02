@@ -255,14 +255,30 @@ impl PreviewState {
     }
 
     /// The `preview://` scheme body: newest JPEG or 204 while there is none.
-    pub fn protocol_response(&self) -> tauri::http::Response<Cow<'static, [u8]>> {
+    ///
+    /// CORS is pinned to the app's own webview origins — never `*` — so that
+    /// captured screen frames can never be fetched by remote content, even
+    /// if a future phase (browser sources, 0.40.0+) renders some.
+    pub fn protocol_response(
+        &self,
+        origin: Option<&str>,
+    ) -> tauri::http::Response<Cow<'static, [u8]>> {
+        const APP_ORIGINS: [&str; 3] = [
+            "http://tauri.localhost", // Windows production webview
+            "tauri://localhost",      // macOS/Linux production webview
+            "http://localhost:1420",  // `tauri dev`
+        ];
+        let allow_origin = origin
+            .filter(|candidate| APP_ORIGINS.contains(candidate))
+            .unwrap_or(APP_ORIGINS[0]);
+
         let latest = self.latest.lock().expect("preview frame slot poisoned");
         match latest.as_ref() {
             Some(frame) => tauri::http::Response::builder()
                 .status(200)
                 .header("content-type", "image/jpeg")
                 .header("cache-control", "no-store")
-                .header("access-control-allow-origin", "*")
+                .header("access-control-allow-origin", allow_origin)
                 .header("access-control-expose-headers", "x-frame-seq")
                 .header("x-frame-seq", frame.seq.to_string())
                 .body(Cow::Owned(frame.jpeg.clone()))
@@ -270,7 +286,7 @@ impl PreviewState {
             None => tauri::http::Response::builder()
                 .status(204)
                 .header("cache-control", "no-store")
-                .header("access-control-allow-origin", "*")
+                .header("access-control-allow-origin", allow_origin)
                 .body(Cow::Borrowed(&[][..]))
                 .expect("static response parts"),
         }

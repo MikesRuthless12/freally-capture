@@ -33,9 +33,16 @@ fn main() {
         .manage(settings)
         .manage(PreviewState::default())
         // The preview frame pipe: the UI polls `preview://` for the newest
-        // JPEG. In-process only — frames never touch a socket or disk.
-        .register_uri_scheme_protocol("preview", |ctx, _request| {
-            ctx.app_handle().state::<PreviewState>().protocol_response()
+        // JPEG. In-process only — frames never touch a socket or disk — and
+        // CORS-pinned to the app's own origins.
+        .register_uri_scheme_protocol("preview", |ctx, request| {
+            let origin = request
+                .headers()
+                .get("origin")
+                .and_then(|value| value.to_str().ok());
+            ctx.app_handle()
+                .state::<PreviewState>()
+                .protocol_response(origin)
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
