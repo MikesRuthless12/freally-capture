@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { health, previewStart, previewStop, settingsGet, settingsSet } from "./api/commands";
 import { onPreview } from "./api/events";
@@ -24,6 +24,11 @@ export default function App() {
   const [sources, setSources] = useState<AddedSource[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({ state: "idle" });
+  // Mirrors activeKey for the event listener (registered once on mount):
+  // stale events from a superseded pump carry the old sourceKey and must not
+  // overwrite the newly selected source's status. Updated synchronously in
+  // the add/select/remove handlers (events can beat React's re-render).
+  const activeKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,7 +52,10 @@ export default function App() {
         if (!cancelled) setSettingsSettled(true);
       });
     const unlisten = onPreview((status) => {
-      if (!cancelled) setPreviewStatus(status);
+      if (cancelled) return;
+      // Keyed events must match the active card; unkeyed ones (idle) always apply.
+      if (status.sourceKey && status.sourceKey !== activeKeyRef.current) return;
+      setPreviewStatus(status);
     }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -59,17 +67,24 @@ export default function App() {
     const key = `src-${nextSourceKey++}`;
     setSources((current) => [...current, { key, label, source }]);
     setActiveKey(key);
+    // Synchronously, not just at re-render: the pump's first event can
+    // arrive before React commits, and it must not be filtered out.
+    activeKeyRef.current = key;
     previewStart(source, key).catch((err) => console.error("preview start failed:", err));
   }, []);
 
   const selectSource = useCallback(
     (key: string) => {
       const entry = sources.find((added) => added.key === key);
-      if (!entry || key === activeKey) return;
+      if (!entry) return;
+      // Clicking the active card is a no-op while it works — but when it
+      // errored (e.g. a permission was just granted), a click retries it.
+      if (key === activeKey && previewStatus.state !== "error") return;
       setActiveKey(key);
+      activeKeyRef.current = key;
       previewStart(entry.source, key).catch((err) => console.error("preview start failed:", err));
     },
-    [sources, activeKey],
+    [sources, activeKey, previewStatus.state],
   );
 
   const removeSource = useCallback(
@@ -77,13 +92,17 @@ export default function App() {
       setSources((current) => current.filter((added) => added.key !== key));
       if (key === activeKey) {
         setActiveKey(null);
+        activeKeyRef.current = null;
         previewStop().catch(() => undefined);
       }
     },
     [activeKey],
   );
 
-  const activeKind = sources.find((added) => added.key === activeKey)?.source.kind;
+  const activeSource = sources.find((added) => added.key === activeKey)?.source;
+  const activeKind = activeSource?.kind;
+  // Cameras are exclusive — the picker must not probe one that's live.
+  const liveWebcamId = activeSource?.kind === "webcam" ? activeSource.id : undefined;
 
   const showStats = settingsSettled && (settings?.showStatsDock ?? true);
 
@@ -140,6 +159,7 @@ export default function App() {
             sources={sources}
             activeKey={activeKey}
             status={previewStatus}
+            liveWebcamId={liveWebcamId}
             onAdd={addSource}
             onSelect={selectSource}
             onRemove={removeSource}

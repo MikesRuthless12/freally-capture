@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use windows::core::Interface;
+use windows::Win32::Foundation::E_ACCESSDENIED;
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
     D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
@@ -54,21 +55,79 @@ pub(crate) fn run(device_name: &str, sender: FrameSender, stop: Arc<AtomicBool>)
     }
 }
 
-fn run_inner(
-    device_name: &str,
-    sender: &FrameSender,
-    stop: &AtomicBool,
-) -> Result<(), CaptureError> {
+/// How long we keep retrying when the display can't be found / duplicated
+/// for reasons *other* than a secure desktop before giving up honestly.
+const RECOVERY_DEADLINE: Duration = Duration::from_secs(10);
+const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+
+/// A duplication session: everything must live on the *same* adapter, so all
+/// three are recreated together on recovery (a display can migrate adapters
+/// on hybrid GPUs / re-plugs).
+struct Duplication {
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
+    duplication: IDXGIOutputDuplication,
+}
+
+fn open_duplication(device_name: &str) -> Result<Duplication, CaptureError> {
     let (adapter, output) = super::find_output_by_name(device_name)?;
     let (device, context) = super::create_d3d_device(Some(&adapter))?;
     let output1: IDXGIOutput1 = output
         .cast()
         .map_err(|err| CaptureError::Backend(format!("IDXGIOutput1: {err}")))?;
-
     // SAFETY: duplication against the device created on this output's adapter.
-    let mut duplication: IDXGIOutputDuplication =
-        unsafe { output1.DuplicateOutput(&device) }.map_err(map_duplicate_error)?;
+    let duplication: IDXGIOutputDuplication =
+        unsafe { output1.DuplicateOutput(&device) }.map_err(|err| {
+            if err.code() == E_ACCESSDENIED {
+                // A secure desktop (UAC prompt, lock screen, Ctrl+Alt+Del) is
+                // active — duplication is temporarily forbidden, not broken.
+                CaptureError::PermissionDenied
+            } else {
+                CaptureError::Backend(format!("DuplicateOutput: {err}"))
+            }
+        })?;
+    Ok(Duplication {
+        device,
+        context,
+        duplication,
+    })
+}
 
+/// (Re)open the duplication, waiting out secure desktops (UAC / lock screen —
+/// those can last as long as the user leaves them up) and giving transient
+/// failures [`RECOVERY_DEADLINE`] to resolve.
+fn open_duplication_with_retry(
+    device_name: &str,
+    stop: &AtomicBool,
+    sender: &FrameSender,
+) -> Result<Option<Duplication>, CaptureError> {
+    let deadline = Instant::now() + RECOVERY_DEADLINE;
+    loop {
+        if stop.load(Ordering::Relaxed) || !sender.is_open() {
+            return Ok(None);
+        }
+        match open_duplication(device_name) {
+            Ok(session) => return Ok(Some(session)),
+            // Secure desktop: retry until it goes away (or we're stopped).
+            Err(CaptureError::PermissionDenied) => {}
+            Err(err) if Instant::now() >= deadline => return Err(err),
+            Err(_) => {}
+        }
+        std::thread::sleep(RECOVERY_RETRY_INTERVAL);
+    }
+}
+
+fn run_inner(
+    device_name: &str,
+    sender: &FrameSender,
+    stop: &AtomicBool,
+) -> Result<(), CaptureError> {
+    // The retry wrapper also covers starting *during* a secure desktop
+    // (frames begin the moment it clears); bad sources still fail within
+    // the recovery deadline.
+    let Some(mut session) = open_duplication_with_retry(device_name, stop, sender)? else {
+        return Ok(()); // stopped before the first frame
+    };
     let mut staging: Option<(u32, u32, ID3D11Texture2D)> = None;
     let mut pointer = PointerState {
         visible: false,
@@ -82,26 +141,30 @@ fn run_inner(
         let mut resource: Option<IDXGIResource> = None;
         // SAFETY: out-params are locals; on success the frame is released
         // below before the next acquire.
-        let acquired =
-            unsafe { duplication.AcquireNextFrame(ACQUIRE_TIMEOUT_MS, &mut info, &mut resource) };
+        let acquired = unsafe {
+            session
+                .duplication
+                .AcquireNextFrame(ACQUIRE_TIMEOUT_MS, &mut info, &mut resource)
+        };
 
         match acquired {
             Ok(()) => {}
             Err(err) if err.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
             Err(err) if err.code() == DXGI_ERROR_ACCESS_LOST => {
-                // Mode switch / fullscreen exclusive handoff: re-duplicate.
-                drop(duplication);
-                std::thread::sleep(Duration::from_millis(100));
-                let (adapter, output) = super::find_output_by_name(device_name)?;
-                let _ = adapter;
-                let output1: IDXGIOutput1 = output
-                    .cast()
-                    .map_err(|err| CaptureError::Backend(format!("IDXGIOutput1: {err}")))?;
-                // SAFETY: as above.
-                duplication =
-                    unsafe { output1.DuplicateOutput(&device) }.map_err(map_duplicate_error)?;
+                // Mode switch, fullscreen-exclusive handoff, secure desktop,
+                // or an adapter migration: rebuild device + duplication
+                // together (same-adapter rule) and keep waiting out secure
+                // desktops instead of killing the session.
+                drop(session);
                 staging = None;
-                continue;
+                std::thread::sleep(Duration::from_millis(100));
+                match open_duplication_with_retry(device_name, stop, sender)? {
+                    Some(new_session) => {
+                        session = new_session;
+                        continue;
+                    }
+                    None => return Ok(()), // stopped while recovering
+                }
             }
             Err(err) => {
                 return Err(CaptureError::Backend(format!("AcquireNextFrame: {err}")));
@@ -109,7 +172,7 @@ fn run_inner(
         }
 
         let result = (|| -> Result<Option<Frame>, CaptureError> {
-            update_pointer(&duplication, &info, &mut pointer);
+            update_pointer(&session.duplication, &info, &mut pointer);
 
             // A pointer-only update carries no desktop image.
             let Some(resource) = resource.as_ref() else {
@@ -125,11 +188,12 @@ fn run_inner(
             // SAFETY: GetDesc writes into the local out-param.
             unsafe { texture.GetDesc(&mut desc) };
 
-            let staging_tex = ensure_staging(&device, &mut staging, desc.Width, desc.Height)?;
+            let staging_tex =
+                ensure_staging(&session.device, &mut staging, desc.Width, desc.Height)?;
             // SAFETY: same-device resources with identical dimensions/format.
-            unsafe { context.CopyResource(staging_tex, &texture) };
+            unsafe { session.context.CopyResource(staging_tex, &texture) };
             Ok(Some(read_staging(
-                &context,
+                &session.context,
                 staging_tex,
                 desc.Width,
                 desc.Height,
@@ -137,7 +201,7 @@ fn run_inner(
         })();
 
         // SAFETY: every successful acquire is paired with exactly one release.
-        let _ = unsafe { duplication.ReleaseFrame() };
+        let _ = unsafe { session.duplication.ReleaseFrame() };
 
         match result {
             Ok(Some(mut frame)) => {
@@ -149,11 +213,6 @@ fn run_inner(
         }
     }
     Ok(())
-}
-
-fn map_duplicate_error(err: windows::core::Error) -> CaptureError {
-    // E_ACCESSDENIED here usually means a secure desktop (UAC / lock screen).
-    CaptureError::Backend(format!("DuplicateOutput: {err}"))
 }
 
 fn ensure_staging<'t>(

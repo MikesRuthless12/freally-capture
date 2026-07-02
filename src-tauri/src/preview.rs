@@ -171,14 +171,23 @@ pub struct PreviewState {
 
 struct RunningPreview {
     stop: Arc<AtomicBool>,
+    /// True while the pump owns an OS capture handle (camera / duplication).
+    /// Lets a replacement wait briefly for the exclusive device to free up.
+    holds_device: Arc<AtomicBool>,
 }
 
+/// How long a new preview waits for the old pump to release its (exclusive)
+/// OS capture handle before proceeding anyway. Pumps poll their stop flag on
+/// ≤150 ms cycles, so this covers the normal case with room to spare.
+const DEVICE_RELEASE_TIMEOUT: Duration = Duration::from_millis(750);
+
 impl PreviewState {
-    /// Signal the current pump (if any) to wind down. Never joins — a pump
-    /// stuck in the Linux portal dialog must not hang the UI; it exits on its
-    /// own and finds its generation stale.
-    fn signal_stop(&self) {
-        if let Some(running) = self.running.lock().expect("preview state poisoned").take() {
+    /// Signal the current pump (if any) to wind down and return its handles.
+    /// Never joins — a pump stuck in the Linux portal dialog must not hang
+    /// the UI; it exits on its own and finds its generation stale.
+    fn signal_stop(&self) -> Option<RunningPreview> {
+        let previous = self.running.lock().expect("preview state poisoned").take();
+        if let Some(running) = &previous {
             running.stop.store(true, Ordering::Relaxed);
         }
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -186,6 +195,7 @@ impl PreviewState {
             .lock()
             .expect("preview frame slot poisoned")
             .take();
+        previous
     }
 
     pub fn stop<R: Runtime>(&self, app: &AppHandle<R>) {
@@ -194,25 +204,54 @@ impl PreviewState {
     }
 
     pub fn start<R: Runtime>(&self, app: &AppHandle<R>, source: PreviewSource, source_key: String) {
-        self.signal_stop();
+        let previous = self.signal_stop();
+        // Exclusive-device handoff: cameras and display duplication reject a
+        // second opener, so give the old pump a bounded moment to let go
+        // (a pump that never acquired a device — e.g. one parked in the
+        // portal dialog — has holds_device = false and costs no wait).
+        if let Some(previous) = previous {
+            let deadline = Instant::now() + DEVICE_RELEASE_TIMEOUT;
+            while previous.holds_device.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
         let my_gen = self.generation.load(Ordering::SeqCst);
         let stop = Arc::new(AtomicBool::new(false));
+        let holds_device = Arc::new(AtomicBool::new(false));
         *self.running.lock().expect("preview state poisoned") = Some(RunningPreview {
             stop: Arc::clone(&stop),
+            holds_device: Arc::clone(&holds_device),
         });
 
-        let app = app.clone();
+        let app_thread = app.clone();
         let latest = Arc::clone(&self.latest);
         let generation = Arc::clone(&self.generation);
         let frame_seq = Arc::clone(&self.frame_seq);
-        std::thread::Builder::new()
+        let error_key = source_key.clone();
+        let spawned = std::thread::Builder::new()
             .name("fcap-preview-pump".into())
             .spawn(move || {
                 pump(
-                    app, source, source_key, latest, generation, frame_seq, my_gen, stop,
+                    app_thread,
+                    source,
+                    source_key,
+                    latest,
+                    generation,
+                    frame_seq,
+                    my_gen,
+                    stop,
+                    holds_device,
                 )
-            })
-            .ok();
+            });
+        if let Err(err) = spawned {
+            // Never leave the UI stuck on "waiting" with no pump behind it.
+            self.running.lock().expect("preview state poisoned").take();
+            let mut status = PreviewStatus::new("error", &error_key, "preview");
+            status.error_code = Some("backend");
+            status.error_message = Some(format!("could not start the preview thread: {err}"));
+            let _ = app.emit("preview", status);
+        }
     }
 
     /// The `preview://` scheme body: newest JPEG or 204 while there is none.
@@ -261,6 +300,7 @@ fn pump<R: Runtime>(
     frame_seq: Arc<AtomicU64>,
     my_gen: u64,
     stop: Arc<AtomicBool>,
+    holds_device: Arc<AtomicBool>,
 ) {
     let label = source.label();
     let current = |status: PreviewStatus| {
@@ -283,8 +323,12 @@ fn pump<R: Runtime>(
             return;
         }
     };
+    // From here the pump owns an exclusive OS capture handle; a replacement
+    // start() waits for this flag before re-opening the same device.
+    holds_device.store(true, Ordering::Release);
     if stop.load(Ordering::Relaxed) {
         session.stop();
+        holds_device.store(false, Ordering::Release);
         return;
     }
 
@@ -317,11 +361,16 @@ fn pump<R: Runtime>(
                         PREVIEW_MAX_HEIGHT,
                         PREVIEW_JPEG_QUALITY,
                     ) {
+                        // The generation check happens *inside* the slot lock:
+                        // signal_stop bumps the generation before clearing the
+                        // slot, so a superseded pump can never park a stale
+                        // frame after the new session's slot was prepared.
+                        let mut slot = latest.lock().expect("preview frame slot poisoned");
                         if generation.load(Ordering::SeqCst) == my_gen {
                             let seq = frame_seq.fetch_add(1, Ordering::Relaxed) + 1;
-                            *latest.lock().expect("preview frame slot poisoned") =
-                                Some(EncodedFrame { jpeg, seq });
+                            *slot = Some(EncodedFrame { jpeg, seq });
                         }
+                        drop(slot);
                         last_encode = Instant::now();
                     }
                 }
@@ -353,6 +402,7 @@ fn pump<R: Runtime>(
         }
     }
     session.stop();
+    holds_device.store(false, Ordering::Release);
 }
 
 /// Downscale (integer nearest-neighbor) + convert to RGB + JPEG-encode.

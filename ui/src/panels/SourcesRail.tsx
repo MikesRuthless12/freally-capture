@@ -21,6 +21,9 @@ type SourcesRailProps = {
   sources: AddedSource[];
   activeKey: string | null;
   status: PreviewStatus;
+  /** The device id of the webcam currently live in the preview, if any —
+   * cameras are exclusive, so the picker must not probe that one. */
+  liveWebcamId?: string;
   onAdd: (source: PreviewSource, label: string) => void;
   onSelect: (key: string) => void;
   onRemove: (key: string) => void;
@@ -40,6 +43,7 @@ export function SourcesRail({
   sources,
   activeKey,
   status,
+  liveWebcamId,
   onAdd,
   onSelect,
   onRemove,
@@ -165,6 +169,7 @@ export function SourcesRail({
         />
       ) : picker === "webcam" ? (
         <WebcamPicker
+          liveWebcamId={liveWebcamId}
           onClose={() => setPicker(null)}
           onPick={(source, label) => {
             setPicker(null);
@@ -304,9 +309,11 @@ function CapturePicker({
 }
 
 function WebcamPicker({
+  liveWebcamId,
   onClose,
   onPick,
 }: {
+  liveWebcamId?: string;
   onClose: () => void;
   onPick: (source: PreviewSource, label: string) => void;
 }) {
@@ -334,8 +341,12 @@ function WebcamPicker({
     };
   }, []);
 
+  const selectedIsLive = selected !== null && selected.id === liveWebcamId;
+
   useEffect(() => {
-    if (!selected) return;
+    // Probing opens the device — never do that to the camera that's already
+    // live in the preview (exclusive access would fail or disrupt it).
+    if (!selected || selected.id === liveWebcamId) return;
     let cancelled = false;
     const deviceId = selected.id;
     videoDeviceFormats(deviceId)
@@ -349,10 +360,15 @@ function WebcamPicker({
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, liveWebcamId]);
 
-  /** `null` = still loading for the selected device. */
-  const formats = selected && formatsFor?.deviceId === selected.id ? formatsFor.list : null;
+  /** `null` = still loading for the selected device; live devices skip
+   * probing entirely and offer "Auto" only. */
+  const formats = selectedIsLive
+    ? []
+    : selected && formatsFor?.deviceId === selected.id
+      ? formatsFor.list
+      : null;
 
   const add = () => {
     if (!selected) return;
@@ -411,6 +427,12 @@ function WebcamPicker({
                   ))}
                 </select>
               </label>
+              {selectedIsLive && (
+                <p className="m-0 text-[11px] leading-relaxed text-havoc-muted">
+                  This camera is live in the preview, so its formats can’t be probed right now —
+                  “Auto” will be used.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={add}

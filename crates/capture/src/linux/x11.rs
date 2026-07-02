@@ -241,6 +241,22 @@ fn run_inner(target: Target, sender: &FrameSender, stop: &AtomicBool) -> Result<
                 image.depth
             )));
         }
+        // Depth 24 can still be *packed* 3-bytes-per-pixel on some servers
+        // (Xvfb/legacy drivers). Fail honestly instead of silently skipping
+        // every under-sized reply forever.
+        let bits_per_pixel = conn
+            .setup()
+            .pixmap_formats
+            .iter()
+            .find(|format| format.depth == image.depth)
+            .map(|format| format.bits_per_pixel)
+            .unwrap_or(32);
+        if bits_per_pixel != 32 {
+            return Err(CaptureError::Unsupported(format!(
+                "X pixmap layout {bits_per_pixel} bpp at depth {} is not supported (need 32 bpp)",
+                image.depth
+            )));
+        }
 
         let stride = (width as u32) * 4;
         let needed = stride as usize * height as usize;

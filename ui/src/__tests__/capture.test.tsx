@@ -152,6 +152,59 @@ describe("capture sources + preview", () => {
     });
   });
 
+  it("retries an errored source when its card is clicked again", async () => {
+    render(<App />);
+    await addDisplaySource();
+    await waitFor(() => expect(listeners.has("preview")).toBe(true));
+    const start = invokeCalls.find((c) => c.cmd === "preview_start")!.args as {
+      sourceKey: string;
+    };
+
+    act(() => {
+      listeners.get("preview")!({
+        payload: { state: "error", sourceKey: start.sourceKey, errorCode: "backend" },
+      });
+    });
+    const startsBefore = invokeCalls.filter((c) => c.cmd === "preview_start").length;
+    act(() => {
+      screen.getByRole("button", { name: /^Display Display 1/ }).click();
+    });
+    await waitFor(() => {
+      expect(invokeCalls.filter((c) => c.cmd === "preview_start").length).toBe(startsBefore + 1);
+    });
+  });
+
+  it("ignores preview events keyed to a superseded source", async () => {
+    render(<App />);
+    await addDisplaySource();
+    await waitFor(() => expect(listeners.has("preview")).toBe(true));
+    const start = invokeCalls.find((c) => c.cmd === "preview_start")!.args as {
+      sourceKey: string;
+    };
+
+    act(() => {
+      listeners.get("preview")!({
+        payload: {
+          state: "live",
+          sourceKey: start.sourceKey,
+          label: DISPLAY.label,
+          width: 2560,
+          height: 1440,
+        },
+      });
+    });
+    expect(await screen.findByRole("img", { name: /live preview/i })).toBeInTheDocument();
+
+    // A stale pump (different sourceKey) reports an error — must be ignored.
+    act(() => {
+      listeners.get("preview")!({
+        payload: { state: "error", sourceKey: "stale-key", errorCode: "backend" },
+      });
+    });
+    expect(screen.getByRole("img", { name: /live preview/i })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("stops the preview when the active source is removed", async () => {
     render(<App />);
     await addDisplaySource();

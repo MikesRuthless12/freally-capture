@@ -26,6 +26,41 @@ use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 /// depend on the constant's generated location).
 const PIXEL_FORMAT_BGRA: u32 = u32::from_be_bytes(*b"BGRA");
 
+/// `SCStreamErrorCode.userDeclined` — the TCC "user said no" code. Matching
+/// the code (not the localized description) keeps permission detection
+/// working in every macOS language.
+const SC_ERROR_USER_DECLINED: isize = -3801;
+
+/// What a completion handler reports about an NSError, in a Send-able shape.
+struct ErrorInfo {
+    code: isize,
+    message: String,
+}
+
+impl ErrorInfo {
+    /// SAFETY-free helper: callers pass a live, non-null NSError reference.
+    fn from_ns_error(error: &NSError) -> Self {
+        ErrorInfo {
+            code: error.code(),
+            message: error.localizedDescription().to_string(),
+        }
+    }
+
+    fn into_capture_error(self, context: &str) -> CaptureError {
+        // Primary: the stable error code. Fallback: English substrings, in
+        // case a permission failure arrives under a different domain/code.
+        let lowered = self.message.to_lowercase();
+        if self.code == SC_ERROR_USER_DECLINED
+            || lowered.contains("declined")
+            || lowered.contains("permission")
+        {
+            CaptureError::PermissionDenied
+        } else {
+            CaptureError::Backend(format!("{context}: {}", self.message))
+        }
+    }
+}
+
 pub(crate) enum Target {
     Display(u32),
     Window(u32),
@@ -40,17 +75,20 @@ unsafe impl Send for SendContent {}
 
 /// Fetch the current displays + on-screen windows (blocking, 10 s timeout).
 pub(crate) fn fetch_shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
-    let (tx, rx) = mpsc::channel::<Result<SendContent, String>>();
+    let (tx, rx) = mpsc::channel::<Result<SendContent, ErrorInfo>>();
     let block = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
             let result = if content.is_null() {
-                let msg = if error.is_null() {
-                    "unknown ScreenCaptureKit error".to_string()
+                let info = if error.is_null() {
+                    ErrorInfo {
+                        code: 0,
+                        message: "unknown ScreenCaptureKit error".to_string(),
+                    }
                 } else {
                     // SAFETY: SCK hands a live NSError when content is null.
-                    unsafe { &*error }.localizedDescription().to_string()
+                    ErrorInfo::from_ns_error(unsafe { &*error })
                 };
-                Err(msg)
+                Err(info)
             } else {
                 // SAFETY: retain the non-null snapshot so it outlives the block;
                 // the raw pointer is re-owned via from_raw on the receiving side.
@@ -70,14 +108,7 @@ pub(crate) fn fetch_shareable_content() -> Result<Retained<SCShareableContent>, 
     match rx.recv_timeout(Duration::from_secs(10)) {
         // SAFETY: re-own the pointer retained inside the block.
         Ok(Ok(content)) => Ok(unsafe { Retained::from_raw(content.0) }.expect("non-null")),
-        Ok(Err(msg)) => {
-            let lowered = msg.to_lowercase();
-            if lowered.contains("declined") || lowered.contains("permission") {
-                Err(CaptureError::PermissionDenied)
-            } else {
-                Err(CaptureError::Backend(format!("shareable content: {msg}")))
-            }
-        }
+        Ok(Err(info)) => Err(info.into_capture_error("shareable content")),
         Err(_) => Err(CaptureError::Backend(
             "shareable content lookup timed out".into(),
         )),
@@ -286,28 +317,21 @@ fn run_inner(target: Target, sender: &FrameSender, stop: &AtomicBool) -> Result<
 }
 
 fn start_capture_blocking(stream: &SCStream) -> Result<(), CaptureError> {
-    let (tx, rx) = mpsc::channel::<Option<String>>();
+    let (tx, rx) = mpsc::channel::<Option<ErrorInfo>>();
     let block = RcBlock::new(move |error: *mut NSError| {
-        let msg = if error.is_null() {
+        let info = if error.is_null() {
             None
         } else {
             // SAFETY: live NSError for the duration of the block call.
-            Some(unsafe { &*error }.localizedDescription().to_string())
+            Some(ErrorInfo::from_ns_error(unsafe { &*error }))
         };
-        let _ = tx.send(msg);
+        let _ = tx.send(info);
     });
     // SAFETY: SCK invokes the completion block exactly once.
     unsafe { stream.startCaptureWithCompletionHandler(&block) };
     match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(None) => Ok(()),
-        Ok(Some(msg)) => {
-            let lowered = msg.to_lowercase();
-            if lowered.contains("declined") || lowered.contains("permission") {
-                Err(CaptureError::PermissionDenied)
-            } else {
-                Err(CaptureError::Backend(format!("startCapture: {msg}")))
-            }
-        }
+        Ok(Some(info)) => Err(info.into_capture_error("startCapture")),
         Err(_) => Err(CaptureError::Backend("startCapture timed out".into())),
     }
 }
