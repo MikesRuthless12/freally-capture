@@ -1,0 +1,13 @@
+# fcap-stream — streaming, virtual camera, replay buffer, and the WS remote API.
+[package]
+name = "fcap-stream"
+description = "Freally Capture — RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, the virtual camera, the replay buffer, and the WebSocket remote API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

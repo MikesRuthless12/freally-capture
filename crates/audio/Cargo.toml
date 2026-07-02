@@ -1,0 +1,13 @@
+# fcap-audio — the cpal audio graph, mixer, and filter set.
+[package]
+name = "fcap-audio"
+description = "Freally Capture — the cpal audio graph: mixing, up to 6 tracks, filters, ducking, LUFS, monitoring."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

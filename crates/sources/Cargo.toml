@@ -1,0 +1,13 @@
+# fcap-sources — the source implementations composed onto the canvas.
+[package]
+name = "fcap-sources"
+description = "Freally Capture — source implementations: webcam/capture card, image, text, color, media, browser."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

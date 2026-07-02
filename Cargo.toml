@@ -6,12 +6,17 @@
 #
 # © 2026 Mike Weaver (Havoc Software) — All Rights Reserved. Proprietary, source-available.
 
+# Package-name scheme: the app crate is `freally-capture`; the owned library
+# crates use the `fcap-` prefix (fcap-capture, fcap-compositor, …) so package
+# names never collide with crates.io packages or the app crate itself. The
+# directory names below stay unprefixed, matching the roadmap.
+
 [workspace]
 resolver = "2"
 members = [
     "src-tauri",        # `freally-capture` — Tauri v2 app crate (UI bridge, profiles, license, hotkeys, i18n)
     "crates/capture",   # per-OS screen/window/(game) capture behind a `Capture` interface
-    "crates/sources",   # source model: webcam/capture-card, browser, media, image, text, color, audio, segmentation
+    "crates/sources",   # source model: webcam/capture-card, browser, media, image, text, color, audio
     "crates/compositor", # OWNED wgpu GPU compositor: transforms, blend modes, filter chain, scene transitions
     "crates/scene",     # OWNED scene/source/filter data model (+ serde, scripting hooks)
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
@@ -56,13 +61,8 @@ objc2 = "0.5"           # macOS: ScreenCaptureKit bindings
 ashpd = "0.9"           # Linux: PipeWire portal
 nokhwa = "0.10"         # webcam / capture card
 
-# Audio
+# Audio (denoise is classic DSP — no ML models anywhere, per charter)
 cpal = "0.15"
-nnnoiseless = "0.5"     # RNNoise denoise
-
-# Inference (DeepFilterNet denoise + selfie segmentation) — models fetched on demand
-ort = "2"
-tract-onnx = "0.21"
 
 # Text sources (reuse Freally Snipper font concepts)
 rustybuzz = "0.18"

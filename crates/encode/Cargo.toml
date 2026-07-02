@@ -1,0 +1,13 @@
+# fcap-encode — encoders: hardware + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge.
+[package]
+name = "fcap-encode"
+description = "Freally Capture — the Encoder interface: hardware encoders (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox), x264 fallback, the owned freally-video lossless codec, and the on-demand ffmpeg wire-codec bridge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

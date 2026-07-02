@@ -1,0 +1,13 @@
+# fcap-compositor — the OWNED wgpu GPU compositor (the engine).
+[package]
+name = "fcap-compositor"
+description = "Freally Capture — the owned wgpu GPU compositor: per-source transforms, blend modes, the video filter chain, and scene transitions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

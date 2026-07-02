@@ -1,0 +1,13 @@
+# fcap-capture — per-OS screen/window/(game) capture behind the `Capture` interface.
+[package]
+name = "fcap-capture"
+description = "Freally Capture — per-OS screen/window/(game) capture behind a single `Capture` interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]

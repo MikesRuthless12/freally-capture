@@ -1,0 +1,13 @@
+# fcap-scene — the OWNED scene/source/filter data model.
+[package]
+name = "fcap-scene"
+description = "Freally Capture — the owned scene/source/filter data model (serde-serialized, shared across scenes, scripting hooks)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
