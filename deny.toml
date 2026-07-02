@@ -6,10 +6,31 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-# Keep any `ignore` entries here in lockstep with the cargo-audit --ignore
-# flags in .github/workflows/ci.yml — update both atomically, with a comment
-# explaining each exception.
-ignore = []
+# Every entry below is an UNMAINTAINED-class advisory (no vulnerability):
+# `cargo audit` reports them as warnings and stays green. They come with
+# Tauri v2's Linux webview stack, which still binds GTK3 — the gtk-rs GTK3
+# bindings (RUSTSEC-2024-0411..0420) are archived upstream, plus a handful
+# of unmaintained transitive utility crates in the same tree. Tauri's GTK4
+# migration removes these; revisit on Tauri upgrades. None are reachable
+# vulnerabilities; the same set is ignored across the Freally repos.
+ignore = [
+  "RUSTSEC-2024-0370", # proc-macro-error — unmaintained (tauri macro tree)
+  "RUSTSEC-2024-0411", # gtk-rs GTK3 bindings — archived upstream
+  "RUSTSEC-2024-0412",
+  "RUSTSEC-2024-0413",
+  "RUSTSEC-2024-0414",
+  "RUSTSEC-2024-0415",
+  "RUSTSEC-2024-0416",
+  "RUSTSEC-2024-0417",
+  "RUSTSEC-2024-0418",
+  "RUSTSEC-2024-0419",
+  "RUSTSEC-2024-0420",
+  "RUSTSEC-2025-0075", # unmaintained transitive crates in the tauri tree
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
+]
 
 [licenses]
 # The workspace's own crates are proprietary (publish = false) — license
