@@ -25,8 +25,12 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`wgpu`](https://github.com/gfx-rs/wgpu) | GPU compositor backend (owned compositor crate) | MIT OR Apache-2.0 |
 | [`windows`](https://crates.io/crates/windows) (windows-rs) *(Windows only)* | DXGI + Windows.Graphics.Capture (screen/window capture) | MIT OR Apache-2.0 |
 | [`objc2`](https://crates.io/crates/objc2) + ScreenCaptureKit bindings *(macOS only)* | screen/window + system-audio capture | MIT OR Apache-2.0 |
-| [`ashpd`](https://crates.io/crates/ashpd) (+ PipeWire) *(Linux only)* | portal screen capture | MIT |
-| [`nokhwa`](https://crates.io/crates/nokhwa) | webcam / capture-card input | Apache-2.0 OR MIT |
+| [`ashpd`](https://crates.io/crates/ashpd) *(Linux only)* | ScreenCast portal negotiation (Wayland-safe capture) | MIT |
+| [`pipewire`](https://crates.io/crates/pipewire) (pipewire-rs) *(Linux only)* | consume the portal's video stream (links system libpipewire) | MIT |
+| [`x11rb`](https://crates.io/crates/x11rb) *(Linux only)* | direct X11 screen/window capture | MIT OR Apache-2.0 |
+| [`nokhwa`](https://crates.io/crates/nokhwa) | webcam / capture-card input | Apache-2.0 |
+| [`mozjpeg`](https://crates.io/crates/mozjpeg) (via `nokhwa`) | MJPEG webcam-frame decode | IJG AND Zlib AND BSD-3-Clause |
+| [`jpeg-encoder`](https://crates.io/crates/jpeg-encoder) | preview-frame JPEG encoding (the in-app preview pipe) | (MIT OR Apache-2.0) AND IJG |
 | [`cpal`](https://crates.io/crates/cpal) | audio capture + output graph (the filter set, incl. classic-DSP denoise, is owned — no ML) | Apache-2.0 |
 | [`rustybuzz`](https://crates.io/crates/rustybuzz) + [Noto fonts](https://fonts.google.com/noto) | text-source shaping (incl. RTL) + bundled fonts (reused from Freally Snipper) | MIT / SIL OFL 1.1 |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
@@ -36,7 +40,10 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |
 | [`fluent`](https://crates.io/crates/fluent) / `fluent-bundle` | i18n catalogs (18 locales) | Apache-2.0 OR MIT |
 
-Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL.
+Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL / IJG.
+
+> **IJG acknowledgment** (required by the libjpeg-lineage license of `mozjpeg` and `jpeg-encoder`):
+> this software is based in part on the work of the **Independent JPEG Group**.
 
 > **Linux note:** the Tauri webview links **WebKitGTK**; capture links **PipeWire**, and the build links
 > `libwayland`, `libxcb`, `libgtk-3`, `libasound2`, `libv4l`, and related system libraries (see

@@ -6,10 +6,12 @@
 //! (embedded webview at a set resolution/fps), image slideshow, and source
 //! groups. (No ML-based sources — AI features are excluded by charter.)
 //!
-//! **Phase 0 stub** — the crate boundary exists; webcam/capture-card lands in
-//! Phase 1 (→ 0.25.0), the remaining sources in Phase 2 (→ 0.40.0).
+//! Webcam / capture-card (Phase 1) lives in [`video_device`]; the remaining
+//! sources land in Phase 2 (→ 0.40.0).
 
 #![forbid(unsafe_code)]
+
+pub mod video_device;
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

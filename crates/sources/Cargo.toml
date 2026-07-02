@@ -11,3 +11,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+fcap-capture = { path = "../capture" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Webcams + capture cards; `input-native` = MSMF (Windows), AVFoundation
+# (macOS), V4L2 (Linux). The default `decoding` feature handles MJPEG/YUYV.
+nokhwa = { workspace = true, features = ["input-native"] }
