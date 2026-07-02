@@ -31,7 +31,6 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`rustybuzz`](https://crates.io/crates/rustybuzz) + [Noto fonts](https://fonts.google.com/noto) | text-source shaping (incl. RTL) + bundled fonts (reused from Freally Snipper) | MIT / SIL OFL 1.1 |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
 | [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
-| [`ed25519-dalek`](https://crates.io/crates/ed25519-dalek) | offline license verification | BSD-3-Clause |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |

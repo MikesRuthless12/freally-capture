@@ -14,7 +14,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "src-tauri",        # `freally-capture` — Tauri v2 app crate (UI bridge, profiles, license, hotkeys, i18n)
+    "src-tauri",        # `freally-capture` — Tauri v2 app crate (UI bridge, profiles, hotkeys, i18n)
     "crates/capture",   # per-OS screen/window/(game) capture behind a `Capture` interface
     "crates/sources",   # source model: webcam/capture-card, browser, media, image, text, color, audio
     "crates/compositor", # OWNED wgpu GPU compositor: transforms, blend modes, filter chain, scene transitions
@@ -70,8 +70,7 @@ rustybuzz = "0.18"
 # Streaming / remote API
 tungstenite = "0.23"
 
-# Licensing / config / hotkeys / i18n
-ed25519-dalek = "2"
+# Config / hotkeys / i18n
 directories = "5"
 global-hotkey = "0.6"
 fluent = "0.16"

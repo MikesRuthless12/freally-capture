@@ -38,7 +38,7 @@ Freally Capture works **fully offline** for building scenes, composing, recordin
   streaming platforms and some exports require), fetched from its third-party
   distributor. The Software contains **no AI/ML features and downloads no
   models**;
-- **an optional license check** (Pro activation) and an **optional update check**.
+- **an optional update check**.
 
 These downloads transfer the component **to** your machine; they are initiated by
 your action, and **no personal data or content is sent** as part of them beyond

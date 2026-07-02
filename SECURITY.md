@@ -31,7 +31,7 @@ remediate before any public disclosure.
 
 - **Local-first:** the core never transmits your captures or recordings. The outbound network actions
   are *limited and explicit* — the **stream targets you configure**, the optional **ffmpeg / model
-  downloads**, the optional **license check**, and the optional **update check**.
+  downloads** and the optional **update check**.
 - **No account / no cloud video path:** there is no login and no server-side video. Streams are muxed
   on-device and sent **directly** to each platform you configured; there is no restream relay we run.
 - **Capture surface:** screen / window / game / webcam frames stay **in-process** and go only to the
@@ -57,8 +57,6 @@ remediate before any public disclosure.
   hostile file fails cleanly instead of exhausting memory; the owned codec is `#![forbid(unsafe_code)]`.
 - **Subprocess execution:** where ffmpeg is invoked as a subprocess, arguments are passed as an **argv
   vector (no shell)**, and temp files use per-process-unique names removed after use.
-- **License keys:** verified offline using **Ed25519** against a public key embedded at build time
-  (not overridable by config). The raw key is **never stored** — only `sha256(key)`.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; we track and update them, and intend to run `cargo audit` / `cargo deny` in CI as the
   project matures.

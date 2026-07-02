@@ -40,17 +40,16 @@ _Nothing yet — 0.25.0 (capture core) is next._
 
 ### Planned — 0.70.0 (Studio MVP — first public)
 - Single-target live streaming (RTMP/RTMPS) to Twitch/YouTube/Kick/Facebook/Trovo/custom, with auto-reconnect and stream delay; the main recording continues regardless of stream state.
-- Studio Mode (preview/program) + transitions (cut/fade/slide/swipe/stinger/luma-wipe); the virtual camera (per-OS); global hotkeys; profiles + scene collections; the stats dock.
-- Free/Pro gating scaffold + the offline Ed25519 license. **First public build.**
+- Studio Mode (preview/program) + transitions (cut/fade/slide/swipe/stinger/luma-wipe); the virtual camera (per-OS); global hotkeys; profiles + scene collections; the stats dock. **First public build — completely free, like every Freally app.**
 
 ### Planned — 0.85.0 (Multistream / SRT / WHIP + scene/source/encoder depth)
-- Simultaneous multistream to several targets (Pro), direct to each platform; SRT and WHIP protocols; vertical/multi-canvas output.
+- Simultaneous multistream to several targets, direct to each platform; SRT and WHIP protocols; vertical/multi-canvas output.
 - The rolling replay buffer with presets; nested scenes, source groups + per-scene audio; an image-slideshow source + capture-card presets; color/luma-key + render-delay filters; high-FPS/4K output, color-space handling + output downscale; recording-side stream markers; virtual-camera depth (single-source + audio); premium stinger + luma packs; advanced filters.
 
 ### Planned — 1.0.0 (Remote API, scripting, game capture & launch)
 - The WebSocket remote-control API (Stream Deck / Companion-style) + browser docks; Lua/JS scripting + a plugin SDK.
 - Game capture (DX/GL/Vulkan GPU-API hooking, flagged honestly); optional NDI + VST.
-- Stripe/PayPal one-time Pro keys; signed/notarized installers (Win MSI/NSIS, macOS .app/.dmg + the virtual-camera plugin, Linux AppImage/.deb/.rpm/Flatpak) + self-hosted auto-update.
+- Signed/notarized installers (Win MSI/NSIS, macOS .app/.dmg + the virtual-camera plugin, Linux AppImage/.deb/.rpm/Flatpak) + self-hosted auto-update.
 - Accessibility (keyboard-first, screen-reader-labeled, high-contrast) and UI localization into 18 languages (`ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk vi zh-CN`, English first, RTL Arabic); onboarding + templates.
 
 [Unreleased]: https://github.com/MikesRuthless12/freally-capture/commits/main

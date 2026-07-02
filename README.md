@@ -21,7 +21,7 @@ leaves your machine is the stream you chose to send.
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
 > telemetry**, and **no cloud restreaming we run** — your stream goes **direct to the platform**. The
-> only network actions are the **stream targets you configure**, an optional **license check**, an
+> only network actions are the **stream targets you configure**, an
 > optional **update check**, and the on-demand download of one clearly-labeled, non-bundled component:
 > **ffmpeg** (for the patent-encumbered wire codecs the platforms require). There are **no AI/ML
 > features and no model downloads**. See [`PRIVACY.md`](PRIVACY.md) and
@@ -32,7 +32,7 @@ leaves your machine is the stream you chose to send.
 1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, text, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur, mask, sharpen) and scene **transitions** (cut/fade/slide/stinger/luma-wipe).
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
-4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — and on **Pro**, **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
+4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — including **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
 5. **Extras** — a **virtual camera** (your produced feed as a webcam in Zoom/Meet/Discord), a rolling **replay buffer** with a save hotkey, **global hotkeys** for everything, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, **scripting** (Lua/JS), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
 
 It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
@@ -57,8 +57,8 @@ Freally Capture is **proprietary, source-available** software — **© 2026 Mike
 Reserved.** The source is **public so you can read it and build/run it for your own personal
 evaluation**, but it is **not open source**: you may not copy, modify, redistribute, or reuse it. See
 [`LICENSE`](LICENSE). Bundled third-party components keep their own licenses — see
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). The pre-built application is free to download and run
-(Free tier); **Pro** is a one-time license that unlocks the extras.
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). The pre-built application is **completely free to
+download and run — every feature, for everyone. No paid tier, no payments, no license keys, no ads.**
 
 ## Security & privacy
 
@@ -80,13 +80,16 @@ Windows.Graphics.Capture, **macOS** ScreenCaptureKit, **Linux** PipeWire portal 
 **`nokhwa`** · audio via **`cpal`** (+ owned classic-DSP filters incl. denoise — no ML) · the **owned `freally-video`**
 lossless codec · hardware encoders (**NVENC/Quick Sync/AMF/VAAPI/VideoToolbox**) + **x264** fallback · a
 clearly-labeled, on-demand **ffmpeg** bridge for the patent-encumbered wire codecs · the **WebSocket
-remote API** via **`tungstenite`** · offline **Ed25519** license keys · **Stripe**/PayPal one-time Pro
-keys · the **Tauri bundler** per-OS installers.
+remote API** via **`tungstenite`** · the **Tauri bundler** per-OS installers.
 
-## Editions
+## Free for everyone
 
-- **Free** — full scenes/sources/compositor, all core video + audio filters, multi-track recording (hardware encoders + `freally-video` lossless), **single-target** live streaming (RTMP/RTMPS), the **virtual camera**, Studio Mode + core transitions, and a basic replay save. The core promise — build a scene, record, and go live — is free for everyone.
-- **Pro** *(one-time license, like Copy That)* — **multistream to many targets**, **SRT/WHIP**, advanced filters/scripting/plugins, **replay-buffer presets**, **premium stinger + luma-wipe packs**, **remote-control automation**, **vertical/multi-canvas output**, and priority support. Unlocked by an offline signed key — no account required.
+**Everything is free.** There is no Pro tier, no payments, no license keys, no ads, and no account —
+the full studio for everyone: scenes/sources/compositor, all video + audio filters, multi-track
+recording (hardware encoders + `freally-video` lossless), streaming **including multistream to many
+targets** and **SRT/WHIP**, the **virtual camera**, Studio Mode + all transitions (including the
+stinger/luma packs), the **replay buffer with presets**, **vertical/multi-canvas output**, scripting/
+plugins, and **remote-control automation**.
 
 ## Requirements
 

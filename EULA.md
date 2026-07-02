@@ -18,16 +18,15 @@ revocable license to install and use the Software for your own lawful purposes.
 No ownership rights are transferred. You may not sell, sublicense, rent, lease, or
 redistribute the Software.
 
-A free tier is provided at no charge. Certain "Pro" features are unlocked by a
-separate, paid, one-time, offline license key issued to you. The license key is
-for your use; you may not share, resell, or redistribute it.
+The Software is provided **free of charge, in full** — every feature, for
+everyone. There is no paid tier, no license key, no in-app purchase, and no
+advertising.
 
 ## 2. Restrictions
 Except to the extent applicable law expressly permits, you may not: (a) reverse
 engineer, decompile, or disassemble the Software; (b) remove or alter any
 proprietary notices; (c) copy the Software to develop a competing product;
-(d) circumvent the license/edition gating; or (e) use the Software in violation of
-any law.
+or (d) use the Software in violation of any law.
 
 ## 3. Your content, your streams, and your responsibility
 The Software is a general-purpose tool for capturing, composing, recording,
@@ -91,8 +90,7 @@ INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR ANY LO
 OF DATA, RECORDINGS, STREAMS, PROFITS, OR GOODWILL, ARISING OUT OF OR RELATED TO
 THE SOFTWARE OR THIS AGREEMENT, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 DAMAGES. THE LICENSOR'S TOTAL LIABILITY WILL NOT EXCEED THE AMOUNT YOU PAID FOR
-THE SOFTWARE (WHICH, FOR THE FREE TIER, IS ZERO; AND FOR PRO, THE ONE-TIME LICENSE
-FEE YOU PAID).
+THE SOFTWARE (WHICH IS ZERO — THE SOFTWARE IS FREE OF CHARGE).
 
 ## 8. Termination
 This license terminates automatically if you breach it. On termination you must
