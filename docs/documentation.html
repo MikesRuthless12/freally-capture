@@ -319,7 +319,7 @@
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/SECURITY.md">SECURITY.md</a><p>The security policy and how to report a vulnerability privately, plus the per-surface security posture.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/PRIVACY.md">PRIVACY.md</a><p>The privacy policy (DRAFT): no accounts, no telemetry, capture stays local, streams go only to the targets you set.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/EULA.md">EULA.md</a><p>The end-user license agreement (DRAFT): the intended terms of use, your-content responsibility, and the codec/patent notice.</p></li>
-            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a><p>Attribution for bundled, downloaded, and driven components (ffmpeg/wire codecs, wgpu, RNNoise, MediaPipe, hardware encoders) and the owned-component note.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a><p>Attribution for bundled, downloaded, and driven components (ffmpeg/wire codecs, wgpu, hardware encoders) and the owned-component note.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/CHANGELOG.md">CHANGELOG.md</a><p>The Keep-a-Changelog history. Currently "Unreleased" — the roadmap to 1.0.0.</p></li>
             <li><a href="changelog.html">changelog.html</a><p>The public Releases &amp; Updates changelog page (this site).</p></li>
           </ul>
@@ -385,7 +385,7 @@
           <ol class="steps">
             <li><span>Each audio source appears as a channel strip in the <strong>Mixer</strong> — name, VU meter, fader, mute, monitor, filters, and track dots (1–6).</span></li>
             <li><span>Drag a fader to set level; click <strong>mute</strong> or <strong>monitor</strong> as needed; assign the source to any subset of the 6 tracks.</span></li>
-            <li><span>Open a source's <strong>filters</strong> and add <strong>Denoise</strong> (RNNoise/DeepFilterNet), <strong>Noise Gate</strong>, <strong>Compressor</strong>, <strong>Limiter</strong>, <strong>EQ</strong>, or <strong>Gain</strong>.</span></li>
+            <li><span>Open a source's <strong>filters</strong> and add <strong>Denoise</strong> (classic DSP — no ML), <strong>Noise Gate</strong>, <strong>Compressor</strong>, <strong>Limiter</strong>, <strong>EQ</strong>, or <strong>Gain</strong>.</span></li>
             <li><span>Bind a <strong>push-to-talk</strong> or <strong>push-to-mute</strong> hotkey; watch the <strong>LUFS</strong> meter for program loudness.</span></li>
           </ol>
           <div class="warn"><strong>macOS note:</strong> macOS doesn't hand apps "what you hear" on its own. Use ScreenCaptureKit audio (macOS 13+) where available, or install a virtual device such as BlackHole and select it as your system-audio source. Freally Capture guides you and keeps recording even if a source can't open.</div>

@@ -64,9 +64,9 @@ the Software, or your breach of this Agreement.
 
 ## 5. Optional components and media formats
 The Software can use optional, separately-licensed components (listed in
-`THIRD-PARTY-NOTICES.md`), some downloaded on demand — notably **ffmpeg** (for the
-patent-encumbered "wire" codecs used to stream and to export certain formats) and
-optional machine-learning models (e.g. for the webcam virtual background). Some
+`THIRD-PARTY-NOTICES.md`), downloaded on demand — notably **ffmpeg** (for the
+patent-encumbered "wire" codecs used to stream and to export certain formats).
+The Software contains no machine-learning components and downloads no models. Some
 media formats — notably **H.264/AVC, AAC, HEVC, and AV1** — are covered by patents
 held by third parties, and your use of those formats (for streaming or export) may
 be subject to those third parties' terms. The Licensor's owned **`freally-video`**

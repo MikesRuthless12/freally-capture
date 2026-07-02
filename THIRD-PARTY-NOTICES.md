@@ -27,9 +27,7 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`objc2`](https://crates.io/crates/objc2) + ScreenCaptureKit bindings *(macOS only)* | screen/window + system-audio capture | MIT OR Apache-2.0 |
 | [`ashpd`](https://crates.io/crates/ashpd) (+ PipeWire) *(Linux only)* | portal screen capture | MIT |
 | [`nokhwa`](https://crates.io/crates/nokhwa) | webcam / capture-card input | Apache-2.0 OR MIT |
-| [`cpal`](https://crates.io/crates/cpal) | audio capture + output graph | Apache-2.0 |
-| [`nnnoiseless`](https://crates.io/crates/nnnoiseless) (RNNoise) | audio denoise | BSD-3-Clause |
-| [`ort`](https://crates.io/crates/ort) / [`tract`](https://crates.io/crates/tract) | ONNX inference (DeepFilterNet denoise + selfie segmentation) | MIT / Apache-2.0 |
+| [`cpal`](https://crates.io/crates/cpal) | audio capture + output graph (the filter set, incl. classic-DSP denoise, is owned — no ML) | Apache-2.0 |
 | [`rustybuzz`](https://crates.io/crates/rustybuzz) + [Noto fonts](https://fonts.google.com/noto) | text-source shaping (incl. RTL) + bundled fonts (reused from Freally Snipper) | MIT / SIL OFL 1.1 |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
 | [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
@@ -64,11 +62,11 @@ bundle or redistribute them. The CPU fallback uses **x264** (see below).
 | Component | Role | License | Notes |
 |-----------|------|---------|-------|
 | [ffmpeg](https://ffmpeg.org) (via [`ffmpeg-sidecar`](https://crates.io/crates/ffmpeg-sidecar) / [`ffmpeg-next`](https://crates.io/crates/ffmpeg-next)) | the patent-encumbered **wire codecs** (H.264/AVC, AAC, HEVC, AV1) required to **stream** to platforms and to **export** certain formats | **LGPL / GPL** (the binary's own license) | **fetched on demand** to a per-user cache, **hash-verified** before use; the owned `freally-video` is the default for local lossless recording |
-| [MediaPipe Selfie Segmentation](https://developers.google.com/mediapipe) model | webcam **virtual background** (blur/replace) | **Apache-2.0** | optional; local; fetched on demand only if you enable virtual background; run via `ort`/`tract` |
-| [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) model | optional high-quality audio **denoise** | MIT / Apache-2.0 | optional; local; fetched on demand |
 
-Downloads are over **TLS** from fixed, hardcoded hosts. The **ffmpeg binary is verified against a pinned
-hash before it is executed**. See [`SECURITY.md`](SECURITY.md) for the full download-integrity posture.
+ffmpeg is the **only** on-demand component — Freally Capture ships **no AI/ML features and downloads
+no models**. Downloads are over **TLS** from fixed, hardcoded hosts. The **ffmpeg binary is verified
+against a pinned hash before it is executed**. See [`SECURITY.md`](SECURITY.md) for the full
+download-integrity posture.
 
 ## x264 (CPU encoder fallback)
 

@@ -33,11 +33,11 @@ Freally Capture works **fully offline** for building scenes, composing, recordin
   **directly** to the streaming services you chose (e.g. Twitch, YouTube, Kick)
   and sends your broadcast to them, using the stream keys you entered. There is
   **no restream server we operate**; your video does not pass through us;
-- **on-demand downloads** of optional, non-bundled components that *you* trigger —
-  specifically **ffmpeg** (used for the patent-encumbered "wire" codecs the
-  streaming platforms and some exports require) and an optional **selfie-
-  segmentation model** (only if you enable the webcam virtual background),
-  fetched from their respective third-party distributors;
+- **an on-demand download** of one optional, non-bundled component that *you*
+  trigger — **ffmpeg** (used for the patent-encumbered "wire" codecs the
+  streaming platforms and some exports require), fetched from its third-party
+  distributor. The Software contains **no AI/ML features and downloads no
+  models**;
 - **an optional license check** (Pro activation) and an **optional update check**.
 
 These downloads transfer the component **to** your machine; they are initiated by

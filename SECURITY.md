@@ -45,13 +45,13 @@ remediate before any public disclosure.
   default (LAN exposure is an explicit opt-in), is **password-authenticated**, validates every command,
   and **cannot read arbitrary files**. Disabled means the port is closed. Treat the password like any
   credential; prefer loopback-only unless you specifically need LAN control.
-- **ffmpeg / model downloads (on demand, not bundled):** the patent-encumbered wire codecs are provided
-  by **ffmpeg**, and the optional webcam virtual background uses a **selfie-segmentation model** — both
-  are **fetched on demand** over **TLS** from fixed, hardcoded hosts to a per-user cache; target
+- **ffmpeg download (on demand, not bundled):** the patent-encumbered wire codecs are provided by
+  **ffmpeg**, **fetched on demand** over **TLS** from fixed, hardcoded hosts to a per-user cache; target
   filenames are **hardcoded literals** (no path-traversal input); each file is streamed to a temp path
   and **atomically renamed**. **Integrity:** the ffmpeg **binary is verified against a pinned hash before
   it is executed** — a mismatch deletes the file and re-prompts; an unverified binary is never run. The
-  owned **`freally-video`** lossless recording path needs no external tool.
+  owned **`freally-video`** lossless recording path needs no external tool. (There are **no model
+  downloads** — the product ships no AI/ML features.)
 - **Decode/parse hardening:** any file read from an untrusted source (e.g. a `.frec` recording, a LUT, a
   stinger media file) has its allocations **bounded by validated header fields** so a malformed or
   hostile file fails cleanly instead of exhausting memory; the owned codec is `#![forbid(unsafe_code)]`.

@@ -28,7 +28,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - The owned scene/source/filter data model; the full source set (image, text, color, media, browser); the Scenes + Sources rails with on-canvas transform handles.
 
 ### Planned — 0.55.0 (Audio mixer + recording)
-- The `cpal` audio graph: per-source volume/mute/monitor, up to 6 tracks, sync offset, ducking, push-to-talk, a LUFS meter, and filters (RNNoise/DeepFilterNet denoise, gate, compressor, limiter, EQ, gain).
+- The `cpal` audio graph: per-source volume/mute/monitor, up to 6 tracks, sync offset, ducking, push-to-talk, a LUFS meter, and filters (owned classic-DSP denoise — no ML — plus gate, compressor, limiter, EQ, gain).
 - Multi-track recording via hardware encoders (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264 fallback, plus the owned `freally-video` lossless codec; containers mp4/mkv/mov/webm; file splitting; separate-track local copy. The patent-encumbered wire codecs via the on-demand, hash-verified ffmpeg bridge.
 
 ### Planned — 0.70.0 (Studio MVP — first public)
@@ -36,9 +36,9 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Studio Mode (preview/program) + transitions (cut/fade/slide/swipe/stinger/luma-wipe); the virtual camera (per-OS); global hotkeys; profiles + scene collections; the stats dock.
 - Free/Pro gating scaffold + the offline Ed25519 license. **First public build.**
 
-### Planned — 0.85.0 (Multistream / SRT / WHIP + virtual background)
+### Planned — 0.85.0 (Multistream / SRT / WHIP + scene/source/encoder depth)
 - Simultaneous multistream to several targets (Pro), direct to each platform; SRT and WHIP protocols; vertical/multi-canvas output.
-- The rolling replay buffer with presets; the webcam virtual background (MediaPipe Selfie Segmentation via `ort`/`tract`, model on demand); premium stinger + luma packs; advanced filters.
+- The rolling replay buffer with presets; nested scenes, source groups + per-scene audio; an image-slideshow source + capture-card presets; color/luma-key + render-delay filters; high-FPS/4K output, color-space handling + output downscale; recording-side stream markers; virtual-camera depth (single-source + audio); premium stinger + luma packs; advanced filters.
 
 ### Planned — 1.0.0 (Remote API, scripting, game capture & launch)
 - The WebSocket remote-control API (Stream Deck / Companion-style) + browser docks; Lua/JS scripting + a plugin SDK.

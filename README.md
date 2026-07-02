@@ -20,9 +20,9 @@ leaves your machine is the stream you chose to send.
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
 > telemetry**, and **no cloud restreaming we run** — your stream goes **direct to the platform**. The
 > only network actions are the **stream targets you configure**, an optional **license check**, an
-> optional **update check**, and the on-demand download of two clearly-labeled, non-bundled components:
-> **ffmpeg** (for the patent-encumbered wire codecs the platforms require) and a **selfie-segmentation
-> model** (only if you turn on webcam virtual background). See [`PRIVACY.md`](PRIVACY.md) and
+> optional **update check**, and the on-demand download of one clearly-labeled, non-bundled component:
+> **ffmpeg** (for the patent-encumbered wire codecs the platforms require). There are **no AI/ML
+> features and no model downloads**. See [`PRIVACY.md`](PRIVACY.md) and
 > [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
 ## What it does
@@ -31,7 +31,7 @@ leaves your machine is the stream you chose to send.
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
 4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — and on **Pro**, **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
-5. **Extras** — a **virtual camera** (your produced feed as a webcam in Zoom/Meet/Discord), a webcam **virtual background**, a rolling **replay buffer** with a save hotkey, **global hotkeys** for everything, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, **scripting** (Lua/JS), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
+5. **Extras** — a **virtual camera** (your produced feed as a webcam in Zoom/Meet/Discord), a rolling **replay buffer** with a save hotkey, **global hotkeys** for everything, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, **scripting** (Lua/JS), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
 
 It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
 local and account-free, the same on all three desktop OSes, and integrated with the Freally suite.
@@ -72,7 +72,7 @@ legal review).
 (the `src-tauri` app crate + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`,
 `sources`, `scene`) · the GPU compositor on **`wgpu`** · per-OS capture (**Windows** DXGI +
 Windows.Graphics.Capture, **macOS** ScreenCaptureKit, **Linux** PipeWire portal + X11) · webcam via
-**`nokhwa`** · audio via **`cpal`** (+ **RNNoise**/DeepFilterNet denoise) · the **owned `freally-video`**
+**`nokhwa`** · audio via **`cpal`** (+ owned classic-DSP filters incl. denoise — no ML) · the **owned `freally-video`**
 lossless codec · hardware encoders (**NVENC/Quick Sync/AMF/VAAPI/VideoToolbox**) + **x264** fallback · a
 clearly-labeled, on-demand **ffmpeg** bridge for the patent-encumbered wire codecs · the **WebSocket
 remote API** via **`tungstenite`** · offline **Ed25519** license keys · **Stripe**/PayPal one-time Pro
@@ -164,7 +164,7 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 The detailed build plan is maintained privately. Public release ladder:
 **0.10.0** (foundation) → 0.25 (capture core) → 0.40 (compositor + scenes/sources) → 0.55 (audio +
 recording) → **0.70 (studio MVP — first public: single-target streaming + virtual cam)** → 0.85
-(multistream/SRT/WHIP + virtual background) → **1.0.0**. Progress is published on the
+(multistream/SRT/WHIP + scene/source/encoder depth) → **1.0.0**. Progress is published on the
 [project site](https://mikesruthless12.github.io/freally-capture/).
 
 ---
