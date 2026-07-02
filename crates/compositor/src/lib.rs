@@ -60,27 +60,28 @@ mod tests {
         );
     }
 
-    /// One GPU device at a time: cargo runs tests on parallel threads, and
-    /// ~20 concurrent devices exhaust the memory budget of CI's software
-    /// rasterizers (WARP failed exactly that way). Each test's compositor
-    /// carries this guard, so devices are created and dropped serially.
-    static GPU_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// ONE shared device for the whole suite. cargo runs tests on parallel
+    /// threads, and CI's software rasterizers (WARP) cannot even survive
+    /// *sequential* device churn — deferred destruction let ~22 create/drop
+    /// cycles exhaust its memory budget. Every test locks the shared
+    /// compositor and resizes its canvas; sources/chains/resources are keyed
+    /// by per-test fresh UUIDs, so state never leaks between tests.
+    static SHARED_GPU: std::sync::Mutex<Option<Compositor>> = std::sync::Mutex::new(None);
 
     struct TestCompositor {
-        comp: Compositor,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        guard: std::sync::MutexGuard<'static, Option<Compositor>>,
     }
 
     impl std::ops::Deref for TestCompositor {
         type Target = Compositor;
         fn deref(&self) -> &Compositor {
-            &self.comp
+            self.guard.as_ref().expect("initialized by compositor()")
         }
     }
 
     impl std::ops::DerefMut for TestCompositor {
         fn deref_mut(&mut self) -> &mut Compositor {
-            &mut self.comp
+            self.guard.as_mut().expect("initialized by compositor()")
         }
     }
 
@@ -88,24 +89,30 @@ mod tests {
     /// CI stays green; real coverage runs wherever a GPU or software
     /// rasterizer exists (Windows WARP, Linux lavapipe, macOS Metal).
     fn compositor(width: u32, height: u32) -> Option<TestCompositor> {
-        // A panicked test poisons the lock; the () state can't be corrupt.
-        let guard = GPU_LOCK
+        // A panicked test only poisons the mutex; the compositor inside is
+        // structurally valid (stale per-test sources are keyed by UUIDs no
+        // other test knows).
+        let mut guard = SHARED_GPU
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match Compositor::new(width, height) {
-            Ok(comp) => {
-                eprintln!("compositor test adapter: {}", comp.adapter_summary());
-                Some(TestCompositor {
-                    comp,
-                    _guard: guard,
-                })
+        if guard.is_none() {
+            match Compositor::new(width, height) {
+                Ok(comp) => {
+                    eprintln!("compositor test adapter: {}", comp.adapter_summary());
+                    *guard = Some(comp);
+                }
+                Err(CompositorError::NoAdapter) => {
+                    eprintln!("SKIPPED: no GPU adapter available on this machine");
+                    return None;
+                }
+                Err(other) => panic!("compositor bring-up failed: {other}"),
             }
-            Err(CompositorError::NoAdapter) => {
-                eprintln!("SKIPPED: no GPU adapter available on this machine");
-                None
-            }
-            Err(other) => panic!("compositor bring-up failed: {other}"),
         }
+        guard
+            .as_mut()
+            .expect("just initialized")
+            .set_canvas_size(width, height);
+        Some(TestCompositor { guard })
     }
 
     fn solid_frame(width: u32, height: u32, format: PixelFormat, px: [u8; 4]) -> Frame {
