@@ -57,9 +57,22 @@ glam = "0.28"
 
 # Capture (per-OS)
 windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture
-objc2 = "0.5"           # macOS: ScreenCaptureKit bindings
-ashpd = "0.9"           # Linux: PipeWire portal
+# macOS: ScreenCaptureKit via the objc2 0.6 / frameworks 0.3 generation (the
+# 0.5/0.2 line predates the CoreMedia coverage SCK's sample buffers need).
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+objc2-screen-capture-kit = "0.3"
+block2 = "0.6"
+dispatch2 = "0.3"
+ashpd = { version = "0.13", features = ["screencast"] } # Linux: ScreenCast portal (tokio by default)
+pipewire = "0.10"       # Linux: consume the portal's PipeWire video stream
+x11rb = "0.13"          # Linux: the X11 capture path
 nokhwa = "0.10"         # webcam / capture card
+jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)
 
 # Audio (denoise is classic DSP — no ML models anywhere, per charter)
 cpal = "0.15"
