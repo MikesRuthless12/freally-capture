@@ -18,3 +18,12 @@ tauri = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 directories = { workspace = true }
+
+# The owned engine crates — linked from day one so `health` proves the wiring.
+fcap-capture = { path = "../crates/capture" }
+fcap-sources = { path = "../crates/sources" }
+fcap-compositor = { path = "../crates/compositor" }
+fcap-scene = { path = "../crates/scene" }
+fcap-audio = { path = "../crates/audio" }
+fcap-encode = { path = "../crates/encode" }
+fcap-stream = { path = "../crates/stream" }

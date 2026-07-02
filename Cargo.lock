@@ -861,6 +861,13 @@ name = "freally-capture"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "fcap-audio",
+ "fcap-capture",
+ "fcap-compositor",
+ "fcap-encode",
+ "fcap-scene",
+ "fcap-sources",
+ "fcap-stream",
  "serde",
  "serde_json",
  "tauri",

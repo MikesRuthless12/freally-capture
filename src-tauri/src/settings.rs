@@ -78,8 +78,6 @@ impl SettingsStore {
     }
 
     /// Replace the settings and persist them atomically.
-    // Wired to the `settings_set` command in P0.3 (exercised by tests today).
-    #[allow(dead_code)]
     pub fn set(&self, next: Settings) -> io::Result<()> {
         {
             let mut guard = self.lock();

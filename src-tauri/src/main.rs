@@ -9,6 +9,8 @@
 //! hosts the window shell, the UI ↔ core command/event bridge, and the
 //! settings store; the engine lives in the owned `fcap-*` workspace crates.
 
+mod commands;
+mod events;
 mod settings;
 
 use settings::SettingsStore;
@@ -26,6 +28,15 @@ fn main() {
 
     tauri::Builder::default()
         .manage(settings)
+        .invoke_handler(tauri::generate_handler![
+            commands::health,
+            commands::settings_get,
+            commands::settings_set
+        ])
+        .setup(|app| {
+            events::spawn_stats_emitter(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Freally Capture");
 }
