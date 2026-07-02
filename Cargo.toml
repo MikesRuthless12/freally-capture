@@ -78,8 +78,13 @@ jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)
 # Audio (denoise is classic DSP — no ML models anywhere, per charter)
 cpal = "0.15"
 
-# Text sources (reuse Freally Snipper font concepts)
-rustybuzz = "0.18"
+# Static sources: image decode (Image source + LUT/mask files), text
+# shaping/rasterization (reuse Freally Snipper font concepts)
+image = "0.25"
+rustybuzz = "0.18"     # shaping (incl. Arabic joining); ttf-parser re-export for outlines
+tiny-skia = "0.11"     # anti-aliased path rasterization for glyphs
+fontdb = "0.18"        # system font discovery (no fonts bundled yet)
+unicode-bidi = "0.3"   # RTL paragraph handling (UAX #9)
 
 # Streaming / remote API
 tungstenite = "0.23"

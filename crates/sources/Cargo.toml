@@ -17,3 +17,9 @@ tracing = { workspace = true }
 # Webcams + capture cards; `input-native` = MSMF (Windows), AVFoundation
 # (macOS), V4L2 (Linux). The default `decoding` feature handles MJPEG/YUYV.
 nokhwa = { workspace = true, features = ["input-native"] }
+# Static sources (P2.4): image decode + text shaping/rasterization.
+image = { workspace = true }
+rustybuzz = { workspace = true }
+tiny-skia = { workspace = true }
+fontdb = { workspace = true }
+unicode-bidi = { workspace = true }
