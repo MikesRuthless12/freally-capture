@@ -16,11 +16,13 @@
 #![forbid(unsafe_code)]
 
 pub mod encoder;
+pub mod ffmpeg;
 pub mod flz;
 pub mod freally_video;
 pub mod hardware;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
+pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};
 pub use freally_video::{
     FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
 };

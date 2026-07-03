@@ -13,6 +13,8 @@ import type {
   AudioFilterKind,
   BlendMode,
   CaptureSource,
+  EncoderCatalog,
+  FfmpegStatus,
   FilterId,
   FilterKind,
   Health,
@@ -299,4 +301,36 @@ export function studioSetAudioFilterEnabled(
   enabled: boolean,
 ): Promise<void> {
   return invoke("studio_set_audio_filter_enabled", { sourceId, filterId, enabled });
+}
+
+// ---------------------------------------------------------------------------
+// Encoders + the on-demand ffmpeg component (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect the encoder catalog (hardware probe; verified against the
+ * installed ffmpeg component when present). First call can take ~1 s.
+ */
+export function encodersList(): Promise<EncoderCatalog> {
+  return invoke<EncoderCatalog>("encoders_list");
+}
+
+/** The ffmpeg component's current status. */
+export function ffmpegStatus(): Promise<FfmpegStatus> {
+  return invoke<FfmpegStatus>("ffmpeg_status");
+}
+
+/** Start the on-demand fetch + verify (progress rides the `ffmpeg` event). */
+export function ffmpegInstall(): Promise<void> {
+  return invoke("ffmpeg_install");
+}
+
+/** Cancel an in-flight fetch (the partial download is removed). */
+export function ffmpegCancel(): Promise<void> {
+  return invoke("ffmpeg_cancel");
+}
+
+/** Remove the installed component. */
+export function ffmpegRemove(): Promise<void> {
+  return invoke("ffmpeg_remove");
 }

@@ -281,11 +281,18 @@ pub fn catalog_for(os: &str, gpus: &[GpuInfo], va_render_node: bool) -> Vec<Enco
             .to_string(),
         verified: None,
     });
+    // The software AV1 encoder differs per pinned ffmpeg build: the Windows
+    // essentials build ships libaom; the Linux/macOS builds ship SVT-AV1.
+    let (av1_id, av1_label) = if os == "windows" {
+        ("libaom-av1", "AOM AV1 (CPU)")
+    } else {
+        ("libsvtav1", "SVT-AV1 (AV1, CPU)")
+    };
     encoders.push(EncoderDesc {
-        id: "libsvtav1".to_string(),
+        id: av1_id.to_string(),
         codec: VideoCodec::Av1,
         engine: EncoderEngine::Software,
-        label: "SVT-AV1 (AV1, CPU)".to_string(),
+        label: av1_label.to_string(),
         hardware: false,
         note: "Software AV1 — CPU-heavy; prefer a hardware AV1 encoder when one is available. \
                Runs via the on-demand ffmpeg component."
@@ -378,7 +385,12 @@ mod tests {
             let ids = ids(&encoders);
             assert!(ids.contains(&"libx264"), "{os}: x264 is always available");
             assert!(ids.contains(&"libx265"));
-            assert!(ids.contains(&"libsvtav1"));
+            // The software AV1 id tracks what each OS's pinned build ships.
+            if os == "windows" {
+                assert!(ids.contains(&"libaom-av1"));
+            } else {
+                assert!(ids.contains(&"libsvtav1"));
+            }
         }
     }
 
@@ -397,7 +409,7 @@ mod tests {
         };
         assert_eq!(
             catalog.best(VideoCodec::Av1).expect("software remains").id,
-            "libsvtav1",
+            "libaom-av1",
             "refused hardware falls back to the CPU encoder"
         );
     }

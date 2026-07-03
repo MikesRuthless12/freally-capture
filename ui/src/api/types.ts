@@ -358,3 +358,68 @@ export type ProgramStatus = {
   dropped: number;
   sources: Record<string, SourceRuntime>;
 };
+
+// ---------------------------------------------------------------------------
+// Encoders + the on-demand ffmpeg component (Phase 4 — mirrors
+// crates/encode and src-tauri/src/commands/recording.rs)
+// ---------------------------------------------------------------------------
+
+export type VideoCodec = "h264" | "hevc" | "av1";
+
+export type EncoderEngine = "nvenc" | "quickSync" | "amf" | "videoToolbox" | "vaapi" | "software";
+
+export type GpuVendor = "nvidia" | "amd" | "intel" | "apple" | "other";
+
+/** One physical GPU, as encoder detection saw it. */
+export type GpuInfo = {
+  name: string;
+  vendor: GpuVendor;
+  backend: string;
+};
+
+/** One encoder the picker can offer (`id` is the stable ffmpeg name). */
+export type EncoderDesc = {
+  id: string;
+  codec: VideoCodec;
+  engine: EncoderEngine;
+  label: string;
+  hardware: boolean;
+  /** The honest capability note the picker shows. */
+  note: string;
+  /**
+   * null until verified against the installed ffmpeg component;
+   * false = refused here (greyed out, auto-pick skips it).
+   */
+  verified: boolean | null;
+};
+
+/** Everything `encoders_list` found. */
+export type EncoderCatalog = {
+  gpus: GpuInfo[];
+  encoders: EncoderDesc[];
+};
+
+/** The build an install would fetch (pinned URL + size). */
+export type FfmpegBuild = {
+  version: string;
+  source: string;
+  url: string;
+  sizeBytes: number;
+};
+
+/**
+ * The `ffmpeg` event + `ffmpeg_status` payload: the clearly-labeled,
+ * on-demand wire-codec component's state machine.
+ */
+export type FfmpegStatus =
+  | { state: "missing"; build: FfmpegBuild | null }
+  | {
+      state: "downloading";
+      receivedBytes: number;
+      totalBytes: number | null;
+      bytesPerSec: number;
+    }
+  | { state: "verifying" }
+  | { state: "extracting" }
+  | { state: "ready"; version: string; path: string }
+  | { state: "error"; message: string; build: FfmpegBuild | null };

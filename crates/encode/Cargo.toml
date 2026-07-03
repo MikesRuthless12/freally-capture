@@ -11,9 +11,22 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+directories = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+ureq = { workspace = true }
 # GPU enumeration only (vendor/device ids drive encoder detection) — the
 # compositor owns the rendering device; this crate never creates one.
 wgpu = { workspace = true }
+
+# The pinned ffmpeg archives differ per OS: zip on Windows/macOS, tar.xz on
+# Linux — each platform compiles only its own extraction path.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+zip = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+lzma-rs = { workspace = true }
+tar = { workspace = true }

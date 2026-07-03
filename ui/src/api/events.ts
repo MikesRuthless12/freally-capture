@@ -6,7 +6,13 @@
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { AudioLevelsPayload, ProgramStatus, StatsPayload, StudioDto } from "./types";
+import type {
+  AudioLevelsPayload,
+  FfmpegStatus,
+  ProgramStatus,
+  StatsPayload,
+  StudioDto,
+} from "./types";
 
 /** Subscribe to the ~2 Hz `stats` event. Resolves to an unlisten function. */
 export function onStats(handler: (stats: StatsPayload) => void): Promise<UnlistenFn> {
@@ -26,4 +32,9 @@ export function onProgram(handler: (status: ProgramStatus) => void): Promise<Unl
 /** Subscribe to mixer levels + audio source states (~20 Hz). */
 export function onAudio(handler: (levels: AudioLevelsPayload) => void): Promise<UnlistenFn> {
   return listen<AudioLevelsPayload>("audio", (event) => handler(event.payload));
+}
+
+/** Subscribe to the ffmpeg component's install/status changes. */
+export function onFfmpeg(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn> {
+  return listen<FfmpegStatus>("ffmpeg", (event) => handler(event.payload));
 }

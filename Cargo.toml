@@ -95,8 +95,13 @@ global-hotkey = "0.6"
 tauri-plugin-global-shortcut = "2"   # PTT/PTM (P3); the full hotkey map lands in P5
 fluent = "0.16"
 
-# Wire codecs (NOT bundled — fetched on demand, hash-verified, behind the encode interface)
-# ffmpeg-sidecar = "1"    # or ffmpeg-next, decided in P4.4
+# Wire-codec bridge (P4.4): fetch + hash-verify + extract the PINNED ffmpeg
+# build on demand (never bundled), then drive it as a separate process.
+ureq = "2"                # HTTPS download (rustls + webpki roots, no system deps)
+sha2 = "0.10"             # SHA-256 verification of the fetched archive
+zip = { version = "2", default-features = false, features = ["deflate"] } # gyan/riedl archives
+tar = "0.4"               # BtbN Linux archive (with lzma-rs for the xz layer)
+lzma-rs = "0.3"           # pure-Rust xz decode (Linux archive only)
 
 [profile.release]
 opt-level = 3

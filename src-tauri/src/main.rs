@@ -48,6 +48,7 @@ fn main() {
         .manage(StudioState::load_default())
         .manage(AudioRuntime::new())
         .manage(HotkeyRegistry::default())
+        .manage(commands::recording::EncodeState::new())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -104,7 +105,11 @@ fn main() {
             commands::audio::studio_reorder_audio_filter,
             commands::audio::studio_update_audio_filter,
             commands::audio::studio_set_audio_filter_enabled,
-            commands::recording::encoders_list
+            commands::recording::encoders_list,
+            commands::recording::ffmpeg_status,
+            commands::recording::ffmpeg_install,
+            commands::recording::ffmpeg_cancel,
+            commands::recording::ffmpeg_remove
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());
