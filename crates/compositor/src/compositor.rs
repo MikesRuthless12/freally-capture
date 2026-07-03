@@ -446,6 +446,40 @@ impl Compositor {
         &self.gpu.adapter_summary
     }
 
+    // -- native preview surface (the "OBS feel" path) -----------------------
+
+    /// Create a [`NativePreview`] surface on `window` (the child window the
+    /// app placed over the preview region), sharing this compositor's device.
+    pub fn create_native_preview<W>(
+        &self,
+        window: W,
+        width: u32,
+        height: u32,
+    ) -> Result<crate::NativePreview, CompositorError>
+    where
+        W: raw_window_handle::HasWindowHandle
+            + raw_window_handle::HasDisplayHandle
+            + Send
+            + Sync
+            + 'static,
+    {
+        crate::NativePreview::new(&self.gpu, window, width, height)
+    }
+
+    /// Blit the current program frame onto the preview surface and present —
+    /// no readback. `Ok(false)` if the frame was skipped (surface not ready).
+    pub fn present_native(
+        &self,
+        preview: &mut crate::NativePreview,
+    ) -> Result<bool, CompositorError> {
+        preview.present(&self.gpu, &self.program_view)
+    }
+
+    /// Reconfigure the preview surface after its window resized.
+    pub fn resize_native(&self, preview: &mut crate::NativePreview, width: u32, height: u32) {
+        preview.resize(&self.gpu, width, height);
+    }
+
     /// CPU cost of the last [`render`](Self::render) (encode + submit).
     pub fn last_render_cpu_micros(&self) -> u64 {
         self.last_render_cpu_micros

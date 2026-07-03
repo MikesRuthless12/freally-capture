@@ -1531,6 +1531,7 @@ dependencies = [
  "fcap-capture",
  "fcap-scene",
  "pollster",
+ "raw-window-handle",
  "thiserror 2.0.18",
  "tracing",
  "wgpu",

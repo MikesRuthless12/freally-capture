@@ -55,6 +55,7 @@ wgpu = "0.20"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.28"
 pollster = "0.3"        # block_on for wgpu's async adapter/device/readback
+raw-window-handle = "0.6"   # native-preview surface target (matches wgpu 0.20)
 
 # Capture (per-OS)
 windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture

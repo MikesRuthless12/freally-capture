@@ -1,15 +1,22 @@
-//! Headless GPU bring-up: instance → adapter → device/queue.
+//! GPU bring-up: instance → adapter → device/queue.
 //!
-//! No window, no surface — the compositor renders into offscreen textures
-//! and the program frame is read back or (later phases) handed to encoders.
-//! Adapter choice prefers real hardware and falls back to software
-//! rasterizers (WARP on Windows, lavapipe/llvmpipe on Linux) so the engine
-//! still runs — slowly but honestly — inside VMs and CI runners.
+//! The compositor renders into an offscreen program texture that is read back
+//! (preview JPEG, encoders) — and, for the native preview surface, blitted
+//! straight to a window with no readback. The `instance` and `adapter` are
+//! **kept alive** so a [`wgpu::Surface`] can be created on demand from a
+//! window handle (a surface borrows the instance and must be validated
+//! against the adapter). Adapter choice prefers real hardware and falls back
+//! to software rasterizers (WARP on Windows, lavapipe/llvmpipe on Linux) so
+//! the engine still runs — slowly but honestly — inside VMs and CI runners.
 
 use crate::CompositorError;
 
 /// The shared device handle the compositor and its filter passes draw with.
 pub struct Gpu {
+    /// Retained so surfaces can be created from a window handle later.
+    pub instance: wgpu::Instance,
+    /// Retained so a surface's supported formats can be queried.
+    pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     /// "<name> (<backend>, <device type>)" — for logs and the stats dock.
@@ -69,6 +76,8 @@ impl Gpu {
         .map_err(|err| CompositorError::Device(err.to_string()))?;
 
         Ok(Self {
+            instance,
+            adapter,
             device,
             queue,
             adapter_summary,
