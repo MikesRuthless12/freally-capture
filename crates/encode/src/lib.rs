@@ -16,9 +16,14 @@
 #![forbid(unsafe_code)]
 
 pub mod encoder;
+pub mod flz;
+pub mod freally_video;
 pub mod hardware;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
+pub use freally_video::{
+    FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
+};
 pub use hardware::{GpuInfo, GpuVendor};
 
 /// This crate's version (inherited from the workspace).
