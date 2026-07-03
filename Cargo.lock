@@ -1493,7 +1493,7 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fcap-audio"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "cpal",
  "fcap-scene",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-capture"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "ashpd",
  "block2",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-compositor"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "bytemuck",
  "fcap-capture",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-encode"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "directories",
  "lzma-rs",
@@ -1555,7 +1555,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-scene"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-sources"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "fcap-audio",
  "fcap-capture",
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-stream"
-version = "0.40.0"
+version = "0.55.0"
 
 [[package]]
 name = "fdeflate"
@@ -1735,7 +1735,7 @@ dependencies = [
 
 [[package]]
 name = "freally-capture"
-version = "0.40.0"
+version = "0.55.0"
 dependencies = [
  "chrono",
  "directories",

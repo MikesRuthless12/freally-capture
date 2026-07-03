@@ -215,16 +215,10 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
         loop {
             match rx.try_recv() {
                 Ok(Cmd::Sources(configs)) => {
-                    // GC media-hub rings whose source left the mix.
-                    let media_ids: Vec<String> = configs
-                        .iter()
-                        .filter_map(|config| match &config.input {
-                            InputSpec::Media { id } => Some(id.clone()),
-                            _ => None,
-                        })
-                        .collect();
-                    crate::media_hub::retain(&media_ids);
-
+                    // Media-hub rings self-GC (weak-referenced) — a ring lives
+                    // as long as its decoder or this engine holds it, so a
+                    // hidden-then-shown media source keeps its audio. No
+                    // config-set-driven drop here (that stranded the decoder).
                     let mut next: HashMap<SourceId, SourceRuntime> =
                         HashMap::with_capacity(configs.len());
                     for config in configs {

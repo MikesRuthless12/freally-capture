@@ -5,16 +5,71 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 2 (compositor + scenes/sources, 0.40.0) is complete. Early
+> **Status: in development.** Phase 4 (recording, 0.55.0) is complete. Early
 > development builds are downloadable from each release; the **studio MVP — the first build meant for
 > everyday use — arrives at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-> **Phase 3 (audio mixer + filters) has landed** — the first half of the **0.55.0** rung. Recording
-> (Phase 4) completes the rung and tags **0.55.0**; until then the audio work rides here.
+> The next rung is **0.70.0 (studio MVP — first public)**: single-target streaming, Studio Mode +
+> transitions, the virtual camera, and the stats dock.
 
-### Added
+## [0.55.0] — 2026-07-03 (Audio mixer + recording)
+
+> The 0.55.0 rung is **Phase 3 (audio mixer + filters)** plus **Phase 4 (recording)** — the studio can
+> now mix and **record** its program feed to disk, multi-track, with the best available hardware encoder
+> or the owned lossless codec.
+
+### Added — recording (Phase 4)
+- **The owned `freally-video` (`.frec`) lossless codec** (`fcap-encode`): the default local-recording
+  format, authored here and **owned outright** — temporal frame deltas + PNG-style left-pixel
+  prediction + an owned byte-aligned **FLZ** (LZ77) stage, every technique decades-expired or
+  public-domain, **zero dependencies, nothing fetched**, `#![forbid(unsafe_code)]`. The container carries
+  up to **6 interleaved stereo PCM tracks** with absolute sample positions (A/V sync + gapless pause by
+  construction), intra frames on a ~2 s cadence, a seek index, and a **truncation-tolerant reader** (a
+  crashed recording plays back to its last complete chunk; corrupt input errors, never panics, and is
+  allocation-capped against hostile files). Real-time verified: a synthetic 1080p60 encode holds its
+  budget.
+- **Encoder detection + the encoder catalog**: a `wgpu` GPU probe (vendor ids + name heuristics,
+  software rasterizers skipped) drives per-OS offer rules — **NVENC / Quick Sync / AMF** on Windows,
+  **NVENC / VAAPI** (render-node gated) on Linux, **VideoToolbox** on macOS — always alongside the
+  universal **x264 / x265 / AV1** CPU fallbacks. Hardware encoders are offered as honest candidates and
+  **confirmed by a real 3-frame smoke encode** on first use (support varies by GPU + driver); every wire
+  encoder labels its ffmpeg dependency.
+- **Multi-track muxing, containers, and file splitting**: record to **mp4 / mkv / mov / webm** (wire
+  codecs) or the owned **`.frec`** (lossless), with **up to 6 audio tracks**, and **automatic file
+  splitting** into standalone playable segments. The recording engine runs a strict-CFR clock (frame
+  count locked to recorded time), so A/V stays in sync through stalls and **pause/resume is gapless
+  within one playable file**. The main recording is architected to continue regardless of stream state
+  (streaming lands in 0.70.0), and a **separate-track local copy** is persisted for it.
+- **The clearly-labeled, on-demand ffmpeg bridge** (`fcap-encode::ffmpeg`): the patent-encumbered wire
+  codecs (H.264/AAC/HEVC/AV1) run through ffmpeg, which is **never bundled**. On first use it is fetched
+  from a **per-OS pinned build** (URL + **SHA-256 baked into source**, cross-checked against the
+  publisher's own checksum), **hash-verified before anything runs** (a mismatch aborts the install),
+  extracted (a single member — archive paths are never used for writing), and driven as a **separate
+  process** (which also keeps its LGPL/GPL license isolated from the owned app). A clearly-labeled
+  **Components** panel shows what it is, why it exists, the pinned source, and live %/of-total/MB/s
+  progress; the owned `.frec` path needs none of it.
+- **HEVC / AV1 recording + post-record remux**: HEVC and AV1 record through the labeled ffmpeg path
+  (hardware where the GPU supports it); a **Recordings** list (Controls → Files…) shows finished files
+  newest-first and offers **Remux to MP4** (mkv → mp4, `-c copy`, no re-encode, faststart, `hvc1` tag on
+  HEVC). The remux command validates the path lives inside the recordings folder — the webview can never
+  point it at arbitrary files.
+- **Encoder settings + presets** (Settings → Output): rate control **CBR / VBR / CQP** + bitrate +
+  keyframe interval, per-encoder **Quality / Balanced / Performance** presets (mapped onto each family's
+  own knob), per-track audio bitrate, and one-click **Lossless / High-quality / Balanced** record
+  presets. Recording controls in the dock: **Start / Stop / Pause / Resume**, a pulsing **REC**
+  indicator with duration (pauses excluded) + track count, and the last session's files or its honest
+  error.
+- **The Media source** (`fcap-sources::media`) — folded in from Phase 2: a video/image file composed on
+  the canvas **with its audio in the mixer**. Still images decode once (like the Image source); **`.frec`
+  plays through the owned codec** with nothing fetched; the wire formats decode through the labeled
+  ffmpeg component (`-hwaccel auto` hardware decode, software fallback, loop/restart), and a stop
+  watchdog means a wedged decoder can never wedge the studio. Media audio flows through a new
+  **media-audio hub** so a media clip gets a full mixer strip (fader, filters, tracks, sync offset) with
+  no special cases.
+
+### Added — audio mixer (Phase 3)
 - **The owned audio engine** (`fcap-audio`): a `cpal` capture graph running everything internally as
   **stereo f32 at 48 kHz** in 10 ms blocks. Per-source **microphone / line-in** (Audio Input) and
   **desktop / system audio** (Audio Output) capture, each format-converted and resampled into the
@@ -49,15 +104,27 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   range-clamped, and self-repairing on load (audio state exists exactly on audio-capable sources).
 
 ### Security / privacy
-- The posture is unchanged and re-verified: captured audio flows **only** to the mixer, the monitor
-  device the user picks, and (from Phase 4) the recording — **nothing leaves the machine**, no
-  accounts, no telemetry. The monitor-device name persisted in settings is length/shape-validated;
-  hotkey accelerators are parsed/validated before they enter the model or register.
-- New third-party dependency: **`tauri-plugin-global-shortcut`** (push-to-talk / push-to-mute; the full
-  hotkey map lands in Phase 5) — MIT OR Apache-2.0, recorded in `THIRD-PARTY-NOTICES.md`. The audio DSP
-  (FFT, filters, LUFS, resampler, mixer) is **entirely owned** — `cpal` provides only device I/O.
-- **Live-hardware audio smoke tests** (kept `--ignored` on headless CI): device enumeration, default-mic
-  capture, desktop-audio loopback, and a mic-through-the-mixer metering path, verified on real hardware.
+- The posture is unchanged and re-verified: captured audio + composed frames flow **only** to the mixer,
+  the monitor device the user picks, the **recording file**, and the virtual camera — **nothing leaves
+  the machine**, no accounts, no telemetry. The monitor-device name persisted in settings is
+  length/shape-validated; hotkey accelerators are parsed/validated before they enter the model.
+- **The one network action added this rung is the explicit, user-clicked ffmpeg download** — over TLS
+  from a **hardcoded, per-OS pinned URL**, **SHA-256-verified before the binary is ever executed**, and
+  driven as a separate process. It never starts on its own; a checksum mismatch aborts the install. The
+  owned `.frec` recording path makes no network calls at all.
+- The recording engine's ffmpeg audio tracks ride **loopback-only (`127.0.0.1`) sockets** that accept
+  exactly one connection then close; recording settings (encoder id, container, bitrate, folder,
+  filename) are **range/shape-validated** before use, and **remux/recordings actions are confined to the
+  recordings folder** (canonicalized parent check) so the webview cannot reach arbitrary files. The
+  `.frec`/media parsers treat file bytes as **untrusted** — allocation-capped, erroring rather than
+  panicking on corrupt input.
+- New third-party dependencies, all recorded in `THIRD-PARTY-NOTICES.md`: **`tauri-plugin-global-shortcut`**
+  (push-to-talk/mute), and the ffmpeg-bridge fetch/verify/unpack set (**`ureq`** + rustls, **`sha2`**,
+  **`zip`**, **`tar`** + **`lzma-rs`**) plus **`chrono`** (local-time filenames). The audio DSP and the
+  **`freally-video`** codec are **entirely owned**; ffmpeg is **driven, never bundled**.
+- **Live-hardware audio smoke tests** (kept `--ignored` on headless CI) plus a release-mode `.frec`
+  1080p60 encode guardrail; the full in-app ffmpeg download → verify → record → play-back flow is the
+  Phase 4 release smoke test.
 
 ## [0.40.0] — 2026-07-02 (Compositor + scenes/sources)
 
@@ -186,5 +253,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Accessibility (keyboard-first, screen-reader-labeled, high-contrast) and UI localization into 18 languages (`ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk vi zh-CN`, English first, RTL Arabic); onboarding + templates.
 
 [Unreleased]: https://github.com/MikesRuthless12/freally-capture/commits/main
+[0.55.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.55.0
+[0.40.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.40.0
 [0.25.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.25.0
 [0.10.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.10.0

@@ -62,8 +62,6 @@ export type RecordingSettings = {
   filenamePrefix: string;
   /** Split into playable segments every N minutes (0 = off). */
   splitMinutes: number;
-  /** Record a separate local copy while streaming (active from 0.70). */
-  separateLocalCopy: boolean;
 };
 
 /** One file in the recordings folder (`recordings_list`). */

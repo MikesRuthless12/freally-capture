@@ -70,9 +70,6 @@ pub struct RecordingSettings {
     pub filename_prefix: String,
     /// Split into playable segments every N minutes (0 = off).
     pub split_minutes: u32,
-    /// Record a separate local copy while streaming (takes effect when
-    /// streaming lands in 0.70 — persisted now so the intent survives).
-    pub separate_local_copy: bool,
 }
 
 impl Default for RecordingSettings {
@@ -93,7 +90,6 @@ impl Default for RecordingSettings {
             folder: String::new(),
             filename_prefix: "Freally Capture".to_owned(),
             split_minutes: 0,
-            separate_local_copy: false,
         }
     }
 }

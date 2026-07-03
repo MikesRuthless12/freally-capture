@@ -265,12 +265,23 @@ fn run_wire(
             .name("fcap-media-audio".into())
             .spawn(move || {
                 let mut bytes = [0u8; 3840]; // one 10 ms stereo f32 block
-                let mut samples = vec![0.0f32; 960];
-                while read_exact_or_end(&mut stdout, &mut bytes) {
-                    for (sample, chunk) in samples.iter_mut().zip(bytes.chunks_exact(4)) {
-                        *sample = f32::from_le_bytes(chunk.try_into().expect("4 bytes"));
+                let mut samples = Vec::with_capacity(960);
+                loop {
+                    // `filled` may be a whole block, or a short final block at
+                    // end-of-stream — push whatever complete stereo frames it
+                    // holds so the clip's last < 10 ms of audio isn't dropped.
+                    let (filled, done) = read_available(&mut stdout, &mut bytes);
+                    let usable = filled - filled % 8; // whole stereo f32 frames
+                    if usable > 0 {
+                        samples.clear();
+                        for chunk in bytes[..usable].chunks_exact(4) {
+                            samples.push(f32::from_le_bytes(chunk.try_into().expect("4 bytes")));
+                        }
+                        ring.push(&samples);
                     }
-                    ring.push(&samples);
+                    if done {
+                        break;
+                    }
                 }
             })
             .ok()
@@ -332,9 +343,53 @@ fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> bool {
     true
 }
 
+/// Fill `buf` as far as possible; returns `(bytes_filled, done)`. `done` is
+/// true at EOF/broken pipe — the last read of a stream may be a short block,
+/// and its bytes must not be discarded (unlike `read_exact_or_end`, which
+/// drops a partial final block).
+fn read_available(reader: &mut impl Read, buf: &mut [u8]) -> (usize, bool) {
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => return (filled, true),
+            Ok(n) => filled += n,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return (filled, true),
+        }
+    }
+    (filled, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_available_keeps_a_short_final_block() {
+        // 10 full bytes + a 3-byte tail, read into a 4-byte buffer: three full
+        // reads, then a partial read of 3 flagged done — the tail is NOT lost.
+        let data: Vec<u8> = (0..15u8).collect();
+        let mut cursor = std::io::Cursor::new(data);
+        let mut buf = [0u8; 4];
+        let mut chunks = Vec::new();
+        loop {
+            let (filled, done) = read_available(&mut cursor, &mut buf);
+            if filled > 0 {
+                chunks.push((filled, buf[..filled].to_vec()));
+            }
+            if done {
+                break;
+            }
+        }
+        // 15 bytes / 4 = three full (4,4,4) + a final partial (3).
+        assert_eq!(
+            chunks.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            vec![4, 4, 4, 3],
+            "the trailing partial block survives"
+        );
+        let total: usize = chunks.iter().map(|(n, _)| *n).sum();
+        assert_eq!(total, 15, "no bytes dropped");
+    }
 
     #[test]
     fn missing_and_empty_paths_error_honestly() {
@@ -381,6 +436,9 @@ mod tests {
         writer.finish().expect("finish");
 
         let hub_id = format!("media-test-{}", std::process::id());
+        // Hold the ring across playback: the hub is weak-referenced, so the
+        // ring is freed once the decoder thread finishes and drops its handle.
+        let ring = fcap_audio::media_hub::ring(&hub_id);
         let session =
             start_media(&hub_id, path.to_str().expect("utf8"), false, true).expect("starts");
         let mut frames = 0;
@@ -396,9 +454,7 @@ mod tests {
             }
         }
         assert_eq!(frames, 10, "every frame plays");
-        let ring = fcap_audio::media_hub::ring(&hub_id);
         assert_eq!(ring.len(), 10 * 960, "track 1 audio landed in the hub");
-        fcap_audio::media_hub::retain(&[]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

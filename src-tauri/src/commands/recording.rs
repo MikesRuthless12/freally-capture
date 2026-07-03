@@ -180,7 +180,7 @@ pub fn ffmpeg_install<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let cancel = Arc::clone(&state.cancel);
     let handle = app.clone();
 
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("fcap-ffmpeg-fetch".into())
         .spawn(move || {
             let progress_handle = handle.clone();
@@ -231,8 +231,15 @@ pub fn ffmpeg_install<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 }
             }
             state.installing.store(false, Ordering::SeqCst);
-        })
-        .map_err(|err| format!("could not start the fetch thread: {err}"))?;
+        });
+
+    if let Err(err) = spawned {
+        // The flag was swapped true above; the worker that would clear it
+        // never started, so clear it here or the panel is wedged at "an
+        // install is already in progress" for the rest of the session.
+        state.installing.store(false, Ordering::SeqCst);
+        return Err(format!("could not start the fetch thread: {err}"));
+    }
     Ok(())
 }
 

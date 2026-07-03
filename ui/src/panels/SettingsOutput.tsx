@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { encodersList, ffmpegStatus, settingsSet } from "../api/commands";
 import { onFfmpeg } from "../api/events";
@@ -77,8 +77,7 @@ const RECORD_PRESETS: {
 /**
  * Settings → Output: where recordings go and what they are — container
  * (owned lossless .frec by default), folder/filename, fps, the up-to-6
- * recorded tracks, splitting, and the separate-local-copy intent. The
- * encoder + rate-control depth lands here too (P4.6).
+ * recorded tracks, and splitting, plus the encoder + rate-control depth (P4.6).
  */
 export function SettingsOutput({
   settings,
@@ -94,6 +93,15 @@ export function SettingsOutput({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [ffmpeg, setFfmpeg] = useState<FfmpegStatus | null>(null);
   const [catalog, setCatalog] = useState<EncoderCatalog | null>(null);
+  // The latest known settings, so back-to-back edits accumulate instead of
+  // each rebuilding from the render-time prop (which lags the async save +
+  // parent re-render, letting the second edit revert the first). Adopt the
+  // prop only when it actually changes (an effect, not every render, so an
+  // unrelated re-render can't clobber an in-flight optimistic patch).
+  const settingsRef = useRef<Settings | null>(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     let alive = true;
@@ -132,7 +140,9 @@ export function SettingsOutput({
   const rec = settings.recording;
 
   const save = (patch: Partial<RecordingSettings>) => {
-    const next: Settings = { ...settings, recording: { ...settings.recording, ...patch } };
+    const base = settingsRef.current ?? settings;
+    const next: Settings = { ...base, recording: { ...base.recording, ...patch } };
+    settingsRef.current = next; // accumulate before the async round-trip
     setSaveError(null);
     settingsSet(next)
       .then(() => onSaved(next))
@@ -374,19 +384,6 @@ export function SettingsOutput({
             </button>
           ))}
         </div>
-
-        <label className="flex items-start gap-2 text-[11px] text-havoc-muted">
-          <input
-            type="checkbox"
-            checked={rec.separateLocalCopy}
-            onChange={(event) => save({ separateLocalCopy: event.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            Record a separate local copy while streaming — takes effect when streaming lands (0.70);
-            the local recording never rides a stream&apos;s settings.
-          </span>
-        </label>
 
         {saveError && (
           <p role="alert" className="m-0 text-[11px] text-red-300">

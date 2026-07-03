@@ -76,6 +76,11 @@ struct Active {
 /// Tauri-managed recording state.
 pub struct RecordingState {
     inner: Mutex<Option<Active>>,
+    /// Held across the whole of [`start`] (which does slow I/O) so two
+    /// concurrent `recording_start` calls can't both pass the "already
+    /// running" check and race onto the same file — the `inner` guard alone
+    /// leaves a TOCTOU window while the sink/file is being created.
+    starting: AtomicBool,
     /// The render thread's cheap gate + feed (uncontended lock per tick).
     active: AtomicBool,
     feed: Mutex<Option<RecorderHandle>>,
@@ -87,6 +92,7 @@ impl RecordingState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            starting: AtomicBool::new(false),
             active: AtomicBool::new(false),
             feed: Mutex::new(None),
             last: Mutex::new((Vec::new(), None)),
@@ -190,9 +196,66 @@ pub fn recordings_folder(settings: &RecordingSettings) -> PathBuf {
     }
 }
 
+/// A non-colliding output path: `{prefix} {timestamp}.{ext}`, appending
+/// ` (2)`, ` (3)`… if that base (or, when splitting, its first `part…`
+/// segment) already exists — so two sessions in the same local-time second
+/// never overwrite each other.
+fn unique_recording_path(
+    folder: &std::path::Path,
+    prefix: &str,
+    timestamp: &str,
+    ext: &str,
+    split: bool,
+) -> PathBuf {
+    let taken = |base: &std::path::Path| -> bool {
+        if base.exists() {
+            return true;
+        }
+        // Splitting never writes `base` itself — the segments are its
+        // `{stem} part000/001.{ext}` siblings; check those instead.
+        if split {
+            if let Some(stem) = base.file_stem().and_then(|s| s.to_str()) {
+                return ["part000", "part001"].iter().any(|suffix| {
+                    base.with_file_name(format!("{stem} {suffix}.{ext}"))
+                        .exists()
+                });
+            }
+        }
+        false
+    };
+    for n in 0..10_000u32 {
+        let name = if n == 0 {
+            format!("{prefix} {timestamp}.{ext}")
+        } else {
+            format!("{prefix} {timestamp} ({}).{ext}", n + 1)
+        };
+        let base = folder.join(name);
+        if !taken(&base) {
+            return base;
+        }
+    }
+    folder.join(format!("{prefix} {timestamp}.{ext}"))
+}
+
+/// Resets an [`AtomicBool`] on scope exit — arms the `starting` guard so it
+/// clears however `start` returns (success or any `?` error).
+struct ResetOnDrop<'a>(&'a AtomicBool);
+impl Drop for ResetOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Start a recording session from the persisted settings.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let state = app.state::<RecordingState>();
+    // Serialize the whole start (it does slow file/child I/O before the
+    // session is registered): a second concurrent start bails here instead of
+    // racing onto the same output file.
+    if state.starting.swap(true, Ordering::SeqCst) {
+        return Err("a recording is already starting".to_string());
+    }
+    let _reset = ResetOnDrop(&state.starting);
     if state.lock_inner().is_some() {
         return Err("a recording is already running".to_string());
     }
@@ -220,13 +283,18 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let folder = recordings_folder(&settings);
     std::fs::create_dir_all(&folder)
         .map_err(|err| format!("could not create {}: {err}", folder.display()))?;
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
-    let path = folder.join(format!(
-        "{} {timestamp}.{}",
-        settings.filename_prefix,
-        settings.container.extension()
-    ));
     let split = (settings.split_minutes > 0).then_some(settings.split_minutes);
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
+    // Second-granularity local timestamps collide (a fast restart, or a DST
+    // fall-back hour), and both sink paths truncate — so guard uniqueness
+    // rather than silently overwrite a finished recording.
+    let path = unique_recording_path(
+        &folder,
+        &settings.filename_prefix,
+        &timestamp,
+        settings.container.extension(),
+        split.is_some(),
+    );
 
     let sink: Box<dyn RecordSink> = match settings.container {
         Container::Frec => Box::new(FrecSink::create(spec.clone(), path.clone(), split)?),
@@ -294,11 +362,17 @@ fn resolve_encoder<R: Runtime>(
     let wanted_codec = |id: &str| catalog.get(id).map(|desc| desc.codec);
 
     let encoder_id = if settings.encoder_id == "auto" {
-        // Auto picks H.264 — the container-universal default.
+        // Auto picks the best encoder for a codec the *container* accepts —
+        // WebM only holds AV1, so H.264 (the default elsewhere) would always
+        // be rejected below and make WebM impossible without a manual pick.
+        let codec = match container {
+            Container::Webm => VideoCodec::Av1,
+            _ => VideoCodec::H264,
+        };
         catalog
-            .best(VideoCodec::H264)
+            .best(codec)
             .map(|desc| desc.id.clone())
-            .ok_or_else(|| "no usable H.264 encoder was detected".to_string())?
+            .ok_or_else(|| format!("no usable {} encoder was detected", codec.label()))?
     } else {
         let desc = catalog.get(&settings.encoder_id).ok_or_else(|| {
             format!(
@@ -423,4 +497,57 @@ pub fn spawn_status_thread<R: Runtime>(app: AppHandle<R>) {
             std::thread::sleep(STATUS_TICK);
         })
         .expect("recording status thread spawns");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_recording_path;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("fcap-recname-{}-{nanos}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        dir
+    }
+
+    #[test]
+    fn same_second_never_overwrites_a_finished_recording() {
+        let dir = temp_dir("collide");
+        let ts = "2026-07-03 14-30-00";
+
+        let first = unique_recording_path(&dir, "Freally Capture", ts, "frec", false);
+        assert_eq!(
+            first.file_name().unwrap(),
+            "Freally Capture 2026-07-03 14-30-00.frec"
+        );
+        std::fs::write(&first, b"x").expect("write");
+
+        // A second session in the same local-time second gets a fresh name.
+        let second = unique_recording_path(&dir, "Freally Capture", ts, "frec", false);
+        assert_eq!(
+            second.file_name().unwrap(),
+            "Freally Capture 2026-07-03 14-30-00 (2).frec"
+        );
+        assert!(!second.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn splitting_collision_checks_the_first_segment() {
+        let dir = temp_dir("split");
+        let ts = "2026-07-03 14-30-00";
+        // A split session writes `… part001.frec`, not the bare base — the
+        // guard must still see the clash.
+        std::fs::write(dir.join("Rec 2026-07-03 14-30-00 part001.frec"), b"x").expect("write");
+        let next = unique_recording_path(&dir, "Rec", ts, "frec", true);
+        assert_eq!(
+            next.file_name().unwrap(),
+            "Rec 2026-07-03 14-30-00 (2).frec"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

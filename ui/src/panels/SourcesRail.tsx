@@ -23,7 +23,6 @@ import type {
   VideoDevice,
   VideoFormat,
 } from "../api/types";
-import { kindHasAudio } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
@@ -170,8 +169,7 @@ export function SourcesRail({
                 </button>
               ))}
               <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                Media (video files) arrives with the recording engine; Browser needs its own
-                offscreen-webview work.
+                Browser Source arrives later — it needs its own offscreen-webview work.
               </p>
             </div>
           )}
@@ -189,12 +187,12 @@ export function SourcesRail({
           {topFirst.map((item) => {
             const modelIndex = items.findIndex((candidate) => candidate.id === item.id);
             const source = sourceOf(item.source);
-            // Audio sources report through the `audio` event; video through
-            // `program`. Same status shape, one dot.
-            const status =
-              source && kindHasAudio(source.kind)
-                ? audio?.sources[item.source]
-                : program?.sources[item.source];
+            // Audio-*only* sources report through the `audio` event; every
+            // video source (incl. Media, which also has audio but is
+            // video-primary) reports its pipeline state — errors, retry —
+            // through `program`. Same status shape, one dot.
+            const audioOnly = source?.kind === "audioInput" || source?.kind === "audioOutput";
+            const status = audioOnly ? audio?.sources[item.source] : program?.sources[item.source];
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
             return (

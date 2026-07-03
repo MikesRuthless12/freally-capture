@@ -23,9 +23,9 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -99,12 +99,16 @@ pub enum EncPreset {
 }
 
 /// Global (pre-input) ffmpeg args an encoder needs — VAAPI brings up its
-/// hardware device here.
+/// hardware device here. The device is left for ffmpeg to auto-select (bare
+/// `vaapi=va`, no node path) so this matches exactly how the encoder was
+/// smoke-verified (`crate::ffmpeg::smoke_test_encoder`); pinning a specific
+/// `/dev/dri/renderD*` node here could point at a different GPU than the one
+/// that verified, making a "confirmed" encoder fail at record time.
 pub fn global_args(encoder_id: &str) -> Vec<String> {
     if encoder_id.ends_with("_vaapi") {
         vec![
             "-init_hw_device".into(),
-            "vaapi=va:/dev/dri/renderD128".into(),
+            "vaapi=va".into(),
             "-filter_hw_device".into(),
             "va".into(),
         ]
@@ -376,11 +380,10 @@ fn frec_spec(spec: &RecordSpec) -> FrecSpec {
     }
 }
 
-/// `name.ext` → `name part001.ext` when splitting, `name.ext` otherwise.
-fn part_path(base: &Path, splitting: bool, part: u32) -> PathBuf {
-    if !splitting {
-        return base.to_path_buf();
-    }
+/// `base` → a sibling `{stem} part{suffix}.{ext}` — the one split-part naming
+/// scheme, shared by the owned `.frec` writer (a formatted number) and the
+/// ffmpeg segment muxer (a literal `%03d` template) so the two can never drift.
+fn part_sibling(base: &Path, suffix: &str, default_ext: &str) -> PathBuf {
     let stem = base
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -388,8 +391,16 @@ fn part_path(base: &Path, splitting: bool, part: u32) -> PathBuf {
     let ext = base
         .extension()
         .and_then(|ext| ext.to_str())
-        .unwrap_or("frec");
-    base.with_file_name(format!("{stem} part{part:03}.{ext}"))
+        .unwrap_or(default_ext);
+    base.with_file_name(format!("{stem} part{suffix}.{ext}"))
+}
+
+/// `name.ext` → `name part001.ext` when splitting, `name.ext` otherwise.
+fn part_path(base: &Path, splitting: bool, part: u32) -> PathBuf {
+    if !splitting {
+        return base.to_path_buf();
+    }
+    part_sibling(base, &format!("{part:03}"), "frec")
 }
 
 impl RecordSink for FrecSink {
@@ -443,26 +454,33 @@ pub struct WirePlan {
     pub path: PathBuf,
 }
 
-enum VideoMsg {
-    Frame(Arc<Vec<u8>>),
-}
-
 struct AudioLane {
     tx: Option<mpsc::SyncSender<Vec<f32>>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// The next stereo-frame position this lane expects. A gap (an upstream
+    /// block dropped on the engine→pacer hop) is silence-padded to it, so the
+    /// stream ffmpeg receives stays positionally exact and A/V never drifts.
+    next_pos: u64,
 }
 
 /// Wire-codec recording through the on-demand ffmpeg component: one child
 /// process, video over stdin, one localhost socket per audio track.
+///
+/// **Backpressure, never silent drops:** both feeds use *blocking* bounded
+/// sends (like [`FrecSink`], which blocks on disk I/O). If ffmpeg falls
+/// behind, the writes block and the recorder's pacing thread slows with it —
+/// so the frames/samples ffmpeg receives always match what the recorder
+/// counted, and neither stream can silently shorten against the other. A dead
+/// child surfaces as a `Disconnected` send error, not a lost frame.
 pub struct FfmpegSink {
     child: Child,
-    video_tx: Option<mpsc::SyncSender<VideoMsg>>,
+    video_tx: Option<mpsc::SyncSender<Arc<Vec<u8>>>>,
     video_thread: Option<std::thread::JoinHandle<()>>,
     lanes: Vec<AudioLane>,
     stderr_thread: Option<std::thread::JoinHandle<Vec<u8>>>,
-    /// Video frames dropped at the queue (sink overloaded) — the recorder
-    /// re-dups later frames so sync holds; the count is surfaced honestly.
-    pub queue_drops: Arc<AtomicU64>,
+    /// Set on finish/drop so a lane still waiting for ffmpeg to connect
+    /// (`accept()`) stops waiting instead of hanging finalize forever.
+    connect_cancel: Arc<AtomicBool>,
     paths: Vec<PathBuf>,
     split: bool,
 }
@@ -576,13 +594,12 @@ impl FfmpegSink {
             })
             .map_err(|err| err.to_string())?;
 
-        let queue_drops = Arc::new(AtomicU64::new(0));
-        let video_thread = spawn_video_writer(stdin, &queue_drops)?;
-        let (video_tx, video_thread) = video_thread;
+        let connect_cancel = Arc::new(AtomicBool::new(false));
+        let (video_tx, video_thread) = spawn_video_writer(stdin)?;
 
         let mut lanes = Vec::new();
         for listener in listeners {
-            lanes.push(spawn_audio_writer(listener)?);
+            lanes.push(spawn_audio_writer(listener, Arc::clone(&connect_cancel))?);
         }
 
         Ok(FfmpegSink {
@@ -591,7 +608,7 @@ impl FfmpegSink {
             video_thread: Some(video_thread),
             lanes,
             stderr_thread: Some(stderr_thread),
-            queue_drops,
+            connect_cancel,
             paths: vec![out_path],
             split,
         })
@@ -600,15 +617,7 @@ impl FfmpegSink {
 
 /// `name.mkv` → `name part%03d.mkv` for the segment muxer.
 fn segment_template(base: &Path) -> PathBuf {
-    let stem = base
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("recording");
-    let ext = base
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("mkv");
-    base.with_file_name(format!("{stem} part%03d.{ext}"))
+    part_sibling(base, "%03d", "mkv")
 }
 
 /// Expand a written `part%03d` template to the files that actually exist.
@@ -632,19 +641,17 @@ fn expand_segments(template: &Path) -> Vec<PathBuf> {
     }
 }
 
-type VideoWriter = (mpsc::SyncSender<VideoMsg>, std::thread::JoinHandle<()>);
+type VideoWriter = (mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<()>);
 
-fn spawn_video_writer(
-    mut stdin: ChildStdin,
-    _drops: &Arc<AtomicU64>,
-) -> Result<VideoWriter, String> {
-    // 8 frames in flight (~130 ms at 60 fps) — deep enough for encoder
-    // jitter, shallow enough that memory stays bounded (8 × frame size).
-    let (tx, rx) = mpsc::sync_channel::<VideoMsg>(8);
+fn spawn_video_writer(mut stdin: ChildStdin) -> Result<VideoWriter, String> {
+    // 8 frames in flight (~130 ms at 60 fps) — deep enough to absorb encoder
+    // jitter, shallow enough that memory stays bounded (8 × frame size). A
+    // full queue *blocks* the sender (the pacer), never drops.
+    let (tx, rx) = mpsc::sync_channel::<Arc<Vec<u8>>>(8);
     let thread = std::thread::Builder::new()
         .name("fcap-rec-video".into())
         .spawn(move || {
-            while let Ok(VideoMsg::Frame(frame)) = rx.recv() {
+            while let Ok(frame) = rx.recv() {
                 if stdin.write_all(&frame).is_err() {
                     break; // ffmpeg died — the pacer sees the send error next
                 }
@@ -656,21 +663,40 @@ fn spawn_video_writer(
     Ok((tx, thread))
 }
 
-fn spawn_audio_writer(listener: TcpListener) -> Result<AudioLane, String> {
+/// How long a lane waits for ffmpeg to connect before giving up (ffmpeg
+/// connects within milliseconds in practice; this only bounds a child that
+/// died at launch and will never connect).
+const AUDIO_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn spawn_audio_writer(listener: TcpListener, cancel: Arc<AtomicBool>) -> Result<AudioLane, String> {
+    // Non-blocking accept so the wait for ffmpeg's connect can be cancelled
+    // (on finish/drop) or time out — a blocking accept() would hang finalize
+    // forever if the child died before connecting.
+    listener
+        .set_nonblocking(true)
+        .map_err(|err| err.to_string())?;
     let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
     let thread = std::thread::Builder::new()
         .name("fcap-rec-audio".into())
         .spawn(move || {
-            // Accept exactly one connection (ffmpeg's), then close the
-            // listener — nothing else can attach for the session's life.
-            let Ok((mut stream, peer)) = listener.accept() else {
-                return;
+            let deadline = Instant::now() + AUDIO_CONNECT_TIMEOUT;
+            let mut stream = loop {
+                match listener.accept() {
+                    // Accept exactly one connection (ffmpeg's), then drop the
+                    // listener — nothing else can attach for the session.
+                    Ok((stream, peer)) if peer.ip().is_loopback() => break stream,
+                    Ok(_) => return, // never on a 127.0.0.1 bind, but don't trust it
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if cancel.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                            return; // ffmpeg never connected — do not hang
+                        }
+                        std::thread::sleep(Duration::from_millis(15));
+                    }
+                    Err(_) => return,
+                }
             };
             drop(listener);
-            if !peer.ip().is_loopback() {
-                // Cannot happen on a 127.0.0.1 bind — but never trust it.
-                return;
-            }
+            let _ = stream.set_nonblocking(false); // blocking writes from here
             let _ = stream.set_nodelay(true);
             let mut bytes = Vec::with_capacity(4096 * 8);
             while let Ok(samples) = rx.recv() {
@@ -688,6 +714,7 @@ fn spawn_audio_writer(listener: TcpListener) -> Result<AudioLane, String> {
     Ok(AudioLane {
         tx: Some(tx),
         thread: Some(thread),
+        next_pos: 0,
     })
 }
 
@@ -720,48 +747,53 @@ impl RecordSink for FfmpegSink {
         let Some(tx) = &self.video_tx else {
             return Err("the sink is already finished".to_string());
         };
-        match tx.try_send(VideoMsg::Frame(Arc::clone(pixels))) {
+        // Blocking send: if the encoder is behind, backpressure the pacer
+        // (which slows the whole recording) rather than drop a frame — every
+        // frame the recorder counts is a frame ffmpeg receives, so the
+        // CFR-by-count video can never shorten against the audio.
+        match tx.send(Arc::clone(pixels)) {
             Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
-                // Encoder overloaded: skip this write; the recorder's clock
-                // re-dups a later frame so the timeline stays intact.
-                self.queue_drops.fetch_add(1, Ordering::Relaxed);
-                Ok(())
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                Err(self.death_note("the ffmpeg component stopped accepting video"))
-            }
+            Err(_) => Err(self.death_note("the ffmpeg component stopped accepting video")),
         }
     }
 
-    fn write_audio(
-        &mut self,
-        slot: usize,
-        _sample_pos: u64,
-        samples: &[f32],
-    ) -> Result<(), String> {
-        let Some(lane) = self.lanes.get(slot) else {
-            return Err(format!("no audio lane {slot}"));
+    fn write_audio(&mut self, slot: usize, sample_pos: u64, samples: &[f32]) -> Result<(), String> {
+        // Own a clone of the sender + a copy of the position so no borrow of
+        // `self` is held across `death_note` (which needs `&mut self`).
+        let (tx, next_pos) = match self.lanes.get(slot) {
+            Some(lane) => match &lane.tx {
+                Some(tx) => (tx.clone(), lane.next_pos),
+                None => return Err("the sink is already finished".to_string()),
+            },
+            None => return Err(format!("no audio lane {slot}")),
         };
-        let Some(tx) = &lane.tx else {
-            return Err("the sink is already finished".to_string());
-        };
-        match tx.try_send(samples.to_vec()) {
-            Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => {
-                self.queue_drops.fetch_add(1, Ordering::Relaxed);
-                Ok(())
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                Err(self.death_note("the ffmpeg component stopped accepting audio"))
+        // Silence-pad any gap: if an upstream block was dropped on the
+        // engine→pacer hop, this block's absolute position jumps ahead of what
+        // we've sent. Filling the gap with silence keeps the positionless
+        // stream ffmpeg reads exactly aligned, so audio never drifts against
+        // the (CFR-by-count) video. `sample_pos`/`next_pos` are stereo frames;
+        // interleaved samples are twice that.
+        if sample_pos > next_pos {
+            let silence = vec![0.0f32; (sample_pos - next_pos) as usize * 2];
+            if tx.send(silence).is_err() {
+                return Err(self.death_note("the ffmpeg component stopped accepting audio"));
             }
         }
+        // Blocking send (backpressure, never drop) — same contract as video.
+        if tx.send(samples.to_vec()).is_err() {
+            return Err(self.death_note("the ffmpeg component stopped accepting audio"));
+        }
+        self.lanes[slot].next_pos = sample_pos + (samples.len() / 2) as u64;
+        Ok(())
     }
 
     fn finish(mut self: Box<Self>) -> Result<Vec<PathBuf>, String> {
         // Close every feed: writer threads flush, stdin/sockets EOF, ffmpeg
         // finalizes the container (faststart can take a while on long
-        // recordings — the wait is generous, then honest).
+        // recordings — the wait is generous, then honest). Cancel first so a
+        // lane still waiting for ffmpeg to connect stops instead of blocking
+        // the join forever.
+        self.connect_cancel.store(true, Ordering::Relaxed);
         self.video_tx.take();
         for lane in &mut self.lanes {
             lane.tx.take();
@@ -814,7 +846,9 @@ impl RecordSink for FfmpegSink {
 
 impl Drop for FfmpegSink {
     fn drop(&mut self) {
-        // Belt-and-braces: a dropped-unfinished sink must not leak a child.
+        // Belt-and-braces: a dropped-unfinished sink must not leak a child or
+        // strand a lane parked in accept().
+        self.connect_cancel.store(true, Ordering::Relaxed);
         self.video_tx.take();
         for lane in &mut self.lanes {
             lane.tx.take();
@@ -883,7 +917,12 @@ mod tests {
     #[test]
     fn vaapi_brings_up_its_device_and_upload_chain() {
         let global = global_args("h264_vaapi");
-        assert!(global.iter().any(|arg| arg.starts_with("vaapi=va:")));
+        // Bare `vaapi=va` (no node path) so it matches the smoke-test device;
+        // ffmpeg auto-selects the render node.
+        assert!(global
+            .windows(2)
+            .any(|w| w == ["-init_hw_device", "vaapi=va"]));
+        assert!(!global.iter().any(|arg| arg.contains("renderD")));
         let video = video_args("h264_vaapi", &rc(RcMode::Cbr), EncPreset::Balanced, 60);
         assert!(video
             .windows(2)
