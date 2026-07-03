@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+use fcap_encode::mux::{Container, RateControl, RcMode};
+
 /// User-facing settings. Every field defaults (`serde(default)`) so missing
 /// keys never brick the app, and unknown keys from newer builds are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,6 +30,8 @@ pub struct Settings {
     pub show_stats_dock: bool,
     /// The audio monitor output device name (`None`/empty = the OS default).
     pub monitor_device: Option<String>,
+    /// Recording output configuration (Phase 4).
+    pub recording: RecordingSettings,
 }
 
 impl Default for Settings {
@@ -36,7 +40,104 @@ impl Default for Settings {
             language: "en".to_owned(),
             show_stats_dock: true,
             monitor_device: None,
+            recording: RecordingSettings::default(),
         }
+    }
+}
+
+/// Recording configuration (Settings → Output). Independent of any future
+/// stream settings by design — the local copy never rides a stream's knobs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RecordingSettings {
+    /// Output container; `frec` is the owned lossless default.
+    pub container: Container,
+    /// ffmpeg encoder id, or "auto" = best detected H.264 encoder.
+    pub encoder_id: String,
+    pub rate_control: RateControl,
+    /// Keyframe interval in seconds.
+    pub keyframe_sec: f32,
+    /// Recording frame rate (CFR).
+    pub fps: u32,
+    pub audio_bitrate_kbps: u32,
+    /// Bitmask of the mixer tracks to record (bit 0 = track 1; ≥ 1 bit).
+    pub tracks_mask: u8,
+    /// Output folder ("" = the OS Videos folder).
+    pub folder: String,
+    /// Filename prefix; the timestamp is appended.
+    pub filename_prefix: String,
+    /// Split into playable segments every N minutes (0 = off).
+    pub split_minutes: u32,
+    /// Record a separate local copy while streaming (takes effect when
+    /// streaming lands in 0.70 — persisted now so the intent survives).
+    pub separate_local_copy: bool,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self {
+            container: Container::Frec,
+            encoder_id: "auto".to_owned(),
+            rate_control: RateControl {
+                mode: RcMode::Cqp,
+                bitrate_kbps: 8_000,
+                cq: 23,
+            },
+            keyframe_sec: 2.0,
+            fps: 60,
+            audio_bitrate_kbps: 192,
+            tracks_mask: 0b1,
+            folder: String::new(),
+            filename_prefix: "Freally Capture".to_owned(),
+            split_minutes: 0,
+            separate_local_copy: false,
+        }
+    }
+}
+
+impl RecordingSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.encoder_id.len() > 64
+            || !self
+                .encoder_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err("invalid encoder id".to_owned());
+        }
+        if !(100..=300_000).contains(&self.rate_control.bitrate_kbps) {
+            return Err("bitrate out of range (100–300000 kbps)".to_owned());
+        }
+        if self.rate_control.cq > 51 {
+            return Err("CQ out of range (0–51)".to_owned());
+        }
+        if !(0.25..=10.0).contains(&self.keyframe_sec) {
+            return Err("keyframe interval out of range (0.25–10 s)".to_owned());
+        }
+        if !(1..=240).contains(&self.fps) {
+            return Err("recording fps out of range (1–240)".to_owned());
+        }
+        if !(32..=512).contains(&self.audio_bitrate_kbps) {
+            return Err("audio bitrate out of range (32–512 kbps)".to_owned());
+        }
+        if self.tracks_mask == 0 || self.tracks_mask > 0b11_1111 {
+            return Err("at least one of the 6 tracks must record".to_owned());
+        }
+        if self.split_minutes > 24 * 60 {
+            return Err("split interval over 24 h".to_owned());
+        }
+        if self.folder.len() > 1024 || self.folder.chars().any(char::is_control) {
+            return Err("invalid recording folder".to_owned());
+        }
+        let prefix_ok = !self.filename_prefix.is_empty()
+            && self.filename_prefix.len() <= 80
+            && !self.filename_prefix.chars().any(|c| {
+                c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            });
+        if !prefix_ok {
+            return Err("invalid filename prefix".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -59,6 +160,7 @@ impl Settings {
                 return Err("invalid monitor device name".to_owned());
             }
         }
+        self.recording.validate()?;
         Ok(())
     }
 }
@@ -242,6 +344,11 @@ mod tests {
             language: "de".to_owned(),
             show_stats_dock: false,
             monitor_device: Some("Speakers (Realtek)".to_owned()),
+            recording: RecordingSettings {
+                container: Container::Mkv,
+                split_minutes: 30,
+                ..RecordingSettings::default()
+            },
         };
         store.set(next.clone()).expect("save settings");
 
@@ -301,6 +408,61 @@ mod tests {
         let settings = store.get();
         assert_eq!(settings.language, "fr");
         assert!(settings.show_stats_dock, "missing keys take their defaults");
+        assert_eq!(
+            settings.recording,
+            RecordingSettings::default(),
+            "recording settings default in (frec, track 1)"
+        );
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recording_settings_validate_their_bounds() {
+        assert!(RecordingSettings::default().validate().is_ok());
+
+        let cases: Vec<(&str, RecordingSettings)> = vec![
+            (
+                "path separators in the prefix",
+                RecordingSettings {
+                    filename_prefix: "a/b".to_owned(),
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "at least one track records",
+                RecordingSettings {
+                    tracks_mask: 0,
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "bitrate floor",
+                RecordingSettings {
+                    rate_control: RateControl {
+                        mode: RcMode::Cbr,
+                        bitrate_kbps: 5,
+                        cq: 23,
+                    },
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "encoder ids are ffmpeg names only",
+                RecordingSettings {
+                    encoder_id: "x264; rm -rf".to_owned(),
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "zero fps",
+                RecordingSettings {
+                    fps: 0,
+                    ..RecordingSettings::default()
+                },
+            ),
+        ];
+        for (why, bad) in cases {
+            assert!(bad.validate().is_err(), "should reject: {why}");
+        }
     }
 }

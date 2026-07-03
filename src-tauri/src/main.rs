@@ -14,6 +14,7 @@ mod audio;
 mod commands;
 mod events;
 mod preview;
+mod recording;
 mod settings;
 mod studio;
 
@@ -49,6 +50,7 @@ fn main() {
         .manage(AudioRuntime::new())
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
+        .manage(recording::RecordingState::new())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -109,7 +111,12 @@ fn main() {
             commands::recording::ffmpeg_status,
             commands::recording::ffmpeg_install,
             commands::recording::ffmpeg_cancel,
-            commands::recording::ffmpeg_remove
+            commands::recording::ffmpeg_remove,
+            commands::recording::recording_start,
+            commands::recording::recording_stop,
+            commands::recording::recording_pause,
+            commands::recording::recording_resume,
+            commands::recording::recording_status
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());
@@ -122,6 +129,9 @@ fn main() {
             // The audio bridge: model → engine reconcile + the `audio`
             // levels event + PTT/PTM hotkey registration.
             audio::spawn_audio_thread(app.handle().clone());
+            // The recording status emitter (~2 Hz while a session runs) +
+            // the dead-sink watchdog.
+            recording::spawn_status_thread(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

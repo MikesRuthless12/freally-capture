@@ -21,6 +21,7 @@ import type {
   ItemId,
   LoopbackDevices,
   MonitorMode,
+  RecordingStatus,
   SceneId,
   Settings,
   SourceId,
@@ -333,4 +334,33 @@ export function ffmpegCancel(): Promise<void> {
 /** Remove the installed component. */
 export function ffmpegRemove(): Promise<void> {
   return invoke("ffmpeg_remove");
+}
+
+// ---------------------------------------------------------------------------
+// Recording (Phase 4)
+// ---------------------------------------------------------------------------
+
+/** Start recording with the persisted Settings → Output configuration. */
+export function recordingStart(): Promise<void> {
+  return invoke("recording_start");
+}
+
+/** Stop + finalize; resolves to the finished file paths. */
+export function recordingStop(): Promise<string[]> {
+  return invoke<string[]>("recording_stop");
+}
+
+/** Pause the running recording (the file stays one contiguous timeline). */
+export function recordingPause(): Promise<void> {
+  return invoke("recording_pause");
+}
+
+/** Resume a paused recording. */
+export function recordingResume(): Promise<void> {
+  return invoke("recording_resume");
+}
+
+/** The current recording status snapshot. */
+export function recordingStatus(): Promise<RecordingStatus> {
+  return invoke<RecordingStatus>("recording_status");
 }

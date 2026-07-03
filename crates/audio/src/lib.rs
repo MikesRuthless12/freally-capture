@@ -30,7 +30,9 @@ pub mod resample;
 pub use devices::{
     list_input_devices, list_loopback_devices, list_output_devices, AudioDeviceInfo,
 };
-pub use engine::{AudioEngine, EngineSnapshot, SourceConfig, SourceSnapshot, SourceState};
+pub use engine::{
+    AudioEngine, EngineSnapshot, RecordTap, SourceConfig, SourceSnapshot, SourceState,
+};
 pub use graph::{MixerCore, StripControl};
 pub use meter::Levels;
 

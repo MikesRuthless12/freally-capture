@@ -90,6 +90,7 @@ unicode-bidi = "0.3"   # RTL paragraph handling (UAX #9)
 tungstenite = "0.23"
 
 # Config / hotkeys / i18n
+chrono = "0.4"          # local-time recording filenames
 directories = "5"
 global-hotkey = "0.6"
 tauri-plugin-global-shortcut = "2"   # PTT/PTM (P3); the full hotkey map lands in P5

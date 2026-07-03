@@ -26,7 +26,63 @@ export type Settings = {
   showStatsDock: boolean;
   /** The audio monitor output device name (null/"" = the OS default). */
   monitorDevice: string | null;
+  /** Recording output configuration (Phase 4). */
+  recording: RecordingSettings;
 };
+
+/** Recording containers; `frec` is the owned lossless default. */
+export type Container = "frec" | "mkv" | "mp4" | "mov" | "webm";
+
+export type RcMode = "cbr" | "vbr" | "cqp";
+
+export type RateControl = {
+  mode: RcMode;
+  bitrateKbps: number;
+  /** Constant-quality value for `cqp` (0–51). */
+  cq: number;
+};
+
+/** Recording configuration (mirrors `RecordingSettings` in settings.rs). */
+export type RecordingSettings = {
+  container: Container;
+  /** ffmpeg encoder id, or "auto" = best detected H.264 encoder. */
+  encoderId: string;
+  rateControl: RateControl;
+  keyframeSec: number;
+  fps: number;
+  audioBitrateKbps: number;
+  /** Bitmask of the mixer tracks to record (bit 0 = track 1). */
+  tracksMask: number;
+  /** Output folder ("" = the OS Videos folder). */
+  folder: string;
+  filenamePrefix: string;
+  /** Split into playable segments every N minutes (0 = off). */
+  splitMinutes: number;
+  /** Record a separate local copy while streaming (active from 0.70). */
+  separateLocalCopy: boolean;
+};
+
+/** The `recording` event + `recording_status` payload. */
+export type RecordingStatus =
+  | { state: "idle"; lastPaths: string[]; error: string | null }
+  | {
+      state: "recording";
+      durationSec: number;
+      path: string;
+      container: Container;
+      tracks: number;
+      framesDuplicated: number;
+      framesBehind: number;
+      audioBlocksDropped: number;
+    }
+  | {
+      state: "paused";
+      durationSec: number;
+      path: string;
+      container: Container;
+      tracks: number;
+    }
+  | { state: "finalizing"; path: string };
 
 /** The `stats` push-event payload (~2 Hz). */
 export type StatsPayload = {

@@ -130,29 +130,32 @@ fn set_and_emit<R: Runtime>(app: &AppHandle<R>, status: FfmpegStatusDto) {
     let _ = app.emit("ffmpeg", &status);
 }
 
+/// Blocking catalog resolution shared by [`encoders_list`] and recording
+/// start: detect + verify once per install state, then session-cached.
+/// Call from a worker thread — the smoke tests spawn processes.
+pub fn ensure_catalog<R: Runtime>(app: &AppHandle<R>) -> Result<Catalog, String> {
+    let cached = app.state::<EncodeState>().lock_catalog().clone();
+    if let Some(catalog) = cached {
+        return Ok(catalog);
+    }
+    let mut catalog = Catalog::detect();
+    if let Some(ready) = app.state::<EncodeState>().ready_ffmpeg() {
+        if let Err(err) = ffmpeg::verify_catalog(&mut catalog, &ready) {
+            eprintln!("encode: could not verify the catalog against ffmpeg: {err}");
+        }
+    }
+    *app.state::<EncodeState>().lock_catalog() = Some(catalog.clone());
+    Ok(catalog)
+}
+
 /// Detect the encoder catalog (GPU enumeration + per-OS rules), verified
 /// against the installed ffmpeg when present. Async — detection and the
 /// first-run smoke tests must not block the UI.
 #[tauri::command]
 pub async fn encoders_list<R: Runtime>(app: AppHandle<R>) -> Result<Catalog, String> {
-    let cached = app.state::<EncodeState>().lock_catalog().clone();
-    if let Some(catalog) = cached {
-        return Ok(catalog);
-    }
-    let handle = app.clone();
-    let catalog = tauri::async_runtime::spawn_blocking(move || {
-        let mut catalog = Catalog::detect();
-        if let Some(ready) = handle.state::<EncodeState>().ready_ffmpeg() {
-            if let Err(err) = ffmpeg::verify_catalog(&mut catalog, &ready) {
-                eprintln!("encode: could not verify the catalog against ffmpeg: {err}");
-            }
-        }
-        catalog
-    })
-    .await
-    .map_err(|err| format!("encoder detection task failed: {err}"))?;
-    *app.state::<EncodeState>().lock_catalog() = Some(catalog.clone());
-    Ok(catalog)
+    tauri::async_runtime::spawn_blocking(move || ensure_catalog(&app))
+        .await
+        .map_err(|err| format!("encoder detection task failed: {err}"))?
 }
 
 /// The ffmpeg component's current status.
@@ -255,4 +258,46 @@ pub fn ffmpeg_remove<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         },
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Recording session commands (P4.3/P4.5) — thin wrappers over
+// `crate::recording`; start/stop block on I/O so they run off-thread.
+// ---------------------------------------------------------------------------
+
+/// Start recording with the persisted Settings → Output configuration.
+#[tauri::command]
+pub async fn recording_start<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::recording::start(&app))
+        .await
+        .map_err(|err| format!("recording start task failed: {err}"))?
+}
+
+/// Stop + finalize; returns the finished file paths.
+#[tauri::command]
+pub async fn recording_stop<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::recording::stop(&app))
+        .await
+        .map_err(|err| format!("recording stop task failed: {err}"))?
+}
+
+/// Pause the running recording (no frames written; the file stays one
+/// contiguous timeline).
+#[tauri::command]
+pub fn recording_pause<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::recording::set_paused(&app, true)
+}
+
+/// Resume a paused recording.
+#[tauri::command]
+pub fn recording_resume<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::recording::set_paused(&app, false)
+}
+
+/// The current recording status snapshot.
+#[tauri::command]
+pub fn recording_status(
+    state: State<'_, crate::recording::RecordingState>,
+) -> crate::recording::RecordingDto {
+    state.status()
 }

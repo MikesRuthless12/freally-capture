@@ -20,6 +20,8 @@ pub mod ffmpeg;
 pub mod flz;
 pub mod freally_video;
 pub mod hardware;
+pub mod mux;
+pub mod recorder;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
 pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};
@@ -27,6 +29,8 @@ pub use freally_video::{
     FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
 };
 pub use hardware::{GpuInfo, GpuVendor};
+pub use mux::{Container, FfmpegSink, FrecSink, RateControl, RcMode, WirePlan};
+pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

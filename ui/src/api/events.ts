@@ -10,6 +10,7 @@ import type {
   AudioLevelsPayload,
   FfmpegStatus,
   ProgramStatus,
+  RecordingStatus,
   StatsPayload,
   StudioDto,
 } from "./types";
@@ -37,4 +38,9 @@ export function onAudio(handler: (levels: AudioLevelsPayload) => void): Promise<
 /** Subscribe to the ffmpeg component's install/status changes. */
 export function onFfmpeg(handler: (status: FfmpegStatus) => void): Promise<UnlistenFn> {
   return listen<FfmpegStatus>("ffmpeg", (event) => handler(event.payload));
+}
+
+/** Subscribe to recording state/progress (~2 Hz while a session runs). */
+export function onRecording(handler: (status: RecordingStatus) => void): Promise<UnlistenFn> {
+  return listen<RecordingStatus>("recording", (event) => handler(event.payload));
 }

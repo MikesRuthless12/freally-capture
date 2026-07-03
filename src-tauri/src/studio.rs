@@ -29,7 +29,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use fcap_capture::{CaptureError, CaptureSession};
-use fcap_compositor::{parse_cube, Compositor, CompositorError, FilterResourceData, ProgramFrame};
+use fcap_compositor::{parse_cube, Compositor, CompositorError, FilterResourceData};
 use fcap_scene::{
     AudioSettings, Collection, FilterId, FilterKind, SceneError, SceneId, SourceId, SourceSettings,
     Transform,
@@ -687,18 +687,33 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         }
         composed_this_second += 1;
 
-        if last_readback.elapsed() >= READBACK_INTERVAL {
+        // The recorder wants the full-res program frame every tick while a
+        // session runs; the preview JPEG keeps its ~30 fps cadence. One
+        // readback serves both.
+        let recording = app.state::<crate::recording::RecordingState>();
+        let record_due = recording.wants_frames();
+        let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
+        if record_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
-                    if let Some(jpeg) = encode_program_jpeg(
-                        &frame,
-                        PREVIEW_MAX_WIDTH,
-                        PREVIEW_MAX_HEIGHT,
-                        PREVIEW_JPEG_QUALITY,
-                    ) {
-                        preview.publish(jpeg);
+                    let (frame_w, frame_h) = (frame.width, frame.height);
+                    let data = Arc::new(frame.data);
+                    if record_due {
+                        recording.push_video(Arc::clone(&data));
                     }
-                    last_readback = Instant::now();
+                    if preview_due {
+                        if let Some(jpeg) = encode_program_jpeg(
+                            frame_w,
+                            frame_h,
+                            &data,
+                            PREVIEW_MAX_WIDTH,
+                            PREVIEW_MAX_HEIGHT,
+                            PREVIEW_JPEG_QUALITY,
+                        ) {
+                            preview.publish(jpeg);
+                        }
+                        last_readback = Instant::now();
+                    }
                 }
                 Err(err) => eprintln!("studio: program readback failed: {err}"),
             }
@@ -901,28 +916,26 @@ fn load_filter_resource(kind: &FilterKind, path: &str) -> Result<FilterResourceD
 
 /// Downscale (integer nearest-neighbor) + JPEG-encode the program frame.
 fn encode_program_jpeg(
-    frame: &ProgramFrame,
+    width: u32,
+    height: u32,
+    data: &[u8],
     max_w: u32,
     max_h: u32,
     quality: u8,
 ) -> Option<Vec<u8>> {
-    if frame.width == 0 || frame.height == 0 {
+    if width == 0 || height == 0 {
         return None;
     }
-    let factor = frame
-        .width
-        .div_ceil(max_w)
-        .max(frame.height.div_ceil(max_h))
-        .max(1);
-    let out_w = frame.width.div_ceil(factor);
-    let out_h = frame.height.div_ceil(factor);
+    let factor = width.div_ceil(max_w).max(height.div_ceil(max_h)).max(1);
+    let out_w = width.div_ceil(factor);
+    let out_h = height.div_ceil(factor);
 
     let mut rgb = Vec::with_capacity(out_w as usize * out_h as usize * 3);
     for y in 0..out_h {
-        let src_row = (y * factor) as usize * frame.width as usize * 4;
+        let src_row = (y * factor) as usize * width as usize * 4;
         for x in 0..out_w {
             let src = src_row + (x * factor) as usize * 4;
-            rgb.extend_from_slice(&frame.data[src..src + 3]);
+            rgb.extend_from_slice(&data[src..src + 3]);
         }
     }
 
@@ -945,12 +958,8 @@ mod tests {
 
     #[test]
     fn program_jpeg_downscales_to_the_box() {
-        let frame = ProgramFrame {
-            width: 1920,
-            height: 1080,
-            data: vec![0x60; 1920 * 1080 * 4],
-        };
-        let jpeg = encode_program_jpeg(&frame, 1280, 720, 75).expect("encodable");
+        let data = vec![0x60; 1920 * 1080 * 4];
+        let jpeg = encode_program_jpeg(1920, 1080, &data, 1280, 720, 75).expect("encodable");
         assert_eq!(&jpeg[..2], &[0xFF, 0xD8], "JPEG magic");
     }
 
