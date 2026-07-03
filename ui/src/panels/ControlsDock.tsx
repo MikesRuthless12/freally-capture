@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { recordingStart, recordingStatus, recordingStop } from "../api/commands";
+import {
+  recordingPause,
+  recordingResume,
+  recordingStart,
+  recordingStatus,
+  recordingStop,
+} from "../api/commands";
 import { onRecording } from "../api/events";
 import type { RecordingStatus, Settings } from "../api/types";
 import { Panel } from "../components/Panel";
@@ -65,6 +71,22 @@ export function ControlsDock({
     }
   };
 
+  const pauseResume = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      if (rec?.state === "paused") {
+        await recordingResume();
+      } else {
+        await recordingPause();
+      }
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // The last session's error surfaces until the next action clears it.
   const sessionError = rec?.state === "idle" ? rec.error : null;
   const shownError = actionError ?? sessionError;
@@ -104,6 +126,25 @@ export function ControlsDock({
             "● Start Recording"
           )}
         </button>
+        {active && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={pauseResume}
+            title={
+              rec?.state === "paused"
+                ? "Resume — the file continues as one contiguous timeline"
+                : "Pause — no frames are written; resuming continues the same playable file"
+            }
+            className={`${buttonBase} ${
+              rec?.state === "paused"
+                ? "border-amber-400/50 bg-amber-400/15 text-havoc-text hover:border-amber-300/70"
+                : "border-white/10 bg-white/[0.04] text-havoc-text hover:border-amber-400/50"
+            }`}
+          >
+            {rec?.state === "paused" ? "▶ Resume Recording" : "⏸ Pause Recording"}
+          </button>
+        )}
         <button
           type="button"
           disabled
