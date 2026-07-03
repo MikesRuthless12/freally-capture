@@ -116,7 +116,9 @@ fn main() {
             commands::recording::recording_stop,
             commands::recording::recording_pause,
             commands::recording::recording_resume,
-            commands::recording::recording_status
+            commands::recording::recording_status,
+            commands::recording::recordings_list,
+            commands::recording::recording_remux
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());

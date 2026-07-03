@@ -22,6 +22,7 @@ pub mod freally_video;
 pub mod hardware;
 pub mod mux;
 pub mod recorder;
+pub mod remux;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
 pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};

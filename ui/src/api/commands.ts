@@ -21,6 +21,7 @@ import type {
   ItemId,
   LoopbackDevices,
   MonitorMode,
+  RecordingFile,
   RecordingStatus,
   SceneId,
   Settings,
@@ -363,4 +364,14 @@ export function recordingResume(): Promise<void> {
 /** The current recording status snapshot. */
 export function recordingStatus(): Promise<RecordingStatus> {
   return invoke<RecordingStatus>("recording_status");
+}
+
+/** The recordings folder's media files, newest first. */
+export function recordingsList(): Promise<RecordingFile[]> {
+  return invoke<RecordingFile[]>("recordings_list");
+}
+
+/** Remux an mkv recording to a sibling mp4 (stream copy, no re-encode). */
+export function recordingRemux(path: string): Promise<string> {
+  return invoke<string>("recording_remux", { path });
 }

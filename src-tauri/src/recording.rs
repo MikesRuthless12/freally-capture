@@ -180,6 +180,16 @@ fn default_folder() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Where recordings land for the given settings — shared by the session
+/// start and the recordings list (and its remux path check).
+pub fn recordings_folder(settings: &RecordingSettings) -> PathBuf {
+    if settings.folder.trim().is_empty() {
+        default_folder()
+    } else {
+        PathBuf::from(settings.folder.trim())
+    }
+}
+
 /// Start a recording session from the persisted settings.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let state = app.state::<RecordingState>();
@@ -207,11 +217,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         tracks,
     };
 
-    let folder = if settings.folder.trim().is_empty() {
-        default_folder()
-    } else {
-        PathBuf::from(settings.folder.trim())
-    };
+    let folder = recordings_folder(&settings);
     std::fs::create_dir_all(&folder)
         .map_err(|err| format!("could not create {}: {err}", folder.display()))?;
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");

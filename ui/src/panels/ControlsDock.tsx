@@ -12,6 +12,7 @@ import type { RecordingStatus, Settings } from "../api/types";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ModelsDialog } from "./Models";
+import { RecordingsDialog } from "./Recordings";
 import { SettingsOutput } from "./SettingsOutput";
 
 const buttonBase =
@@ -28,7 +29,7 @@ export function ControlsDock({
   const [rec, setRec] = useState<RecordingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"components" | "output" | null>(null);
+  const [dialog, setDialog] = useState<"components" | "output" | "recordings" | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -161,11 +162,19 @@ export function ControlsDock({
         >
           ⌁ Start Virtual Camera
         </button>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setDialog("recordings")}
+            title="Finished recordings + the remux-to-mp4 action"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ▤ Files…
+          </button>
           <button
             type="button"
             onClick={() => setDialog("output")}
-            title="Recording format, folder, tracks, and splitting"
+            title="Recording format, encoder, folder, tracks, and splitting"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
             ⚙ Output…
@@ -176,7 +185,7 @@ export function ControlsDock({
             title="The on-demand ffmpeg wire-codec component (clearly labeled, never bundled)"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⬡ Components…
+            ⬡ Codecs…
           </button>
         </div>
         {shownError && (
@@ -191,6 +200,7 @@ export function ControlsDock({
         )}
       </div>
       {dialog === "components" && <ModelsDialog onClose={() => setDialog(null)} />}
+      {dialog === "recordings" && <RecordingsDialog onClose={() => setDialog(null)} />}
       {dialog === "output" && (
         <SettingsOutput
           settings={settings}

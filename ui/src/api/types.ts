@@ -66,6 +66,16 @@ export type RecordingSettings = {
   separateLocalCopy: boolean;
 };
 
+/** One file in the recordings folder (`recordings_list`). */
+export type RecordingFile = {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  modifiedMs: number;
+  /** Lowercase extension ("frec", "mkv", …). */
+  ext: string;
+};
+
 /** The `recording` event + `recording_status` payload. */
 export type RecordingStatus =
   | { state: "idle"; lastPaths: string[]; error: string | null }

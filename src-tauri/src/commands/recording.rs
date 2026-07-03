@@ -301,3 +301,108 @@ pub fn recording_status(
 ) -> crate::recording::RecordingDto {
     state.status()
 }
+
+// ---------------------------------------------------------------------------
+// The recordings list + remux (P4.8)
+// ---------------------------------------------------------------------------
+
+/// One file in the recordings folder.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingFileDto {
+    pub path: String,
+    pub name: String,
+    pub size_bytes: u64,
+    /// Unix millis of the last modification.
+    pub modified_ms: u64,
+    /// Lowercase extension ("frec", "mkv", …).
+    pub ext: String,
+}
+
+const RECORDING_EXTS: [&str; 5] = ["frec", "mkv", "mp4", "mov", "webm"];
+
+/// List the recordings folder's media files, newest first (capped at 200).
+#[tauri::command]
+pub async fn recordings_list<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Vec<RecordingFileDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = app
+            .state::<crate::settings::SettingsStore>()
+            .get()
+            .recording;
+        let folder = crate::recording::recordings_folder(&settings);
+        let mut files: Vec<RecordingFileDto> = Vec::new();
+        let entries = match std::fs::read_dir(&folder) {
+            Ok(entries) => entries,
+            Err(_) => return Ok(Vec::new()), // no folder yet — nothing recorded
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(ext) = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_ascii_lowercase())
+            else {
+                continue;
+            };
+            if !RECORDING_EXTS.contains(&ext.as_str()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            files.push(RecordingFileDto {
+                name: entry.file_name().to_string_lossy().to_string(),
+                path: path.display().to_string(),
+                size_bytes: meta.len(),
+                modified_ms,
+                ext,
+            });
+        }
+        files.sort_by_key(|file| std::cmp::Reverse(file.modified_ms));
+        files.truncate(200);
+        Ok(files)
+    })
+    .await
+    .map_err(|err| format!("recordings listing task failed: {err}"))?
+}
+
+/// Remux an mkv recording to a sibling mp4 (stream copy — no re-encode).
+/// The path must live in the recordings folder: the webview never gets to
+/// point this at arbitrary files.
+#[tauri::command]
+pub async fn recording_remux<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = app
+            .state::<crate::settings::SettingsStore>()
+            .get()
+            .recording;
+        let folder = crate::recording::recordings_folder(&settings)
+            .canonicalize()
+            .map_err(|err| format!("recordings folder: {err}"))?;
+        let input = std::path::Path::new(&path)
+            .canonicalize()
+            .map_err(|err| format!("recording not found: {err}"))?;
+        if input.parent() != Some(folder.as_path()) {
+            return Err("only files in the recordings folder can be remuxed".to_string());
+        }
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("remuxing needs the ffmpeg component — install it from Components")?;
+        fcap_encode::remux::remux_to_mp4(&ready, &input).map(|out| out.display().to_string())
+    })
+    .await
+    .map_err(|err| format!("remux task failed: {err}"))?
+}
