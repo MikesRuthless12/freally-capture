@@ -120,10 +120,12 @@ export function SettingsOutput({
           .then((found) => setCatalog(found))
           .catch(() => undefined);
       }
-    }).then((fn) => {
-      if (alive) unlisten = fn;
-      else fn();
-    });
+    })
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
       unlisten?.();

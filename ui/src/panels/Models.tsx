@@ -31,10 +31,12 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
     ffmpegStatus()
       .then((current) => alive && setStatus(current))
       .catch(() => alive && setStatus(null));
-    onFfmpeg((next) => setStatus(next)).then((fn) => {
-      if (alive) unlisten = fn;
-      else fn();
-    });
+    onFfmpeg((next) => setStatus(next))
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
       unlisten?.();

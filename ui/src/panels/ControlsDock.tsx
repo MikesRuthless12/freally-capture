@@ -37,10 +37,12 @@ export function ControlsDock({
     recordingStatus()
       .then((status) => alive && setRec(status))
       .catch(() => alive && setRec(null));
-    onRecording((status) => setRec(status)).then((fn) => {
-      if (alive) unlisten = fn;
-      else fn();
-    });
+    onRecording((status) => setRec(status))
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
       unlisten?.();
