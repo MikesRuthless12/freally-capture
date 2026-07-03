@@ -1,0 +1,99 @@
+# Cross-OS "loads cleanly" screenshot smoke.
+#
+# Builds the release binary on Windows / macOS / Linux, launches it, and
+# uploads a screenshot artifact — so the studio UI (and, as they land, the
+# per-OS native preview surfaces) can be *visually* verified on every OS
+# without owning that hardware. Runs on demand and on the native-preview
+# branch. CI runners have no discrete GPU: wgpu uses a software rasterizer
+# (WARP / lavapipe), so this proves the app boots + renders cleanly, not raw
+# performance.
+name: Screenshot smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-preview]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A launched app that panics should still let us grab the screenshot.
+  RUST_BACKTRACE: 1
+
+jobs:
+  screenshot:
+    name: launch + screenshot (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/linux-deps
+      - name: Install Linux screenshot tools
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app (release, UI embedded)
+        run: npm run tauri -- build --no-bundle
+
+      # -- launch + screenshot, per OS -----------------------------------------
+      - name: Launch + screenshot (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = "target/release/freally-capture.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD/screenshot-windows.png")
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "captured: $(Test-Path screenshot-windows.png)"
+
+      - name: Launch + screenshot (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          ./target/release/freally-capture &
+          APP_PID=$!
+          sleep 25
+          screencapture -x screenshot-macos.png || echo "screencapture failed"
+          kill $APP_PID 2>/dev/null || true
+          ls -la screenshot-macos.png || true
+
+      - name: Launch + screenshot (Linux, Xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
+          sleep 3
+          ./target/release/freally-capture &
+          APP_PID=$!
+          sleep 25
+          import -window root screenshot-linux.png || echo "import failed"
+          kill $APP_PID 2>/dev/null || true
+          ls -la screenshot-linux.png || true
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: screenshot-*.png
+          if-no-files-found: warn
