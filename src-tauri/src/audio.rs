@@ -281,6 +281,11 @@ fn specs_to_configs(
                 SourceSettings::AudioOutput { device_id } => InputSpec::Loopback {
                     device_id: device_id.clone(),
                 },
+                // Media audio: the decode thread feeds the hub ring keyed
+                // by the source id; the engine drains it like any capture.
+                SourceSettings::Media { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
                 _ => return None,
             };
             let mut settings = spec.audio.clone();

@@ -215,6 +215,16 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
         loop {
             match rx.try_recv() {
                 Ok(Cmd::Sources(configs)) => {
+                    // GC media-hub rings whose source left the mix.
+                    let media_ids: Vec<String> = configs
+                        .iter()
+                        .filter_map(|config| match &config.input {
+                            InputSpec::Media { id } => Some(id.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    crate::media_hub::retain(&media_ids);
+
                     let mut next: HashMap<SourceId, SourceRuntime> =
                         HashMap::with_capacity(configs.len());
                     for config in configs {

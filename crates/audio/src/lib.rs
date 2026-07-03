@@ -23,6 +23,7 @@ pub mod fft;
 pub mod filters;
 pub mod graph;
 pub mod lufs;
+pub mod media_hub;
 pub mod meter;
 pub mod monitor;
 pub mod resample;
@@ -68,12 +69,14 @@ impl AudioError {
     }
 }
 
-/// What a source captures: a plain input device, or desktop audio
-/// ("loopback" — resolved per OS, see [`capture::open_capture`]).
+/// What a source captures: a plain input device, desktop audio
+/// ("loopback" — resolved per OS, see [`capture::open_capture`]), or a
+/// media source's decoded audio (fed through [`media_hub`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputSpec {
     Input { device_id: String },
     Loopback { device_id: String },
+    Media { id: String },
 }
 
 /// This crate's version (inherited from the workspace).

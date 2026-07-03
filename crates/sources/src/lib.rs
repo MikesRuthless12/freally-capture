@@ -10,15 +10,18 @@
 //! the static sources: [`image`] (still files, also mask/LUT loading for the
 //! filter chain), [`color`] (solid blocks), and [`text`] (rustybuzz shaping +
 //! bidi RTL + tiny-skia rasterization over the **bundled Noto Sans family**
-//! with per-run script fallback; system fonts stay selectable). Media (video
-//! files, hardware-decoded) rides the Phase 4 wire-codec architecture
-//! (TASK-409), and the Browser source lands with the Phase 6 source depth
-//! after an offscreen-webview spike (TASK-612) — nothing here fakes either.
+//! with per-run script fallback; system fonts stay selectable). Phase 4 adds [`media`]:
+//! video/image files composed onto the canvas with their audio in the mixer —
+//! `.frec` through the owned codec, the wire formats through the labeled
+//! on-demand ffmpeg component, `-hwaccel auto` hardware decode. The Browser
+//! source lands with the Phase 6 source depth after an offscreen-webview
+//! spike (TASK-612) — nothing here fakes it.
 
 #![forbid(unsafe_code)]
 
 pub mod color;
 pub mod image;
+pub mod media;
 pub mod static_source;
 pub mod text;
 pub mod video_device;

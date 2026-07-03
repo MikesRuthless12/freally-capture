@@ -199,6 +199,7 @@ export type SourceSettings =
   | { kind: "portal" }
   | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
   | { kind: "image"; path: string }
+  | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
@@ -219,7 +220,7 @@ export type SourceKindName = SourceSettings["kind"];
 
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
-  return kind === "audioInput" || kind === "audioOutput";
+  return kind === "audioInput" || kind === "audioOutput" || kind === "media";
 }
 
 /** One shared source: identity + name + flattened settings (+ audio strip). */

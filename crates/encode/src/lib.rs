@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod decode;
 pub mod encoder;
 pub mod ffmpeg;
 pub mod flz;

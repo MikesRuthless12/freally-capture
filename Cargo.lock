@@ -1567,7 +1567,9 @@ dependencies = [
 name = "fcap-sources"
 version = "0.40.0"
 dependencies = [
+ "fcap-audio",
  "fcap-capture",
+ "fcap-encode",
  "fontdb",
  "image",
  "nokhwa",

@@ -74,6 +74,10 @@ fn default_text_size() -> f32 {
     72.0
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_line_spacing() -> f32 {
     1.0
 }
@@ -131,6 +135,20 @@ pub enum SourceSettings {
     Image {
         #[serde(default)]
         path: String,
+    },
+    /// A media file (video or image) composed onto the canvas with its
+    /// audio in the mixer. `.frec` plays through the owned codec with
+    /// nothing fetched; the wire formats (mp4/mkv/webm/…) decode through
+    /// the clearly-labeled on-demand ffmpeg component.
+    Media {
+        #[serde(default)]
+        path: String,
+        /// Restart from the top at the end.
+        #[serde(default, rename = "loop")]
+        looping: bool,
+        /// Try hardware decode first (falls back to software on its own).
+        #[serde(default = "default_true")]
+        hw_decode: bool,
     },
     /// A solid color block.
     Color {
@@ -205,6 +223,7 @@ impl SourceSettings {
             SourceSettings::Portal {} => "portal",
             SourceSettings::VideoDevice { .. } => "videoDevice",
             SourceSettings::Image { .. } => "image",
+            SourceSettings::Media { .. } => "media",
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
@@ -220,6 +239,7 @@ impl SourceSettings {
             SourceSettings::Portal {} => "Screen Capture (Portal)",
             SourceSettings::VideoDevice { .. } => "Video Capture Device",
             SourceSettings::Image { .. } => "Image",
+            SourceSettings::Media { .. } => "Media",
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
@@ -228,8 +248,19 @@ impl SourceSettings {
     }
 
     /// Whether this kind produces audio (and so carries [`AudioSettings`]).
-    /// Media joins in Phase 4 on the wire-codec architecture.
+    /// Media has both video and audio — it mixes *and* composes.
     pub fn has_audio(&self) -> bool {
+        matches!(
+            self,
+            SourceSettings::AudioInput { .. }
+                | SourceSettings::AudioOutput { .. }
+                | SourceSettings::Media { .. }
+        )
+    }
+
+    /// Whether this kind is audio-*only* (renders nothing on the canvas —
+    /// the studio's video pipeline skips it; the mixer owns it entirely).
+    pub fn is_audio_only(&self) -> bool {
         matches!(
             self,
             SourceSettings::AudioInput { .. } | SourceSettings::AudioOutput { .. }

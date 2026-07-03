@@ -457,8 +457,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             for source in &scene_sources {
                 // Audio-only sources belong to the audio engine (their state
                 // rides the `audio` event) — shed any stale video pipeline
-                // from a kind flip and skip them here.
-                if source.settings.has_audio() {
+                // from a kind flip and skip them here. (Media has audio too
+                // but keeps its video pipeline — it composes AND mixes.)
+                if source.settings.is_audio_only() {
                     if let Some(slot) = sessions.remove(&source.id) {
                         slot.session.stop();
                     }
@@ -791,6 +792,7 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Window { .. }
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
+            | SourceSettings::Media { .. }
     )
 }
 
@@ -825,6 +827,14 @@ fn start_session(
                         fourcc: f.fourcc.clone(),
                     });
                     video_device::start_video_device(device_id, format.as_ref())
+                }
+                SourceSettings::Media {
+                    path,
+                    looping,
+                    hw_decode,
+                } => {
+                    // The source id keys the mixer-side audio ring.
+                    fcap_sources::media::start_media(&id.0.to_string(), path, *looping, *hw_decode)
                 }
                 other => Err(CaptureError::Unsupported(format!(
                     "{} is not capture-backed",

@@ -52,6 +52,7 @@ type PickerMode =
   | "window"
   | "webcam"
   | "image"
+  | "media"
   | "color"
   | "text"
   | "audioInput"
@@ -64,6 +65,7 @@ const KIND_BADGE: Record<string, string> = {
   portal: "Portal",
   videoDevice: "Camera",
   image: "Image",
+  media: "Media",
   color: "Color",
   text: "Text",
   audioInput: "Audio In",
@@ -75,6 +77,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["window", "Window Capture"],
   ["webcam", "Video Capture Device"],
   ["image", "Image"],
+  ["media", "Media (video/image file)"],
   ["color", "Color"],
   ["text", "Text"],
   ["audioInput", "Audio Input Capture"],
@@ -372,6 +375,8 @@ export function SourcesRail({
         <AudioPicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "image" ? (
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "media" ? (
+        <MediaForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "color" ? (
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
@@ -736,6 +741,53 @@ function ImageForm({
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
         >
           Add image
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+function MediaForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const [path, setPath] = useState("");
+  const [loop, setLoop] = useState(false);
+  return (
+    <PickerShell title="Add Media" onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          Media file (mp4, mkv, webm, mov, .frec, or an image)
+          <input
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+            placeholder="C:\clips\intro.mp4"
+            className={inputClass}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={loop}
+            onChange={(event) => setLoop(event.target.checked)}
+          />
+          Loop (restart from the top at the end)
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          .frec plays through the owned freally-video codec — nothing to download. The wire formats
+          (mp4/mkv/webm/…) decode through the on-demand FFmpeg component; its audio lands in the
+          mixer as its own strip.
+        </p>
+        <button
+          type="button"
+          disabled={!path.trim()}
+          onClick={() => onPick({ kind: "media", path: path.trim(), loop, hwDecode: true })}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          Add media
         </button>
       </div>
     </PickerShell>

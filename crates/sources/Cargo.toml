@@ -12,6 +12,11 @@ publish.workspace = true
 
 [dependencies]
 fcap-capture = { path = "../capture" }
+# The Media source (P4.9): decoded audio lands in the mixer's media hub;
+# .frec plays through the owned codec; the wire formats decode through the
+# labeled on-demand ffmpeg component.
+fcap-audio = { path = "../audio" }
+fcap-encode = { path = "../encode" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # Webcams + capture cards; `input-native` = MSMF (Windows), AVFoundation
