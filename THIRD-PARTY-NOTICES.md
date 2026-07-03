@@ -13,8 +13,10 @@ require. Trademarks belong to their respective owners; listing here does not imp
 
 `freally-video` (the owned lossless recording codec, `.frec`, shared with **Freally Snipper**), the
 **`wgpu`-based GPU compositor**, the **scene/source/filter data model**, the **per-OS capture
-pipeline**, and the **stream orchestration / muxers** are original works © Mike Weaver, covered by
-[`LICENSE`](LICENSE) — they are not third-party components.
+pipeline**, the **audio engine** (the mixing graph, the owned radix-2 FFT + spectral denoiser, the
+noise gate / compressor / limiter / EQ / gain / ducker filter set, BS.1770 LUFS metering, and the
+resampler — `cpal` supplies only device I/O), and the **stream orchestration / muxers** are original
+works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-party components.
 
 ## Bundled / linked (compiled into the app)
 
@@ -31,7 +33,7 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`nokhwa`](https://crates.io/crates/nokhwa) | webcam / capture-card input | Apache-2.0 |
 | [`mozjpeg`](https://crates.io/crates/mozjpeg) (via `nokhwa`) | MJPEG webcam-frame decode | IJG AND Zlib AND BSD-3-Clause |
 | [`jpeg-encoder`](https://crates.io/crates/jpeg-encoder) | preview-frame JPEG encoding (the in-app preview pipe) | (MIT OR Apache-2.0) AND IJG |
-| [`cpal`](https://crates.io/crates/cpal) | audio capture + output graph (the filter set, incl. classic-DSP denoise, is owned — no ML) | Apache-2.0 |
+| [`cpal`](https://crates.io/crates/cpal) | audio device I/O only — capture + monitor output (the whole DSP engine: mixer, FFT, spectral denoise, gate/comp/limiter/EQ, LUFS, resampler, is **owned** — no ML) | Apache-2.0 |
 | [`pollster`](https://crates.io/crates/pollster) | blocking bridge for `wgpu`'s async adapter/readback calls | MIT OR Apache-2.0 |
 | [`image`](https://crates.io/crates/image) | Image-source decode + Image-Mask filter files (PNG/JPEG/BMP/GIF/WebP…) | MIT OR Apache-2.0 |
 | [`rustybuzz`](https://crates.io/crates/rustybuzz) | text-source shaping (Arabic joining, ligatures, kerning; RTL) | MIT |
@@ -42,6 +44,7 @@ pipeline**, and the **stream orchestration / muxers** are original works © Mike
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
 | [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |
+| [`tauri-plugin-global-shortcut`](https://crates.io/crates/tauri-plugin-global-shortcut) | audio push-to-talk / push-to-mute global shortcuts (the full hotkey map lands in Phase 5) | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |
 | [`fluent`](https://crates.io/crates/fluent) / `fluent-bundle` | i18n catalogs (18 locales) | Apache-2.0 OR MIT |

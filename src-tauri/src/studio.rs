@@ -31,7 +31,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use fcap_capture::{CaptureError, CaptureSession};
 use fcap_compositor::{parse_cube, Compositor, CompositorError, FilterResourceData, ProgramFrame};
 use fcap_scene::{
-    Collection, FilterId, FilterKind, SceneError, SceneId, SourceId, SourceSettings, Transform,
+    AudioSettings, Collection, FilterId, FilterKind, SceneError, SceneId, SourceId, SourceSettings,
+    Transform,
 };
 use fcap_sources::video_device::{self, VideoFormatInfo};
 use fcap_sources::{color, image, text};
@@ -127,6 +128,40 @@ impl StudioState {
         }
     }
 
+    /// The current model revision — a cheap read the audio bridge polls to
+    /// decide whether it must fetch the (cloning) [`Self::audio_specs`].
+    pub fn audio_revision(&self) -> u64 {
+        self.lock().revision
+    }
+
+    /// What the audio engine reconciles against: the revision plus the active
+    /// scene's audio-capable sources (visible items only — the eye toggle
+    /// silences audio exactly like it hides video), with their strips and
+    /// retry nonces.
+    pub fn audio_specs(&self) -> (u64, Vec<AudioSourceSpec>) {
+        let core = self.lock();
+        let scene = core.collection.active_scene();
+        let specs = core
+            .collection
+            .sources
+            .iter()
+            .filter(|source| source.settings.has_audio())
+            .filter(|source| {
+                scene
+                    .items
+                    .iter()
+                    .any(|item| item.source == source.id && item.visible)
+            })
+            .map(|source| AudioSourceSpec {
+                id: source.id,
+                settings: source.settings.clone(),
+                audio: source.audio.clone().unwrap_or_default(),
+                nonce: core.retry_nonces.get(&source.id).copied().unwrap_or(0),
+            })
+            .collect();
+        (core.revision, specs)
+    }
+
     /// Apply one mutation: validate, bump the revision, mark the autosave
     /// dirty, and push the fresh model to the UI. The collection is never
     /// left half-mutated — `apply` is all-or-nothing per fcap-scene.
@@ -157,6 +192,16 @@ impl StudioState {
             persist(&mut core);
         }
     }
+}
+
+/// One audio source the engine should run (see [`StudioState::audio_specs`]).
+#[derive(Debug, Clone)]
+pub struct AudioSourceSpec {
+    pub id: SourceId,
+    pub settings: SourceSettings,
+    pub audio: AudioSettings,
+    /// The retry nonce — bumping it forces a device reopen.
+    pub nonce: u64,
 }
 
 fn read_collection(path: &std::path::Path) -> Collection {
@@ -410,6 +455,22 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // Stop sessions whose source left the scene or changed settings.
             let mut keep_ids: Vec<SourceId> = Vec::new();
             for source in &scene_sources {
+                // Audio-only sources belong to the audio engine (their state
+                // rides the `audio` event) — shed any stale video pipeline
+                // from a kind flip and skip them here.
+                if source.settings.has_audio() {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    if statuses.remove(&source.id).is_some() {
+                        statuses_changed = true;
+                    }
+                    compositor.remove_source(source.id);
+                    continue;
+                }
                 // The retry nonce is part of the fingerprint: bumping it is
                 // how an errored source gets restarted with equal settings.
                 let nonce = nonces.get(&source.id).copied().unwrap_or(0);

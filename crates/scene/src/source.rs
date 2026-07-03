@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::audio::AudioSettings;
+
 /// Stable identity of a shared [`Source`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -139,6 +141,22 @@ pub enum SourceSettings {
         #[serde(default = "default_color_height")]
         height: u32,
     },
+    /// A microphone / line-in (audio only — renders nothing on the canvas).
+    AudioInput {
+        /// The audio device name; `""` = the OS default input.
+        #[serde(default)]
+        device_id: String,
+    },
+    /// Desktop / system audio ("what you hear"). Windows captures any output
+    /// device via WASAPI loopback; Linux uses a PipeWire/Pulse **monitor**
+    /// device; macOS needs a virtual loopback device (e.g. BlackHole) until
+    /// ScreenCaptureKit audio lands — the pickers say so honestly.
+    AudioOutput {
+        /// Windows: an *output* device name (loopback); elsewhere the
+        /// monitor / virtual capture device name. `""` = the default.
+        #[serde(default)]
+        device_id: String,
+    },
     /// Shaped, rasterized text (rustybuzz shaping, RTL-aware).
     Text {
         #[serde(default)]
@@ -188,6 +206,8 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "videoDevice",
             SourceSettings::Image { .. } => "image",
             SourceSettings::Color { .. } => "color",
+            SourceSettings::AudioInput { .. } => "audioInput",
+            SourceSettings::AudioOutput { .. } => "audioOutput",
             SourceSettings::Text { .. } => "text",
         }
     }
@@ -201,24 +221,40 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "Video Capture Device",
             SourceSettings::Image { .. } => "Image",
             SourceSettings::Color { .. } => "Color",
+            SourceSettings::AudioInput { .. } => "Audio Input Capture",
+            SourceSettings::AudioOutput { .. } => "Audio Output Capture",
             SourceSettings::Text { .. } => "Text",
         }
     }
+
+    /// Whether this kind produces audio (and so carries [`AudioSettings`]).
+    /// Media joins in Phase 4 on the wire-codec architecture.
+    pub fn has_audio(&self) -> bool {
+        matches!(
+            self,
+            SourceSettings::AudioInput { .. } | SourceSettings::AudioOutput { .. }
+        )
+    }
 }
 
-/// One shared source: identity + display name + settings.
+/// One shared source: identity + display name + settings (+ the mixer state
+/// for audio-capable kinds).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub id: SourceId,
     pub name: String,
+    /// Present exactly when [`SourceSettings::has_audio`] — enforced by
+    /// [`crate::Collection::sanitize`] on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioSettings>,
     #[serde(flatten)]
     pub settings: SourceSettings,
 }
 
 impl Source {
     /// A new source with a fresh id. Empty names fall back to the kind's
-    /// default name.
+    /// default name; audio-capable kinds start with the neutral mixer strip.
     pub fn new(name: impl Into<String>, settings: SourceSettings) -> Self {
         let name = name.into();
         let name = if name.trim().is_empty() {
@@ -229,6 +265,7 @@ impl Source {
         Self {
             id: SourceId::new(),
             name,
+            audio: settings.has_audio().then(AudioSettings::default),
             settings,
         }
     }

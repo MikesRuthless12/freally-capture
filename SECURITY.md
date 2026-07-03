@@ -41,6 +41,16 @@ remediate before any public disclosure.
   requested honestly and a denial is surfaced, never worked around. The unavoidable OS-capture
   `unsafe` (DXGI/WGC/ScreenCaptureKit) is isolated behind small, audited modules in `crates/capture`
   (the Linux path is entirely safe Rust); the rest of the core is `#![forbid(unsafe_code)]`.
+- **Audio surface:** captured audio (microphone / line-in and desktop / system audio) stays **on this
+  machine** and goes **only** to the mixer, the **monitor** output device you pick, and (from Phase 4)
+  the recording — it is never transmitted anywhere. The whole DSP engine (mixing, FFT/spectral denoise,
+  gate/comp/limiter/EQ, LUFS, resampler) is **owned** and `#![forbid(unsafe_code)]`; `cpal` supplies only
+  device I/O. Desktop-audio capture is **honest per OS** and never silently installs a system component
+  (Windows WASAPI loopback; Linux monitor devices; macOS a user-installed virtual device). The
+  **monitor-device name** persisted in settings is length/shape-validated, and **push-to-talk /
+  push-to-mute hotkeys** are parsed as accelerators and **validated before** they enter the model or are
+  registered — a global shortcut only mutes/unmutes a source (`tauri-plugin-global-shortcut`), never runs
+  code or reads files, and registration failures (e.g. Wayland) are surfaced honestly, never fatal.
 - **Stream keys / service credentials:** stored **locally** in your profile (the OS config dir), masked
   in the UI, and sent **only** to the streaming service you are broadcasting to. They are never
   transmitted anywhere else and never logged.

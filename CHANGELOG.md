@@ -11,7 +11,53 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-_Nothing yet — 0.55.0 (audio + recording) is next._
+> **Phase 3 (audio mixer + filters) has landed** — the first half of the **0.55.0** rung. Recording
+> (Phase 4) completes the rung and tags **0.55.0**; until then the audio work rides here.
+
+### Added
+- **The owned audio engine** (`fcap-audio`): a `cpal` capture graph running everything internally as
+  **stereo f32 at 48 kHz** in 10 ms blocks. Per-source **microphone / line-in** (Audio Input) and
+  **desktop / system audio** (Audio Output) capture, each format-converted and resampled into the
+  engine clock through an **owned streaming linear resampler**. Desktop audio is told honestly per OS:
+  **Windows** captures any output device via **WASAPI loopback**; **Linux** uses a PipeWire/PulseAudio
+  **monitor** device; **macOS** needs a virtual loopback device (e.g. BlackHole) until a
+  ScreenCaptureKit audio path lands — the pickers say so and filter for known virtual devices.
+- **The mixing graph**: per-source **sync-offset delay → filter chain → push-to-talk / push-to-mute /
+  mute / fader**, routed into **up to 6 track buses** (per-source assignment), the **program (master)**
+  mix, and a **monitor** mix. Click-free ~8 ms gain smoothing on every mute/PTT/fader move. The whole
+  core is pure and **device-free — every routing rule is unit-tested without hardware**.
+- **The owned classic-DSP filter set — no ML anywhere, per charter**: **Denoise** (STFT spectral
+  suppression with an owned radix-2 FFT — 512-sample √Hann frames, 50% overlap, per-bin noise-floor
+  tracking + spectral subtraction; steady noise drops while speech passes), **Noise Gate** (hysteresis
+  + hold), **Compressor** (peak-sensing, make-up gain), **Limiter** (instant-attack with a hard
+  ceiling), **3-Band EQ** (RBJ shelf/peak biquads), **Gain**, and sidechain **Ducking** (dip one source
+  under another). Every processor is clamped defensively so a hand-edited scene can't build a runaway.
+- **Monitoring, ducking, PTT/PTM, and LUFS**: a **monitor output** on any device (bounded, underrun-safe);
+  sidechain ducking driven by the trigger source's live envelope; **push-to-talk / push-to-mute** via
+  global hotkeys (registered from the model, honest about Wayland's lack of global hotkeys); a
+  **BS.1770 K-weighted LUFS** meter (momentary + short-term) on the program mix; per-source peak/RMS
+  metering.
+- **The Audio Mixer panel**: one **channel strip** per audio source in the active scene — name +
+  status, a **VU meter** (green→yellow→red, peak tick), a **fader** (−60…+6 dB), **mute**, a **monitor**
+  cycle, an **audio-filters** dialog (all 7 filters, with a trigger picker for ducking), **track dots
+  1–6**, and an advanced popover (sync offset + PTT/PTM hotkeys). A **LUFS** readout and a
+  **monitor-device** picker (persisted in settings). Audio sources appear in the Sources rail with the
+  same live status dots as video, and in the **Add Source** menu with per-OS-honest device pickers.
+- The scene/source model (`fcap-scene`) gains **Audio Input / Audio Output** source kinds and a
+  per-source **`AudioSettings`** strip (fader, mute, monitor mode, track bitmask, sync offset, PTT/PTM
+  hotkeys, the ordered audio-filter chain) — serde round-trip tested, camelCase wire-checked,
+  range-clamped, and self-repairing on load (audio state exists exactly on audio-capable sources).
+
+### Security / privacy
+- The posture is unchanged and re-verified: captured audio flows **only** to the mixer, the monitor
+  device the user picks, and (from Phase 4) the recording — **nothing leaves the machine**, no
+  accounts, no telemetry. The monitor-device name persisted in settings is length/shape-validated;
+  hotkey accelerators are parsed/validated before they enter the model or register.
+- New third-party dependency: **`tauri-plugin-global-shortcut`** (push-to-talk / push-to-mute; the full
+  hotkey map lands in Phase 5) — MIT OR Apache-2.0, recorded in `THIRD-PARTY-NOTICES.md`. The audio DSP
+  (FFT, filters, LUFS, resampler, mixer) is **entirely owned** — `cpal` provides only device I/O.
+- **Live-hardware audio smoke tests** (kept `--ignored` on headless CI): device enumeration, default-mic
+  capture, desktop-audio loopback, and a mic-through-the-mixer metering path, verified on real hardware.
 
 ## [0.40.0] — 2026-07-02 (Compositor + scenes/sources)
 

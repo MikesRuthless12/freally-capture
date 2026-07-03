@@ -19,10 +19,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
 pub mod filter;
 pub mod scene;
 pub mod source;
 
+pub use audio::{
+    AudioFilter, AudioFilterId, AudioFilterKind, AudioSettings, MonitorMode, MAX_SYNC_OFFSET_MS,
+    MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
+};
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
 pub use scene::{BlendMode, Crop, ItemId, Scene, SceneId, SceneItem, Transform};
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
@@ -51,6 +56,8 @@ pub enum SceneError {
     FilterNotFound,
     #[error("a collection needs at least one scene")]
     LastScene,
+    #[error("this source has no audio")]
+    SourceNotAudio,
 }
 
 fn default_format_version() -> u32 {
@@ -142,6 +149,17 @@ impl Collection {
         }
         // …then sources nothing references.
         self.gc_sources();
+        // Audio state exists exactly on audio-capable sources, inside range.
+        for source in &mut self.sources {
+            if source.settings.has_audio() {
+                source
+                    .audio
+                    .get_or_insert_with(AudioSettings::default)
+                    .clamp();
+            } else {
+                source.audio = None;
+            }
+        }
     }
 
     // -- scenes ------------------------------------------------------------
@@ -500,6 +518,148 @@ impl Collection {
         filter.enabled = enabled;
         Ok(())
     }
+
+    // -- audio (per-source mixer state) --------------------------------------
+
+    /// The mutable audio strip of an audio-capable source.
+    fn audio_mut(&mut self, id: SourceId) -> Result<&mut AudioSettings, SceneError> {
+        let source = self.source_mut(id).ok_or(SceneError::SourceNotFound)?;
+        if !source.settings.has_audio() {
+            return Err(SceneError::SourceNotAudio);
+        }
+        Ok(source.audio.get_or_insert_with(AudioSettings::default))
+    }
+
+    /// Set the fader, clamped to [`MIN_VOLUME_DB`]..=[`MAX_VOLUME_DB`]
+    /// (non-finite input resets to unity).
+    pub fn set_audio_volume(&mut self, id: SourceId, volume_db: f32) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        audio.volume_db = if volume_db.is_finite() {
+            volume_db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB)
+        } else {
+            0.0
+        };
+        Ok(())
+    }
+
+    pub fn set_audio_muted(&mut self, id: SourceId, muted: bool) -> Result<(), SceneError> {
+        self.audio_mut(id)?.muted = muted;
+        Ok(())
+    }
+
+    pub fn set_audio_monitor(
+        &mut self,
+        id: SourceId,
+        monitor: MonitorMode,
+    ) -> Result<(), SceneError> {
+        self.audio_mut(id)?.monitor = monitor;
+        Ok(())
+    }
+
+    /// Set the track-assignment bitmask (bits past track 6 are dropped).
+    pub fn set_audio_tracks(&mut self, id: SourceId, tracks: u8) -> Result<(), SceneError> {
+        self.audio_mut(id)?.tracks = tracks & 0b0011_1111;
+        Ok(())
+    }
+
+    /// Set the A/V sync offset, clamped to 0..=[`MAX_SYNC_OFFSET_MS`].
+    pub fn set_audio_sync_offset(&mut self, id: SourceId, ms: u32) -> Result<(), SceneError> {
+        self.audio_mut(id)?.sync_offset_ms = ms.min(MAX_SYNC_OFFSET_MS);
+        Ok(())
+    }
+
+    /// Set the push-to-talk / push-to-mute hotkeys (blank strings clear).
+    pub fn set_audio_hotkeys(
+        &mut self,
+        id: SourceId,
+        push_to_talk: Option<String>,
+        push_to_mute: Option<String>,
+    ) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        audio.push_to_talk = push_to_talk.filter(|key| !key.trim().is_empty());
+        audio.push_to_mute = push_to_mute.filter(|key| !key.trim().is_empty());
+        Ok(())
+    }
+
+    /// Append an audio filter to a source's chain; returns the new filter's id.
+    pub fn add_audio_filter(
+        &mut self,
+        id: SourceId,
+        kind: AudioFilterKind,
+    ) -> Result<AudioFilterId, SceneError> {
+        let audio = self.audio_mut(id)?;
+        let filter = AudioFilter::new(kind);
+        let filter_id = filter.id;
+        audio.filters.push(filter);
+        Ok(filter_id)
+    }
+
+    pub fn remove_audio_filter(
+        &mut self,
+        id: SourceId,
+        filter_id: AudioFilterId,
+    ) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        let index = audio
+            .filters
+            .iter()
+            .position(|filter| filter.id == filter_id)
+            .ok_or(SceneError::FilterNotFound)?;
+        audio.filters.remove(index);
+        Ok(())
+    }
+
+    /// Move an audio filter to `to_index` in the chain (clamped).
+    pub fn reorder_audio_filter(
+        &mut self,
+        id: SourceId,
+        filter_id: AudioFilterId,
+        to_index: usize,
+    ) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        let from = audio
+            .filters
+            .iter()
+            .position(|filter| filter.id == filter_id)
+            .ok_or(SceneError::FilterNotFound)?;
+        let to = to_index.min(audio.filters.len() - 1);
+        let filter = audio.filters.remove(from);
+        audio.filters.insert(to, filter);
+        Ok(())
+    }
+
+    /// Replace an audio filter's parameters (its id and position stay).
+    pub fn update_audio_filter(
+        &mut self,
+        id: SourceId,
+        filter_id: AudioFilterId,
+        kind: AudioFilterKind,
+    ) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        let filter = audio
+            .filters
+            .iter_mut()
+            .find(|filter| filter.id == filter_id)
+            .ok_or(SceneError::FilterNotFound)?;
+        filter.kind = kind;
+        Ok(())
+    }
+
+    pub fn set_audio_filter_enabled(
+        &mut self,
+        id: SourceId,
+        filter_id: AudioFilterId,
+        enabled: bool,
+    ) -> Result<(), SceneError> {
+        let audio = self.audio_mut(id)?;
+        let filter = audio
+            .filters
+            .iter_mut()
+            .find(|filter| filter.id == filter_id)
+            .ok_or(SceneError::FilterNotFound)?;
+        filter.enabled = enabled;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -648,6 +808,81 @@ mod tests {
         collection
             .set_item_locked(scene_a, item_a, true)
             .expect("lock");
+
+        // Audio sources with a non-default strip + every audio filter kind.
+        let (mic, _) = collection
+            .add_item_with_new_source(
+                scene_a,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: "USB Microphone".into(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        let (desktop, _) = collection
+            .add_item_with_new_source(
+                scene_a,
+                Source::new(
+                    "Desktop",
+                    SourceSettings::AudioOutput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add desktop audio");
+        for kind in [
+            AudioFilterKind::Denoise { strength: 0.7 },
+            AudioFilterKind::NoiseGate {
+                open_threshold_db: -24.0,
+                close_threshold_db: -30.0,
+                attack_ms: 20.0,
+                hold_ms: 150.0,
+                release_ms: 100.0,
+            },
+            AudioFilterKind::Compressor {
+                ratio: 3.0,
+                threshold_db: -16.0,
+                attack_ms: 5.0,
+                release_ms: 80.0,
+                output_gain_db: 2.0,
+            },
+            AudioFilterKind::Limiter {
+                threshold_db: -2.0,
+                release_ms: 50.0,
+            },
+            AudioFilterKind::Eq {
+                low_db: 2.0,
+                mid_db: -1.5,
+                high_db: 3.0,
+            },
+            AudioFilterKind::Gain { db: -3.0 },
+        ] {
+            collection.add_audio_filter(mic, kind).expect("add filter");
+        }
+        collection
+            .add_audio_filter(
+                desktop,
+                AudioFilterKind::Ducker {
+                    trigger: Some(mic),
+                    threshold_db: -28.0,
+                    amount_db: 10.0,
+                    attack_ms: 40.0,
+                    release_ms: 250.0,
+                },
+            )
+            .expect("add ducker");
+        collection.set_audio_volume(mic, -6.5).expect("volume");
+        collection
+            .set_audio_monitor(mic, MonitorMode::MonitorAndOutput)
+            .expect("monitor");
+        collection.set_audio_tracks(mic, 0b000011).expect("tracks");
+        collection.set_audio_sync_offset(mic, 120).expect("sync");
+        collection
+            .set_audio_hotkeys(mic, Some("Ctrl+Shift+T".into()), None)
+            .expect("hotkeys");
+        collection.set_audio_muted(desktop, true).expect("mute");
 
         collection
     }
@@ -911,6 +1146,282 @@ mod tests {
         })
         .expect("serialize");
         assert!(cc_json.contains("\"hueShift\":15.0"), "got: {cc_json}");
+    }
+
+    #[test]
+    fn audio_wire_format_uses_camel_case_fields() {
+        let source = Source::new(
+            "Mic",
+            SourceSettings::AudioInput {
+                device_id: "USB Microphone".into(),
+            },
+        );
+        let json = serde_json::to_string(&source).expect("serialize");
+        assert!(json.contains("\"kind\":\"audioInput\""), "got: {json}");
+        assert!(
+            json.contains("\"deviceId\":\"USB Microphone\""),
+            "got: {json}"
+        );
+        for key in [
+            "\"volumeDb\"",
+            "\"syncOffsetMs\"",
+            "\"tracks\"",
+            "\"monitor\"",
+        ] {
+            assert!(json.contains(key), "missing {key} in {json}");
+        }
+        assert!(
+            !json.contains("pushToTalk"),
+            "unset hotkeys stay off the wire: {json}"
+        );
+
+        let parsed: SourceSettings =
+            serde_json::from_str(r#"{"kind":"audioOutput","deviceId":"Speakers"}"#).expect("parse");
+        assert_eq!(
+            parsed,
+            SourceSettings::AudioOutput {
+                device_id: "Speakers".into(),
+            }
+        );
+
+        let gate: AudioFilterKind = serde_json::from_str(
+            r#"{"type":"noiseGate","openThresholdDb":-20.0,"closeThresholdDb":-26.0}"#,
+        )
+        .expect("parse gate");
+        match gate {
+            AudioFilterKind::NoiseGate {
+                open_threshold_db,
+                close_threshold_db,
+                ..
+            } => {
+                assert_eq!(open_threshold_db, -20.0);
+                assert_eq!(close_threshold_db, -26.0);
+            }
+            other => panic!("wrong kind: {other:?}"),
+        }
+        let ducker_json = serde_json::to_string(&AudioFilterKind::Ducker {
+            trigger: None,
+            threshold_db: -30.0,
+            amount_db: 12.0,
+            attack_ms: 50.0,
+            release_ms: 300.0,
+        })
+        .expect("serialize ducker");
+        for key in [
+            "\"thresholdDb\"",
+            "\"amountDb\"",
+            "\"attackMs\"",
+            "\"releaseMs\"",
+        ] {
+            assert!(ducker_json.contains(key), "missing {key} in {ducker_json}");
+        }
+        let monitor_json =
+            serde_json::to_string(&MonitorMode::MonitorAndOutput).expect("serialize monitor");
+        assert_eq!(monitor_json, "\"monitorAndOutput\"");
+    }
+
+    #[test]
+    fn audio_mutations_clamp_and_validate() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (mic, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        let (block, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Block",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 8,
+                        height: 8,
+                    },
+                ),
+            )
+            .expect("add color");
+
+        collection.set_audio_volume(mic, -200.0).expect("volume");
+        assert_eq!(
+            collection
+                .source(mic)
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .volume_db,
+            MIN_VOLUME_DB
+        );
+        collection
+            .set_audio_volume(mic, f32::INFINITY)
+            .expect("volume");
+        assert_eq!(
+            collection
+                .source(mic)
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .volume_db,
+            0.0
+        );
+        collection.set_audio_tracks(mic, 0xFF).expect("tracks");
+        assert_eq!(
+            collection
+                .source(mic)
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .tracks,
+            0b0011_1111
+        );
+        collection.set_audio_sync_offset(mic, 5_000).expect("sync");
+        assert_eq!(
+            collection
+                .source(mic)
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .sync_offset_ms,
+            MAX_SYNC_OFFSET_MS
+        );
+        collection
+            .set_audio_hotkeys(mic, Some("  ".into()), Some("F13".into()))
+            .expect("hotkeys");
+        let audio = collection.source(mic).unwrap().audio.as_ref().unwrap();
+        assert_eq!(audio.push_to_talk, None, "blank hotkeys clear");
+        assert_eq!(audio.push_to_mute.as_deref(), Some("F13"));
+
+        // A video-only source refuses audio mutations without mutating.
+        assert_eq!(
+            collection.set_audio_muted(block, true),
+            Err(SceneError::SourceNotAudio)
+        );
+        assert!(collection.source(block).unwrap().audio.is_none());
+    }
+
+    #[test]
+    fn audio_filter_lifecycle_add_update_reorder_remove() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (mic, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+
+        let denoise = collection
+            .add_audio_filter(mic, AudioFilterKind::Denoise { strength: 0.5 })
+            .expect("add denoise");
+        let gain = collection
+            .add_audio_filter(mic, AudioFilterKind::Gain { db: 3.0 })
+            .expect("add gain");
+
+        collection
+            .update_audio_filter(mic, gain, AudioFilterKind::Gain { db: -6.0 })
+            .expect("update");
+        collection
+            .set_audio_filter_enabled(mic, denoise, false)
+            .expect("disable");
+        collection
+            .reorder_audio_filter(mic, gain, 0)
+            .expect("reorder");
+
+        let filters = &collection
+            .source(mic)
+            .unwrap()
+            .audio
+            .as_ref()
+            .unwrap()
+            .filters;
+        assert_eq!(filters.len(), 2);
+        assert_eq!(filters[0].id, gain);
+        assert_eq!(filters[0].kind, AudioFilterKind::Gain { db: -6.0 });
+        assert!(!filters[1].enabled);
+
+        collection
+            .remove_audio_filter(mic, denoise)
+            .expect("remove");
+        assert_eq!(
+            collection
+                .source(mic)
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .filters
+                .len(),
+            1
+        );
+        assert_eq!(
+            collection.remove_audio_filter(mic, denoise),
+            Err(SceneError::FilterNotFound)
+        );
+    }
+
+    #[test]
+    fn sanitize_repairs_audio_state() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (mic, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        let (block, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Block",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 8,
+                        height: 8,
+                    },
+                ),
+            )
+            .expect("add color");
+
+        // Simulate hand-editing damage: audio stripped from the mic, junk
+        // audio added to a video source, out-of-range values.
+        collection.source_mut(mic).unwrap().audio = None;
+        collection.source_mut(block).unwrap().audio = Some(AudioSettings {
+            volume_db: 99.0,
+            ..AudioSettings::default()
+        });
+        collection.sanitize();
+
+        assert_eq!(
+            collection.source(mic).unwrap().audio,
+            Some(AudioSettings::default()),
+            "audio kinds regain their strip"
+        );
+        assert!(
+            collection.source(block).unwrap().audio.is_none(),
+            "video kinds shed junk audio state"
+        );
     }
 
     #[test]

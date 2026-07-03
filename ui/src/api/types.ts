@@ -24,6 +24,8 @@ export type Health = {
 export type Settings = {
   language: string;
   showStatsDock: boolean;
+  /** The audio monitor output device name (null/"" = the OS default). */
+  monitorDevice: string | null;
 };
 
 /** The `stats` push-event payload (~2 Hz). */
@@ -128,6 +130,8 @@ export type SourceSettings =
   | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
   | { kind: "image"; path: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
+  | { kind: "audioInput"; deviceId: string }
+  | { kind: "audioOutput"; deviceId: string }
   | {
       kind: "text";
       text: string;
@@ -143,8 +147,119 @@ export type SourceSettings =
 
 export type SourceKindName = SourceSettings["kind"];
 
-/** One shared source: identity + name + flattened settings. */
-export type Source = { id: SourceId; name: string } & SourceSettings;
+/** Whether a source kind produces audio (and so carries `AudioSettings`). */
+export function kindHasAudio(kind: SourceKindName): boolean {
+  return kind === "audioInput" || kind === "audioOutput";
+}
+
+/** One shared source: identity + name + flattened settings (+ audio strip). */
+export type Source = {
+  id: SourceId;
+  name: string;
+  audio?: AudioSettings | null;
+} & SourceSettings;
+
+// ---------------------------------------------------------------------------
+// Audio (Phase 3 — mirrors crates/scene/src/audio.rs + src-tauri/src/audio.rs)
+// ---------------------------------------------------------------------------
+
+export type AudioFilterId = string;
+
+/** Where a source's monitored audio goes. */
+export type MonitorMode = "off" | "monitorOnly" | "monitorAndOutput";
+
+/** One audio filter's parameters (serde tag = `type`; owned classic DSP). */
+export type AudioFilterKind =
+  | { type: "gain"; db: number }
+  | {
+      type: "noiseGate";
+      openThresholdDb: number;
+      closeThresholdDb: number;
+      attackMs: number;
+      holdMs: number;
+      releaseMs: number;
+    }
+  | {
+      type: "compressor";
+      ratio: number;
+      thresholdDb: number;
+      attackMs: number;
+      releaseMs: number;
+      outputGainDb: number;
+    }
+  | { type: "limiter"; thresholdDb: number; releaseMs: number }
+  | { type: "eq"; lowDb: number; midDb: number; highDb: number }
+  | { type: "denoise"; strength: number }
+  | {
+      type: "ducker";
+      trigger?: SourceId | null;
+      thresholdDb: number;
+      amountDb: number;
+      attackMs: number;
+      releaseMs: number;
+    };
+
+export type AudioFilterTypeName = AudioFilterKind["type"];
+
+/** One audio filter instance in a source's chain. */
+export type AudioFilter = { id: AudioFilterId; enabled: boolean } & AudioFilterKind;
+
+/** The fader floor/ceiling (mirrors MIN/MAX_VOLUME_DB in crates/scene). */
+export const MIN_VOLUME_DB = -60;
+export const MAX_VOLUME_DB = 6;
+export const TRACK_COUNT = 6;
+export const MAX_SYNC_OFFSET_MS = 950;
+
+/** A source's whole mixer state (lives on the shared source). */
+export type AudioSettings = {
+  volumeDb: number;
+  muted: boolean;
+  monitor: MonitorMode;
+  /** Bitmask of the up-to-6 tracks (bit 0 = track 1). */
+  tracks: number;
+  syncOffsetMs: number;
+  /** Hotkey accelerator: silent unless held. */
+  pushToTalk?: string | null;
+  /** Hotkey accelerator: silent while held. */
+  pushToMute?: string | null;
+  filters: AudioFilter[];
+};
+
+/** One selectable audio device. */
+export type AudioDevice = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+};
+
+/** The Audio Output Capture picker payload (+ honest per-OS guidance). */
+export type LoopbackDevices = {
+  devices: AudioDevice[];
+  guidance?: string;
+};
+
+/** One source's live levels/status in the `audio` event. */
+export type AudioSourceLevels = {
+  state: SourceRuntimeState;
+  errorCode?: string;
+  errorMessage?: string;
+  /** Linear peak per channel [L, R] since the last event. */
+  peak: [number, number];
+  /** Linear RMS per channel [L, R] since the last event. */
+  rms: [number, number];
+  /** The strip mixes silence right now (mute or a PTT/PTM gate). */
+  gated: boolean;
+};
+
+/** The `audio` push event (~20 Hz): per-source levels + program mix health. */
+export type AudioLevelsPayload = {
+  sources: Record<string, AudioSourceLevels>;
+  master: { peak: [number, number]; rms: [number, number] };
+  lufs: { momentary?: number; shortTerm?: number };
+  monitorError?: string;
+  /** Capture samples dropped across sources (ring overflows). */
+  dropped: number;
+};
 
 /** One filter's parameters (serde tag = `type`). */
 export type FilterKind =

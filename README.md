@@ -11,17 +11,20 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — Phase 1 (capture core, 0.25.0) complete; Phase 2 (compositor +
-> scenes/sources, → 0.40.0) in progress.** Real capture is in: per-OS screen/window capture
+> **Status: in development — Phase 2 (compositor + scenes/sources, 0.40.0) complete; Phase 3 (audio
+> mixer + filters, → part of 0.55.0) landed.** Real capture is in: per-OS screen/window capture
 > (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux ScreenCast portal + X11)
-> and webcams/capture cards. Phase 2 has landed the **owned wgpu GPU compositor** (per-item
+> and webcams/capture cards. Phase 2 landed the **owned wgpu GPU compositor** (per-item
 > move/scale/rotate/crop, seven blend modes, 60 fps @ 1080p verified on hardware), the **owned
 > scene/source model** (shared sources, autosaved scene collection), the **on-GPU filter chain**
 > (chroma key, color correction, LUT, blur, mask, sharpen, scroll, crop), **Image/Color/Text
 > sources** (real shaping incl. RTL), and the working **Scenes/Sources rails with on-canvas
-> transform handles**. Audio, recording, and streaming land phase by phase per the ladder below.
-> The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
-> go-to-market plan) is **maintained privately** and is not published here.
+> transform handles**. Phase 3 adds the **owned audio engine** — mic + desktop-audio capture, a mixing
+> graph with **up to 6 tracks**, the owned classic-DSP filter set (**spectral denoise — no ML** — plus
+> gate, compressor, limiter, EQ, gain, ducking), monitoring, push-to-talk/mute, a LUFS meter, and the
+> **Audio Mixer** panel. Recording and streaming land phase by phase per the ladder below (recording
+> completes the 0.55.0 rung). The detailed planning + design set (product vision, PRD, roadmap,
+> build-prompts guide, and go-to-market plan) is **maintained privately** and is not published here.
 > **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
@@ -77,9 +80,10 @@ legal review).
 ## Stack
 
 > The **Tauri v2 + React shell, the workspace, CI, and packaging are built** (Phase 0), **per-OS
-> capture (screens, windows, webcams) is live** (Phase 1), and the **wgpu compositor, scene/source
-> model, GPU filters, and the scenes/sources UI are composing in real time** (Phase 2, in
-> progress); the remaining engine pieces below land per the release ladder.
+> capture (screens, windows, webcams) is live** (Phase 1), the **wgpu compositor, scene/source
+> model, GPU filters, and the scenes/sources UI compose in real time** (Phase 2), and the **owned
+> audio engine + mixer (capture, 6 tracks, classic-DSP filters, monitoring, PTT, LUFS)** is in
+> (Phase 3); the remaining engine pieces below land per the release ladder.
 
 **Tauri v2** shell + **React + TypeScript (Vite)** control UI (Havoc dark) · a **Rust** Cargo workspace
 (the `src-tauri` app crate + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`,
@@ -178,10 +182,10 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 ## Roadmap
 
 The detailed build plan is maintained privately. Public release ladder:
-**0.10.0** (foundation — **done**) → **0.25** (capture core — **done**) → 0.40 (compositor +
-scenes/sources) → 0.55 (audio + recording) → **0.70 (studio MVP — single-target streaming + virtual
-cam)** → 0.85 (multistream/SRT/WHIP + scene/source/encoder depth) → **1.0.0**. Progress is published
-on the [project site](https://mikesruthless12.github.io/freally-capture/).
+**0.10.0** (foundation — **done**) → **0.25** (capture core — **done**) → **0.40** (compositor +
+scenes/sources — **done**) → 0.55 (audio — **done** — + recording) → **0.70 (studio MVP —
+single-target streaming + virtual cam)** → 0.85 (multistream/SRT/WHIP + scene/source/encoder depth) →
+**1.0.0**. Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
 
 ---
 

@@ -26,6 +26,8 @@ pub struct Settings {
     pub language: String,
     /// Whether the stats dock is shown.
     pub show_stats_dock: bool,
+    /// The audio monitor output device name (`None`/empty = the OS default).
+    pub monitor_device: Option<String>,
 }
 
 impl Default for Settings {
@@ -33,6 +35,7 @@ impl Default for Settings {
         Self {
             language: "en".to_owned(),
             show_stats_dock: true,
+            monitor_device: None,
         }
     }
 }
@@ -49,6 +52,12 @@ impl Settings {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         {
             return Err("invalid language tag".to_owned());
+        }
+        if let Some(device) = &self.monitor_device {
+            // Device names are what the OS reports — bound the size and shape.
+            if device.len() > 256 || device.chars().any(char::is_control) {
+                return Err("invalid monitor device name".to_owned());
+            }
         }
         Ok(())
     }
@@ -103,6 +112,12 @@ impl SettingsStore {
     /// A snapshot of the current settings.
     pub fn get(&self) -> Settings {
         self.lock().clone()
+    }
+
+    /// Just the monitor-device field — so the audio bridge's per-tick poll
+    /// doesn't clone the whole [`Settings`] every 50 ms to compare one string.
+    pub fn monitor_device(&self) -> Option<String> {
+        self.lock().monitor_device.clone()
     }
 
     /// Replace the settings and persist them atomically.
@@ -226,6 +241,7 @@ mod tests {
         let next = Settings {
             language: "de".to_owned(),
             show_stats_dock: false,
+            monitor_device: Some("Speakers (Realtek)".to_owned()),
         };
         store.set(next.clone()).expect("save settings");
 
@@ -241,6 +257,23 @@ mod tests {
         let store = SettingsStore::load_from(path.clone());
         assert_eq!(store.get(), Settings::default());
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn validate_bounds_the_monitor_device() {
+        let ok = Settings {
+            monitor_device: Some("Headphones (USB)".to_owned()),
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+
+        for bad in ["x".repeat(300), "spk\u{0007}".to_owned()] {
+            let settings = Settings {
+                monitor_device: Some(bad.clone()),
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "should reject {bad:?}");
+        }
     }
 
     #[test]

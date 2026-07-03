@@ -10,6 +10,7 @@ use crate::settings::{Settings, SettingsStore};
 use fcap_capture::SourceKind;
 use fcap_sources::video_device;
 
+pub mod audio;
 pub mod studio;
 
 /// One linked core crate, as reported by [`health`].

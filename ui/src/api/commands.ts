@@ -8,12 +8,17 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddedItem,
+  AudioDevice,
+  AudioFilterId,
+  AudioFilterKind,
   BlendMode,
   CaptureSource,
   FilterId,
   FilterKind,
   Health,
   ItemId,
+  LoopbackDevices,
+  MonitorMode,
   SceneId,
   Settings,
   SourceId,
@@ -207,4 +212,91 @@ export function studioSetFilterEnabled(
   enabled: boolean,
 ): Promise<void> {
   return invoke("studio_set_filter_enabled", { sceneId, itemId, filterId, enabled });
+}
+
+// ---------------------------------------------------------------------------
+// Audio (Phase 3): devices + the per-source mixer state
+// ---------------------------------------------------------------------------
+
+/** Capture devices (microphones / line-in). */
+export function audioInputDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>("audio_input_devices");
+}
+
+/** Playback devices (the monitor picker). */
+export function audioOutputDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>("audio_output_devices");
+}
+
+/** Desktop-audio capture candidates + the honest per-OS guidance. */
+export function audioLoopbackDevices(): Promise<LoopbackDevices> {
+  return invoke<LoopbackDevices>("audio_loopback_devices");
+}
+
+export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {
+  return invoke("studio_set_audio_volume", { sourceId, volumeDb });
+}
+
+export function studioSetAudioMuted(sourceId: SourceId, muted: boolean): Promise<void> {
+  return invoke("studio_set_audio_muted", { sourceId, muted });
+}
+
+export function studioSetAudioMonitor(sourceId: SourceId, monitor: MonitorMode): Promise<void> {
+  return invoke("studio_set_audio_monitor", { sourceId, monitor });
+}
+
+/** Set the track-assignment bitmask (bit 0 = track 1). */
+export function studioSetAudioTracks(sourceId: SourceId, tracks: number): Promise<void> {
+  return invoke("studio_set_audio_tracks", { sourceId, tracks });
+}
+
+export function studioSetAudioSyncOffset(sourceId: SourceId, syncOffsetMs: number): Promise<void> {
+  return invoke("studio_set_audio_sync_offset", { sourceId, syncOffsetMs });
+}
+
+/** Bind/clear PTT + PTM hotkeys (accelerator strings, e.g. "Ctrl+Shift+T"). */
+export function studioSetAudioHotkeys(
+  sourceId: SourceId,
+  pushToTalk: string | null,
+  pushToMute: string | null,
+): Promise<void> {
+  return invoke("studio_set_audio_hotkeys", { sourceId, pushToTalk, pushToMute });
+}
+
+export function studioAddAudioFilter(
+  sourceId: SourceId,
+  kind: AudioFilterKind,
+): Promise<AudioFilterId> {
+  return invoke<AudioFilterId>("studio_add_audio_filter", { sourceId, kind });
+}
+
+export function studioRemoveAudioFilter(
+  sourceId: SourceId,
+  filterId: AudioFilterId,
+): Promise<void> {
+  return invoke("studio_remove_audio_filter", { sourceId, filterId });
+}
+
+export function studioReorderAudioFilter(
+  sourceId: SourceId,
+  filterId: AudioFilterId,
+  toIndex: number,
+): Promise<void> {
+  return invoke("studio_reorder_audio_filter", { sourceId, filterId, toIndex });
+}
+
+export function studioUpdateAudioFilter(
+  sourceId: SourceId,
+  filterId: AudioFilterId,
+  kind: AudioFilterKind,
+): Promise<void> {
+  return invoke("studio_update_audio_filter", { sourceId, filterId, kind });
+}
+
+export function studioSetAudioFilterEnabled(
+  sourceId: SourceId,
+  filterId: AudioFilterId,
+  enabled: boolean,
+): Promise<void> {
+  return invoke("studio_set_audio_filter_enabled", { sourceId, filterId, enabled });
 }

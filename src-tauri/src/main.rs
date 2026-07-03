@@ -10,12 +10,14 @@
 //! store, and (Phase 2) the studio runtime — the scene collection + the
 //! 60 fps compose loop; the engine lives in the owned `fcap-*` crates.
 
+mod audio;
 mod commands;
 mod events;
 mod preview;
 mod settings;
 mod studio;
 
+use audio::{AudioRuntime, HotkeyRegistry};
 use preview::PreviewState;
 use settings::SettingsStore;
 use studio::StudioState;
@@ -33,9 +35,19 @@ fn main() {
     println!("settings: language={}", settings.get().language);
 
     let app = tauri::Builder::default()
+        // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    audio::on_hotkey(app, shortcut, event.state());
+                })
+                .build(),
+        )
         .manage(settings)
         .manage(PreviewState::default())
         .manage(StudioState::load_default())
+        .manage(AudioRuntime::new())
+        .manage(HotkeyRegistry::default())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -77,7 +89,21 @@ fn main() {
             commands::studio::studio_remove_filter,
             commands::studio::studio_reorder_filter,
             commands::studio::studio_update_filter,
-            commands::studio::studio_set_filter_enabled
+            commands::studio::studio_set_filter_enabled,
+            commands::audio::audio_input_devices,
+            commands::audio::audio_output_devices,
+            commands::audio::audio_loopback_devices,
+            commands::audio::studio_set_audio_volume,
+            commands::audio::studio_set_audio_muted,
+            commands::audio::studio_set_audio_monitor,
+            commands::audio::studio_set_audio_tracks,
+            commands::audio::studio_set_audio_sync_offset,
+            commands::audio::studio_set_audio_hotkeys,
+            commands::audio::studio_add_audio_filter,
+            commands::audio::studio_remove_audio_filter,
+            commands::audio::studio_reorder_audio_filter,
+            commands::audio::studio_update_audio_filter,
+            commands::audio::studio_set_audio_filter_enabled
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());
@@ -87,6 +113,9 @@ fn main() {
                 app.handle().clone(),
                 &app.state::<StudioState>(),
             );
+            // The audio bridge: model → engine reconcile + the `audio`
+            // levels event + PTT/PTM hotkey registration.
+            audio::spawn_audio_thread(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())
