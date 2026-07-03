@@ -668,6 +668,41 @@ fn spawn_video_writer(mut stdin: ChildStdin) -> Result<VideoWriter, String> {
 /// died at launch and will never connect).
 const AUDIO_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a feed will backpressure before declaring ffmpeg wedged. Normal
+/// backpressure drains within a frame period; this only trips if ffmpeg stops
+/// reading entirely while still alive (e.g. a full recording disk), so the
+/// pacer surfaces an error instead of blocking forever.
+const WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The result of a bounded send onto a feed channel.
+enum SendOutcome {
+    Sent,
+    /// The receiver is gone — the child died / closed the pipe.
+    Gone,
+    /// The queue stayed full past [`WRITE_STALL_TIMEOUT`] — ffmpeg is alive
+    /// but not draining (wedged).
+    Wedged,
+}
+
+/// Send `msg`, backpressuring (never dropping) but bounded so a wedged ffmpeg
+/// can't block the pacer — and therefore `recording_stop` — forever.
+fn send_bounded<T>(tx: &mpsc::SyncSender<T>, mut msg: T) -> SendOutcome {
+    let deadline = Instant::now() + WRITE_STALL_TIMEOUT;
+    loop {
+        match tx.try_send(msg) {
+            Ok(()) => return SendOutcome::Sent,
+            Err(mpsc::TrySendError::Disconnected(_)) => return SendOutcome::Gone,
+            Err(mpsc::TrySendError::Full(returned)) => {
+                if Instant::now() >= deadline {
+                    return SendOutcome::Wedged;
+                }
+                msg = returned;
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+}
+
 fn spawn_audio_writer(listener: TcpListener, cancel: Arc<AtomicBool>) -> Result<AudioLane, String> {
     // Non-blocking accept so the wait for ffmpeg's connect can be cancelled
     // (on finish/drop) or time out — a blocking accept() would hang finalize
@@ -740,20 +775,38 @@ impl FfmpegSink {
             (None, _) => context.to_string(),
         }
     }
+
+    fn audio_send_error(&mut self, outcome: SendOutcome) -> String {
+        match outcome {
+            SendOutcome::Sent => String::new(), // never called on success
+            SendOutcome::Gone => self.death_note("the ffmpeg component stopped accepting audio"),
+            SendOutcome::Wedged => {
+                "the ffmpeg component stopped reading audio — the recording disk may be full"
+                    .to_string()
+            }
+        }
+    }
 }
 
 impl RecordSink for FfmpegSink {
     fn write_video(&mut self, pixels: &Arc<Vec<u8>>) -> Result<(), String> {
-        let Some(tx) = &self.video_tx else {
+        let Some(tx) = self.video_tx.clone() else {
             return Err("the sink is already finished".to_string());
         };
-        // Blocking send: if the encoder is behind, backpressure the pacer
-        // (which slows the whole recording) rather than drop a frame — every
-        // frame the recorder counts is a frame ffmpeg receives, so the
-        // CFR-by-count video can never shorten against the audio.
-        match tx.send(Arc::clone(pixels)) {
-            Ok(()) => Ok(()),
-            Err(_) => Err(self.death_note("the ffmpeg component stopped accepting video")),
+        // Bounded backpressure: if the encoder is behind, slow the pacer
+        // rather than drop a frame — every frame the recorder counts is a
+        // frame ffmpeg receives, so the CFR-by-count video can never shorten
+        // against the audio. Bounded so a wedged (alive-but-not-reading)
+        // ffmpeg surfaces an error instead of blocking `recording_stop`.
+        match send_bounded(&tx, Arc::clone(pixels)) {
+            SendOutcome::Sent => Ok(()),
+            SendOutcome::Gone => {
+                Err(self.death_note("the ffmpeg component stopped accepting video"))
+            }
+            SendOutcome::Wedged => Err(
+                "the ffmpeg component stopped reading video — the recording disk may be full"
+                    .to_string(),
+            ),
         }
     }
 
@@ -775,29 +828,55 @@ impl RecordSink for FfmpegSink {
         // interleaved samples are twice that.
         if sample_pos > next_pos {
             let silence = vec![0.0f32; (sample_pos - next_pos) as usize * 2];
-            if tx.send(silence).is_err() {
-                return Err(self.death_note("the ffmpeg component stopped accepting audio"));
+            match send_bounded(&tx, silence) {
+                SendOutcome::Sent => {}
+                outcome => return Err(self.audio_send_error(outcome)),
             }
         }
-        // Blocking send (backpressure, never drop) — same contract as video.
-        if tx.send(samples.to_vec()).is_err() {
-            return Err(self.death_note("the ffmpeg component stopped accepting audio"));
+        // Bounded backpressure (never drop) — same contract as video.
+        match send_bounded(&tx, samples.to_vec()) {
+            SendOutcome::Sent => {}
+            outcome => return Err(self.audio_send_error(outcome)),
         }
         self.lanes[slot].next_pos = sample_pos + (samples.len() / 2) as u64;
         Ok(())
     }
 
     fn finish(mut self: Box<Self>) -> Result<Vec<PathBuf>, String> {
-        // Close every feed: writer threads flush, stdin/sockets EOF, ffmpeg
-        // finalizes the container (faststart can take a while on long
-        // recordings — the wait is generous, then honest). Cancel first so a
-        // lane still waiting for ffmpeg to connect stops instead of blocking
-        // the join forever.
+        // Close every feed: the writer threads drain what's queued, then EOF
+        // stdin / the sockets, and ffmpeg finalizes the container (faststart
+        // can take a while on a long recording — the wait is generous). Cancel
+        // first so a lane still waiting for ffmpeg to connect stops.
         self.connect_cancel.store(true, Ordering::Relaxed);
         self.video_tx.take();
         for lane in &mut self.lanes {
             lane.tx.take();
         }
+
+        // Wait for the child to exit **before** joining the writer threads: a
+        // writer can be blocked writing to a wedged (alive, not-reading) child,
+        // so killing the child on the deadline is what unblocks the joins —
+        // joining first would hang finalize forever.
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut timed_out = false;
+        let status = loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) => {
+                    if Instant::now() > deadline {
+                        let _ = self.child.kill();
+                        let _ = self.child.wait();
+                        timed_out = true;
+                        break None;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(err) => return Err(format!("waiting for the ffmpeg component: {err}")),
+            }
+        };
+
+        // The child is gone now (exited or killed) → the writers' stdin/socket
+        // writes fail and their loops end, so these joins can't hang.
         if let Some(thread) = self.video_thread.take() {
             let _ = thread.join();
         }
@@ -806,29 +885,16 @@ impl RecordSink for FfmpegSink {
                 let _ = thread.join();
             }
         }
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(180);
-        let status = loop {
-            match self.child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {
-                    if std::time::Instant::now() > deadline {
-                        let _ = self.child.kill();
-                        let _ = self.child.wait();
-                        return Err(
-                            "the ffmpeg component did not finalize the file in time".to_string()
-                        );
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(err) => return Err(format!("waiting for the ffmpeg component: {err}")),
-            }
-        };
         let stderr_tail = self
             .stderr_thread
             .take()
             .and_then(|thread| thread.join().ok())
             .unwrap_or_default();
+
+        if timed_out {
+            return Err("the ffmpeg component did not finalize the file in time".to_string());
+        }
+        let status = status.expect("set unless timed out");
         if !status.success() {
             return Err(format!(
                 "the ffmpeg component exited with {status}: {}",
