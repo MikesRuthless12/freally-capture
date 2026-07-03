@@ -124,6 +124,66 @@ impl Default for Transform {
     }
 }
 
+/// Corner-slot geometry as fractions of the canvas. A slot spans [`SLOT_SIZE`]
+/// of *each* axis (so on a 16:9 canvas it is itself 16:9 — a 16:9 camera fills
+/// it edge to edge), inset from the edges by [`SLOT_MARGIN`]. Four such slots
+/// never overlap each other or crowd the centered screen.
+pub const SLOT_MARGIN: f32 = 0.02;
+/// See [`SLOT_MARGIN`].
+pub const SLOT_SIZE: f32 = 0.30;
+
+/// A rectangle in normalized canvas coordinates — `0.0..=1.0` on each axis,
+/// origin top-left. A layout stores one on a corner item as its
+/// [`SceneItem::pending_slot`]; the engine turns it into pixels against the
+/// live canvas size when the source's first frame arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NormRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// One of the four corners the screen-plus-corners layout can drop a camera
+/// into — the host and up to three guests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    /// The corners in a natural host-first fill order (top-right, then the
+    /// others) — how auto-assignment seats people.
+    pub const FILL_ORDER: [Corner; 4] = [
+        Corner::TopRight,
+        Corner::TopLeft,
+        Corner::BottomRight,
+        Corner::BottomLeft,
+    ];
+
+    /// The normalized slot this corner fills (see [`SLOT_SIZE`]/[`SLOT_MARGIN`]).
+    pub fn slot(self) -> NormRect {
+        let far = 1.0 - SLOT_MARGIN - SLOT_SIZE;
+        let (x, y) = match self {
+            Corner::TopLeft => (SLOT_MARGIN, SLOT_MARGIN),
+            Corner::TopRight => (far, SLOT_MARGIN),
+            Corner::BottomLeft => (SLOT_MARGIN, far),
+            Corner::BottomRight => (far, far),
+        };
+        NormRect {
+            x,
+            y,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        }
+    }
+}
+
 fn default_visible() -> bool {
     true
 }
@@ -148,6 +208,11 @@ pub struct SceneItem {
     /// added items so a 4K display lands fitted instead of overflowing.
     #[serde(default)]
     pub pending_fit: bool,
+    /// When set (and `pending_fit` is still true), the first-frame placement
+    /// fits the source into this normalized canvas slot instead of the whole
+    /// canvas — the corner-cam slots of a screen-plus-corners layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_slot: Option<NormRect>,
     #[serde(default)]
     pub filters: Vec<Filter>,
 }
@@ -163,6 +228,7 @@ impl SceneItem {
             blend: BlendMode::Normal,
             transform: Transform::default(),
             pending_fit: true,
+            pending_slot: None,
             filters: Vec::new(),
         }
     }

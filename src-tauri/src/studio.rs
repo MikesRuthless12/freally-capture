@@ -653,11 +653,26 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             .filter(|item| item.pending_fit)
             .filter_map(|item| {
                 compositor.source_size(item.source).map(|(w, h)| {
-                    (
-                        scene.id,
-                        item.id,
-                        fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1),
-                    )
+                    // A layout corner fits the source into its normalized slot;
+                    // otherwise the ordinary whole-canvas fit-and-center.
+                    let transform = match item.pending_slot {
+                        Some(slot) => {
+                            let cw = canvas.0 as f32;
+                            let ch = canvas.1 as f32;
+                            fcap_compositor::transform::fit_into_slot(
+                                w,
+                                h,
+                                slot.x * cw,
+                                slot.y * ch,
+                                slot.w * cw,
+                                slot.h * ch,
+                            )
+                        }
+                        None => {
+                            fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1)
+                        }
+                    };
+                    (scene.id, item.id, transform)
                 })
             })
             .collect();
