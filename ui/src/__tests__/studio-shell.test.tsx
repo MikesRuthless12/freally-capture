@@ -17,10 +17,13 @@ describe("studio shell", () => {
 
   it("keeps the not-yet-implemented controls disabled with honest tooltips", () => {
     render(<App />);
-    for (const name of [/start recording/i, /go live/i, /start virtual camera/i]) {
+    // Go Live + the virtual camera arrive with the studio MVP (0.70.0).
+    // Recording (Start Recording) is implemented as of 0.55.0.
+    for (const name of [/go live/i, /start virtual camera/i]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title");
     }
+    expect(screen.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
   });
 });

@@ -42,8 +42,8 @@ remediate before any public disclosure.
   `unsafe` (DXGI/WGC/ScreenCaptureKit) is isolated behind small, audited modules in `crates/capture`
   (the Linux path is entirely safe Rust); the rest of the core is `#![forbid(unsafe_code)]`.
 - **Audio surface:** captured audio (microphone / line-in and desktop / system audio) stays **on this
-  machine** and goes **only** to the mixer, the **monitor** output device you pick, and (from Phase 4)
-  the recording — it is never transmitted anywhere. The whole DSP engine (mixing, FFT/spectral denoise,
+  machine** and goes **only** to the mixer, the **monitor** output device you pick, and the **recording
+  file** — it is never transmitted anywhere. The whole DSP engine (mixing, FFT/spectral denoise,
   gate/comp/limiter/EQ, LUFS, resampler) is **owned** and `#![forbid(unsafe_code)]`; `cpal` supplies only
   device I/O. Desktop-audio capture is **honest per OS** and never silently installs a system component
   (Windows WASAPI loopback; Linux monitor devices; macOS a user-installed virtual device). The
@@ -59,17 +59,27 @@ remediate before any public disclosure.
   and **cannot read arbitrary files**. Disabled means the port is closed. Treat the password like any
   credential; prefer loopback-only unless you specifically need LAN control.
 - **ffmpeg download (on demand, not bundled):** the patent-encumbered wire codecs are provided by
-  **ffmpeg**, **fetched on demand** over **TLS** from fixed, hardcoded hosts to a per-user cache; target
-  filenames are **hardcoded literals** (no path-traversal input); each file is streamed to a temp path
-  and **atomically renamed**. **Integrity:** the ffmpeg **binary is verified against a pinned hash before
-  it is executed** — a mismatch deletes the file and re-prompts; an unverified binary is never run. The
-  owned **`freally-video`** lossless recording path needs no external tool. (There are **no model
-  downloads** — the product ships no AI/ML features.)
-- **Decode/parse hardening:** any file read from an untrusted source (e.g. a `.frec` recording, a LUT, a
-  stinger media file) has its allocations **bounded by validated header fields** so a malformed or
-  hostile file fails cleanly instead of exhausting memory; the owned codec is `#![forbid(unsafe_code)]`.
-- **Subprocess execution:** where ffmpeg is invoked as a subprocess, arguments are passed as an **argv
-  vector (no shell)**, and temp files use per-process-unique names removed after use.
+  **ffmpeg**, **fetched on demand** over **TLS** (rustls) from a **per-OS pinned URL** — a hardcoded
+  literal, no path-traversal input — to a per-user cache; the download is streamed to a temp path.
+  **Integrity:** each pinned build carries a **SHA-256 baked into the source** (cross-checked against the
+  publisher's own published checksum at pin time), and the archive is **verified against that hash before
+  anything is extracted or executed** — a mismatch aborts the install and removes the partial file; an
+  unverified binary is never run. Extraction pulls out the **single `ffmpeg` member only**, always to an
+  app-chosen path — **archive-supplied paths are never used for writing** (zip-slip / tar-traversal
+  inert). The fetch **never starts on its own** (an explicit click in the labeled Components panel). The
+  owned **`freally-video`** lossless recording path needs none of this. (There are **no model downloads**
+  — the product ships no AI/ML features.)
+- **Decode/parse hardening:** any file read from an untrusted source (a `.frec` recording, a media file,
+  a LUT, a mask) has its allocations **bounded by validated header fields** so a malformed or hostile
+  file fails cleanly (an error, not a panic) instead of exhausting memory; the owned codec + FLZ stage
+  are `#![forbid(unsafe_code)]`.
+- **Subprocess execution:** where ffmpeg is driven as a subprocess, arguments are passed as an **argv
+  vector (no shell)** — user-controlled values (media paths, encoder ids, output paths) are separate
+  argv entries, and encoder ids are **shape-validated** (`[A-Za-z0-9_-]`) before reaching `-c:v`. Child
+  processes run with **hard timeouts + drained pipes** and, on Windows, **no console window**. Recording
+  audio tracks ride **loopback-only (`127.0.0.1`) sockets** that accept **exactly one** connection then
+  close. The **remux** and **recordings-list** actions are **confined to the recordings folder** (a
+  canonicalized parent-directory check) so the webview command surface cannot reach arbitrary files.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; `cargo audit` and `cargo deny` run in CI on every push, and documented-ignore entries in
   `deny.toml` are limited to unmaintained-class advisories with no reachable vulnerability.

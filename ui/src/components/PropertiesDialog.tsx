@@ -130,6 +130,42 @@ function SettingsEditor({
           />
         </label>
       );
+    case "media":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Media file (mp4, mkv, webm, mov, .frec, or an image)
+            <input
+              value={draft.path}
+              onChange={(event) => onChange({ ...draft, path: event.target.value })}
+              placeholder="C:\clips\intro.mp4"
+              className={inputClass}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.loop}
+              onChange={(event) => onChange({ ...draft, loop: event.target.checked })}
+            />
+            Loop (restart from the top at the end)
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.hwDecode}
+              onChange={(event) => onChange({ ...draft, hwDecode: event.target.checked })}
+            />
+            Hardware decode (falls back to software on its own)
+          </label>
+          <p className="m-0 text-[10px] leading-relaxed text-havoc-muted">
+            .frec plays through the owned freally-video codec — nothing to download. Other video
+            formats decode through the on-demand FFmpeg component. The file&apos;s audio gets its
+            own mixer strip; the strip&apos;s sync offset fine-tunes A/V alignment. A clip with no
+            audio leaves its strip silent.
+          </p>
+        </div>
+      );
     case "color":
       return (
         <div className="flex items-end gap-2">

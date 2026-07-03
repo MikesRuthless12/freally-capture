@@ -10,12 +10,29 @@
 //!
 //! The patent-encumbered wire codecs (H.264/AAC/HEVC/AV1) run through the
 //! clearly-labeled **on-demand ffmpeg bridge** — never bundled, fetched to a
-//! per-user cache, hash-verified before use.
-//!
-//! **Phase 0 stub** — the crate boundary exists; encoding lands in Phase 4
-//! (→ 0.55.0).
+//! per-user cache, hash-verified before use. Hardware encoders are *driven*
+//! (through that bridge's per-vendor wrappers), never vendored.
 
 #![forbid(unsafe_code)]
+
+pub mod decode;
+pub mod encoder;
+pub mod ffmpeg;
+pub mod flz;
+pub mod freally_video;
+pub mod hardware;
+pub mod mux;
+pub mod recorder;
+pub mod remux;
+
+pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
+pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};
+pub use freally_video::{
+    FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
+};
+pub use hardware::{GpuInfo, GpuVendor};
+pub use mux::{Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, WirePlan};
+pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

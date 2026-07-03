@@ -26,7 +26,75 @@ export type Settings = {
   showStatsDock: boolean;
   /** The audio monitor output device name (null/"" = the OS default). */
   monitorDevice: string | null;
+  /** Recording output configuration (Phase 4). */
+  recording: RecordingSettings;
 };
+
+/** Recording containers; `frec` is the owned lossless default. */
+export type Container = "frec" | "mkv" | "mp4" | "mov" | "webm";
+
+export type RcMode = "cbr" | "vbr" | "cqp";
+
+export type RateControl = {
+  mode: RcMode;
+  bitrateKbps: number;
+  /** Constant-quality value for `cqp` (0–51). */
+  cq: number;
+};
+
+/** The quality/speed trade, mapped onto each encoder family's knob. */
+export type EncPreset = "quality" | "balanced" | "performance";
+
+/** Recording configuration (mirrors `RecordingSettings` in settings.rs). */
+export type RecordingSettings = {
+  container: Container;
+  /** ffmpeg encoder id, or "auto" = best detected H.264 encoder. */
+  encoderId: string;
+  rateControl: RateControl;
+  preset: EncPreset;
+  keyframeSec: number;
+  fps: number;
+  audioBitrateKbps: number;
+  /** Bitmask of the mixer tracks to record (bit 0 = track 1). */
+  tracksMask: number;
+  /** Output folder ("" = the OS Videos folder). */
+  folder: string;
+  filenamePrefix: string;
+  /** Split into playable segments every N minutes (0 = off). */
+  splitMinutes: number;
+};
+
+/** One file in the recordings folder (`recordings_list`). */
+export type RecordingFile = {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  modifiedMs: number;
+  /** Lowercase extension ("frec", "mkv", …). */
+  ext: string;
+};
+
+/** The `recording` event + `recording_status` payload. */
+export type RecordingStatus =
+  | { state: "idle"; lastPaths: string[]; error: string | null }
+  | {
+      state: "recording";
+      durationSec: number;
+      path: string;
+      container: Container;
+      tracks: number;
+      framesDuplicated: number;
+      framesBehind: number;
+      audioBlocksDropped: number;
+    }
+  | {
+      state: "paused";
+      durationSec: number;
+      path: string;
+      container: Container;
+      tracks: number;
+    }
+  | { state: "finalizing"; path: string };
 
 /** The `stats` push-event payload (~2 Hz). */
 export type StatsPayload = {
@@ -129,6 +197,7 @@ export type SourceSettings =
   | { kind: "portal" }
   | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
   | { kind: "image"; path: string }
+  | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
@@ -149,7 +218,7 @@ export type SourceKindName = SourceSettings["kind"];
 
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
-  return kind === "audioInput" || kind === "audioOutput";
+  return kind === "audioInput" || kind === "audioOutput" || kind === "media";
 }
 
 /** One shared source: identity + name + flattened settings (+ audio strip). */
@@ -358,3 +427,68 @@ export type ProgramStatus = {
   dropped: number;
   sources: Record<string, SourceRuntime>;
 };
+
+// ---------------------------------------------------------------------------
+// Encoders + the on-demand ffmpeg component (Phase 4 — mirrors
+// crates/encode and src-tauri/src/commands/recording.rs)
+// ---------------------------------------------------------------------------
+
+export type VideoCodec = "h264" | "hevc" | "av1";
+
+export type EncoderEngine = "nvenc" | "quickSync" | "amf" | "videoToolbox" | "vaapi" | "software";
+
+export type GpuVendor = "nvidia" | "amd" | "intel" | "apple" | "other";
+
+/** One physical GPU, as encoder detection saw it. */
+export type GpuInfo = {
+  name: string;
+  vendor: GpuVendor;
+  backend: string;
+};
+
+/** One encoder the picker can offer (`id` is the stable ffmpeg name). */
+export type EncoderDesc = {
+  id: string;
+  codec: VideoCodec;
+  engine: EncoderEngine;
+  label: string;
+  hardware: boolean;
+  /** The honest capability note the picker shows. */
+  note: string;
+  /**
+   * null until verified against the installed ffmpeg component;
+   * false = refused here (greyed out, auto-pick skips it).
+   */
+  verified: boolean | null;
+};
+
+/** Everything `encoders_list` found. */
+export type EncoderCatalog = {
+  gpus: GpuInfo[];
+  encoders: EncoderDesc[];
+};
+
+/** The build an install would fetch (pinned URL + size). */
+export type FfmpegBuild = {
+  version: string;
+  source: string;
+  url: string;
+  sizeBytes: number;
+};
+
+/**
+ * The `ffmpeg` event + `ffmpeg_status` payload: the clearly-labeled,
+ * on-demand wire-codec component's state machine.
+ */
+export type FfmpegStatus =
+  | { state: "missing"; build: FfmpegBuild | null }
+  | {
+      state: "downloading";
+      receivedBytes: number;
+      totalBytes: number | null;
+      bytesPerSec: number;
+    }
+  | { state: "verifying" }
+  | { state: "extracting" }
+  | { state: "ready"; version: string; path: string }
+  | { state: "error"; message: string; build: FfmpegBuild | null };

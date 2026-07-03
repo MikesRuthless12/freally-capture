@@ -20,34 +20,43 @@
     </header>
 
     <main>
-      <!-- In development: Phase 3 audio (part of 0.55.0) -->
+      <!-- 0.55.0 — audio mixer + recording -->
       <article class="release latest">
         <div class="release-head">
           <div class="meta">
-            <span class="badge upcoming">0.55.0 · in dev</span>
-            <span class="date">Jul 2, 2026 · Audio mixer + filters (audio half)</span>
+            <span class="badge">0.55.0</span>
+            <span class="date">Jul 3, 2026 · Audio mixer + recording</span>
           </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.55.0">Download v0.55.0</a>
         </div>
 
-        <h2>Audio mixer + filters — landed on <code>main</code></h2>
+        <h2>0.55.0 — Audio mixer + recording (done)</h2>
         <p class="summary">
-          The owned audio engine is in (the first half of 0.55.0; recording completes and publishes the
-          milestone). Everything runs on the machine as owned classic DSP — <strong>no AI/ML anywhere</strong>.
-          This work is on <code>main</code> now; the next downloadable installer ships when recording lands.
+          The studio can now <strong>record</strong>. Its program feed writes to disk multi-track, with the
+          best available hardware encoder or the owned lossless codec — and the audio engine (up to 6
+          tracks, owned classic-DSP filters, LUFS) that shipped alongside feeds those tracks. Everything
+          runs on the machine — <strong>no AI/ML anywhere, no accounts, no cloud</strong>.
         </p>
 
-        <h3>Highlights</h3>
+        <h3>Recording</h3>
         <ul class="features">
-          <li>Add an <strong>Audio Input Capture</strong> (microphone / line-in) or <strong>Audio Output Capture</strong> (desktop / system audio) — honest per OS: Windows WASAPI loopback, Linux monitor devices, macOS a virtual device (never silently installed).</li>
-          <li>A mixer with per-source volume, mute, and monitoring, assignable across <strong>up to 6 tracks</strong>, with a click-free fader and a per-source A/V sync offset.</li>
-          <li>Owned classic-DSP filters — <strong>spectral denoise (no ML)</strong>, noise gate, compressor, limiter, 3-band EQ, gain, and sidechain ducking — editable live without clicks.</li>
-          <li>Monitoring to any output device, sidechain ducking, <strong>push-to-talk / push-to-mute</strong> global hotkeys, and a broadcast-standard <strong>LUFS</strong> loudness meter with live VU metering.</li>
-          <li>Captured audio never leaves your machine — it goes only to the mixer, the monitor device you pick, and (next milestone) the recording.</li>
+          <li>The <strong>owned <code>freally-video</code> (.frec) lossless codec</strong> — the default local format, authored here and owned outright (temporal deltas + prediction + an owned LZ77 stage), <strong>nothing fetched</strong>, up to 6 PCM audio tracks, and a truncation-tolerant reader (a crashed recording still plays back).</li>
+          <li>Per-OS <strong>hardware encoders</strong> (NVENC / Quick Sync / AMF / VAAPI / VideoToolbox) with a universal <strong>x264 / x265 / AV1</strong> CPU fallback — detected, best-picked, and confirmed by a real smoke encode on first use.</li>
+          <li><strong>Multi-track</strong> mp4 / mkv / mov / webm (or lossless .frec), automatic <strong>file splitting</strong>, and gapless <strong>pause / resume</strong> — with a REC indicator showing duration + track count.</li>
+          <li>Encoder settings + presets (CBR/VBR/CQP, Quality/Balanced/Performance), <strong>HEVC/AV1</strong> recording, and post-record <strong>remux to MP4</strong> (no re-encode).</li>
+          <li>A <strong>Media source</strong> — play a video/image file on the canvas with its audio in the mixer (.frec through the owned codec; other formats through the labeled ffmpeg component).</li>
+          <li>The patent-encumbered wire codecs run through a <strong>clearly-labeled, on-demand ffmpeg component — never bundled</strong>: fetched only when you ask, <strong>SHA-256-verified before it ever runs</strong>. The owned lossless path needs none of it.</li>
+        </ul>
+
+        <h3>Audio mixer</h3>
+        <ul class="features">
+          <li><strong>Audio Input</strong> (mic / line-in) and <strong>Audio Output</strong> (desktop audio) capture — honest per OS: Windows WASAPI loopback, Linux monitor devices, macOS a virtual device (never silently installed).</li>
+          <li>A mixer with per-source volume/mute/monitor across <strong>up to 6 tracks</strong>, owned classic-DSP filters (<strong>spectral denoise — no ML</strong>, gate, compressor, limiter, 3-band EQ, gain, ducking), <strong>push-to-talk/mute</strong> hotkeys, and a broadcast-standard <strong>LUFS</strong> meter.</li>
         </ul>
 
         <p class="note">
-          Multi-track recording with hardware encoders + the owned lossless freally-video codec completes
-          0.55.0 and publishes the next build.
+          Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, and the virtual
+          camera — plus a native GPU preview surface (real-time "OBS feel") as its own milestone.
         </p>
       </article>
 

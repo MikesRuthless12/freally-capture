@@ -11,20 +11,23 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — Phase 2 (compositor + scenes/sources, 0.40.0) complete; Phase 3 (audio
-> mixer + filters, → part of 0.55.0) landed.** Real capture is in: per-OS screen/window capture
-> (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux ScreenCast portal + X11)
-> and webcams/capture cards. Phase 2 landed the **owned wgpu GPU compositor** (per-item
+> **Status: in development — Phase 4 (recording, 0.55.0) complete.** Real capture is in: per-OS
+> screen/window capture (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux
+> ScreenCast portal + X11) and webcams/capture cards. The **owned wgpu GPU compositor** (per-item
 > move/scale/rotate/crop, seven blend modes, 60 fps @ 1080p verified on hardware), the **owned
 > scene/source model** (shared sources, autosaved scene collection), the **on-GPU filter chain**
 > (chroma key, color correction, LUT, blur, mask, sharpen, scroll, crop), **Image/Color/Text
-> sources** (real shaping incl. RTL), and the working **Scenes/Sources rails with on-canvas
-> transform handles**. Phase 3 adds the **owned audio engine** — mic + desktop-audio capture, a mixing
-> graph with **up to 6 tracks**, the owned classic-DSP filter set (**spectral denoise — no ML** — plus
-> gate, compressor, limiter, EQ, gain, ducking), monitoring, push-to-talk/mute, a LUFS meter, and the
-> **Audio Mixer** panel. Recording and streaming land phase by phase per the ladder below (recording
-> completes the 0.55.0 rung). The detailed planning + design set (product vision, PRD, roadmap,
-> build-prompts guide, and go-to-market plan) is **maintained privately** and is not published here.
+> sources** (real shaping incl. RTL), and the **Scenes/Sources rails with on-canvas transform
+> handles** are all in. The **owned audio engine** mixes mic + desktop audio across **up to 6 tracks**
+> with the owned classic-DSP filter set (**spectral denoise — no ML** — plus gate, compressor,
+> limiter, EQ, gain, ducking), monitoring, push-to-talk/mute, and a LUFS meter. **Phase 4 adds
+> recording**: the **owned `freally-video` (`.frec`) lossless codec**, per-OS **hardware encoders**
+> (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264/x265/AV1 fallback, **multi-track** mp4/mkv/mov/webm
+> + file splitting + **pause/resume**, HEVC/AV1 + **remux-to-mp4**, and a **Media source** (video/image
+> files, audio in the mixer) — with the patent-encumbered wire codecs driven through the
+> **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). Streaming lands next
+> (0.70.0). The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
+> go-to-market plan) is **maintained privately** and is not published here.
 > **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
@@ -183,7 +186,7 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 
 The detailed build plan is maintained privately. Public release ladder:
 **0.10.0** (foundation — **done**) → **0.25** (capture core — **done**) → **0.40** (compositor +
-scenes/sources — **done**) → 0.55 (audio — **done** — + recording) → **0.70 (studio MVP —
+scenes/sources — **done**) → **0.55** (audio + recording — **done**) → **0.70 (studio MVP —
 single-target streaming + virtual cam)** → 0.85 (multistream/SRT/WHIP + scene/source/encoder depth) →
 **1.0.0**. Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
 

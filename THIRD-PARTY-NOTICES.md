@@ -48,6 +48,10 @@ works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-par
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |
 | [`fluent`](https://crates.io/crates/fluent) / `fluent-bundle` | i18n catalogs (18 locales) | Apache-2.0 OR MIT |
+| [`ureq`](https://crates.io/crates/ureq) (+ `rustls`, `webpki-roots`) | the ffmpeg component's TLS download (the app's only fetch path) | MIT OR Apache-2.0 / ISC / MPL-2.0 (root store data) |
+| [`sha2`](https://crates.io/crates/sha2) | SHA-256 verification of the fetched ffmpeg archive | MIT OR Apache-2.0 |
+| [`zip`](https://crates.io/crates/zip) *(Windows/macOS)* | unpack the fetched ffmpeg archive | MIT |
+| [`tar`](https://crates.io/crates/tar) + [`lzma-rs`](https://crates.io/crates/lzma-rs) *(Linux only)* | unpack the fetched ffmpeg tar.xz archive | MIT OR Apache-2.0 / MIT |
 
 Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL / IJG.
 
@@ -76,12 +80,21 @@ bundle or redistribute them. The CPU fallback uses **x264** (see below).
 
 | Component | Role | License | Notes |
 |-----------|------|---------|-------|
-| [ffmpeg](https://ffmpeg.org) (via [`ffmpeg-sidecar`](https://crates.io/crates/ffmpeg-sidecar) / [`ffmpeg-next`](https://crates.io/crates/ffmpeg-next)) | the patent-encumbered **wire codecs** (H.264/AVC, AAC, HEVC, AV1) required to **stream** to platforms and to **export** certain formats | **LGPL / GPL** (the binary's own license) | **fetched on demand** to a per-user cache, **hash-verified** before use; the owned `freally-video` is the default for local lossless recording |
+| [ffmpeg](https://ffmpeg.org) | the patent-encumbered **wire codecs** (H.264/AVC, AAC, HEVC, AV1) required to record/export mp4/mkv/mov/webm and (Phase 5) to **stream** to platforms | **LGPL / GPL** (the binary's own license) | **fetched on demand** to a per-user cache, **SHA-256-verified before anything runs**, and driven as a **separate process** (never linked — the GPL stays with the binary); the owned `freally-video` is the default for local lossless recording and needs none of this |
+
+The exact builds are **pinned in source** (`crates/encode/src/ffmpeg.rs`), one per OS, each hash
+cross-checked against the publisher's own published checksum at pin time:
+
+| OS | Build | Publisher |
+|----|-------|-----------|
+| Windows x64 | ffmpeg **8.1.2** essentials build (zip) | [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) |
+| Linux x64 | ffmpeg **n8.1.2** linux64-gpl (tar.xz, immutable dated release) | [BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) |
+| macOS (Apple silicon + Intel) | ffmpeg **8.1.2** (zip) | [martin-riedl.de](https://ffmpeg.martin-riedl.de) |
 
 ffmpeg is the **only** on-demand component — Freally Capture ships **no AI/ML features and downloads
-no models**. Downloads are over **TLS** from fixed, hardcoded hosts. The **ffmpeg binary is verified
-against a pinned hash before it is executed**. See [`SECURITY.md`](SECURITY.md) for the full
-download-integrity posture.
+no models**. The download starts only from an explicit user action in the clearly-labeled
+**Components** panel, over **TLS** from the fixed, hardcoded URLs above. A checksum mismatch aborts
+the install. See [`SECURITY.md`](SECURITY.md) for the full download-integrity posture.
 
 ## x264 (CPU encoder fallback)
 

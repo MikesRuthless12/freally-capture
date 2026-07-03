@@ -13,12 +13,16 @@ import type {
   AudioFilterKind,
   BlendMode,
   CaptureSource,
+  EncoderCatalog,
+  FfmpegStatus,
   FilterId,
   FilterKind,
   Health,
   ItemId,
   LoopbackDevices,
   MonitorMode,
+  RecordingFile,
+  RecordingStatus,
   SceneId,
   Settings,
   SourceId,
@@ -299,4 +303,75 @@ export function studioSetAudioFilterEnabled(
   enabled: boolean,
 ): Promise<void> {
   return invoke("studio_set_audio_filter_enabled", { sourceId, filterId, enabled });
+}
+
+// ---------------------------------------------------------------------------
+// Encoders + the on-demand ffmpeg component (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect the encoder catalog (hardware probe; verified against the
+ * installed ffmpeg component when present). First call can take ~1 s.
+ */
+export function encodersList(): Promise<EncoderCatalog> {
+  return invoke<EncoderCatalog>("encoders_list");
+}
+
+/** The ffmpeg component's current status. */
+export function ffmpegStatus(): Promise<FfmpegStatus> {
+  return invoke<FfmpegStatus>("ffmpeg_status");
+}
+
+/** Start the on-demand fetch + verify (progress rides the `ffmpeg` event). */
+export function ffmpegInstall(): Promise<void> {
+  return invoke("ffmpeg_install");
+}
+
+/** Cancel an in-flight fetch (the partial download is removed). */
+export function ffmpegCancel(): Promise<void> {
+  return invoke("ffmpeg_cancel");
+}
+
+/** Remove the installed component. */
+export function ffmpegRemove(): Promise<void> {
+  return invoke("ffmpeg_remove");
+}
+
+// ---------------------------------------------------------------------------
+// Recording (Phase 4)
+// ---------------------------------------------------------------------------
+
+/** Start recording with the persisted Settings → Output configuration. */
+export function recordingStart(): Promise<void> {
+  return invoke("recording_start");
+}
+
+/** Stop + finalize; resolves to the finished file paths. */
+export function recordingStop(): Promise<string[]> {
+  return invoke<string[]>("recording_stop");
+}
+
+/** Pause the running recording (the file stays one contiguous timeline). */
+export function recordingPause(): Promise<void> {
+  return invoke("recording_pause");
+}
+
+/** Resume a paused recording. */
+export function recordingResume(): Promise<void> {
+  return invoke("recording_resume");
+}
+
+/** The current recording status snapshot. */
+export function recordingStatus(): Promise<RecordingStatus> {
+  return invoke<RecordingStatus>("recording_status");
+}
+
+/** The recordings folder's media files, newest first. */
+export function recordingsList(): Promise<RecordingFile[]> {
+  return invoke<RecordingFile[]>("recordings_list");
+}
+
+/** Remux an mkv recording to a sibling mp4 (stream copy, no re-encode). */
+export function recordingRemux(path: string): Promise<string> {
+  return invoke<string>("recording_remux", { path });
 }

@@ -37,7 +37,9 @@ pub struct CaptureRing {
 }
 
 impl CaptureRing {
-    fn new() -> Arc<Self> {
+    /// Public: the media hub creates producer-fed rings with no device
+    /// behind them (the Media source pushes decoded audio here).
+    pub fn new() -> Arc<Self> {
         Arc::new(Self {
             buf: Mutex::new(VecDeque::with_capacity(RING_MAX_SAMPLES)),
             dropped: AtomicU64::new(0),
@@ -45,7 +47,9 @@ impl CaptureRing {
         })
     }
 
-    fn push(&self, samples: &[f32]) {
+    /// Append interleaved stereo 48 kHz samples (drops the oldest past the
+    /// cap). Producers: cpal callbacks and media decoders.
+    pub fn push(&self, samples: &[f32]) {
         let mut buf = self.buf.lock();
         for &sample in samples {
             if buf.len() >= RING_MAX_SAMPLES {
@@ -54,6 +58,12 @@ impl CaptureRing {
             }
             buf.push_back(sample);
         }
+    }
+
+    /// Drop everything buffered without counting it dropped — a restarting
+    /// media producer clears its predecessor's stale tail.
+    pub fn clear(&self) {
+        self.buf.lock().clear();
     }
 
     /// Samples currently buffered.
@@ -96,7 +106,8 @@ impl CaptureRing {
 /// A running capture session feeding a [`CaptureRing`].
 pub struct CaptureStream {
     // Held for its Drop (stops the stream); never touched otherwise.
-    _stream: cpal::Stream,
+    // `None` for externally-fed rings (the Media source's decoded audio).
+    _stream: Option<cpal::Stream>,
     ring: Arc<CaptureRing>,
     device_name: String,
 }
@@ -109,6 +120,16 @@ impl CaptureStream {
     pub fn device_name(&self) -> &str {
         &self.device_name
     }
+
+    /// A stream over a producer-fed ring (no device): the Media source's
+    /// decode thread pushes; the mixer drains exactly like any capture.
+    pub fn external(ring: Arc<CaptureRing>, name: String) -> Self {
+        Self {
+            _stream: None,
+            ring,
+            device_name: name,
+        }
+    }
 }
 
 /// Open a capture per the spec. Loopback resolves per OS: on **Windows** an
@@ -117,6 +138,10 @@ impl CaptureStream {
 /// loopback to fall back to off-Windows).
 pub fn open_capture(spec: &InputSpec) -> Result<CaptureStream, AudioError> {
     match spec {
+        InputSpec::Media { id } => Ok(CaptureStream::external(
+            crate::media_hub::ring(id),
+            format!("media:{id}"),
+        )),
         InputSpec::Input { device_id } => {
             let device = find_input_device(device_id)?;
             let config = device
@@ -257,7 +282,7 @@ fn build(
         .map_err(|err| AudioError::Backend(err.to_string()))?;
 
     Ok(CaptureStream {
-        _stream: stream,
+        _stream: Some(stream),
         ring,
         device_name,
     })

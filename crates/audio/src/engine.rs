@@ -80,6 +80,20 @@ pub struct EngineSnapshot {
     pub dropped: u64,
 }
 
+/// The recording tap (Phase 4): called on the engine thread after **every**
+/// mixed block with the enabled track buses, in ascending track order. It
+/// runs inside the 10 ms loop — implementations must only hand the data off
+/// (the recorder does its own buffering, pause gating, and position
+/// accounting). Captured audio still goes nowhere but the mixer, the
+/// monitor, and the recording file.
+pub struct RecordTap {
+    /// Bitmask of the tracks to deliver (bit 0 = track 1).
+    pub tracks: u8,
+    /// `(track_index, block)` pairs for the enabled tracks, every 10 ms.
+    #[allow(clippy::type_complexity)]
+    pub sink: Box<dyn FnMut(&[(usize, &[f32])]) + Send>,
+}
+
 enum Cmd {
     Sources(Vec<SourceConfig>),
     MonitorDevice(String),
@@ -88,6 +102,7 @@ enum Cmd {
         ptt_held: bool,
         ptm_held: bool,
     },
+    RecordTap(Option<RecordTap>),
 }
 
 /// Cloneable handle to the engine thread.
@@ -127,6 +142,12 @@ impl AudioEngine {
             ptt_held,
             ptm_held,
         });
+    }
+
+    /// Install (or clear) the recording tap. The tap sees every mixed block
+    /// from the moment it lands on the engine thread.
+    pub fn set_record_tap(&self, tap: Option<RecordTap>) {
+        let _ = self.tx.send(Cmd::RecordTap(tap));
     }
 
     /// The latest levels/status snapshot.
@@ -174,6 +195,7 @@ impl SourceRuntime {
 fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
     let mut core = MixerCore::new();
     let mut sources: HashMap<SourceId, SourceRuntime> = HashMap::new();
+    let mut record_tap: Option<RecordTap> = None;
     let mut monitor: Option<MonitorStream> = None;
     let mut monitor_device = String::new();
     let mut monitor_error: Option<String> = None;
@@ -193,6 +215,10 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
         loop {
             match rx.try_recv() {
                 Ok(Cmd::Sources(configs)) => {
+                    // Media-hub rings self-GC (weak-referenced) — a ring lives
+                    // as long as its decoder or this engine holds it, so a
+                    // hidden-then-shown media source keeps its audio. No
+                    // config-set-driven drop here (that stranded the decoder).
                     let mut next: HashMap<SourceId, SourceRuntime> =
                         HashMap::with_capacity(configs.len());
                     for config in configs {
@@ -241,6 +267,7 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
                         runtime.ptm_held = ptm_held;
                     }
                 }
+                Ok(Cmd::RecordTap(tap)) => record_tap = tap,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return, // app gone
             }
@@ -293,6 +320,16 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
 
         // -- mix one block -----------------------------------------------------
         core.process(&inputs, &controls);
+
+        // -- the recording tap (P4): every block, whether sources exist or
+        //    not — a video-only scene records silent tracks, correctly ------
+        if let Some(tap) = &mut record_tap {
+            let blocks: Vec<(usize, &[f32])> = (0..fcap_scene::TRACK_COUNT)
+                .filter(|index| tap.tracks & (1 << index) != 0)
+                .map(|index| (index, core.track(index)))
+                .collect();
+            (tap.sink)(&blocks);
+        }
 
         // -- monitor output ----------------------------------------------------
         let monitoring = controls

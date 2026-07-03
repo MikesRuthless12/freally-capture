@@ -316,7 +316,7 @@ export default function App() {
             onSettingsSaved={setSettings}
             onOpenAudioFilters={(sourceId) => setDialog({ kind: "audioFilters", sourceId })}
           />
-          <ControlsDock />
+          <ControlsDock settings={settings} onSettingsSaved={setSettings} />
           {showStats && <StatsDock />}
         </div>
       </main>
