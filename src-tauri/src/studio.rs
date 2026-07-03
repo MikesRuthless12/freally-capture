@@ -422,6 +422,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // retrying after a creation failure so it can't spin.
     let mut native_surface: Option<(fcap_compositor::NativePreview, u64)> = None;
     let mut native_disabled = false;
+    let mut native_present_count: u64 = 0;
 
     loop {
         let tick_started = Instant::now();
@@ -708,7 +709,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             bounds.width,
                             bounds.height,
                         ) {
-                            Ok(surface) => native_surface = Some((surface, gen)),
+                            Ok(surface) => {
+                                println!(
+                                    "native preview: surface created {}x{} at ({},{})",
+                                    bounds.width, bounds.height, bounds.x, bounds.y
+                                );
+                                native_surface = Some((surface, gen));
+                            }
                             Err(err) => {
                                 eprintln!(
                                     "studio: native preview surface failed ({err}) — \
@@ -727,10 +734,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
                 if native.is_visible() {
                     if let Some((surface, _)) = &mut native_surface {
-                        if let Err(err) = compositor.present_native(surface) {
-                            eprintln!("studio: native present failed ({err})");
-                            native_disabled = true;
-                            native_surface = None;
+                        match compositor.present_native(surface) {
+                            Ok(presented) => {
+                                native_present_count += 1;
+                                if native_present_count % 120 == 1 {
+                                    println!(
+                                        "native preview: present #{native_present_count} (presented={presented})"
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("studio: native present failed ({err})");
+                                native_disabled = true;
+                                native_surface = None;
+                            }
                         }
                     }
                 }
