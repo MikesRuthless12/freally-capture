@@ -181,6 +181,18 @@ export const BLEND_MODES: BlendMode[] = [
   "darken",
 ];
 
+/** One of the four corners the screen-plus-corners layout can seat a camera in. */
+export type Corner = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+
+/** The corners in host-first fill order (top-right, then the rest). */
+export const CORNERS: Corner[] = ["topRight", "topLeft", "bottomRight", "bottomLeft"];
+
+/** A rectangle in normalized canvas coordinates (0..1, origin top-left). */
+export type NormRect = { x: number; y: number; w: number; h: number };
+
+/** One corner assignment for the screen-plus-corners layout. */
+export type CornerSlot = { itemId: ItemId; corner: Corner };
+
 export type TextAlign = "left" | "center" | "right";
 
 export type VideoDeviceFormat = {
@@ -364,6 +376,8 @@ export type SceneItem = {
   transform: Transform;
   /** True until the first frame auto-fits the item (engine-managed). */
   pendingFit: boolean;
+  /** When set, the first-frame fit targets this normalized slot (a layout corner). */
+  pendingSlot?: NormRect;
   filters: Filter[];
 };
 

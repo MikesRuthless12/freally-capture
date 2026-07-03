@@ -5,6 +5,7 @@ import {
   audioLoopbackDevices,
   captureListSources,
   openPrivacySettings,
+  studioApplyLayout,
   studioRenameSource,
   studioRetrySource,
   videoDeviceFormats,
@@ -15,6 +16,8 @@ import type {
   AudioLevelsPayload,
   CaptureSource,
   Collection,
+  Corner,
+  CornerSlot,
   ItemId,
   ProgramStatus,
   Scene,
@@ -23,6 +26,7 @@ import type {
   VideoDevice,
   VideoFormat,
 } from "../api/types";
+import { CORNERS } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
@@ -107,6 +111,7 @@ export function SourcesRail({
 }: SourcesRailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [picker, setPicker] = useState<PickerMode | null>(null);
+  const [showLayout, setShowLayout] = useState(false);
   const [renaming, setRenaming] = useState<{ source: SourceId; draft: string } | null>(null);
 
   const items = scene?.items ?? [];
@@ -138,41 +143,53 @@ export function SourcesRail({
     <Panel
       title="Sources"
       actions={
-        <div className="relative">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             disabled={!scene}
-            onClick={() => setMenuOpen((open) => !open)}
-            title="Add a source"
-            aria-label="Add a source"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
+            onClick={() => setShowLayout(true)}
+            title="Arrange: screen + corners"
+            aria-label="Arrange: screen + corners"
             className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
           >
-            +
+            ▦
           </button>
-          {menuOpen && (
-            <div
-              role="menu"
+          <div className="relative">
+            <button
+              type="button"
+              disabled={!scene}
+              onClick={() => setMenuOpen((open) => !open)}
+              title="Add a source"
               aria-label="Add a source"
-              className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
             >
-              {ADD_MENU.map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => openPicker(mode)}
-                  className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                >
-                  {label}
-                </button>
-              ))}
-              <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                Browser Source arrives later — it needs its own offscreen-webview work.
-              </p>
-            </div>
-          )}
+              +
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                aria-label="Add a source"
+                className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+              >
+                {ADD_MENU.map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openPicker(mode)}
+                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                  >
+                    {label}
+                  </button>
+                ))}
+                <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
+                  Browser Source arrives later — it needs its own offscreen-webview work.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       }
     >
@@ -389,6 +406,9 @@ export function SourcesRail({
           }}
         />
       ) : null}
+      {showLayout && (
+        <LayoutPicker collection={collection} scene={scene} onClose={() => setShowLayout(false)} />
+      )}
     </Panel>
   );
 }
@@ -954,6 +974,138 @@ function ExistingPicker({
             </li>
           ))}
         </ul>
+      )}
+    </PickerShell>
+  );
+}
+
+/** A source's assigned slot in the screen-plus-corners layout. */
+type LayoutChoice = "off" | "center" | Corner;
+
+const SLOT_OPTIONS: Array<[LayoutChoice, string]> = [
+  ["off", "Off"],
+  ["center", "Center (screen)"],
+  ["topLeft", "Top-Left"],
+  ["topRight", "Top-Right"],
+  ["bottomLeft", "Bottom-Left"],
+  ["bottomRight", "Bottom-Right"],
+];
+
+/**
+ * Arrange the scene as a centered screen with up to four corner cameras — the
+ * explainer / podcast layout. Screen-kind sources auto-seat to the center,
+ * cameras fill the corners; the user can reassign any of them (and drag on the
+ * canvas afterward). Audio-only sources are skipped — they don't compose.
+ */
+function LayoutPicker({
+  collection,
+  scene,
+  onClose,
+}: {
+  collection: Collection | null;
+  scene: Scene | null;
+  onClose: () => void;
+}) {
+  const sourceOf = (id: SourceId) => collection?.sources.find((source) => source.id === id);
+  const visual = (scene?.items ?? []).filter((item) => {
+    const kind = sourceOf(item.source)?.kind;
+    return kind !== "audioInput" && kind !== "audioOutput";
+  });
+
+  const [choice, setChoice] = useState<Record<string, LayoutChoice>>(() => {
+    const map: Record<string, LayoutChoice> = {};
+    let centerTaken = false;
+    let cornerIdx = 0;
+    for (const item of visual) {
+      const kind = sourceOf(item.source)?.kind;
+      if (!centerTaken && (kind === "display" || kind === "window" || kind === "portal")) {
+        map[item.id] = "center";
+        centerTaken = true;
+      } else if ((kind === "videoDevice" || kind === "media") && cornerIdx < CORNERS.length) {
+        map[item.id] = CORNERS[cornerIdx];
+        cornerIdx += 1;
+      } else {
+        map[item.id] = "off";
+      }
+    }
+    return map;
+  });
+
+  const apply = () => {
+    if (!scene) return;
+    // Dedupe by slot — the first source assigned to a slot wins it.
+    let center: ItemId | null = null;
+    const taken = new Set<Corner>();
+    const corners: CornerSlot[] = [];
+    for (const item of visual) {
+      const slot = choice[item.id] ?? "off";
+      if (slot === "off") continue;
+      if (slot === "center") {
+        center ??= item.id;
+      } else if (!taken.has(slot)) {
+        taken.add(slot);
+        corners.push({ itemId: item.id, corner: slot });
+      }
+    }
+    studioApplyLayout(scene.id, center, corners).catch((err) =>
+      console.error("apply layout failed:", err),
+    );
+    onClose();
+  };
+
+  return (
+    <PickerShell title="Arrange: Screen + corners" onClose={onClose}>
+      {visual.length === 0 ? (
+        <p className="m-0 text-xs text-havoc-muted">
+          Add a screen capture and one or more cameras to this scene first, then arrange them here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="m-0 text-[11px] leading-relaxed text-havoc-muted">
+            Put a screen in the center and up to four cameras in the corners — your explainer /
+            podcast layout. Each corner holds a webcam, a captured call window, or a media clip. You
+            can drag any of them on the canvas afterward.
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {visual.map((item) => {
+              const source = sourceOf(item.source);
+              return (
+                <li key={item.id} className="flex items-center gap-2">
+                  <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
+                    {KIND_BADGE[source?.kind ?? ""] ?? "?"}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-havoc-text">
+                    {source?.name ?? "(missing source)"}
+                  </span>
+                  <select
+                    value={choice[item.id] ?? "off"}
+                    onChange={(event) =>
+                      setChoice((prev) => ({
+                        ...prev,
+                        [item.id]: event.target.value as LayoutChoice,
+                      }))
+                    }
+                    aria-label={`Slot for ${source?.name ?? "source"}`}
+                    className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+                  >
+                    {SLOT_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            type="button"
+            onClick={apply}
+            className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+          >
+            Apply layout
+          </button>
+        </div>
       )}
     </PickerShell>
   );

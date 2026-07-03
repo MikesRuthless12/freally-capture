@@ -85,6 +85,7 @@ fn main() {
             commands::studio::studio_set_item_visible,
             commands::studio::studio_set_item_locked,
             commands::studio::studio_set_item_blend,
+            commands::studio::studio_apply_layout,
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,

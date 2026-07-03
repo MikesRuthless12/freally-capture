@@ -668,9 +668,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 slot.h * ch,
                             )
                         }
-                        None => {
-                            fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1)
-                        }
+                        None => fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1),
                     };
                     (scene.id, item.id, transform)
                 })
