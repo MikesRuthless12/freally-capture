@@ -1555,6 +1555,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fcap-preview"
+version = "0.55.0"
+dependencies = [
+ "raw-window-handle",
+ "thiserror 2.0.18",
+ "tracing",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "fcap-scene"
 version = "0.55.0"
 dependencies = [

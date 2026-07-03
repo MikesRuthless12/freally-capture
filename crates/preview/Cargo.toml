@@ -1,0 +1,27 @@
+# fcap-preview — the native preview child window (the "OBS feel" surface host).
+[package]
+name = "fcap-preview"
+description = "Freally Capture — the native preview child window that hosts the GPU preview surface over the webview's preview region."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+raw-window-handle = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Windows: the child HWND is created + positioned here (the only place this
+# crate uses `unsafe`, in a small audited module). macOS/Linux get honest
+# stubs so the app falls back to the JPEG preview:// path there.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }

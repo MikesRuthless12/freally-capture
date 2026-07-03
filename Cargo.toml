@@ -22,6 +22,7 @@ members = [
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
     "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
+    "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Windows now, others fall back)
 ]
 
 [workspace.package]
