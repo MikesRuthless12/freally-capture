@@ -103,7 +103,8 @@ fn main() {
             commands::audio::studio_remove_audio_filter,
             commands::audio::studio_reorder_audio_filter,
             commands::audio::studio_update_audio_filter,
-            commands::audio::studio_set_audio_filter_enabled
+            commands::audio::studio_set_audio_filter_enabled,
+            commands::recording::encoders_list
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());

@@ -1508,6 +1508,12 @@ dependencies = [
 [[package]]
 name = "fcap-encode"
 version = "0.40.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+ "wgpu",
+]
 
 [[package]]
 name = "fcap-scene"
