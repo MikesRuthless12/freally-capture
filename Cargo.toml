@@ -92,6 +92,7 @@ tungstenite = "0.23"
 # Config / hotkeys / i18n
 directories = "5"
 global-hotkey = "0.6"
+tauri-plugin-global-shortcut = "2"   # PTT/PTM (P3); the full hotkey map lands in P5
 fluent = "0.16"
 
 # Wire codecs (NOT bundled — fetched on demand, hash-verified, behind the encode interface)

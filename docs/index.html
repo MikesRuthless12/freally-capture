@@ -64,7 +64,7 @@
         <div class="release-head">
           <div class="meta">
             <span class="badge">In development</span>
-            <span class="date">0.25.0 capture core done · Jul 1, 2026</span>
+            <span class="date">0.40.0 compositor done · audio mixer landed · Jul 2, 2026</span>
           </div>
           <details class="dl">
             <summary>Download <span class="chev" aria-hidden="true">▾</span></summary>
@@ -97,10 +97,14 @@
         <p class="summary">
           Capture is in (0.25.0): screens, windows, and webcams stream live into the program preview on
           Windows (DXGI + Windows.Graphics.Capture), macOS (ScreenCaptureKit), and Linux (the ScreenCast
-          portal on Wayland — the system dialog picks the source — plus a direct X11 path). The studio
-          MVP (0.70.0) adds GPU-composited scenes, multi-track recording (hardware encoders + the owned
-          lossless freally-video codec), a virtual camera, and single-target streaming to Twitch,
-          YouTube, Kick, and more. Early development builds are downloadable above.
+          portal on Wayland — the system dialog picks the source — plus a direct X11 path). The owned
+          wgpu GPU compositor, the scene/source model, and the on-GPU filter chain are in (0.40.0), and
+          the <strong>owned audio engine has just landed on <code>main</code></strong> — mic and
+          desktop-audio capture, a mixer with up to 6 tracks, the owned classic-DSP filters (spectral
+          denoise — no ML — plus gate, compressor, limiter, EQ, gain, ducking), monitoring, push-to-talk,
+          and a LUFS meter. Recording completes the 0.55.0 milestone next. The studio MVP (0.70.0) then
+          adds a virtual camera and single-target streaming to Twitch, YouTube, Kick, and more. Early
+          development builds are downloadable above.
         </p>
 
         <h3>What the first public build will do</h3>
@@ -115,8 +119,8 @@
         <p class="note">
           Simultaneous multistream to several platforms, SRT/WHIP, nested scenes and source groups, the
           replay-buffer presets, and the WebSocket remote-control API arrive in the 0.85.0 and 1.0.0
-          milestones. Pre-0.70.0 downloads are honest early builds — capture, scenes, and the GPU
-          compositor with filters work; audio, recording, and streaming are still to come.
+          milestones. Pre-0.70.0 downloads are honest early builds — capture, scenes, the GPU compositor
+          with filters, and now the audio mixer work; recording and streaming are still to come.
         </p>
       </article>
 
@@ -152,7 +156,7 @@
             <span class="badge upcoming">0.55.0</span>
             <div>
               <strong>Audio mixer + recording</strong>
-              <p>The audio graph (up to 6 tracks, denoise/gate/compressor/EQ, LUFS), and multi-track recording with hardware encoders + the owned lossless codec.</p>
+              <p>The audio graph (up to 6 tracks, denoise/gate/compressor/EQ, LUFS), and multi-track recording with hardware encoders + the owned lossless codec. <strong>The audio half is in on <code>main</code></strong>; recording completes the milestone.</p>
             </div>
             <span class="soon">Coming soon</span>
           </li>

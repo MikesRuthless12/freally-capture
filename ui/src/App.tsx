@@ -13,8 +13,9 @@ import {
   studioSetItemTransform,
   studioSetItemVisible,
 } from "./api/commands";
-import { onProgram, onStudio } from "./api/events";
+import { onAudio, onProgram, onStudio } from "./api/events";
 import type {
+  AudioLevelsPayload,
   Health,
   ItemId,
   ProgramStatus,
@@ -24,6 +25,7 @@ import type {
   StudioDto,
   Transform,
 } from "./api/types";
+import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
 import { ControlsDock } from "./panels/ControlsDock";
@@ -34,7 +36,10 @@ import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
 
 type OpenDialog =
-  { kind: "filters"; itemId: ItemId } | { kind: "properties"; sourceId: SourceId } | null;
+  | { kind: "filters"; itemId: ItemId }
+  | { kind: "properties"; sourceId: SourceId }
+  | { kind: "audioFilters"; sourceId: SourceId }
+  | null;
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
 export default function App() {
@@ -48,6 +53,7 @@ export default function App() {
 
   const [studio, setStudio] = useState<StudioDto | null>(null);
   const [program, setProgram] = useState<ProgramStatus | null>(null);
+  const [audio, setAudio] = useState<AudioLevelsPayload | null>(null);
   const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   // Ignore stale event echoes while a drag streams newer transforms.
@@ -92,10 +98,14 @@ export default function App() {
     const unlistenProgram = onProgram((status) => {
       if (!cancelled) setProgram(status);
     }).catch(() => undefined);
+    const unlistenAudio = onAudio((levels) => {
+      if (!cancelled) setAudio(levels);
+    }).catch(() => undefined);
     return () => {
       cancelled = true;
       void unlistenStudio.then((fn) => fn?.());
       void unlistenProgram.then((fn) => fn?.());
+      void unlistenAudio.then((fn) => fn?.());
     };
   }, []);
 
@@ -228,6 +238,10 @@ export default function App() {
     dialog?.kind === "properties"
       ? (collection?.sources.find((source) => source.id === dialog.sourceId) ?? null)
       : null;
+  const dialogAudioSource =
+    dialog?.kind === "audioFilters"
+      ? (collection?.sources.find((source) => source.id === dialog.sourceId) ?? null)
+      : null;
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
@@ -275,6 +289,7 @@ export default function App() {
             collection={collection}
             scene={activeScene}
             program={program}
+            audio={audio}
             os={core?.os}
             selectedItem={effectiveSelection}
             onSelect={setSelectedItem}
@@ -293,7 +308,14 @@ export default function App() {
             showStats ? "grid-cols-[2fr_1fr_1fr]" : "grid-cols-[3fr_1fr]"
           }`}
         >
-          <MixerDock />
+          <MixerDock
+            collection={collection}
+            scene={activeScene}
+            audio={audio}
+            settings={settings}
+            onSettingsSaved={setSettings}
+            onOpenAudioFilters={(sourceId) => setDialog({ kind: "audioFilters", sourceId })}
+          />
           <ControlsDock />
           {showStats && <StatsDock />}
         </div>
@@ -311,6 +333,13 @@ export default function App() {
       )}
       {dialog?.kind === "properties" && dialogSource && (
         <PropertiesDialog source={dialogSource} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "audioFilters" && dialogAudioSource && (
+        <AudioFiltersDialog
+          source={dialogAudioSource}
+          collection={collection}
+          onClose={() => setDialog(null)}
+        />
       )}
     </div>
   );

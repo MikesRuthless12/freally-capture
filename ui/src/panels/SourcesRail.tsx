@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  audioInputDevices,
+  audioLoopbackDevices,
   captureListSources,
   openPrivacySettings,
   studioRenameSource,
@@ -9,6 +11,8 @@ import {
   videoDevicesList,
 } from "../api/commands";
 import type {
+  AudioDevice,
+  AudioLevelsPayload,
   CaptureSource,
   Collection,
   ItemId,
@@ -19,6 +23,7 @@ import type {
   VideoDevice,
   VideoFormat,
 } from "../api/types";
+import { kindHasAudio } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
@@ -28,6 +33,7 @@ type SourcesRailProps = {
   collection: Collection | null;
   scene: Scene | null;
   program: ProgramStatus | null;
+  audio: AudioLevelsPayload | null;
   os?: string;
   selectedItem: ItemId | null;
   onSelect: (item: ItemId | null) => void;
@@ -41,7 +47,16 @@ type SourcesRailProps = {
   onOpenProperties: (source: SourceId) => void;
 };
 
-type PickerMode = "display" | "window" | "webcam" | "image" | "color" | "text" | "existing";
+type PickerMode =
+  | "display"
+  | "window"
+  | "webcam"
+  | "image"
+  | "color"
+  | "text"
+  | "audioInput"
+  | "audioOutput"
+  | "existing";
 
 const KIND_BADGE: Record<string, string> = {
   display: "Display",
@@ -51,6 +66,8 @@ const KIND_BADGE: Record<string, string> = {
   image: "Image",
   color: "Color",
   text: "Text",
+  audioInput: "Audio In",
+  audioOutput: "Audio Out",
 };
 
 const ADD_MENU: Array<[PickerMode, string]> = [
@@ -60,6 +77,8 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["image", "Image"],
   ["color", "Color"],
   ["text", "Text"],
+  ["audioInput", "Audio Input Capture"],
+  ["audioOutput", "Audio Output Capture"],
   ["existing", "Existing source…"],
 ];
 
@@ -71,6 +90,7 @@ export function SourcesRail({
   collection,
   scene,
   program,
+  audio,
   os,
   selectedItem,
   onSelect,
@@ -166,7 +186,12 @@ export function SourcesRail({
           {topFirst.map((item) => {
             const modelIndex = items.findIndex((candidate) => candidate.id === item.id);
             const source = sourceOf(item.source);
-            const status = program?.sources[item.source];
+            // Audio sources report through the `audio` event; video through
+            // `program`. Same status shape, one dot.
+            const status =
+              source && kindHasAudio(source.kind)
+                ? audio?.sources[item.source]
+                : program?.sources[item.source];
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
             return (
@@ -259,9 +284,11 @@ export function SourcesRail({
                   ) : status ? (
                     <span
                       title={
-                        status.state === "live"
-                          ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
-                          : "starting…"
+                        status.state !== "live"
+                          ? "starting…"
+                          : "width" in status && status.width
+                            ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
+                            : "live"
                       }
                       aria-label={`status: ${status.state}`}
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -341,6 +368,8 @@ export function SourcesRail({
         <CapturePicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "webcam" ? (
         <WebcamPicker onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "audioInput" || picker === "audioOutput" ? (
+        <AudioPicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "image" ? (
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "color" ? (
@@ -563,6 +592,113 @@ function WebcamPicker({
                 Add camera
               </button>
             </>
+          )}
+        </div>
+      )}
+    </PickerShell>
+  );
+}
+
+function AudioPicker({
+  mode,
+  onClose,
+  onPick,
+}: {
+  mode: "audioInput" | "audioOutput";
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const [devices, setDevices] = useState<AudioDevice[] | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const isLoopback = mode === "audioOutput";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isLoopback) {
+      audioLoopbackDevices()
+        .then((result) => {
+          if (cancelled) return;
+          setDevices(result.devices);
+          setGuidance(result.guidance ?? null);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(String(err));
+        });
+    } else {
+      audioInputDevices()
+        .then((list) => {
+          if (!cancelled) setDevices(list);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(String(err));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoopback]);
+
+  const title = isLoopback ? "Add an Audio Output Capture" : "Add an Audio Input Capture";
+  // Windows loopback (no guidance) can capture the default output; elsewhere
+  // an explicit monitor/virtual device pick is the honest requirement.
+  const offerDefault = !isLoopback || (devices !== null && guidance === null);
+  const entries: Array<{ id: string; name: string }> = [
+    ...(offerDefault
+      ? [
+          {
+            id: "",
+            name: isLoopback ? "Default output (what you hear)" : "Default input",
+          },
+        ]
+      : []),
+    ...(devices ?? []),
+  ];
+
+  return (
+    <PickerShell title={title} onClose={onClose}>
+      {error ? (
+        <p className="m-0 text-xs text-red-400">{error}</p>
+      ) : devices === null ? (
+        <p className="m-0 text-xs text-havoc-muted">Looking for audio devices…</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {entries.length === 0 ? (
+            <p className="m-0 text-xs text-havoc-muted">
+              {isLoopback
+                ? "No desktop-audio capture device was found here."
+                : "No microphones or line-ins were found."}
+            </p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {entries.map((device) => (
+                <li key={device.id || "(default)"}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onPick(
+                        { kind: mode, deviceId: device.id },
+                        device.id === "" ? undefined : device.name,
+                      )
+                    }
+                    className="w-full truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
+                  >
+                    {device.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {guidance && (
+            <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
+              {guidance}
+            </p>
+          )}
+          {!isLoopback && (
+            <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+              Mixer strips get a VU meter, fader, mute, monitoring, filters (denoise, gate,
+              compressor…), and track assignment. Everything stays on this machine.
+            </p>
           )}
         </div>
       )}

@@ -6,7 +6,7 @@
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { ProgramStatus, StatsPayload, StudioDto } from "./types";
+import type { AudioLevelsPayload, ProgramStatus, StatsPayload, StudioDto } from "./types";
 
 /** Subscribe to the ~2 Hz `stats` event. Resolves to an unlisten function. */
 export function onStats(handler: (stats: StatsPayload) => void): Promise<UnlistenFn> {
@@ -21,4 +21,9 @@ export function onStudio(handler: (studio: StudioDto) => void): Promise<Unlisten
 /** Subscribe to compose-loop health + per-source states (≥1 Hz). */
 export function onProgram(handler: (status: ProgramStatus) => void): Promise<UnlistenFn> {
   return listen<ProgramStatus>("program", (event) => handler(event.payload));
+}
+
+/** Subscribe to mixer levels + audio source states (~20 Hz). */
+export function onAudio(handler: (levels: AudioLevelsPayload) => void): Promise<UnlistenFn> {
+  return listen<AudioLevelsPayload>("audio", (event) => handler(event.payload));
 }

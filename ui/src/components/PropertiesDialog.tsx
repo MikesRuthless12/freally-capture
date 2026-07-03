@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import {
+  audioInputDevices,
+  audioLoopbackDevices,
   captureListSources,
   studioRenameSource,
   studioUpdateSourceSettings,
@@ -8,6 +10,7 @@ import {
   videoDevicesList,
 } from "../api/commands";
 import type {
+  AudioDevice,
   CaptureSource,
   Source,
   SourceSettings,
@@ -31,10 +34,12 @@ type PropertiesDialogProps = {
 export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
   const [name, setName] = useState(source.name);
   const [draft, setDraft] = useState<SourceSettings>(() => {
-    // A Source is its settings plus identity — peel the identity off.
+    // A Source is its settings plus identity (+ the audio strip) — peel
+    // everything that isn't per-kind settings off.
     const settings: Partial<Source> = { ...source };
     delete settings.id;
     delete settings.name;
+    delete settings.audio;
     return settings as SourceSettings;
   });
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +115,9 @@ function SettingsEditor({
       );
     case "videoDevice":
       return <VideoDeviceEditor draft={draft} onChange={onChange} />;
+    case "audioInput":
+    case "audioOutput":
+      return <AudioDeviceEditor draft={draft} onChange={onChange} />;
     case "image":
       return (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
@@ -312,6 +320,83 @@ function VideoDeviceEditor({
           ))}
         </select>
       </label>
+    </div>
+  );
+}
+
+function AudioDeviceEditor({
+  draft,
+  onChange,
+}: {
+  draft: Extract<SourceSettings, { kind: "audioInput" | "audioOutput" }>;
+  onChange: (settings: SourceSettings) => void;
+}) {
+  const [devices, setDevices] = useState<AudioDevice[] | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
+  const isLoopback = draft.kind === "audioOutput";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isLoopback) {
+      audioLoopbackDevices()
+        .then((result) => {
+          if (cancelled) return;
+          setDevices(result.devices);
+          setGuidance(result.guidance ?? null);
+        })
+        .catch(() => {
+          if (!cancelled) setDevices([]);
+        });
+    } else {
+      audioInputDevices()
+        .then((list) => {
+          if (!cancelled) setDevices(list);
+        })
+        .catch(() => {
+          if (!cancelled) setDevices([]);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoopback]);
+
+  // Windows loopback (no guidance) has a real "default output" fallback;
+  // elsewhere an explicit device pick is the honest requirement.
+  const offerDefault = !isLoopback || guidance === null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+        {isLoopback ? "Capture the audio of" : "Device"}
+        <select
+          value={draft.deviceId}
+          onChange={(event) => onChange({ ...draft, deviceId: event.target.value })}
+          className={inputClass}
+        >
+          {offerDefault && (
+            <option value="">
+              {isLoopback ? "Default output (what you hear)" : "Default input"}
+            </option>
+          )}
+          {(devices ?? []).map((device) => (
+            <option key={device.id} value={device.id}>
+              {device.name}
+              {device.isDefault ? " (default)" : ""}
+            </option>
+          ))}
+          {devices !== null &&
+            draft.deviceId !== "" &&
+            !devices.some((device) => device.id === draft.deviceId) && (
+              <option value={draft.deviceId}>(current device: {draft.deviceId})</option>
+            )}
+        </select>
+      </label>
+      {guidance && (
+        <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[10px] leading-snug text-amber-200/90">
+          {guidance}
+        </p>
+      )}
     </div>
   );
 }
