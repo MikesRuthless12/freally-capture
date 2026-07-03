@@ -20,8 +20,39 @@
     </header>
 
     <main>
-      <!-- 0.40.0 -->
+      <!-- In development: Phase 3 audio (part of 0.55.0) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge upcoming">0.55.0 · in dev</span>
+            <span class="date">Jul 2, 2026 · Audio mixer + filters (audio half)</span>
+          </div>
+        </div>
+
+        <h2>Audio mixer + filters — landed on <code>main</code></h2>
+        <p class="summary">
+          The owned audio engine is in (the first half of 0.55.0; recording completes and publishes the
+          milestone). Everything runs on the machine as owned classic DSP — <strong>no AI/ML anywhere</strong>.
+          This work is on <code>main</code> now; the next downloadable installer ships when recording lands.
+        </p>
+
+        <h3>Highlights</h3>
+        <ul class="features">
+          <li>Add an <strong>Audio Input Capture</strong> (microphone / line-in) or <strong>Audio Output Capture</strong> (desktop / system audio) — honest per OS: Windows WASAPI loopback, Linux monitor devices, macOS a virtual device (never silently installed).</li>
+          <li>A mixer with per-source volume, mute, and monitoring, assignable across <strong>up to 6 tracks</strong>, with a click-free fader and a per-source A/V sync offset.</li>
+          <li>Owned classic-DSP filters — <strong>spectral denoise (no ML)</strong>, noise gate, compressor, limiter, 3-band EQ, gain, and sidechain ducking — editable live without clicks.</li>
+          <li>Monitoring to any output device, sidechain ducking, <strong>push-to-talk / push-to-mute</strong> global hotkeys, and a broadcast-standard <strong>LUFS</strong> loudness meter with live VU metering.</li>
+          <li>Captured audio never leaves your machine — it goes only to the mixer, the monitor device you pick, and (next milestone) the recording.</li>
+        </ul>
+
+        <p class="note">
+          Multi-track recording with hardware encoders + the owned lossless freally-video codec completes
+          0.55.0 and publishes the next build.
+        </p>
+      </article>
+
+      <!-- 0.40.0 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.40.0</span>
@@ -50,8 +81,9 @@
         </ul>
 
         <p class="note">
-          This is an early development build: scenes, capture, and the compositor work; the audio
-          mixer, recording, and streaming arrive in the milestones below.
+          This is an early development build: scenes, capture, and the compositor work. The audio mixer
+          has since landed on <code>main</code> (above); recording and streaming arrive in the milestones
+          below.
         </p>
       </article>
 
