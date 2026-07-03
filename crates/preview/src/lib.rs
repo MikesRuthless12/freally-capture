@@ -90,6 +90,15 @@ pub struct PreviewWindow {
     _unsupported: (),
 }
 
+// SAFETY: the window holds only an HWND — a process-global identifier, not a
+// thread-owned resource. It is *created* on the UI thread (required), but the
+// operations exposed here (`SetWindowPos`, `ShowWindow`, `DestroyWindow`) are
+// callable from any thread for a window whose owning thread pumps messages
+// (the Tauri main thread always does). This lets the app hold it in shared
+// state; the app still routes creation through the main thread.
+unsafe impl Send for PreviewWindow {}
+unsafe impl Sync for PreviewWindow {}
+
 impl PreviewWindow {
     /// Create the child window over `bounds`, parented to `parent`. Errors
     /// with [`PreviewError::Unsupported`] off Windows (the app falls back to

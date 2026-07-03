@@ -31,3 +31,4 @@ fcap-scene = { path = "../crates/scene" }
 fcap-audio = { path = "../crates/audio" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
+fcap-preview = { path = "../crates/preview" }

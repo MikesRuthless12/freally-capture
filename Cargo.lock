@@ -1754,6 +1754,7 @@ dependencies = [
  "fcap-capture",
  "fcap-compositor",
  "fcap-encode",
+ "fcap-preview",
  "fcap-scene",
  "fcap-sources",
  "fcap-stream",

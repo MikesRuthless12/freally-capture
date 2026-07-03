@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { nativePreviewActive, nativePreviewSetRegion } from "../api/commands";
 import type { Collection, ItemId, ProgramStatus, Scene, SceneItem, Transform } from "../api/types";
 import {
   canvasToLocal,
@@ -65,10 +66,16 @@ export function PreviewPanel({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const dragRef = useRef<DragState | null>(null);
+  // The native GPU preview surface (the "OBS feel" path): when active, a
+  // native child window paints the program region and the JPEG canvas is
+  // suppressed. Off Windows this stays false → the JPEG path renders.
+  const [nativeActive, setNativeActive] = useState(false);
+  const lastRegion = useRef("");
 
   const programW = collection?.canvasWidth ?? 1920;
   const programH = collection?.canvasHeight ?? 1080;
   const running = program?.state === "running";
+  const emptyScene = (scene?.items.length ?? 0) === 0;
 
   // The displayed box: the program frame letterboxed inside the container.
   useEffect(() => {
@@ -92,9 +99,52 @@ export function PreviewPanel({
     return () => observer.disconnect();
   }, [programW, programH]);
 
-  // Poll the composed frame onto the canvas while the studio runs.
+  // Is the native GPU preview surface available? (Windows + created.)
   useEffect(() => {
-    if (!running) return;
+    let alive = true;
+    nativePreviewActive()
+      .then((on) => alive && setNativeActive(on))
+      .catch(() => alive && setNativeActive(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // While native, keep the child window positioned over the letterboxed
+  // program area (physical px, window-client relative) and shown only when
+  // there's a live scene to paint (so the empty/starting HTML hints aren't
+  // hidden behind it). A light interval catches layout drift as docks resize.
+  useEffect(() => {
+    if (!nativeActive) return;
+    const report = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = Math.round((rect.left + box.left) * dpr);
+      const y = Math.round((rect.top + box.top) * dpr);
+      const w = Math.round(box.width * dpr);
+      const h = Math.round(box.height * dpr);
+      const visible = running && !emptyScene;
+      const key = `${x},${y},${w},${h},${visible}`;
+      if (key !== lastRegion.current) {
+        lastRegion.current = key;
+        void nativePreviewSetRegion(x, y, w, h, visible).catch(() => undefined);
+      }
+    };
+    report();
+    const timer = setInterval(report, 150);
+    return () => {
+      clearInterval(timer);
+      lastRegion.current = "";
+      void nativePreviewSetRegion(0, 0, 0, 0, false).catch(() => undefined);
+    };
+  }, [nativeActive, box, running, emptyScene]);
+
+  // Poll the composed frame onto the canvas while the studio runs (skipped
+  // when the native surface is painting the region).
+  useEffect(() => {
+    if (!running || nativeActive) return;
     // jsdom (tests) has neither the scheme nor createImageBitmap.
     if (typeof createImageBitmap === "undefined") return;
     let stopped = false;
@@ -131,7 +181,7 @@ export function PreviewPanel({
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [running]);
+  }, [running, nativeActive]);
 
   const displayScale = box.width > 0 ? box.width / programW : 1;
   const toProgram = useCallback(
@@ -288,15 +338,13 @@ export function PreviewPanel({
     return { corner, mids, rotate, locked: selected.locked };
   }, [selected, selectedGeometry, displayScale]);
 
-  const emptyScene = (scene?.items.length ?? 0) === 0;
-
   return (
     <section
       aria-label="Program preview"
       className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/60"
     >
       <div ref={containerRef} className="relative min-h-0 flex-1">
-        {running && (
+        {running && !nativeActive && (
           <>
             <canvas
               ref={canvasRef}

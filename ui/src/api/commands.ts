@@ -338,6 +338,34 @@ export function ffmpegRemove(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Native preview surface (the "OBS feel" path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the native GPU preview surface is active (Windows + created). When
+ * true the preview panel hides its JPEG `<canvas>` — the native child window
+ * paints the region directly.
+ */
+export function nativePreviewActive(): Promise<boolean> {
+  return invoke<boolean>("native_preview_active");
+}
+
+/**
+ * Report the preview region's on-screen rectangle in **physical pixels**
+ * (relative to the window client area) + whether it's currently visible. The
+ * native child window follows it. A no-op off Windows.
+ */
+export function nativePreviewSetRegion(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  visible: boolean,
+): Promise<void> {
+  return invoke("native_preview_set_region", { x, y, width, height, visible });
+}
+
+// ---------------------------------------------------------------------------
 // Recording (Phase 4)
 // ---------------------------------------------------------------------------
 

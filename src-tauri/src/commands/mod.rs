@@ -193,6 +193,43 @@ pub async fn video_device_formats(device_id: String) -> Result<Vec<VideoFormatDt
     .map_err(|err| format!("format listing task failed: {err}"))?
 }
 
+// ---------------------------------------------------------------------------
+// Native preview surface (the "OBS feel" path)
+// ---------------------------------------------------------------------------
+
+/// The UI reports the preview region's on-screen rectangle (physical pixels,
+/// relative to the window's client area) + whether it's currently visible.
+/// The native child window follows it; off Windows this is a no-op and the
+/// UI keeps the JPEG canvas.
+#[tauri::command]
+pub fn native_preview_set_region(
+    state: tauri::State<'_, crate::native_preview::NativePreviewState>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    visible: bool,
+) {
+    state.set_region(
+        fcap_preview::Bounds {
+            x,
+            y,
+            width,
+            height,
+        },
+        visible,
+    );
+}
+
+/// Whether the native preview surface is active (Windows + created OK). When
+/// true the UI hides its JPEG `<canvas>` — the native window paints the region.
+#[tauri::command]
+pub fn native_preview_active(
+    state: tauri::State<'_, crate::native_preview::NativePreviewState>,
+) -> bool {
+    state.surface_handle().is_some()
+}
+
 /// macOS: deep-link the user to the Privacy pane they need after a denial.
 /// `pane` is "screenRecording" or "camera".
 #[tauri::command]

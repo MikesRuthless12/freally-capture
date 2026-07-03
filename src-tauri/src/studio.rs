@@ -416,6 +416,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut last_program_event = Instant::now();
     let mut statuses_changed = true;
 
+    // The native preview surface (the "OBS feel" path): created lazily once
+    // the UI reports a non-zero preview region, then presented every frame
+    // with no readback. `None` while unsupported/uncreated; `disabled` stops
+    // retrying after a creation failure so it can't spin.
+    let mut native_surface: Option<(fcap_compositor::NativePreview, u64)> = None;
+    let mut native_disabled = false;
+
     loop {
         let tick_started = Instant::now();
 
@@ -687,6 +694,48 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             eprintln!("studio: compose failed: {err}");
         }
         composed_this_second += 1;
+
+        // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
+        if !native_disabled {
+            let native = app.state::<crate::native_preview::NativePreviewState>();
+            if let Some(handle) = native.surface_handle() {
+                let (gen, bounds) = native.region();
+                let sized = bounds.width > 0 && bounds.height > 0;
+                if sized && native.is_visible() {
+                    match &mut native_surface {
+                        None => match compositor.create_native_preview(
+                            handle,
+                            bounds.width,
+                            bounds.height,
+                        ) {
+                            Ok(surface) => native_surface = Some((surface, gen)),
+                            Err(err) => {
+                                eprintln!(
+                                    "studio: native preview surface failed ({err}) — \
+                                     falling back to the JPEG preview"
+                                );
+                                native_disabled = true;
+                            }
+                        },
+                        Some((surface, seen_gen)) => {
+                            if *seen_gen != gen {
+                                compositor.resize_native(surface, bounds.width, bounds.height);
+                                *seen_gen = gen;
+                            }
+                        }
+                    }
+                }
+                if native.is_visible() {
+                    if let Some((surface, _)) = &mut native_surface {
+                        if let Err(err) = compositor.present_native(surface) {
+                            eprintln!("studio: native present failed ({err})");
+                            native_disabled = true;
+                            native_surface = None;
+                        }
+                    }
+                }
+            }
+        }
 
         // The recorder wants the full-res program frame every tick while a
         // session runs; the preview JPEG keeps its ~30 fps cadence. One

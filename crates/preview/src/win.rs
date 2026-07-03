@@ -14,7 +14,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, SetWindowPos, ShowWindow,
     HMENU, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOWNA,
-    WINDOW_EX_STYLE, WM_ERASEBKGND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    WINDOW_EX_STYLE, WM_ERASEBKGND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS,
 };
 
 use crate::{Bounds, PreviewError, SurfaceHandle};
@@ -106,7 +106,9 @@ impl WinPreviewWindow {
                 WINDOW_EX_STYLE(0),
                 PCWSTR(CLASS_NAME.as_ptr()),
                 PCWSTR::null(),
-                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+                // Starts hidden — the UI shows it once it reports the region,
+                // so there's no flash at a placeholder position/size.
+                WS_CHILD | WS_CLIPSIBLINGS,
                 bounds.x,
                 bounds.y,
                 bounds.width.max(1) as i32,

@@ -13,6 +13,7 @@
 mod audio;
 mod commands;
 mod events;
+mod native_preview;
 mod preview;
 mod recording;
 mod settings;
@@ -51,6 +52,7 @@ fn main() {
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
         .manage(recording::RecordingState::new())
+        .manage(native_preview::NativePreviewState::new())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -118,7 +120,9 @@ fn main() {
             commands::recording::recording_resume,
             commands::recording::recording_status,
             commands::recording::recordings_list,
-            commands::recording::recording_remux
+            commands::recording::recording_remux,
+            commands::native_preview_set_region,
+            commands::native_preview_active
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());
@@ -134,6 +138,11 @@ fn main() {
             // The recording status emitter (~2 Hz while a session runs) +
             // the dead-sink watchdog.
             recording::spawn_status_thread(app.handle().clone());
+            // The native preview child window (Windows). Created here on the
+            // main thread; the studio thread presents the GPU surface onto it.
+            // Failure (or any non-Windows OS) leaves it absent → the JPEG
+            // `preview://` path stays in charge.
+            native_preview::try_create(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
