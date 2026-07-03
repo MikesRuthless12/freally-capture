@@ -29,7 +29,7 @@ pub use freally_video::{
     FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
 };
 pub use hardware::{GpuInfo, GpuVendor};
-pub use mux::{Container, FfmpegSink, FrecSink, RateControl, RcMode, WirePlan};
+pub use mux::{Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, WirePlan};
 pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
 
 /// This crate's version (inherited from the workspace).

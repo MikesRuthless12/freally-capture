@@ -235,6 +235,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                 container: wire,
                 encoder_id,
                 rate_control: settings.rate_control,
+                preset: settings.preset,
                 keyframe_sec: settings.keyframe_sec,
                 audio_bitrate_kbps: settings.audio_bitrate_kbps,
                 split_minutes: split,

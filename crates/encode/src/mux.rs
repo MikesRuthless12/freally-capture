@@ -87,6 +87,17 @@ pub struct RateControl {
     pub cq: u8,
 }
 
+/// The quality/speed trade every encoder family maps onto its own knob
+/// (x264 `-preset`, NVENC `p1–p7`, AMF `-quality`, …).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EncPreset {
+    Quality,
+    #[default]
+    Balanced,
+    Performance,
+}
+
 /// Global (pre-input) ffmpeg args an encoder needs — VAAPI brings up its
 /// hardware device here.
 pub fn global_args(encoder_id: &str) -> Vec<String> {
@@ -102,9 +113,14 @@ pub fn global_args(encoder_id: &str) -> Vec<String> {
     }
 }
 
-/// The output-side video args for an encoder + rate control + keyframe
-/// interval. Pure — every family's shape is unit-tested.
-pub fn video_args(encoder_id: &str, rc: &RateControl, keyint_frames: u32) -> Vec<String> {
+/// The output-side video args for an encoder + rate control + quality/perf
+/// preset + keyframe interval. Pure — every family's shape is unit-tested.
+pub fn video_args(
+    encoder_id: &str,
+    rc: &RateControl,
+    preset: EncPreset,
+    keyint_frames: u32,
+) -> Vec<String> {
     let mut args: Vec<String> = vec!["-c:v".into(), encoder_id.into()];
     let bitrate = format!("{}k", rc.bitrate_kbps.max(100));
     let maxrate = format!("{}k", rc.bitrate_kbps.max(100) * 2);
@@ -117,7 +133,12 @@ pub fn video_args(encoder_id: &str, rc: &RateControl, keyint_frames: u32) -> Vec
     );
     match encoder_id {
         "libx264" | "libx265" => {
-            args.extend(["-preset".into(), "veryfast".into()]);
+            let speed = match preset {
+                EncPreset::Quality => "slow",
+                EncPreset::Balanced => "veryfast",
+                EncPreset::Performance => "ultrafast",
+            };
+            args.extend(["-preset".into(), speed.into()]);
             match rc.mode {
                 RcMode::Cbr => args.extend([
                     "-b:v".into(),
@@ -141,11 +162,16 @@ pub fn video_args(encoder_id: &str, rc: &RateControl, keyint_frames: u32) -> Vec
             }
         }
         "libaom-av1" => {
+            let cpu_used = match preset {
+                EncPreset::Quality => "4",
+                EncPreset::Balanced => "8",
+                EncPreset::Performance => "10",
+            };
             args.extend([
                 "-usage".into(),
                 "realtime".into(),
                 "-cpu-used".into(),
-                "8".into(),
+                cpu_used.into(),
             ]);
             match rc.mode {
                 RcMode::Cqp => args.extend(["-crf".into(), cq, "-b:v".into(), "0".into()]),
@@ -153,14 +179,24 @@ pub fn video_args(encoder_id: &str, rc: &RateControl, keyint_frames: u32) -> Vec
             }
         }
         "libsvtav1" => {
-            args.extend(["-preset".into(), "10".into()]);
+            let speed = match preset {
+                EncPreset::Quality => "6",
+                EncPreset::Balanced => "10",
+                EncPreset::Performance => "12",
+            };
+            args.extend(["-preset".into(), speed.into()]);
             match rc.mode {
                 RcMode::Cqp => args.extend(["-crf".into(), cq]),
                 _ => args.extend(["-b:v".into(), bitrate]),
             }
         }
         id if id.ends_with("_nvenc") => {
-            args.extend(["-preset".into(), "p5".into()]);
+            let speed = match preset {
+                EncPreset::Quality => "p7",
+                EncPreset::Balanced => "p5",
+                EncPreset::Performance => "p2",
+            };
+            args.extend(["-preset".into(), speed.into()]);
             match rc.mode {
                 RcMode::Cbr => args.extend(["-rc".into(), "cbr".into(), "-b:v".into(), bitrate]),
                 RcMode::Vbr => args.extend([
@@ -174,32 +210,48 @@ pub fn video_args(encoder_id: &str, rc: &RateControl, keyint_frames: u32) -> Vec
                 RcMode::Cqp => args.extend(["-rc".into(), "constqp".into(), "-qp".into(), cq]),
             }
         }
-        id if id.ends_with("_qsv") => match rc.mode {
-            RcMode::Cbr => {
-                args.extend(["-b:v".into(), bitrate.clone(), "-maxrate".into(), bitrate])
+        id if id.ends_with("_qsv") => {
+            let speed = match preset {
+                EncPreset::Quality => "veryslow",
+                EncPreset::Balanced => "medium",
+                EncPreset::Performance => "veryfast",
+            };
+            args.extend(["-preset".into(), speed.into()]);
+            match rc.mode {
+                RcMode::Cbr => {
+                    args.extend(["-b:v".into(), bitrate.clone(), "-maxrate".into(), bitrate])
+                }
+                RcMode::Vbr => args.extend(["-b:v".into(), bitrate, "-maxrate".into(), maxrate]),
+                RcMode::Cqp => args.extend(["-global_quality".into(), cq]),
             }
-            RcMode::Vbr => args.extend(["-b:v".into(), bitrate, "-maxrate".into(), maxrate]),
-            RcMode::Cqp => args.extend(["-global_quality".into(), cq]),
-        },
-        id if id.ends_with("_amf") => match rc.mode {
-            RcMode::Cbr => args.extend(["-rc".into(), "cbr".into(), "-b:v".into(), bitrate]),
-            RcMode::Vbr => args.extend([
-                "-rc".into(),
-                "vbr_peak".into(),
-                "-b:v".into(),
-                bitrate,
-                "-maxrate".into(),
-                maxrate,
-            ]),
-            RcMode::Cqp => args.extend([
-                "-rc".into(),
-                "cqp".into(),
-                "-qp_i".into(),
-                cq.clone(),
-                "-qp_p".into(),
-                cq,
-            ]),
-        },
+        }
+        id if id.ends_with("_amf") => {
+            let quality = match preset {
+                EncPreset::Quality => "quality",
+                EncPreset::Balanced => "balanced",
+                EncPreset::Performance => "speed",
+            };
+            args.extend(["-quality".into(), quality.into()]);
+            match rc.mode {
+                RcMode::Cbr => args.extend(["-rc".into(), "cbr".into(), "-b:v".into(), bitrate]),
+                RcMode::Vbr => args.extend([
+                    "-rc".into(),
+                    "vbr_peak".into(),
+                    "-b:v".into(),
+                    bitrate,
+                    "-maxrate".into(),
+                    maxrate,
+                ]),
+                RcMode::Cqp => args.extend([
+                    "-rc".into(),
+                    "cqp".into(),
+                    "-qp_i".into(),
+                    cq.clone(),
+                    "-qp_p".into(),
+                    cq,
+                ]),
+            }
+        }
         id if id.ends_with("_videotoolbox") => match rc.mode {
             RcMode::Cqp => {
                 // VT quality runs 1–100 (higher = better); map the 0–51
@@ -382,6 +434,7 @@ pub struct WirePlan {
     pub container: Container,
     pub encoder_id: String,
     pub rate_control: RateControl,
+    pub preset: EncPreset,
     pub keyframe_sec: f32,
     pub audio_bitrate_kbps: u32,
     /// Split into playable segments every N minutes (`None` = one file).
@@ -465,7 +518,12 @@ impl FfmpegSink {
         for index in 1..=listeners.len() {
             cmd.args(["-map", &format!("{index}:a")]);
         }
-        cmd.args(video_args(&plan.encoder_id, &plan.rate_control, keyint));
+        cmd.args(video_args(
+            &plan.encoder_id,
+            &plan.rate_control,
+            plan.preset,
+            keyint,
+        ));
         if !spec.tracks.is_empty() {
             cmd.args(audio_args(plan.container, plan.audio_bitrate_kbps));
         }
@@ -782,33 +840,51 @@ mod tests {
 
     #[test]
     fn x264_pins_yuv420p_and_maps_rate_control() {
-        let cbr = video_args("libx264", &rc(RcMode::Cbr), 120);
+        let cbr = video_args("libx264", &rc(RcMode::Cbr), EncPreset::Balanced, 120);
         assert!(cbr.windows(2).any(|w| w == ["-b:v", "8000k"]));
         assert!(cbr.windows(2).any(|w| w == ["-minrate", "8000k"]));
         assert!(cbr.windows(2).any(|w| w == ["-g", "120"]));
         assert!(cbr.windows(2).any(|w| w == ["-pix_fmt", "yuv420p"]));
 
-        let cqp = video_args("libx264", &rc(RcMode::Cqp), 120);
+        let cqp = video_args("libx264", &rc(RcMode::Cqp), EncPreset::Balanced, 120);
         assert!(cqp.windows(2).any(|w| w == ["-crf", "23"]));
         assert!(!cqp.iter().any(|arg| arg == "-b:v"));
     }
 
     #[test]
     fn nvenc_uses_its_rc_modes_and_no_forced_pix_fmt() {
-        let cbr = video_args("h264_nvenc", &rc(RcMode::Cbr), 60);
+        let cbr = video_args("h264_nvenc", &rc(RcMode::Cbr), EncPreset::Balanced, 60);
         assert!(cbr.windows(2).any(|w| w == ["-rc", "cbr"]));
         assert!(!cbr.iter().any(|arg| arg == "-pix_fmt"), "hw negotiates");
 
-        let cqp = video_args("hevc_nvenc", &rc(RcMode::Cqp), 60);
+        let cqp = video_args("hevc_nvenc", &rc(RcMode::Cqp), EncPreset::Balanced, 60);
         assert!(cqp.windows(2).any(|w| w == ["-rc", "constqp"]));
         assert!(cqp.windows(2).any(|w| w == ["-qp", "23"]));
+    }
+
+    #[test]
+    fn presets_change_every_family_knob() {
+        let quality = video_args("libx264", &rc(RcMode::Cqp), EncPreset::Quality, 60);
+        assert!(quality.windows(2).any(|w| w == ["-preset", "slow"]));
+        let perf = video_args("libx264", &rc(RcMode::Cqp), EncPreset::Performance, 60);
+        assert!(perf.windows(2).any(|w| w == ["-preset", "ultrafast"]));
+
+        let nv_quality = video_args("h264_nvenc", &rc(RcMode::Cbr), EncPreset::Quality, 60);
+        assert!(nv_quality.windows(2).any(|w| w == ["-preset", "p7"]));
+        let nv_perf = video_args("h264_nvenc", &rc(RcMode::Cbr), EncPreset::Performance, 60);
+        assert!(nv_perf.windows(2).any(|w| w == ["-preset", "p2"]));
+
+        let amf = video_args("h264_amf", &rc(RcMode::Cbr), EncPreset::Quality, 60);
+        assert!(amf.windows(2).any(|w| w == ["-quality", "quality"]));
+        let qsv = video_args("h264_qsv", &rc(RcMode::Cbr), EncPreset::Performance, 60);
+        assert!(qsv.windows(2).any(|w| w == ["-preset", "veryfast"]));
     }
 
     #[test]
     fn vaapi_brings_up_its_device_and_upload_chain() {
         let global = global_args("h264_vaapi");
         assert!(global.iter().any(|arg| arg.starts_with("vaapi=va:")));
-        let video = video_args("h264_vaapi", &rc(RcMode::Cbr), 60);
+        let video = video_args("h264_vaapi", &rc(RcMode::Cbr), EncPreset::Balanced, 60);
         assert!(video
             .windows(2)
             .any(|w| w == ["-vf", "format=nv12,hwupload"]));
@@ -817,7 +893,12 @@ mod tests {
 
     #[test]
     fn videotoolbox_maps_cq_onto_its_quality_scale() {
-        let cqp = video_args("h264_videotoolbox", &rc(RcMode::Cqp), 60);
+        let cqp = video_args(
+            "h264_videotoolbox",
+            &rc(RcMode::Cqp),
+            EncPreset::Balanced,
+            60,
+        );
         assert!(cqp.windows(2).any(|w| w == ["-q:v", "54"])); // 100 - 2×23
     }
 

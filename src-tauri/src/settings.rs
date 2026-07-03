@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-use fcap_encode::mux::{Container, RateControl, RcMode};
+use fcap_encode::mux::{Container, EncPreset, RateControl, RcMode};
 
 /// User-facing settings. Every field defaults (`serde(default)`) so missing
 /// keys never brick the app, and unknown keys from newer builds are ignored.
@@ -55,6 +55,8 @@ pub struct RecordingSettings {
     /// ffmpeg encoder id, or "auto" = best detected H.264 encoder.
     pub encoder_id: String,
     pub rate_control: RateControl,
+    /// The quality/speed trade, mapped onto each encoder family's knob.
+    pub preset: EncPreset,
     /// Keyframe interval in seconds.
     pub keyframe_sec: f32,
     /// Recording frame rate (CFR).
@@ -83,6 +85,7 @@ impl Default for RecordingSettings {
                 bitrate_kbps: 8_000,
                 cq: 23,
             },
+            preset: EncPreset::Balanced,
             keyframe_sec: 2.0,
             fps: 60,
             audio_bitrate_kbps: 192,

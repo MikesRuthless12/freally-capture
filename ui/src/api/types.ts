@@ -42,12 +42,16 @@ export type RateControl = {
   cq: number;
 };
 
+/** The quality/speed trade, mapped onto each encoder family's knob. */
+export type EncPreset = "quality" | "balanced" | "performance";
+
 /** Recording configuration (mirrors `RecordingSettings` in settings.rs). */
 export type RecordingSettings = {
   container: Container;
   /** ffmpeg encoder id, or "auto" = best detected H.264 encoder. */
   encoderId: string;
   rateControl: RateControl;
+  preset: EncPreset;
   keyframeSec: number;
   fps: number;
   audioBitrateKbps: number;
