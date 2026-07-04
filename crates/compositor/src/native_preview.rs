@@ -37,7 +37,29 @@ impl NativePreview {
             .instance
             .create_surface(window)
             .map_err(|err| CompositorError::Device(format!("preview surface: {err}")))?;
+        Self::finish(gpu, surface, width, height)
+    }
 
+    /// Configure a surface the caller already created, and build the blit
+    /// pipeline. The DirectComposition overlay (`fcap-preview`) needs wgpu's
+    /// *unsafe* `CompositionVisual` surface target — which can't live in this
+    /// `#![forbid(unsafe_code)]` crate — so it hands the finished `Surface`
+    /// here.
+    pub fn from_surface(
+        gpu: &Gpu,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, CompositorError> {
+        Self::finish(gpu, surface, width, height)
+    }
+
+    fn finish(
+        gpu: &Gpu,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, CompositorError> {
         let caps = surface.get_capabilities(&gpu.adapter);
         if caps.formats.is_empty() {
             return Err(CompositorError::Device(
