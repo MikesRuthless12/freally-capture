@@ -41,7 +41,11 @@ jobs:
         uses: ./.github/actions/linux-deps
       - name: Install Linux screenshot tools
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick
+        # openbox: a minimal window manager — without one under Xvfb the GTK/
+        # WebKitGTK window never receives the map/expose events it needs to
+        # paint, so the root capture comes back pure black. x11-utils gives us
+        # xwininfo for the diagnostic dump below.
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -90,13 +94,24 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           LIBGL_ALWAYS_SOFTWARE: "1"
+          # Force the X11 GDK backend so GTK never tries Wayland on the runner.
+          GDK_BACKEND: "x11"
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
           sleep 3
+          # A window manager maps + exposes the window; without one WebKitGTK
+          # never paints and the root capture is pure black (the failure the
+          # screenshot_check gate exposed — the env flags alone weren't enough).
+          openbox &
+          sleep 2
           ./target/release/freally-capture &
           APP_PID=$!
           sleep 25
+          # Diagnostic: what actually mapped on the display (helps if still blank).
+          echo "--- xwininfo -root -tree (top 40 lines) ---"
+          xwininfo -root -tree 2>&1 | head -40 || true
+          echo "-------------------------------------------"
           import -window root screenshot-linux.png || echo "import failed"
           kill $APP_PID 2>/dev/null || true
           ls -la screenshot-linux.png || true
