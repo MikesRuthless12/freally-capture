@@ -70,6 +70,7 @@ export function PreviewPanel({
   // native child window paints the program region and the JPEG canvas is
   // suppressed. Off Windows this stays false → the JPEG path renders.
   const [nativeActive, setNativeActive] = useState(false);
+  const [hoverCursor, setHoverCursor] = useState("default");
   const lastRegion = useRef("");
 
   const programW = collection?.canvasWidth ?? 1920;
@@ -221,6 +222,26 @@ export function PreviewPanel({
     return { source, content };
   }, [selected, sourceSize]);
 
+  /** The cursor for a pointer position: resize on handles, move on the body. */
+  const cursorFor = useCallback(
+    (p: Vec2): string => {
+      if (!selected || !selectedGeometry || selected.locked) return "default";
+      const { content } = selectedGeometry;
+      const t = selected.transform;
+      const corner = itemCorners(t, content);
+      const mids = edgeMidpoints(corner);
+      const rotate = rotateHandle(t, content, displayScale);
+      const near = (a: Vec2) => distance(a, p) * displayScale <= HANDLE_RADIUS;
+      if (near(rotate)) return "grab";
+      const c = corner.findIndex(near);
+      if (c >= 0) return c === 0 || c === 3 ? "nwse-resize" : "nesw-resize";
+      const e = mids.findIndex(near);
+      if (e >= 0) return e <= 1 ? "ew-resize" : "ns-resize";
+      return hitTest(t, content, p) ? "move" : "default";
+    },
+    [selected, selectedGeometry, displayScale],
+  );
+
   // -- pointer interactions ---------------------------------------------------
 
   const beginDrag = (event: React.PointerEvent) => {
@@ -311,9 +332,12 @@ export function PreviewPanel({
   };
 
   const updateDrag = (event: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
     const p = toProgram(event);
+    const drag = dragRef.current;
+    if (!drag) {
+      setHoverCursor(cursorFor(p));
+      return;
+    }
     const next = applyDrag(drag, p, event.shiftKey);
     if (next) onItemTransform(drag.itemId, next);
   };
@@ -344,20 +368,22 @@ export function PreviewPanel({
       className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/60"
     >
       <div ref={containerRef} className="relative min-h-0 flex-1">
-        {running && !nativeActive && (
+        {running && (
           <>
-            <canvas
-              ref={canvasRef}
-              role="img"
-              aria-label="Program output"
-              className="absolute"
-              style={{
-                left: box.left,
-                top: box.top,
-                width: box.width,
-                height: box.height,
-              }}
-            />
+            {!nativeActive && (
+              <canvas
+                ref={canvasRef}
+                role="img"
+                aria-label="Program output"
+                className="absolute"
+                style={{
+                  left: box.left,
+                  top: box.top,
+                  width: box.width,
+                  height: box.height,
+                }}
+              />
+            )}
             <svg
               role="application"
               aria-label="Canvas editor"
@@ -367,7 +393,7 @@ export function PreviewPanel({
                 top: box.top,
                 width: box.width,
                 height: box.height,
-                cursor: overlay ? "move" : "default",
+                cursor: hoverCursor,
               }}
               onPointerDown={beginDrag}
               onPointerMove={updateDrag}
