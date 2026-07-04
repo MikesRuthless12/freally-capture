@@ -228,6 +228,7 @@ pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
             eprintln!("native preview: no main window — using the JPEG preview");
             return;
         };
+        println!("native preview: linux try_create — reading the X11 window handle");
         // The Tauri window's X11 id (Xlib). On Wayland the handle is Wayland-
         // shaped, so keep the JPEG path there (an X11 child window doesn't apply).
         let parent = match window.window_handle() {
@@ -243,6 +244,7 @@ pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
                 return;
             }
         };
+        println!("native preview: X11 parent {parent:#x} — creating the child window");
         match CompositionOverlay::create(parent, Bounds::default()) {
             Ok(overlay) => {
                 let handle = overlay.handle();

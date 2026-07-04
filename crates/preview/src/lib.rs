@@ -87,9 +87,9 @@ pub struct CompositionHandle {
 // window + its own Xlib display on Linux — which the app guarantees outlives
 // every surface built from it. The render thread only reads them to construct
 // the surface (the documented wgpu `CompositionVisual` / `CoreAnimationLayer` /
-// `RawHandle` pattern); the overlay's own methods stay on the UI thread. The
-// Linux Xlib connection is `XInitThreads`-locked, so wgpu may present on it from
-// the render thread while the UI thread repositions.
+// `RawHandle` pattern); the overlay's own methods stay on the UI thread. On
+// Linux wgpu presents on the overlay's own Xlib connection (separate from GTK's)
+// from the render thread.
 unsafe impl Send for CompositionHandle {}
 unsafe impl Sync for CompositionHandle {}
 
@@ -165,8 +165,8 @@ pub struct CompositionOverlay {
 
 // SAFETY: the overlay owns native compositor objects created on the UI thread
 // (DirectComposition COM on Windows; a retained CAMetalLayer + a non-owning
-// NSWindow pointer on macOS; an X11 child window on its own XInitThreads-locked
-// Xlib connection on Linux); the app routes creation + geometry through the main
+// NSWindow pointer on macOS; an X11 child window on its own Xlib connection,
+// separate from GTK's, on Linux); the app routes creation + geometry through the main
 // thread and only hands the render thread a `CompositionHandle`. Holding it in
 // shared state is sound under that discipline.
 unsafe impl Send for CompositionOverlay {}

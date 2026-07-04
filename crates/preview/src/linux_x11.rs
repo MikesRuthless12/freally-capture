@@ -6,8 +6,8 @@
 //! surface like WebView2 / WKWebView), so a plain X11 **child window** raised
 //! over it composites on top — the child-window approach that renders black on
 //! Windows works here. We create the child on our **own** Xlib display
-//! connection (`XInitThreads` first, so wgpu can present from the render thread
-//! while GTK owns the main thread on its separate connection), parented to the
+//! connection (separate from GTK's, so wgpu presents on it from the render
+//! thread while GTK owns the main thread on its own connection), parented to the
 //! Tauri window's X11 id (window ids are server-global, so cross-connection
 //! parenting is fine), and hand wgpu the child + our display via
 //! `SurfaceTargetUnsafe::RawHandle` (`RawWindowHandle::Xlib`).
@@ -48,10 +48,14 @@ impl LinuxX11Overlay {
         let xlib = Xlib::open().map_err(|err| PreviewError::Os(format!("libX11: {err}")))?;
         // SAFETY: standard Xlib bring-up on our own connection; every returned
         // handle is null-checked before use.
+        //
+        // NOTE: `XInitThreads` is intentionally NOT called — invoking it
+        // mid-run, after GTK has already opened its own X connection, deadlocks
+        // (it must be the very first Xlib call). Our connection is separate;
+        // the smoke changes bounds once before presenting, so nothing overlaps a
+        // present. Production region changes must serialize with the render
+        // thread's present (a follow-up) rather than rely on Xlib locking.
         unsafe {
-            // Thread-safe locking for this connection (the render thread presents
-            // while the UI thread repositions).
-            (xlib.XInitThreads)();
             let display = (xlib.XOpenDisplay)(std::ptr::null());
             if display.is_null() {
                 return Err(PreviewError::Os("XOpenDisplay failed (no DISPLAY?)".into()));
@@ -115,8 +119,9 @@ impl LinuxX11Overlay {
     /// Reposition the child over the preview region (UI thread). No Y-flip — X11
     /// and the preview `Bounds` are both top-left.
     pub fn set_bounds(&self, bounds: Bounds) {
-        // SAFETY: display + child are live; XInitThreads made this connection
-        // safe to touch alongside the render thread's present.
+        // SAFETY: display + child are live. This connection is not
+        // XInitThreads-locked (see `create`), so callers must not run this
+        // concurrently with the render thread's present — the smoke doesn't.
         unsafe {
             (self.xlib.XMoveResizeWindow)(
                 self.display,
