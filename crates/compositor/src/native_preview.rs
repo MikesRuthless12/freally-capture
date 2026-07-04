@@ -127,6 +127,9 @@ impl NativePreview {
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 return Err(CompositorError::Device("preview surface OOM".into()))
             }
+            Err(wgpu::SurfaceError::Other) => {
+                return Err(CompositorError::Device("preview surface error".into()))
+            }
         };
         let view = frame
             .texture
@@ -157,6 +160,7 @@ impl NativePreview {
                 label: Some("fcap-preview-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -213,16 +217,17 @@ fn build_pipeline(
     });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("fcap-preview-pipeline"),
+        cache: None,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
-            entry_point: "vs",
+            entry_point: Some("vs"),
             buffers: &[],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
-            entry_point: "fs",
+            entry_point: Some("fs"),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: None,

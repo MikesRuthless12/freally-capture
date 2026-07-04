@@ -65,7 +65,7 @@ pub struct GpuInfo {
 /// GPU-less machine (CI, headless VM) — the catalog then offers only the
 /// CPU paths, honestly.
 pub fn detect_gpus() -> Vec<GpuInfo> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY | wgpu::Backends::GL,
         ..Default::default()
     });

@@ -297,10 +297,11 @@ impl Compositor {
                 let (blend, _) = blend_config(mode);
                 let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("fcap item pipeline"),
+                    cache: None,
                     layout: Some(&pipeline_layout),
                     vertex: wgpu::VertexState {
                         module: &shader,
-                        entry_point: "vs_main",
+                        entry_point: Some("vs_main"),
                         compilation_options: Default::default(),
                         buffers: &[],
                     },
@@ -313,7 +314,7 @@ impl Compositor {
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_main",
+                        entry_point: Some("fs_main"),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: PROGRAM_FORMAT,
@@ -596,14 +597,14 @@ impl Compositor {
 
         let slot = self.sources.get(&source).expect("slot was just ensured");
         self.gpu.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &slot.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &frame.data[..needed],
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(frame.stride),
                 rows_per_image: Some(frame.height),
@@ -811,6 +812,7 @@ impl Compositor {
                 label: Some("fcap filter pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -840,6 +842,7 @@ impl Compositor {
                 label: Some("fcap program pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.program_view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -957,15 +960,15 @@ impl Compositor {
                 label: Some("fcap readback"),
             });
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.program,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded as u32),
                     rows_per_image: Some(height),
@@ -984,7 +987,7 @@ impl Compositor {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        self.gpu.device.poll(wgpu::Maintain::Wait);
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv()
             .map_err(|_| CompositorError::Readback("map callback dropped".into()))?
             .map_err(|err| CompositorError::Readback(err.to_string()))?;

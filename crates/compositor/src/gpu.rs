@@ -57,14 +57,14 @@ impl Gpu {
         // Broadly-supported baseline limits, but with the adapter's real
         // maximum texture size so ultrawide/5K captures upload intact.
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("fcap-compositor"),
-                required_features: wgpu::Features::empty(),
-                required_limits: limits,
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("fcap-compositor"),
+            required_features: wgpu::Features::empty(),
+            required_limits: limits,
+            memory_hints: wgpu::MemoryHints::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            trace: wgpu::Trace::Off,
+        }))
         .map_err(|err| CompositorError::Device(err.to_string()))?;
 
         Ok(Self {
@@ -97,23 +97,25 @@ impl Gpu {
         // composition swapchain share one DirectX device.
         #[cfg(windows)]
         {
-            let dx12 = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            let dx12 = wgpu::Instance::new(&wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::DX12,
                 ..Default::default()
             });
-            if let Some(adapter) = request(&dx12, false) {
+            if let Ok(adapter) = request(&dx12, false) {
                 return (dx12, Some(adapter));
             }
             tracing::warn!("no DX12 adapter — native preview will use the JPEG path");
         }
 
         // Broad set (all platforms; the Windows fallback path too).
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             // PRIMARY = Vulkan / Metal / DX12; GL catches older Linux setups.
             backends: wgpu::Backends::PRIMARY | wgpu::Backends::GL,
             ..Default::default()
         });
-        let adapter = request(&instance, false).or_else(|| request(&instance, true));
+        let adapter = request(&instance, false)
+            .or_else(|_| request(&instance, true))
+            .ok();
         (instance, adapter)
     }
 }

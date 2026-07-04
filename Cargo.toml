@@ -51,12 +51,14 @@ parking_lot = "0.12"
 tauri = { version = "2", features = [] }
 tauri-build = "2"
 
-# GPU compositor
-wgpu = "0.20"
+# GPU compositor — wgpu 27 for the native DirectComposition surface
+# (`SurfaceTargetUnsafe::CompositionVisual`) that the "OBS feel" preview needs;
+# migrated up from 0.20 (NP.1). raw-window-handle 0.6 still matches.
+wgpu = "27"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.28"
 pollster = "0.3"        # block_on for wgpu's async adapter/device/readback
-raw-window-handle = "0.6"   # native-preview surface target (matches wgpu 0.20)
+raw-window-handle = "0.6"   # native-preview surface target (matches wgpu 27)
 
 # Capture (per-OS)
 windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture
