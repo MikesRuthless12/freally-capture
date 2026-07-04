@@ -181,6 +181,46 @@ fn run(
     }
 }
 
+/// Open a camera, start streaming, and prove it streams by pulling one frame —
+/// the first frame is where an unsupported format errors (e.g. MSMF
+/// `0xC00D36D5` on a resolution the camera advertises but can't deliver).
+fn try_stream(index: &CameraIndex, requested: RequestedFormatType) -> Result<Camera, CaptureError> {
+    let mut camera = Camera::new(index.clone(), RequestedFormat::new::<RgbAFormat>(requested))
+        .map_err(backend_error)?;
+    camera.open_stream().map_err(backend_error)?;
+    camera.frame().map_err(backend_error)?;
+    Ok(camera)
+}
+
+/// Bring a camera up on the requested format, falling back through
+/// progressively more universally-supported ones — some cameras advertise
+/// high-res modes Media Foundation can't actually stream.
+fn open_streaming_camera(
+    index: CameraIndex,
+    requested: RequestedFormatType,
+) -> Result<Camera, CaptureError> {
+    let candidates = [
+        requested,
+        RequestedFormatType::Closest(CameraFormat::new(
+            Resolution::new(1280, 720),
+            FrameFormat::MJPEG,
+            30,
+        )),
+        RequestedFormatType::None,
+    ];
+    let mut last = None;
+    for candidate in candidates {
+        match try_stream(&index, candidate) {
+            Ok(camera) => return Ok(camera),
+            Err(err) => {
+                tracing::warn!("webcam: a requested format did not stream: {err}");
+                last = Some(err);
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| CaptureError::Backend("no camera format streamed".into())))
+}
+
 fn run_inner(
     index: CameraIndex,
     requested_type: RequestedFormatType,
@@ -188,9 +228,7 @@ fn run_inner(
     stop: &AtomicBool,
 ) -> Result<(), CaptureError> {
     // The camera lives entirely on this thread (nokhwa handles aren't Send).
-    let mut camera = Camera::new(index, RequestedFormat::new::<RgbAFormat>(requested_type))
-        .map_err(backend_error)?;
-    camera.open_stream().map_err(backend_error)?;
+    let mut camera = open_streaming_camera(index, requested_type)?;
 
     // Cameras occasionally emit a corrupt MJPEG frame — skip those, but give
     // up honestly if nothing decodes for a while.
