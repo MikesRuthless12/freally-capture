@@ -241,6 +241,12 @@ pub fn native_preview_set_selection(
     state: tauri::State<'_, crate::native_preview::NativePreviewState>,
     item: Option<fcap_scene::ItemId>,
 ) {
+    // Test-only: the smoke run forces a selection so the screenshot shows the
+    // selection overlay (box + handles + rotate). Ignore the UI's sync, which
+    // reports "nothing selected" on load and would clear it. No effect normally.
+    if std::env::var_os("FCAP_SMOKE").is_some() {
+        return;
+    }
     state.set_selection(item);
 }
 
