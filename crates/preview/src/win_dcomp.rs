@@ -30,38 +30,6 @@ use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice};
 
 use crate::{Bounds, PreviewError};
 
-/// A Send handle carrying the composition visual's raw COM pointer, for the
-/// render thread to build the wgpu surface from.
-#[derive(Debug, Clone, Copy)]
-pub struct CompositionHandle {
-    visual: *mut core::ffi::c_void,
-}
-
-// SAFETY: the pointer is a COM interface pointer to a visual owned by the
-// `WinDCompOverlay`, which the app guarantees outlives every surface built from
-// it. The render thread only reads it to construct the surface (the documented
-// wgpu `CompositionVisual` pattern); the visual's own methods stay on the UI
-// thread.
-unsafe impl Send for CompositionHandle {}
-unsafe impl Sync for CompositionHandle {}
-
-impl CompositionHandle {
-    /// Build the wgpu preview surface on this composition visual, using the
-    /// compositor's own `wgpu::Instance` (so it validates against the same
-    /// adapter). This is the one place the unsafe `CompositionVisual` target
-    /// lives — `fcap-compositor` and the app both `#![forbid(unsafe_code)]`.
-    pub fn create_surface(
-        &self,
-        instance: &wgpu::Instance,
-    ) -> Result<wgpu::Surface<'static>, PreviewError> {
-        let target = wgpu::SurfaceTargetUnsafe::CompositionVisual(self.visual);
-        // SAFETY: `self.visual` is a live `IDCompositionVisual` owned by the
-        // overlay, which outlives the surface; wgpu increments its refcount.
-        unsafe { instance.create_surface_unsafe(target) }
-            .map_err(|err| PreviewError::Os(format!("composition surface: {err}")))
-    }
-}
-
 /// The DirectComposition overlay: a topmost target on the Tauri window and the
 /// visual that shows the GPU preview above WebView2. Lives on the UI thread.
 pub struct WinDCompOverlay {
@@ -116,11 +84,10 @@ impl WinDCompOverlay {
         }
     }
 
-    /// A Send handle for the render thread to build the wgpu surface.
-    pub fn handle(&self) -> CompositionHandle {
-        CompositionHandle {
-            visual: self.visual.as_raw(),
-        }
+    /// The composition visual's raw COM pointer, for wgpu's
+    /// `SurfaceTargetUnsafe::CompositionVisual`.
+    pub fn visual_ptr(&self) -> *mut core::ffi::c_void {
+        self.visual.as_raw()
     }
 
     /// Reposition the visual over the preview region (UI thread). The surface

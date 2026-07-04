@@ -467,6 +467,24 @@ impl Compositor {
         crate::NativePreview::new(&self.gpu, window, width, height)
     }
 
+    /// The wgpu instance this compositor's device came from — the
+    /// DirectComposition overlay builds its surface against the same adapter.
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.gpu.instance
+    }
+
+    /// Create a [`NativePreview`] from a surface the caller already built (the
+    /// DirectComposition overlay path in `fcap-preview`), sharing this
+    /// compositor's device.
+    pub fn native_preview_from_surface(
+        &self,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<crate::NativePreview, CompositorError> {
+        crate::NativePreview::from_surface(&self.gpu, surface, width, height)
+    }
+
     /// Blit the current program frame onto the preview surface and present —
     /// no readback. `Ok(false)` if the frame was skipped (surface not ready).
     pub fn present_native(

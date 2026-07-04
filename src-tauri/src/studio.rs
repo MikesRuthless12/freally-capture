@@ -699,16 +699,23 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
         if !native_disabled {
             let native = app.state::<crate::native_preview::NativePreviewState>();
-            if let Some(handle) = native.surface_handle() {
+            if let Some(handle) = native.composition_handle() {
                 let (gen, bounds) = native.region();
                 let sized = bounds.width > 0 && bounds.height > 0;
                 if sized && native.is_visible() {
                     match &mut native_surface {
-                        None => match compositor.create_native_preview(
-                            handle,
-                            bounds.width,
-                            bounds.height,
-                        ) {
+                        None => match handle
+                            .create_surface(compositor.instance())
+                            .map_err(|err| err.to_string())
+                            .and_then(|surface| {
+                                compositor
+                                    .native_preview_from_surface(
+                                        surface,
+                                        bounds.width,
+                                        bounds.height,
+                                    )
+                                    .map_err(|err| err.to_string())
+                            }) {
                             Ok(surface) => {
                                 println!(
                                     "native preview: surface created {}x{} at ({},{})",

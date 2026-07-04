@@ -227,7 +227,7 @@ pub fn native_preview_set_region(
 pub fn native_preview_active(
     state: tauri::State<'_, crate::native_preview::NativePreviewState>,
 ) -> bool {
-    state.surface_handle().is_some()
+    state.composition_handle().is_some()
 }
 
 /// macOS: deep-link the user to the Privacy pane they need after a denial.

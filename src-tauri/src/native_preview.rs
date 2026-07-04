@@ -1,27 +1,28 @@
 //! The app side of the native preview surface (the "OBS feel" path).
 //!
-//! The child window is created on the **main thread** in `setup` (parented to
-//! the Tauri window); its Send [`SurfaceHandle`] is stashed here so the studio
-//! render thread can create + present the wgpu surface. The UI reports the
-//! preview region's rectangle (physical px) via `native_preview_set_region`,
-//! which repositions the child window and signals the render thread to
-//! reconfigure the surface. Off Windows (or if creation fails) the window is
+//! A **DirectComposition overlay** is created on the **main thread** in `setup`
+//! (a topmost composition target on the Tauri window, so its visual composites
+//! *above* WebView2). Its Send [`CompositionHandle`] is stashed here so the
+//! studio render thread can build + present the wgpu surface. The UI reports
+//! the preview region's rectangle (physical px) via `native_preview_set_region`,
+//! which repositions the overlay's visual and signals the render thread to
+//! reconfigure the surface. Off Windows (or if creation fails) the overlay is
 //! absent and the app keeps the JPEG `preview://` path — the render thread
-//! checks [`NativePreviewState::surface_handle`] and simply does neither.
+//! checks [`NativePreviewState::composition_handle`] and simply does neither.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use fcap_preview::{Bounds, PreviewWindow, SurfaceHandle};
+use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
 use tauri::{AppHandle, Manager, Runtime};
 
 /// Tauri-managed native-preview state, shared main-thread ↔ render-thread.
 pub struct NativePreviewState {
-    /// The child window (Windows only, when creation succeeded). Held here so
-    /// it outlives the surface; `PreviewWindow` is Send by its own contract.
-    window: Mutex<Option<PreviewWindow>>,
-    /// The surface target for the render thread (present).
-    handle: Mutex<Option<SurfaceHandle>>,
+    /// The DirectComposition overlay (Windows only, when creation succeeded).
+    /// Held here so it outlives the surface; owns the visual on the UI thread.
+    overlay: Mutex<Option<CompositionOverlay>>,
+    /// The composition handle for the render thread (build + present).
+    handle: Mutex<Option<CompositionHandle>>,
     /// The preview region in physical px (parent-client relative).
     rect: Mutex<Bounds>,
     /// Bumped on every region change so the render thread reconfigures.
@@ -33,7 +34,7 @@ pub struct NativePreviewState {
 impl NativePreviewState {
     pub fn new() -> Self {
         Self {
-            window: Mutex::new(None),
+            overlay: Mutex::new(None),
             handle: Mutex::new(None),
             rect: Mutex::new(Bounds::default()),
             rect_gen: AtomicU64::new(0),
@@ -41,31 +42,31 @@ impl NativePreviewState {
         }
     }
 
-    fn lock_window(&self) -> std::sync::MutexGuard<'_, Option<PreviewWindow>> {
-        self.window
+    fn lock_overlay(&self) -> std::sync::MutexGuard<'_, Option<CompositionOverlay>> {
+        self.overlay
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Install the child window + its surface handle (main thread, in setup).
-    pub fn install(&self, window: PreviewWindow, handle: SurfaceHandle) {
+    /// Install the overlay + its composition handle (main thread, in setup).
+    pub fn install(&self, overlay: CompositionOverlay, handle: CompositionHandle) {
         *self
             .handle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
-        *self.lock_window() = Some(window);
+        *self.lock_overlay() = Some(overlay);
     }
 
-    /// The surface handle, if the native path is available (Windows + created).
-    pub fn surface_handle(&self) -> Option<SurfaceHandle> {
+    /// The composition handle, if the native path is available (Windows + created).
+    pub fn composition_handle(&self) -> Option<CompositionHandle> {
         *self
             .handle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Whether the region is currently visible (the render thread only
-    /// presents while it is — a hidden window has nothing to show).
+    /// Whether the region is currently visible (the render thread only presents
+    /// while it is — a hidden overlay has nothing to show).
     pub fn is_visible(&self) -> bool {
         self.visible.load(Ordering::Relaxed)
     }
@@ -80,7 +81,7 @@ impl NativePreviewState {
     }
 
     /// The UI reported a new preview region (position/size in physical px) and
-    /// visibility. Repositions the child window and signals a surface resize.
+    /// visibility. Repositions the overlay's visual and signals a surface resize.
     pub fn set_region(&self, bounds: Bounds, visible: bool) {
         {
             let mut rect = self
@@ -91,9 +92,9 @@ impl NativePreviewState {
         }
         self.rect_gen.fetch_add(1, Ordering::Release);
         self.visible.store(visible, Ordering::Relaxed);
-        if let Some(window) = self.lock_window().as_ref() {
-            window.set_bounds(bounds);
-            window.set_visible(visible);
+        if let Some(overlay) = self.lock_overlay().as_ref() {
+            overlay.set_bounds(bounds);
+            overlay.set_visible(visible);
         }
     }
 }
@@ -104,10 +105,10 @@ impl Default for NativePreviewState {
     }
 }
 
-/// Create the native preview child window (main thread, in setup) and install
-/// it into [`NativePreviewState`]. Any failure — or a non-Windows OS — is
-/// logged honestly and leaves the state empty, so the app keeps the JPEG
-/// `preview://` path.
+/// Create the native preview DirectComposition overlay (main thread, in setup)
+/// and install it into [`NativePreviewState`]. Any failure — or a non-Windows
+/// OS — is logged honestly and leaves the state empty, so the app keeps the
+/// JPEG `preview://` path.
 pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(windows)]
     {
@@ -122,12 +123,11 @@ pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
                 return;
             }
         };
-        match PreviewWindow::create(fcap_preview::ParentHandle::Win32(parent), Bounds::default()) {
-            Ok(preview_window) => {
-                let handle = preview_window.surface_handle();
-                app.state::<NativePreviewState>()
-                    .install(preview_window, handle);
-                println!("native preview: child window created (GPU surface path)");
+        match CompositionOverlay::create(parent, Bounds::default()) {
+            Ok(overlay) => {
+                let handle = overlay.handle();
+                app.state::<NativePreviewState>().install(overlay, handle);
+                println!("native preview: DirectComposition overlay created (GPU surface path)");
             }
             Err(err) => {
                 eprintln!("native preview unavailable ({err}) — using the JPEG preview")
