@@ -26,6 +26,17 @@ use studio::StudioState;
 use tauri::Manager;
 
 fn main() {
+    // Surface wgpu's `log` diagnostics when RUST_LOG is set (silent otherwise),
+    // and loudly print any panic — main *or* worker thread — to stdout before
+    // the (`panic = "abort"`) exit, so an init failure lands in the logs instead
+    // of vanishing. The hook still chains the default (backtrace) behaviour.
+    env_logger::init();
+    let default_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        println!("PANIC: {info}");
+        default_panic_hook(info);
+    }));
+
     // Version banner on launch (visible in dev consoles and CI logs; the
     // release Windows build has no console by design).
     println!(
@@ -35,6 +46,7 @@ fn main() {
 
     let settings = SettingsStore::load_default();
     println!("settings: language={}", settings.get().language);
+    println!("init: building the Tauri app (creates the webview, then runs setup)...");
 
     let app = tauri::Builder::default()
         // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
@@ -126,6 +138,7 @@ fn main() {
             commands::native_preview_set_selection
         ])
         .setup(|app| {
+            println!("init: setup entered");
             events::spawn_stats_emitter(app.handle().clone());
             // The compose loop: capture sessions + static sources → the
             // compositor → the program frame behind `preview://`.
@@ -133,12 +146,14 @@ fn main() {
                 app.handle().clone(),
                 &app.state::<StudioState>(),
             );
+            println!("init: studio thread spawned");
             // The audio bridge: model → engine reconcile + the `audio`
             // levels event + PTT/PTM hotkey registration.
             audio::spawn_audio_thread(app.handle().clone());
             // The recording status emitter (~2 Hz while a session runs) +
             // the dead-sink watchdog.
             recording::spawn_status_thread(app.handle().clone());
+            println!("init: bridges spawned — calling native_preview::try_create");
             // The native preview child window (Windows). Created here on the
             // main thread; the studio thread presents the GPU surface onto it.
             // Failure (or any non-Windows OS) leaves it absent → the JPEG
@@ -151,10 +166,12 @@ fn main() {
             if std::env::var_os("FCAP_SMOKE").is_some() {
                 studio::seed_smoke_scene(app.handle());
             }
+            println!("init: setup complete");
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Freally Capture");
+    println!("init: build() returned — entering the event loop");
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {

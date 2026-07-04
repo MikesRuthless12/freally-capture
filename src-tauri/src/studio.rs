@@ -425,6 +425,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             guard.collection.canvas_height,
         )
     };
+    println!("studio: creating the compositor ({canvas_w}x{canvas_h})...");
     let mut compositor = match Compositor::new(canvas_w, canvas_h) {
         Ok(compositor) => compositor,
         Err(err) => {

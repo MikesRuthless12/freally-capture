@@ -21,6 +21,9 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
 jpeg-encoder = { workspace = true }
+# Prints wgpu's `log` diagnostics (adapter enumeration, surface errors) when
+# RUST_LOG is set; silent by default, so no effect on normal runs.
+env_logger = { workspace = true }
 
 # The owned engine crates — linked from day one so `health` proves the wiring.
 # (fcap-capture + fcap-sources are live as of Phase 1: capture + preview.)
