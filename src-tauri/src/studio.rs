@@ -194,6 +194,51 @@ impl StudioState {
     }
 }
 
+/// **Test-only** (env `FCAP_SMOKE`): seed a bright **magenta** color source into
+/// the active scene and force the native preview region on, so the headless
+/// `screenshot-smoke` job actually exercises the native GPU surface. The UI
+/// never reports a preview region without interaction, so without this the
+/// render loop builds no surface and the screenshot shows only the HTML shell
+/// (the same on every OS — the native surface was only ever proven interactively
+/// on real hardware). A no-op unless the env var is set; never touches normal use.
+pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
+    use fcap_scene::{Rgba, Source, SourceSettings};
+
+    let studio = app.state::<StudioState>();
+    if let Err(err) = studio.mutate(app, |collection| {
+        let scene_id = collection.active_scene().id;
+        let magenta = Source::new(
+            "Smoke Magenta",
+            SourceSettings::Color {
+                color: Rgba::new(255, 0, 255, 255),
+                width: 1920,
+                height: 1080,
+            },
+        );
+        collection
+            .add_item_with_new_source(scene_id, magenta)
+            .map(|_| ())
+    }) {
+        eprintln!("smoke: could not seed the magenta scene: {err}");
+    }
+
+    // Force the preview region on (physical px, parent-client top-left) so the
+    // studio thread builds + presents the native surface. A large central rect
+    // that stays visible at 1x or 2x backing scale — exact placement doesn't
+    // matter here; the "surface created" log line + a magenta frame are the proof.
+    app.state::<crate::native_preview::NativePreviewState>()
+        .set_region(
+            fcap_preview::Bounds {
+                x: 100,
+                y: 100,
+                width: 1000,
+                height: 600,
+            },
+            true,
+        );
+    println!("smoke: seeded magenta scene + forced the native preview region on");
+}
+
 /// One audio source the engine should run (see [`StudioState::audio_specs`]).
 #[derive(Debug, Clone)]
 pub struct AudioSourceSpec {

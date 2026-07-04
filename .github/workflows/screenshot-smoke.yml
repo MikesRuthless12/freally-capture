@@ -32,6 +32,11 @@ env:
   CARGO_TERM_COLOR: always
   # A launched app that panics should still let us grab the screenshot.
   RUST_BACKTRACE: 1
+  # Seed a magenta scene + force the preview region on launch, so the headless
+  # screenshot actually exercises the native GPU surface (Windows DComp / macOS
+  # CAMetalLayer) — the UI never reports a region without interaction. A magenta
+  # frame + the "native preview: surface created" log line prove the native path.
+  FCAP_SMOKE: "1"
 
 jobs:
   screenshot:

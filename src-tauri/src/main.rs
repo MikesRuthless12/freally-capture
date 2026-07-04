@@ -144,6 +144,13 @@ fn main() {
             // Failure (or any non-Windows OS) leaves it absent → the JPEG
             // `preview://` path stays in charge.
             native_preview::try_create(app.handle());
+            // Test-only (env `FCAP_SMOKE`, set by the screenshot-smoke CI): seed
+            // a magenta scene + force the preview region so the headless
+            // screenshot actually exercises the native GPU surface. No-op
+            // otherwise — see `studio::seed_smoke_scene`.
+            if std::env::var_os("FCAP_SMOKE").is_some() {
+                studio::seed_smoke_scene(app.handle());
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
