@@ -107,7 +107,11 @@
           with file splitting and pause/resume, HEVC/AV1 + remux-to-mp4, and a Media source — with the
           patent-encumbered wire codecs driven through the clearly-labeled, on-demand, hash-verified
           ffmpeg bridge (never bundled). The studio MVP (0.70.0) next adds a virtual camera and
-          single-target streaming to Twitch, YouTube, Kick, and more. Early development builds are
+          single-target streaming to Twitch, YouTube, Kick, and more. A <strong>native GPU preview</strong>
+          ("OBS feel") — the compositor's frame painted straight to the screen with no read-back/encode
+          round-trip — is also underway: <strong>real-time on Windows now</strong> (DirectComposition,
+          with the selection box + transform handles drawn into the GPU frame), macOS/Linux next; the
+          JPEG preview stays as the universal fallback. Early development builds are
           downloadable above.
         </p>
 
@@ -163,6 +167,14 @@
               <p>The audio graph (up to 6 tracks, denoise/gate/compressor/EQ, LUFS), and multi-track recording with hardware encoders + the owned <code>freally-video</code> lossless codec — containers, file splitting, pause/resume, HEVC/AV1 + remux, and a Media source; the wire codecs via the on-demand, hash-verified ffmpeg bridge.</p>
             </div>
             <span class="soon">Done — Jul 3, 2026</span>
+          </li>
+          <li>
+            <span class="badge upcoming">preview</span>
+            <div>
+              <strong>Native GPU preview ("OBS feel")</strong>
+              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag. Real-time on <strong>Windows</strong> (DirectComposition), with the selection box + transform handles drawn into the GPU frame; macOS (CAMetalLayer) and Linux (Vulkan) next. The JPEG preview stays as the universal fallback.</p>
+            </div>
+            <span class="soon">In development — Windows done</span>
           </li>
           <li>
             <span class="badge upcoming">0.70.0</span>

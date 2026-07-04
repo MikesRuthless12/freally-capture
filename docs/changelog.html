@@ -56,7 +56,9 @@
 
         <p class="note">
           Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, and the virtual
-          camera — plus a native GPU preview surface (real-time "OBS feel") as its own milestone.
+          camera. A <strong>native GPU preview</strong> surface (real-time "OBS feel") is underway as its
+          own milestone — <strong>real-time on Windows now</strong> (DirectComposition), with the
+          selection box + transform handles drawn into the GPU frame; macOS/Linux next.
         </p>
       </article>
 
@@ -199,6 +201,14 @@
               <p>The audio graph (6 tracks, denoise/gate/compressor/EQ, LUFS) and multi-track recording with hardware encoders + the owned lossless codec. <strong>The audio half is in on <code>main</code></strong> — mic + desktop-audio capture, the owned classic-DSP filters (spectral denoise, no ML), monitoring, push-to-talk, and the mixer panel; recording completes the milestone.</p>
             </div>
             <span class="soon">In development — audio done</span>
+          </li>
+          <li>
+            <span class="badge upcoming">preview</span>
+            <div>
+              <strong>Native GPU preview ("OBS feel")</strong>
+              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag. Real-time on <strong>Windows</strong> (DirectComposition), with the selection box + transform handles drawn into the GPU frame; macOS (CAMetalLayer) and Linux (Vulkan) next. The JPEG preview stays as the universal fallback.</p>
+            </div>
+            <span class="soon">In development — Windows done</span>
           </li>
           <li>
             <span class="badge upcoming">0.70.0</span>

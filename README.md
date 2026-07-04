@@ -26,7 +26,10 @@ leaves your machine is the stream you chose to send.
 > + file splitting + **pause/resume**, HEVC/AV1 + **remux-to-mp4**, and a **Media source** (video/image
 > files, audio in the mixer) — with the patent-encumbered wire codecs driven through the
 > **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). Streaming lands next
-> (0.70.0). The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
+> (0.70.0). **In progress now:** a **native GPU preview** ("OBS feel") that paints the compositor's GPU
+> output straight to the screen with no read-back/encode round-trip — **real-time on Windows** via
+> **DirectComposition** (macOS/Linux next), with the interactive selection box + transform handles drawn
+> into the GPU frame; the JPEG preview stays as the universal fallback. The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
 > go-to-market plan) is **maintained privately** and is not published here.
 > **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
 

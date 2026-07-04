@@ -14,6 +14,16 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > The next rung is **0.70.0 (studio MVP — first public)**: single-target streaming, Studio Mode +
 > transitions, the virtual camera, and the stats dock.
 
+### Added — native GPU preview ("OBS feel"), Windows (in progress)
+- **A zero-copy native GPU preview surface** that replaces the read-back → JPEG → canvas preview with
+  the compositor's own GPU output painted directly on screen — no encode round-trip, no lag. On
+  **Windows** this is a **DirectComposition** surface (wgpu `SurfaceTargetUnsafe::CompositionVisual` on
+  DX12) composited *above* WebView2, **verified real-time on hardware**; the interactive **selection box
+  + transform handles are drawn into the GPU frame itself** (preview-only — never recorded or streamed).
+  Under the hood the GPU stack was **upgraded wgpu 0.20 → 27**. **macOS (CAMetalLayer) and Linux (Vulkan)
+  land next**; until they do, those platforms keep the existing JPEG preview, which also stays as the
+  universal fallback everywhere. *(Windows-only so far — not yet in a tagged release.)*
+
 ## [0.55.0] — 2026-07-03 (Audio mixer + recording)
 
 > The 0.55.0 rung is **Phase 3 (audio mixer + filters)** plus **Phase 4 (recording)** — the studio can
