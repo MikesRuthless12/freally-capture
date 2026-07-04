@@ -21,7 +21,7 @@ pub mod transform;
 
 pub use compositor::{Compositor, ProgramFrame};
 pub use filters::{cube::parse_cube, FilterResourceData};
-pub use native_preview::NativePreview;
+pub use native_preview::{NativePreview, PreviewOverlay};
 
 use thiserror::Error;
 

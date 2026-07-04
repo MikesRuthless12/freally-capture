@@ -230,6 +230,17 @@ pub fn native_preview_active(
     state.composition_handle().is_some()
 }
 
+/// The UI reports which scene item is selected, so the native preview can draw
+/// its selection box + handles *into* the GPU frame (they'd otherwise be hidden
+/// under the opaque native surface). `None` clears it. A no-op off the native path.
+#[tauri::command]
+pub fn native_preview_set_selection(
+    state: tauri::State<'_, crate::native_preview::NativePreviewState>,
+    item: Option<fcap_scene::ItemId>,
+) {
+    state.set_selection(item);
+}
+
 /// macOS: deep-link the user to the Privacy pane they need after a denial.
 /// `pane` is "screenRecording" or "camera".
 #[tauri::command]

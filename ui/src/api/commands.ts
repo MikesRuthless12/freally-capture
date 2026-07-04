@@ -365,6 +365,15 @@ export function nativePreviewSetRegion(
   return invoke("native_preview_set_region", { x, y, width, height, visible });
 }
 
+/**
+ * Report which scene item is selected so the native GPU preview can draw its
+ * selection box + handles into the frame (they'd otherwise be hidden under the
+ * opaque native surface). `null` clears it. A no-op off the native path.
+ */
+export function nativePreviewSetSelection(item: ItemId | null): Promise<void> {
+  return invoke("native_preview_set_selection", { item });
+}
+
 // ---------------------------------------------------------------------------
 // Recording (Phase 4)
 // ---------------------------------------------------------------------------

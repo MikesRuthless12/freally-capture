@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import { nativePreviewActive, nativePreviewSetRegion } from "../api/commands";
+import {
+  nativePreviewActive,
+  nativePreviewSetRegion,
+  nativePreviewSetSelection,
+} from "../api/commands";
 import type { Collection, ItemId, ProgramStatus, Scene, SceneItem, Transform } from "../api/types";
 import {
   canvasToLocal,
@@ -141,6 +145,14 @@ export function PreviewPanel({
       void nativePreviewSetRegion(0, 0, 0, 0, false).catch(() => undefined);
     };
   }, [nativeActive, box, running, emptyScene]);
+
+  // Tell the native surface which item is selected, so it can draw the box +
+  // handles *into* the GPU frame (they're hidden under the opaque surface).
+  // Also fires with `null` on deselect. Only matters on the native path.
+  useEffect(() => {
+    if (!nativeActive) return;
+    void nativePreviewSetSelection(selectedItem).catch(() => undefined);
+  }, [nativeActive, selectedItem]);
 
   // Poll the composed frame onto the canvas while the studio runs (skipped
   // when the native surface is painting the region).

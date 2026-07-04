@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
+use fcap_scene::ItemId;
 use tauri::{AppHandle, Manager, Runtime};
 
 /// Tauri-managed native-preview state, shared main-thread ↔ render-thread.
@@ -29,6 +30,8 @@ pub struct NativePreviewState {
     rect_gen: AtomicU64,
     /// The region is currently shown (hidden while a modal covers it).
     visible: AtomicBool,
+    /// The UI's selected item — drawn as the native preview's selection box.
+    selection: Mutex<Option<ItemId>>,
 }
 
 impl NativePreviewState {
@@ -39,6 +42,7 @@ impl NativePreviewState {
             rect: Mutex::new(Bounds::default()),
             rect_gen: AtomicU64::new(0),
             visible: AtomicBool::new(false),
+            selection: Mutex::new(None),
         }
     }
 
@@ -72,6 +76,24 @@ impl NativePreviewState {
         if let Some(overlay) = self.lock_overlay().as_ref() {
             overlay.commit();
         }
+    }
+
+    /// The UI's selected item, drawn as the native preview's selection box
+    /// (`None` when nothing is selected). Read by the render thread each tick.
+    pub fn selection(&self) -> Option<ItemId> {
+        *self
+            .selection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The UI reported which item is selected (or none). A no-op visual on the
+    /// JPEG path; on the native path the render thread draws its box + handles.
+    pub fn set_selection(&self, item: Option<ItemId>) {
+        *self
+            .selection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = item;
     }
 
     /// Whether the region is currently visible (the render thread only presents

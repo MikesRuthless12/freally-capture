@@ -422,7 +422,6 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // retrying after a creation failure so it can't spin.
     let mut native_surface: Option<(fcap_compositor::NativePreview, u64)> = None;
     let mut native_disabled = false;
-    let mut native_present_count: u64 = 0;
 
     loop {
         let tick_started = Instant::now();
@@ -744,16 +743,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                 }
                 if native.is_visible() {
+                    // The selection box + handles, drawn into the native frame
+                    // (they'd sit hidden under the opaque surface otherwise).
+                    let overlay =
+                        native_selection_overlay(native.selection(), &scene, &compositor, canvas);
                     if let Some((surface, _)) = &mut native_surface {
-                        match compositor.present_native(surface) {
-                            Ok(presented) => {
-                                native_present_count += 1;
-                                if native_present_count % 120 == 1 {
-                                    println!(
-                                        "native preview: present #{native_present_count} (presented={presented})"
-                                    );
-                                }
-                            }
+                        match compositor.present_native(surface, overlay.as_ref()) {
+                            Ok(_) => {}
                             Err(err) => {
                                 eprintln!("studio: native present failed ({err})");
                                 native_disabled = true;
@@ -871,6 +867,70 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
     )
+}
+
+/// The native preview's selection overlay, computed from the model: the
+/// selected item's four content corners (canvas px) + its locked flag, or
+/// `None` when nothing usable is selected (no selection, awaiting first frame,
+/// no known size, or fully cropped). Preview-only chrome — this never touches
+/// the program frame the recorder and stream read.
+fn native_selection_overlay(
+    selection: Option<fcap_scene::ItemId>,
+    scene: &fcap_scene::Scene,
+    compositor: &Compositor,
+    canvas: (u32, u32),
+) -> Option<fcap_compositor::PreviewOverlay> {
+    let id = selection?;
+    let item = scene.items.iter().find(|it| it.id == id)?;
+    if item.pending_fit {
+        return None;
+    }
+    let (source_w, source_h) = compositor.source_size(item.source)?;
+    let (eff_w, eff_h) = effective_source_size(source_w, source_h, &item.filters);
+    let content = fcap_compositor::transform::content_size(eff_w, eff_h, &item.transform.crop)?;
+    Some(fcap_compositor::PreviewOverlay {
+        corners: fcap_compositor::transform::corners(&item.transform, content),
+        canvas: (canvas.0 as f32, canvas.1 as f32),
+        locked: item.locked,
+    })
+}
+
+/// The source size the compositor actually composes for an item: the reported
+/// resolution after its enabled Crop *filters* (the only size-changing filter
+/// kind), folded in chain order with the engine's skip semantics. Mirrors
+/// `effectiveSourceSize` in `ui/src/lib/transform.ts` so the native selection
+/// box hugs the same pixels the HTML one does.
+fn effective_source_size(
+    source_w: u32,
+    source_h: u32,
+    filters: &[fcap_scene::Filter],
+) -> (u32, u32) {
+    let mut w = source_w;
+    let mut h = source_h;
+    for filter in filters {
+        if !filter.enabled {
+            continue;
+        }
+        if let FilterKind::Crop {
+            left,
+            top,
+            right,
+            bottom,
+        } = filter.kind
+        {
+            if left == 0 && top == 0 && right == 0 && bottom == 0 {
+                continue;
+            }
+            let out_w = w.saturating_sub(left).saturating_sub(right);
+            let out_h = h.saturating_sub(top).saturating_sub(bottom);
+            if out_w == 0 || out_h == 0 {
+                continue; // the engine skips a crop that would zero an axis
+            }
+            w = out_w;
+            h = out_h;
+        }
+    }
+    (w, h)
 }
 
 /// A change-detection fingerprint of a source's settings.

@@ -10,11 +10,57 @@
 //! `create_surface`. On acquire failure (minimised, device lost) the frame is
 //! skipped honestly rather than panicking; the caller keeps the JPEG
 //! `preview://` path as the cross-platform fallback.
+//!
+//! Because the native surface is **opaque** and composited *above* the webview,
+//! the HTML selection box + handles are hidden behind it. So the selection
+//! chrome is drawn *into* this frame too (a [`PreviewOverlay`] the caller
+//! computes from the model each tick) — a line + triangle pass over the blit.
+//! It is preview-only: it never touches the program texture the recorder and
+//! stream read.
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::gpu::Gpu;
 use crate::CompositorError;
+
+/// The selection overlay to draw on top of the native preview frame. `corners`
+/// are in **canvas pixels** (y-down, origin top-left), in the local corner
+/// order `(0,0) (w,0) (0,h) (w,h)` — exactly what [`crate::transform::corners`]
+/// produces and what the UI draws its box through. The blit stretches the whole
+/// canvas onto the whole surface, so the same corners map straight to the
+/// surface.
+pub struct PreviewOverlay {
+    /// The item's four content corners, canvas px, order `(0,0)(w,0)(0,h)(w,h)`.
+    pub corners: [[f32; 2]; 4],
+    /// The canvas size those corners are expressed in.
+    pub canvas: (f32, f32),
+    /// Locked items show the box but no interactive handles.
+    pub locked: bool,
+}
+
+/// One overlay vertex: a clip-space (NDC) position + an opaque RGBA color.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct OverlayVertex {
+    pos: [f32; 2],
+    color: [f32; 4],
+}
+
+/// Handle half-extent, surface px (a 10px square) — matches the HTML handles'
+/// visual weight at typical DPI.
+const HANDLE_HALF_PX: f32 = 5.0;
+/// Rotate-handle distance out from the top-edge midpoint, surface px.
+const ROTATE_OFFSET_PX: f32 = 24.0;
+/// Vertex-buffer capacities. Worst case: 5 line segments = 10 verts; 9 handle
+/// squares × 6 = 54 verts. Rounded up.
+const OVERLAY_LINE_CAP: u64 = 16;
+const OVERLAY_TRI_CAP: u64 = 64;
+
+// Overlay colors (written to a non-sRGB Unorm surface, so these are the on-
+// screen sRGB values 1:1). Box #4a9eff, handles near-white, rotate #00d4ff.
+const BOX_BLUE: [f32; 4] = [0.29, 0.62, 1.0, 1.0];
+const HANDLE_WHITE: [f32; 4] = [0.95, 0.97, 1.0, 1.0];
+const ROTATE_CYAN: [f32; 4] = [0.0, 0.83, 1.0, 1.0];
 
 /// A window surface the program frame is blitted onto.
 pub struct NativePreview {
@@ -23,6 +69,10 @@ pub struct NativePreview {
     pipeline: wgpu::RenderPipeline,
     bind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    overlay_line_pipeline: wgpu::RenderPipeline,
+    overlay_tri_pipeline: wgpu::RenderPipeline,
+    overlay_line_buf: wgpu::Buffer,
+    overlay_tri_buf: wgpu::Buffer,
 }
 
 impl NativePreview {
@@ -100,12 +150,32 @@ impl NativePreview {
             ..Default::default()
         });
 
+        let (overlay_line_pipeline, overlay_tri_pipeline) =
+            build_overlay_pipelines(&gpu.device, format);
+        let vertex = std::mem::size_of::<OverlayVertex>() as u64;
+        let overlay_line_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap-preview-overlay-lines"),
+            size: OVERLAY_LINE_CAP * vertex,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let overlay_tri_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap-preview-overlay-tris"),
+            size: OVERLAY_TRI_CAP * vertex,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Ok(Self {
             surface,
             config,
             pipeline,
             bind_layout,
             sampler,
+            overlay_line_pipeline,
+            overlay_tri_pipeline,
+            overlay_line_buf,
+            overlay_tri_buf,
         })
     }
 
@@ -127,15 +197,16 @@ impl NativePreview {
         (self.config.width, self.config.height)
     }
 
-    /// Blit the program texture onto the surface and present. `program_view`
-    /// is the compositor's current program-frame view (recreated on canvas
-    /// resize, so the bind group is rebuilt each present — cheap). Returns
-    /// `Ok(false)` when the frame had to be skipped (surface not ready);
-    /// `Ok(true)` when presented.
+    /// Blit the program texture onto the surface, draw the selection `overlay`
+    /// (if any) over it, and present. `program_view` is the compositor's
+    /// current program-frame view (recreated on canvas resize, so the bind
+    /// group is rebuilt each present — cheap). Returns `Ok(false)` when the
+    /// frame had to be skipped (surface not ready); `Ok(true)` when presented.
     pub fn present(
         &mut self,
         gpu: &Gpu,
         program_view: &wgpu::TextureView,
+        overlay: Option<&PreviewOverlay>,
     ) -> Result<bool, CompositorError> {
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
@@ -172,6 +243,25 @@ impl NativePreview {
             ],
         });
 
+        // Build the overlay geometry and upload it *before* the pass, so the
+        // draw counts are known and the queue writes land ahead of the submit.
+        let (line_count, tri_count) = match overlay {
+            Some(ov) => {
+                let (lines, tris) =
+                    overlay_vertices(ov, self.config.width as f32, self.config.height as f32);
+                if !lines.is_empty() {
+                    gpu.queue
+                        .write_buffer(&self.overlay_line_buf, 0, bytemuck::cast_slice(&lines));
+                }
+                if !tris.is_empty() {
+                    gpu.queue
+                        .write_buffer(&self.overlay_tri_buf, 0, bytemuck::cast_slice(&tris));
+                }
+                (lines.len() as u32, tris.len() as u32)
+            }
+            None => (0, 0),
+        };
+
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -196,11 +286,112 @@ impl NativePreview {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             pass.draw(0..3, 0..1);
+
+            // The selection chrome, over the program frame (same attachment).
+            if line_count > 0 {
+                pass.set_pipeline(&self.overlay_line_pipeline);
+                pass.set_vertex_buffer(0, self.overlay_line_buf.slice(..));
+                pass.draw(0..line_count, 0..1);
+            }
+            if tri_count > 0 {
+                pass.set_pipeline(&self.overlay_tri_pipeline);
+                pass.set_vertex_buffer(0, self.overlay_tri_buf.slice(..));
+                pass.draw(0..tri_count, 0..1);
+            }
         }
         gpu.queue.submit(Some(encoder.finish()));
         frame.present();
         Ok(true)
     }
+}
+
+/// Build the overlay's line + triangle vertices from the selection box.
+/// Everything is computed in **surface pixels** (mapping the canvas-space box
+/// through the same stretch the blit applies), so handles are square and a
+/// fixed size regardless of canvas aspect, then projected to NDC.
+fn overlay_vertices(
+    overlay: &PreviewOverlay,
+    surface_w: f32,
+    surface_h: f32,
+) -> (Vec<OverlayVertex>, Vec<OverlayVertex>) {
+    let (cw, ch) = overlay.canvas;
+    if cw <= 0.0 || ch <= 0.0 || surface_w <= 0.0 || surface_h <= 0.0 {
+        return (Vec::new(), Vec::new());
+    }
+    // Canvas px → surface px (the blit stretches the whole canvas onto the
+    // whole surface); surface px → NDC (y-down px to y-up clip).
+    let to_surface = |p: [f32; 2]| [p[0] * surface_w / cw, p[1] * surface_h / ch];
+    let ndc = |p: [f32; 2]| [2.0 * p[0] / surface_w - 1.0, 1.0 - 2.0 * p[1] / surface_h];
+    let seg = |a: [f32; 2], b: [f32; 2], color: [f32; 4]| {
+        [
+            OverlayVertex { pos: ndc(a), color },
+            OverlayVertex { pos: ndc(b), color },
+        ]
+    };
+    let square = |p: [f32; 2], color: [f32; 4]| {
+        let h = HANDLE_HALF_PX;
+        let tl = ndc([p[0] - h, p[1] - h]);
+        let tr = ndc([p[0] + h, p[1] - h]);
+        let bl = ndc([p[0] - h, p[1] + h]);
+        let br = ndc([p[0] + h, p[1] + h]);
+        [
+            OverlayVertex { pos: tl, color },
+            OverlayVertex { pos: tr, color },
+            OverlayVertex { pos: bl, color },
+            OverlayVertex { pos: tr, color },
+            OverlayVertex { pos: br, color },
+            OverlayVertex { pos: bl, color },
+        ]
+    };
+
+    let c = [
+        to_surface(overlay.corners[0]),
+        to_surface(overlay.corners[1]),
+        to_surface(overlay.corners[2]),
+        to_surface(overlay.corners[3]),
+    ];
+
+    let mut lines: Vec<OverlayVertex> = Vec::new();
+    // Box edges: (0,0)-(w,0)-(w,h)-(0,h)-(0,0) → corners 0,1,3,2.
+    lines.extend_from_slice(&seg(c[0], c[1], BOX_BLUE));
+    lines.extend_from_slice(&seg(c[1], c[3], BOX_BLUE));
+    lines.extend_from_slice(&seg(c[3], c[2], BOX_BLUE));
+    lines.extend_from_slice(&seg(c[2], c[0], BOX_BLUE));
+
+    let mut tris: Vec<OverlayVertex> = Vec::new();
+    if overlay.locked {
+        return (lines, tris);
+    }
+
+    let mid = |a: [f32; 2], b: [f32; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+    let left = mid(c[0], c[2]);
+    let right = mid(c[1], c[3]);
+    let top = mid(c[0], c[1]);
+    let bottom = mid(c[2], c[3]);
+
+    // Rotate handle: out from the top-edge midpoint, away from the box center.
+    let center = [
+        (c[0][0] + c[1][0] + c[2][0] + c[3][0]) * 0.25,
+        (c[0][1] + c[1][1] + c[2][1] + c[3][1]) * 0.25,
+    ];
+    let dir = [top[0] - center[0], top[1] - center[1]];
+    let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+    if len > 1e-3 {
+        let n = [dir[0] / len, dir[1] / len];
+        let rotate = [
+            top[0] + n[0] * ROTATE_OFFSET_PX,
+            top[1] + n[1] * ROTATE_OFFSET_PX,
+        ];
+        lines.extend_from_slice(&seg(top, rotate, ROTATE_CYAN));
+        tris.extend_from_slice(&square(rotate, ROTATE_CYAN));
+    }
+
+    // Corner + edge handles (white squares).
+    for p in [c[0], c[1], c[2], c[3], left, right, top, bottom] {
+        tris.extend_from_slice(&square(p, HANDLE_WHITE));
+    }
+
+    (lines, tris)
 }
 
 fn build_pipeline(
@@ -263,4 +454,116 @@ fn build_pipeline(
         multiview: None,
     });
     (pipeline, bind_layout)
+}
+
+/// Build the two overlay pipelines (lines for the box + rotate stem, triangles
+/// for the handle squares) — one shared shader + vertex layout, differing only
+/// in primitive topology.
+fn build_overlay_pipelines(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fcap-preview-overlay"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overlay.wgsl").into()),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fcap-preview-overlay-layout"),
+        bind_group_layouts: &[],
+        push_constant_ranges: &[],
+    });
+    const ATTRS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
+    let make = |topology: wgpu::PrimitiveTopology| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap-preview-overlay-pipeline"),
+            cache: None,
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<OverlayVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &ATTRS,
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        })
+    };
+    (
+        make(wgpu::PrimitiveTopology::LineList),
+        make(wgpu::PrimitiveTopology::TriangleList),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn overlay(corners: [[f32; 2]; 4], locked: bool) -> PreviewOverlay {
+        PreviewOverlay {
+            corners,
+            canvas: (100.0, 100.0),
+            locked,
+        }
+    }
+
+    #[test]
+    fn unlocked_box_emits_box_lines_and_handles() {
+        // A centered 20×20 box on a 100×100 canvas.
+        let ov = overlay(
+            [[40.0, 40.0], [60.0, 40.0], [40.0, 60.0], [60.0, 60.0]],
+            false,
+        );
+        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        // 4 box edges (8 verts) + 1 rotate stem (2 verts).
+        assert_eq!(lines.len(), 10);
+        // 8 corner/edge handles + 1 rotate handle, 6 verts each.
+        assert_eq!(tris.len(), 9 * 6);
+        // Every vertex lands inside clip space.
+        for v in lines.iter().chain(tris.iter()) {
+            assert!(v.pos[0] >= -1.5 && v.pos[0] <= 1.5);
+            assert!(v.pos[1] >= -1.5 && v.pos[1] <= 1.5);
+        }
+    }
+
+    #[test]
+    fn locked_box_draws_the_outline_but_no_handles() {
+        let ov = overlay(
+            [[40.0, 40.0], [60.0, 40.0], [40.0, 60.0], [60.0, 60.0]],
+            true,
+        );
+        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        assert_eq!(lines.len(), 8); // box only
+        assert!(tris.is_empty());
+    }
+
+    #[test]
+    fn degenerate_canvas_emits_nothing() {
+        let ov = PreviewOverlay {
+            corners: [[0.0, 0.0]; 4],
+            canvas: (0.0, 0.0),
+            locked: false,
+        };
+        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        assert!(lines.is_empty() && tris.is_empty());
+    }
 }

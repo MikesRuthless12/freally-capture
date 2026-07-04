@@ -490,8 +490,9 @@ impl Compositor {
     pub fn present_native(
         &self,
         preview: &mut crate::NativePreview,
+        overlay: Option<&crate::PreviewOverlay>,
     ) -> Result<bool, CompositorError> {
-        preview.present(&self.gpu, &self.program_view)
+        preview.present(&self.gpu, &self.program_view, overlay)
     }
 
     /// Reconfigure the preview surface after its window resized.

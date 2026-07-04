@@ -122,7 +122,8 @@ fn main() {
             commands::recording::recordings_list,
             commands::recording::recording_remux,
             commands::native_preview_set_region,
-            commands::native_preview_active
+            commands::native_preview_active,
+            commands::native_preview_set_selection
         ])
         .setup(|app| {
             events::spawn_stats_emitter(app.handle().clone());
