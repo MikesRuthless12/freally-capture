@@ -3,13 +3,12 @@
 //! trip. This is the "OBS feel" path — the preview *is* the GPU output,
 //! painted on the GPU.
 //!
-//! The compositor stays `#![forbid(unsafe_code)]`: this module takes a window
-//! that already implements the safe `raw-window-handle` traits (the
-//! unavoidable `unsafe` of building a handle from a native window lives in
-//! the windowing crate that constructs it) and uses wgpu's **safe**
-//! `create_surface`. On acquire failure (minimised, device lost) the frame is
-//! skipped honestly rather than panicking; the caller keeps the JPEG
-//! `preview://` path as the cross-platform fallback.
+//! The compositor stays `#![forbid(unsafe_code)]`: the DirectComposition
+//! overlay (`fcap-preview`) builds the wgpu surface via the unsafe
+//! `CompositionVisual` target and hands the finished `Surface` here, so this
+//! module only ever configures a surface it is given. On acquire failure
+//! (minimised, device lost) the frame is skipped honestly rather than
+//! panicking; the caller keeps the JPEG `preview://` path as the fallback.
 //!
 //! Because the native surface is **opaque** and composited *above* the webview,
 //! the HTML selection box + handles are hidden behind it. So the selection
@@ -17,8 +16,6 @@
 //! computes from the model each tick) — a line + triangle pass over the blit.
 //! It is preview-only: it never touches the program texture the recorder and
 //! stream read.
-
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::gpu::Gpu;
 use crate::CompositorError;
@@ -73,23 +70,13 @@ pub struct NativePreview {
     overlay_tri_pipeline: wgpu::RenderPipeline,
     overlay_line_buf: wgpu::Buffer,
     overlay_tri_buf: wgpu::Buffer,
+    /// Reused CPU staging for the overlay vertices — cleared and refilled each
+    /// present so the hot render path allocates nothing per frame.
+    overlay_line_scratch: Vec<OverlayVertex>,
+    overlay_tri_scratch: Vec<OverlayVertex>,
 }
 
 impl NativePreview {
-    /// Create a surface on `window` and the blit pipeline. `window` must
-    /// outlive the surface — the caller (the windowing layer) owns it for the
-    /// preview's lifetime.
-    pub fn new<W>(gpu: &Gpu, window: W, width: u32, height: u32) -> Result<Self, CompositorError>
-    where
-        W: HasWindowHandle + HasDisplayHandle + Send + Sync + 'static,
-    {
-        let surface = gpu
-            .instance
-            .create_surface(window)
-            .map_err(|err| CompositorError::Device(format!("preview surface: {err}")))?;
-        Self::finish(gpu, surface, width, height)
-    }
-
     /// Configure a surface the caller already created, and build the blit
     /// pipeline. The DirectComposition overlay (`fcap-preview`) needs wgpu's
     /// *unsafe* `CompositionVisual` surface target — which can't live in this
@@ -176,6 +163,8 @@ impl NativePreview {
             overlay_tri_pipeline,
             overlay_line_buf,
             overlay_tri_buf,
+            overlay_line_scratch: Vec::with_capacity(OVERLAY_LINE_CAP as usize),
+            overlay_tri_scratch: Vec::with_capacity(OVERLAY_TRI_CAP as usize),
         })
     }
 
@@ -247,17 +236,33 @@ impl NativePreview {
         // draw counts are known and the queue writes land ahead of the submit.
         let (line_count, tri_count) = match overlay {
             Some(ov) => {
-                let (lines, tris) =
-                    overlay_vertices(ov, self.config.width as f32, self.config.height as f32);
-                if !lines.is_empty() {
-                    gpu.queue
-                        .write_buffer(&self.overlay_line_buf, 0, bytemuck::cast_slice(&lines));
+                self.overlay_line_scratch.clear();
+                self.overlay_tri_scratch.clear();
+                overlay_vertices(
+                    ov,
+                    self.config.width as f32,
+                    self.config.height as f32,
+                    &mut self.overlay_line_scratch,
+                    &mut self.overlay_tri_scratch,
+                );
+                if !self.overlay_line_scratch.is_empty() {
+                    gpu.queue.write_buffer(
+                        &self.overlay_line_buf,
+                        0,
+                        bytemuck::cast_slice(&self.overlay_line_scratch),
+                    );
                 }
-                if !tris.is_empty() {
-                    gpu.queue
-                        .write_buffer(&self.overlay_tri_buf, 0, bytemuck::cast_slice(&tris));
+                if !self.overlay_tri_scratch.is_empty() {
+                    gpu.queue.write_buffer(
+                        &self.overlay_tri_buf,
+                        0,
+                        bytemuck::cast_slice(&self.overlay_tri_scratch),
+                    );
                 }
-                (lines.len() as u32, tris.len() as u32)
+                (
+                    self.overlay_line_scratch.len() as u32,
+                    self.overlay_tri_scratch.len() as u32,
+                )
             }
             None => (0, 0),
         };
@@ -305,18 +310,21 @@ impl NativePreview {
     }
 }
 
-/// Build the overlay's line + triangle vertices from the selection box.
-/// Everything is computed in **surface pixels** (mapping the canvas-space box
-/// through the same stretch the blit applies), so handles are square and a
-/// fixed size regardless of canvas aspect, then projected to NDC.
+/// Append the overlay's line + triangle vertices for the selection box into the
+/// caller's (pre-cleared) buffers. Everything is computed in **surface pixels**
+/// (mapping the canvas-space box through the same stretch the blit applies), so
+/// handles are square and a fixed size regardless of canvas aspect, then
+/// projected to NDC.
 fn overlay_vertices(
     overlay: &PreviewOverlay,
     surface_w: f32,
     surface_h: f32,
-) -> (Vec<OverlayVertex>, Vec<OverlayVertex>) {
+    lines: &mut Vec<OverlayVertex>,
+    tris: &mut Vec<OverlayVertex>,
+) {
     let (cw, ch) = overlay.canvas;
     if cw <= 0.0 || ch <= 0.0 || surface_w <= 0.0 || surface_h <= 0.0 {
-        return (Vec::new(), Vec::new());
+        return;
     }
     // Canvas px → surface px (the blit stretches the whole canvas onto the
     // whole surface); surface px → NDC (y-down px to y-up clip).
@@ -351,16 +359,14 @@ fn overlay_vertices(
         to_surface(overlay.corners[3]),
     ];
 
-    let mut lines: Vec<OverlayVertex> = Vec::new();
     // Box edges: (0,0)-(w,0)-(w,h)-(0,h)-(0,0) → corners 0,1,3,2.
     lines.extend_from_slice(&seg(c[0], c[1], BOX_BLUE));
     lines.extend_from_slice(&seg(c[1], c[3], BOX_BLUE));
     lines.extend_from_slice(&seg(c[3], c[2], BOX_BLUE));
     lines.extend_from_slice(&seg(c[2], c[0], BOX_BLUE));
 
-    let mut tris: Vec<OverlayVertex> = Vec::new();
     if overlay.locked {
-        return (lines, tris);
+        return;
     }
 
     let mid = |a: [f32; 2], b: [f32; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
@@ -390,8 +396,6 @@ fn overlay_vertices(
     for p in [c[0], c[1], c[2], c[3], left, right, top, bottom] {
         tris.extend_from_slice(&square(p, HANDLE_WHITE));
     }
-
-    (lines, tris)
 }
 
 fn build_pipeline(
@@ -533,7 +537,9 @@ mod tests {
             [[40.0, 40.0], [60.0, 40.0], [40.0, 60.0], [60.0, 60.0]],
             false,
         );
-        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        let mut lines = Vec::new();
+        let mut tris = Vec::new();
+        overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
         // 4 box edges (8 verts) + 1 rotate stem (2 verts).
         assert_eq!(lines.len(), 10);
         // 8 corner/edge handles + 1 rotate handle, 6 verts each.
@@ -551,7 +557,9 @@ mod tests {
             [[40.0, 40.0], [60.0, 40.0], [40.0, 60.0], [60.0, 60.0]],
             true,
         );
-        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        let mut lines = Vec::new();
+        let mut tris = Vec::new();
+        overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
         assert_eq!(lines.len(), 8); // box only
         assert!(tris.is_empty());
     }
@@ -563,7 +571,9 @@ mod tests {
             canvas: (0.0, 0.0),
             locked: false,
         };
-        let (lines, tris) = overlay_vertices(&ov, 200.0, 200.0);
+        let mut lines = Vec::new();
+        let mut tris = Vec::new();
+        overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
         assert!(lines.is_empty() && tris.is_empty());
     }
 }

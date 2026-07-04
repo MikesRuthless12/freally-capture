@@ -34,6 +34,12 @@ pub struct NativePreviewState {
     rect_gen: AtomicU64,
     /// The region is currently shown (hidden while a modal covers it).
     visible: AtomicBool,
+    /// The native GPU preview is actually viable: the compositor is on DX12 and
+    /// the overlay was created, and no runtime surface failure has knocked it
+    /// out. The UI reads this (via `native_preview_active`) to decide whether to
+    /// hide its JPEG canvas — set by the render thread, which is the only place
+    /// that knows the backend and whether the surface presents.
+    viable: AtomicBool,
     /// The UI's selected item — drawn as the native preview's selection box.
     selection: Mutex<Option<ItemId>>,
 }
@@ -46,6 +52,7 @@ impl NativePreviewState {
             rect: Mutex::new(Bounds::default()),
             rect_gen: AtomicU64::new(0),
             visible: AtomicBool::new(false),
+            viable: AtomicBool::new(false),
             selection: Mutex::new(None),
         }
     }
@@ -109,13 +116,28 @@ impl NativePreviewState {
         self.visible.load(Ordering::Relaxed)
     }
 
+    /// Whether the native GPU preview is viable (DX12 + overlay + not failed).
+    /// The UI hides its JPEG canvas only when this is true, so a non-DX12
+    /// machine or a lost surface transparently keeps the JPEG fallback.
+    pub fn is_viable(&self) -> bool {
+        self.viable.load(Ordering::Relaxed)
+    }
+
+    /// The render thread reports whether the native path is currently viable
+    /// (set once it knows the backend; cleared on a surface build/present error).
+    pub fn set_viable(&self, viable: bool) {
+        self.viable.store(viable, Ordering::Relaxed);
+    }
+
     /// The render thread's reconcile key: the current region + its generation.
+    /// Read the generation *while still holding the rect lock* so the pair is
+    /// always consistent — `set_region` bumps the generation under the same lock.
     pub fn region(&self) -> (u64, Bounds) {
-        let rect = *self
+        let rect = self
             .rect
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (self.rect_gen.load(Ordering::Acquire), rect)
+        (self.rect_gen.load(Ordering::Acquire), *rect)
     }
 
     /// The UI reported a new preview region (position/size in physical px) and
@@ -127,8 +149,10 @@ impl NativePreviewState {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             *rect = bounds;
+            // Bump the generation under the same lock so `region()` can never
+            // pair a new generation with stale bounds (torn read).
+            self.rect_gen.fetch_add(1, Ordering::Release);
         }
-        self.rect_gen.fetch_add(1, Ordering::Release);
         self.visible.store(visible, Ordering::Relaxed);
         if let Some(overlay) = self.lock_overlay().as_ref() {
             overlay.set_bounds(bounds);

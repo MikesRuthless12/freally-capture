@@ -221,13 +221,16 @@ pub fn native_preview_set_region(
     );
 }
 
-/// Whether the native preview surface is active (Windows + created OK). When
-/// true the UI hides its JPEG `<canvas>` — the native window paints the region.
+/// Whether the native preview surface is **viable** — the compositor is on the
+/// DX12 backend, the DirectComposition overlay was created, and no runtime
+/// surface failure has knocked it out. Only then does the UI hide its JPEG
+/// `<canvas>`; a non-DX12 GPU or a lost surface reports `false` so the UI keeps
+/// the JPEG fallback (the UI re-polls this, so a mid-session drop is caught).
 #[tauri::command]
 pub fn native_preview_active(
     state: tauri::State<'_, crate::native_preview::NativePreviewState>,
 ) -> bool {
-    state.composition_handle().is_some()
+    state.is_viable()
 }
 
 /// The UI reports which scene item is selected, so the native preview can draw

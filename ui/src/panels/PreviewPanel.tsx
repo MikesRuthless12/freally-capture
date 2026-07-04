@@ -104,14 +104,20 @@ export function PreviewPanel({
     return () => observer.disconnect();
   }, [programW, programH]);
 
-  // Is the native GPU preview surface available? (Windows + created.)
+  // Is the native GPU preview viable? (Windows DX12 + overlay, not failed.) It
+  // can flip false mid-session (surface build error, device lost), so re-poll
+  // rather than checking once — when it drops, the JPEG canvas + poll return.
   useEffect(() => {
     let alive = true;
-    nativePreviewActive()
-      .then((on) => alive && setNativeActive(on))
-      .catch(() => alive && setNativeActive(false));
+    const poll = () =>
+      nativePreviewActive()
+        .then((on) => alive && setNativeActive(on))
+        .catch(() => alive && setNativeActive(false));
+    void poll();
+    const timer = setInterval(poll, 1000);
     return () => {
       alive = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -139,12 +145,22 @@ export function PreviewPanel({
     };
     report();
     const timer = setInterval(report, 150);
+    // Only stop the interval here — do NOT hide the region. This effect re-runs
+    // on every `box` change (a resize spawns a new box object each tick), and
+    // hiding on each re-run flashes the native preview blank. The hide lives in
+    // the deactivate/unmount effect below, which only fires when nativeActive flips.
+    return () => clearInterval(timer);
+  }, [nativeActive, box, running, emptyScene]);
+
+  // Hide the native overlay when it stops being viable or the panel unmounts,
+  // decoupled from per-layout reporting so an ordinary resize never flashes it.
+  useEffect(() => {
+    if (!nativeActive) return;
     return () => {
-      clearInterval(timer);
       lastRegion.current = "";
       void nativePreviewSetRegion(0, 0, 0, 0, false).catch(() => undefined);
     };
-  }, [nativeActive, box, running, emptyScene]);
+  }, [nativeActive]);
 
   // Tell the native surface which item is selected, so it can draw the box +
   // handles *into* the GPU frame (they're hidden under the opaque surface).
@@ -253,6 +269,15 @@ export function PreviewPanel({
     },
     [selected, selectedGeometry, displayScale],
   );
+
+  // Restore the move affordance the instant an item is selected (keyboard, or a
+  // click that doesn't move) — updateDrag refines the per-handle cursor on the
+  // first pointer move. Keyed on the item id only, so an ordinary scene tick
+  // never resets a hovered handle cursor out from under the pointer.
+  useEffect(() => {
+    setHoverCursor(selected && !selected.locked ? "move" : "default");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItem]);
 
   // -- pointer interactions ---------------------------------------------------
 

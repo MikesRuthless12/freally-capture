@@ -421,7 +421,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // with no readback. `None` while unsupported/uncreated; `disabled` stops
     // retrying after a creation failure so it can't spin.
     let mut native_surface: Option<(fcap_compositor::NativePreview, u64)> = None;
-    let mut native_disabled = false;
+    // The native GPU preview needs the DX12 backend (DirectComposition only
+    // accepts DirectX swapchains); on any other adapter it stays disabled and
+    // the JPEG path renders.
+    let mut native_disabled = !compositor.is_dx12();
+    {
+        // Tell the UI up front whether the native path is viable, so a non-DX12
+        // machine (or a missing overlay) never hides its JPEG canvas over a
+        // surface that can never present.
+        let native = app.state::<crate::native_preview::NativePreviewState>();
+        native.set_viable(!native_disabled && native.composition_handle().is_some());
+    }
 
     loop {
         let tick_started = Instant::now();
@@ -732,6 +742,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                      falling back to the JPEG preview"
                                 );
                                 native_disabled = true;
+                                native.set_viable(false);
                             }
                         },
                         Some((surface, seen_gen)) => {
@@ -754,6 +765,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 eprintln!("studio: native present failed ({err})");
                                 native_disabled = true;
                                 native_surface = None;
+                                native.set_viable(false);
                             }
                         }
                     }

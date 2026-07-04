@@ -181,15 +181,32 @@ fn run(
     }
 }
 
-/// Open a camera, start streaming, and prove it streams by pulling one frame —
-/// the first frame is where an unsupported format errors (e.g. MSMF
-/// `0xC00D36D5` on a resolution the camera advertises but can't deliver).
+/// How many first-frame attempts a format gets before it is judged
+/// unstreamable. Many cameras drop the first frame or two while the sensor
+/// warms up, so a single failure must not condemn the user's chosen format —
+/// only a *persistent* one (a truly unsupported mode, e.g. MSMF `0xC00D36D5`).
+const WARMUP_FRAME_ATTEMPTS: usize = 8;
+const WARMUP_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Open a camera, start streaming, and prove it streams by pulling a frame. The
+/// first frame is where an unsupported format errors — but a warming-up camera
+/// can also drop its first frame(s), so retry briefly before rejecting the
+/// format, so a transient blip never silently downgrades the requested mode.
 fn try_stream(index: &CameraIndex, requested: RequestedFormatType) -> Result<Camera, CaptureError> {
     let mut camera = Camera::new(index.clone(), RequestedFormat::new::<RgbAFormat>(requested))
         .map_err(backend_error)?;
     camera.open_stream().map_err(backend_error)?;
-    camera.frame().map_err(backend_error)?;
-    Ok(camera)
+    let mut last = None;
+    for _ in 0..WARMUP_FRAME_ATTEMPTS {
+        match camera.frame() {
+            Ok(_) => return Ok(camera),
+            Err(err) => last = Some(err),
+        }
+        std::thread::sleep(WARMUP_RETRY_DELAY);
+    }
+    Err(backend_error(
+        last.expect("the warmup loop runs at least once"),
+    ))
 }
 
 /// Bring a camera up on the requested format, falling back through

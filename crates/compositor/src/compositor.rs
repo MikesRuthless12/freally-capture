@@ -449,28 +449,18 @@ impl Compositor {
 
     // -- native preview surface (the "OBS feel" path) -----------------------
 
-    /// Create a [`NativePreview`] surface on `window` (the child window the
-    /// app placed over the preview region), sharing this compositor's device.
-    pub fn create_native_preview<W>(
-        &self,
-        window: W,
-        width: u32,
-        height: u32,
-    ) -> Result<crate::NativePreview, CompositorError>
-    where
-        W: raw_window_handle::HasWindowHandle
-            + raw_window_handle::HasDisplayHandle
-            + Send
-            + Sync
-            + 'static,
-    {
-        crate::NativePreview::new(&self.gpu, window, width, height)
-    }
-
     /// The wgpu instance this compositor's device came from — the
     /// DirectComposition overlay builds its surface against the same adapter.
     pub fn instance(&self) -> &wgpu::Instance {
         &self.gpu.instance
+    }
+
+    /// True when the compositor is on the DX12 backend — the only backend that
+    /// can build a DirectComposition `CompositionVisual` surface. The app gates
+    /// the native preview on this so a non-DX12 machine stays on the JPEG path
+    /// instead of advertising a native surface it can never present.
+    pub fn is_dx12(&self) -> bool {
+        self.gpu.is_dx12
     }
 
     /// Create a [`NativePreview`] from a surface the caller already built (the
