@@ -45,7 +45,7 @@ jobs:
         # WebKitGTK window never receives the map/expose events it needs to
         # paint, so the root capture comes back pure black. x11-utils gives us
         # xwininfo for the diagnostic dump below.
-        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -107,11 +107,22 @@ jobs:
           sleep 2
           ./target/release/freally-capture &
           APP_PID=$!
-          sleep 25
-          # Diagnostic: what actually mapped on the display (helps if still blank).
-          echo "--- xwininfo -root -tree (top 40 lines) ---"
-          xwininfo -root -tree 2>&1 | head -40 || true
-          echo "-------------------------------------------"
+          # Under headless GTK the window comes up collapsed to ~10x10 (the
+          # configured 1280x800 isn't honoured without a real display), so the
+          # capture is almost all root background. Give it a moment to map, then
+          # force it to fill the screen — that size-allocate makes WebKitGTK lay
+          # out and paint the full UI — and let it repaint before the grab.
+          sleep 12
+          WIN=$(xdotool search --class '[Ff]really' 2>/dev/null | head -1 || true)
+          echo "app window id: ${WIN:-<none>}"
+          if [ -n "$WIN" ]; then
+            xdotool windowsize "$WIN" 1600 1000
+            xdotool windowmove "$WIN" 0 0
+            xdotool windowactivate "$WIN" 2>/dev/null || true
+          fi
+          sleep 10
+          echo "--- xwininfo (freally window after resize) ---"
+          xwininfo -root -tree 2>&1 | grep -i freally || true
           import -window root screenshot-linux.png || echo "import failed"
           kill $APP_PID 2>/dev/null || true
           ls -la screenshot-linux.png || true
