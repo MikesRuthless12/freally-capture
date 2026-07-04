@@ -79,6 +79,14 @@ jobs:
 
       - name: Launch + screenshot (Linux, Xvfb)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          # WebKitGTK paints a black window under Xvfb (no GPU / DRM device)
+          # unless its DMABUF / accelerated-compositing path is disabled — force
+          # the software renderer so the webview actually draws. LIBGL_ALWAYS_
+          # SOFTWARE steers wgpu + GL to the software rasterizer (lavapipe) too.
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
