@@ -57,7 +57,10 @@ jobs:
         # openbox: a minimal window manager so the app window is managed + mapped
         # under Xvfb. xdotool locates + sizes it (headless GTK brings the window
         # up collapsed at ~10x10); x11-utils' xwininfo logs the geometry.
-        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool
+        # mesa-vulkan-drivers (lavapipe) + libgl1-mesa-dri give wgpu a *software*
+        # GPU adapter — without one the headless runner has no GPU at all and the
+        # compositor's request_adapter hangs, so the native preview never runs.
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool mesa-vulkan-drivers libgl1-mesa-dri
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
