@@ -15,7 +15,11 @@ use std::sync::Mutex;
 
 use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
 use fcap_scene::ItemId;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
+// `Manager` (for `app.state` / `app.get_webview_window`) is only needed by the
+// Windows overlay bring-up in `try_create`; importing it off Windows is unused.
+#[cfg(windows)]
+use tauri::Manager;
 
 /// Tauri-managed native-preview state, shared main-thread ↔ render-thread.
 pub struct NativePreviewState {
@@ -53,6 +57,9 @@ impl NativePreviewState {
     }
 
     /// Install the overlay + its composition handle (main thread, in setup).
+    /// Windows-only: the overlay is only ever constructed on Windows
+    /// (`try_create`); off Windows the app keeps the JPEG path and installs none.
+    #[cfg(windows)]
     pub fn install(&self, overlay: CompositionOverlay, handle: CompositionHandle) {
         *self
             .handle
