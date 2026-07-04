@@ -116,7 +116,10 @@ jobs:
           # openbox manages + maps the window (without a WM it isn't managed).
           openbox &
           sleep 2
-          ./target/release/freally-capture &
+          # Capture stdout/stderr to a file (line-buffered via stdbuf) so the
+          # native-preview diagnostics survive the kill and can be cat'd — a
+          # plain pipe loses them to block buffering.
+          stdbuf -oL -eL ./target/release/freally-capture >/tmp/fcap.log 2>&1 &
           APP_PID=$!
           # Headless GTK brings the window up collapsed at ~10x10; give it a
           # moment to map, then size it to the screen so the (documentary)
@@ -130,10 +133,12 @@ jobs:
             xdotool windowactivate "$WIN" 2>/dev/null || true
           fi
           sleep 6
-          echo "--- xwininfo (freally window) ---"
-          xwininfo -root -tree 2>&1 | grep -i freally || true
-          # Capture for the record (expected black — WebKitGTK doesn't paint
-          # headless); the upload step keeps it either way.
+          echo "=== fcap app log (native-preview diagnostics) ==="
+          cat /tmp/fcap.log 2>/dev/null || echo "(no app log)"
+          echo "--- xwininfo (freally window + its child windows) ---"
+          xwininfo -root -tree 2>&1 | sed -n '/freally-capture/,+6p' || true
+          # Capture for the record: WebKitGTK stays black headless, but the
+          # native X11 surface should paint magenta if it worked.
           import -window root screenshot-linux.png || echo "import failed"
           # -- Linux gate: assert what is reliably observable headless ----------
           # No pixel check here (WebKitGTK won't render under Xvfb). Fail only if
