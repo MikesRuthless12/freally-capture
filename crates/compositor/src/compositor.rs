@@ -463,6 +463,15 @@ impl Compositor {
         self.gpu.is_dx12
     }
 
+    /// True when the compositor is on the Metal backend — the backend that can
+    /// build a `CoreAnimationLayer` (CAMetalLayer) surface for the macOS native
+    /// preview. The app gates the native preview on DX12-or-Metal so other
+    /// backends stay on the JPEG path instead of advertising an unpresentable
+    /// native surface.
+    pub fn is_metal(&self) -> bool {
+        self.gpu.is_metal
+    }
+
     /// Create a [`NativePreview`] from a surface the caller already built (the
     /// DirectComposition overlay path in `fcap-preview`), sharing this
     /// compositor's device.

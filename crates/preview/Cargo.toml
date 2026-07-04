@@ -18,9 +18,9 @@ tracing = { workspace = true }
 # unsafe CompositionVisual target), then hands the Surface to fcap-compositor.
 wgpu = { workspace = true }
 
-# Windows: the child HWND is created + positioned here (the only place this
-# crate uses `unsafe`, in a small audited module). macOS/Linux get honest
-# stubs so the app falls back to the JPEG preview:// path there.
+# Windows: the DirectComposition overlay + child surface are created here (one
+# of the two places this crate uses `unsafe`, in a small audited module). Linux
+# still gets the honest stub so the app falls back to the JPEG preview:// path.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",
@@ -33,3 +33,12 @@ windows = { workspace = true, features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# macOS: a CAMetalLayer composited above the WKWebView (wgpu `CoreAnimationLayer`,
+# zero-copy) — the analog of the Windows DComp visual. All AppKit / Core Animation
+# `unsafe` is isolated in `mac_metal` via raw `objc2` message sends; CGRect &c.
+# come from objc2-core-foundation (the `objc2` feature provides the Encode impls
+# raw msg_send needs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-core-foundation = { workspace = true, features = ["objc2", "CFCGTypes"] }

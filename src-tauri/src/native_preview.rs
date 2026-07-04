@@ -17,8 +17,9 @@ use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
 use fcap_scene::ItemId;
 use tauri::{AppHandle, Runtime};
 // `Manager` (for `app.state` / `app.get_webview_window`) is only needed by the
-// Windows overlay bring-up in `try_create`; importing it off Windows is unused.
-#[cfg(windows)]
+// native overlay bring-up in `try_create` (Windows + macOS); importing it on
+// Linux is unused.
+#[cfg(any(windows, target_os = "macos"))]
 use tauri::Manager;
 
 /// Tauri-managed native-preview state, shared main-thread ↔ render-thread.
@@ -64,9 +65,9 @@ impl NativePreviewState {
     }
 
     /// Install the overlay + its composition handle (main thread, in setup).
-    /// Windows-only: the overlay is only ever constructed on Windows
-    /// (`try_create`); off Windows the app keeps the JPEG path and installs none.
-    #[cfg(windows)]
+    /// Windows + macOS only: the overlay is only ever constructed there
+    /// (`try_create`); on Linux the app keeps the JPEG path and installs none.
+    #[cfg(any(windows, target_os = "macos"))]
     pub fn install(&self, overlay: CompositionOverlay, handle: CompositionHandle) {
         *self
             .handle
@@ -167,10 +168,10 @@ impl Default for NativePreviewState {
     }
 }
 
-/// Create the native preview DirectComposition overlay (main thread, in setup)
-/// and install it into [`NativePreviewState`]. Any failure — or a non-Windows
-/// OS — is logged honestly and leaves the state empty, so the app keeps the
-/// JPEG `preview://` path.
+/// Create the native preview overlay (main thread, in setup) — a
+/// DirectComposition visual on Windows, a `CAMetalLayer` on macOS — and install
+/// it into [`NativePreviewState`]. Any failure — or Linux — is logged honestly
+/// and leaves the state empty, so the app keeps the JPEG `preview://` path.
 pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(windows)]
     {
@@ -196,7 +197,31 @@ pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
             }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let Some(window) = app.get_webview_window("main") else {
+            eprintln!("native preview: no main window — using the JPEG preview");
+            return;
+        };
+        let parent = match window.ns_window() {
+            Ok(ptr) => ptr as isize,
+            Err(err) => {
+                eprintln!("native preview: no NSWindow ({err}) — using the JPEG preview");
+                return;
+            }
+        };
+        match CompositionOverlay::create(parent, Bounds::default()) {
+            Ok(overlay) => {
+                let handle = overlay.handle();
+                app.state::<NativePreviewState>().install(overlay, handle);
+                println!("native preview: CAMetalLayer overlay created (GPU surface path)");
+            }
+            Err(err) => {
+                eprintln!("native preview unavailable ({err}) — using the JPEG preview")
+            }
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = app; // JPEG preview path only
     }

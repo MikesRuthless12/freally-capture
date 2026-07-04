@@ -24,6 +24,9 @@ pub struct Gpu {
     /// True when the device is the DX12 backend — the DirectComposition
     /// preview path is only possible then.
     pub is_dx12: bool,
+    /// True when the device is the Metal backend — the macOS native preview
+    /// composites a `CAMetalLayer` (wgpu `CoreAnimationLayer`) over the WKWebView.
+    pub is_metal: bool,
 }
 
 impl Gpu {
@@ -42,6 +45,7 @@ impl Gpu {
 
         let info = adapter.get_info();
         let is_dx12 = info.backend == wgpu::Backend::Dx12;
+        let is_metal = info.backend == wgpu::Backend::Metal;
         let adapter_summary = format!(
             "{} ({:?}, {:?})",
             if info.name.is_empty() {
@@ -74,6 +78,7 @@ impl Gpu {
             queue,
             adapter_summary,
             is_dx12,
+            is_metal,
         })
     }
 
