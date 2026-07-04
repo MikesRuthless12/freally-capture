@@ -113,6 +113,17 @@ impl WinDCompOverlay {
             let _ = self.device.Commit();
         }
     }
+
+    /// Commit the composition tree. The render thread calls this right after
+    /// wgpu binds the swapchain to the visual (`SetContent`) — without it the
+    /// new content is not composited until the next geometry change.
+    pub fn commit(&self) {
+        // SAFETY: `device` is live; serialized against the other DComp calls by
+        // the app's overlay mutex.
+        unsafe {
+            let _ = self.device.Commit();
+        }
+    }
 }
 
 impl Drop for WinDCompOverlay {

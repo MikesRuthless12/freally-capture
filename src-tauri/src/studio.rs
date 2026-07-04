@@ -722,6 +722,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                     bounds.width, bounds.height, bounds.x, bounds.y
                                 );
                                 native_surface = Some((surface, gen));
+                                // wgpu just bound the swapchain to the visual;
+                                // commit so DComp composites it immediately, not
+                                // only after the next resize.
+                                native.commit();
                             }
                             Err(err) => {
                                 eprintln!(

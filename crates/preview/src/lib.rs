@@ -295,6 +295,14 @@ impl CompositionOverlay {
         #[cfg(not(target_os = "windows"))]
         let _ = visible;
     }
+
+    /// Commit the composition tree — call once after the surface is created so
+    /// wgpu's `SetContent` is composited (else the visual stays blank until the
+    /// next geometry change).
+    pub fn commit(&self) {
+        #[cfg(target_os = "windows")]
+        self.inner.commit();
+    }
 }
 
 /// This crate's version (inherited from the workspace).

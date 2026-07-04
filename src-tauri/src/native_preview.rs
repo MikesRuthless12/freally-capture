@@ -65,6 +65,15 @@ impl NativePreviewState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Commit the overlay's composition tree — the render thread calls this
+    /// right after building the surface, so wgpu's `SetContent` is composited
+    /// (otherwise the visual stays blank until the next region change).
+    pub fn commit(&self) {
+        if let Some(overlay) = self.lock_overlay().as_ref() {
+            overlay.commit();
+        }
+    }
+
     /// Whether the region is currently visible (the render thread only presents
     /// while it is — a hidden overlay has nothing to show).
     pub fn is_visible(&self) -> bool {
