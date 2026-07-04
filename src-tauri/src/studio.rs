@@ -202,7 +202,7 @@ impl StudioState {
 /// (the same on every OS — the native surface was only ever proven interactively
 /// on real hardware). A no-op unless the env var is set; never touches normal use.
 pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
-    use fcap_scene::{Rgba, Source, SourceSettings};
+    use fcap_scene::{Rgba, Source, SourceSettings, Transform};
 
     let studio = app.state::<StudioState>();
     let seeded = studio.mutate(app, |collection| {
@@ -215,9 +215,21 @@ pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
                 height: 1080,
             },
         );
-        collection
-            .add_item_with_new_source(scene_id, magenta)
-            .map(|(_source_id, item_id)| item_id)
+        let (_source_id, item_id) = collection.add_item_with_new_source(scene_id, magenta)?;
+        // Resize to a centered ~55% box (mimics a manual resize). A full-canvas
+        // item pushes the selection box + handles to the surface edges and the
+        // rotate handle above the top edge — all clipped; a smaller centered box
+        // keeps the whole overlay on-screen. This also clears `pending_fit`, so
+        // the first-frame auto-fit won't overwrite it back to fill-canvas.
+        let transform = Transform {
+            x: 960.0,
+            y: 540.0,
+            scale_x: 0.55,
+            scale_y: 0.55,
+            ..Default::default()
+        };
+        collection.set_item_transform(scene_id, item_id, transform)?;
+        Ok(item_id)
     });
 
     let native = app.state::<crate::native_preview::NativePreviewState>();
