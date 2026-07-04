@@ -60,7 +60,7 @@ jobs:
         # mesa-vulkan-drivers (lavapipe) + libgl1-mesa-dri give wgpu a *software*
         # GPU adapter — without one the headless runner has no GPU at all and the
         # compositor's request_adapter hangs, so the native preview never runs.
-        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool mesa-vulkan-drivers libgl1-mesa-dri
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool mesa-vulkan-drivers libgl1-mesa-dri dbus-x11
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -115,6 +115,10 @@ jobs:
           # Surface wgpu's adapter/surface diagnostics (env_logger reads this) so
           # a hanging/failing Compositor::new shows *why* in /tmp/fcap.log.
           RUST_LOG: "info,wgpu_core=info,wgpu_hal=debug"
+          # WebKitGTK's WebView creation blocks in tauri build() on the bare
+          # runner: it wants a D-Bus session (below, dbus-run-session) and the
+          # a11y bridge (org.a11y.Bus) which isn't there — disable the bridge.
+          NO_AT_BRIDGE: "1"
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
@@ -122,10 +126,10 @@ jobs:
           # openbox manages + maps the window (without a WM it isn't managed).
           openbox &
           sleep 2
-          # Capture stdout/stderr to a file (line-buffered via stdbuf) so the
-          # native-preview diagnostics survive the kill and can be cat'd — a
-          # plain pipe loses them to block buffering.
-          stdbuf -oL -eL ./target/release/freally-capture >/tmp/fcap.log 2>&1 &
+          # Run under a private D-Bus session so WebKitGTK's WebView creation
+          # completes (it otherwise blocks in tauri build() on the bare runner).
+          # stdbuf line-buffers so the log survives the kill.
+          dbus-run-session -- stdbuf -oL -eL ./target/release/freally-capture >/tmp/fcap.log 2>&1 &
           APP_PID=$!
           # Headless GTK brings the window up collapsed at ~10x10; give it a
           # moment to map, then size it to the screen so the (documentary)
