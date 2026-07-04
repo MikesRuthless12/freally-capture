@@ -29,6 +29,14 @@ use thiserror::Error;
 
 #[cfg(target_os = "windows")]
 mod win;
+#[cfg(target_os = "windows")]
+mod win_dcomp;
+
+/// The DirectComposition overlay + its Send composition handle — the native
+/// preview surface hosted *above* WebView2 (Windows only). The app falls back
+/// to the child window / JPEG path if this fails or off Windows.
+#[cfg(target_os = "windows")]
+pub use win_dcomp::{CompositionHandle, WinDCompOverlay as CompositionOverlay};
 
 /// A rectangle in **physical pixels**, relative to the parent window's client
 /// area — the preview region the webview reserves.
