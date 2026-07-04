@@ -205,7 +205,7 @@ pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
     use fcap_scene::{Rgba, Source, SourceSettings};
 
     let studio = app.state::<StudioState>();
-    if let Err(err) = studio.mutate(app, |collection| {
+    let seeded = studio.mutate(app, |collection| {
         let scene_id = collection.active_scene().id;
         let magenta = Source::new(
             "Smoke Magenta",
@@ -217,26 +217,31 @@ pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
         );
         collection
             .add_item_with_new_source(scene_id, magenta)
-            .map(|_| ())
-    }) {
-        eprintln!("smoke: could not seed the magenta scene: {err}");
-    }
+            .map(|(_source_id, item_id)| item_id)
+    });
 
+    let native = app.state::<crate::native_preview::NativePreviewState>();
     // Force the preview region on (physical px, parent-client top-left) so the
     // studio thread builds + presents the native surface. A large central rect
     // that stays visible at 1x or 2x backing scale — exact placement doesn't
     // matter here; the "surface created" log line + a magenta frame are the proof.
-    app.state::<crate::native_preview::NativePreviewState>()
-        .set_region(
-            fcap_preview::Bounds {
-                x: 100,
-                y: 100,
-                width: 1000,
-                height: 600,
-            },
-            true,
-        );
-    println!("smoke: seeded magenta scene + forced the native preview region on");
+    native.set_region(
+        fcap_preview::Bounds {
+            x: 100,
+            y: 100,
+            width: 1000,
+            height: 600,
+        },
+        true,
+    );
+    match seeded {
+        // Select the seeded item so the selection box + corner/edge handles + the
+        // rotate handle draw *into* the native GPU frame (NP.3b) — proving the
+        // interactive overlay on the surface, not just the surface itself.
+        Ok(item_id) => native.set_selection(Some(item_id)),
+        Err(err) => eprintln!("smoke: could not seed the magenta scene: {err}"),
+    }
+    println!("smoke: seeded + selected the magenta scene, forced the preview region on");
 }
 
 /// One audio source the engine should run (see [`StudioState::audio_specs`]).
