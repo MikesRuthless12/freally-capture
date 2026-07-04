@@ -488,8 +488,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // the JPEG path renders.
     // The native preview needs a backend whose swapchain the OS compositor
     // accepts: DX12 for the Windows DirectComposition visual, Metal for the
-    // macOS CAMetalLayer. Any other backend stays on the JPEG path.
-    let mut native_disabled = !(compositor.is_dx12() || compositor.is_metal());
+    // macOS CAMetalLayer, Vulkan/GL for the Linux X11 child window. Anything
+    // else stays on the JPEG path.
+    let mut native_disabled =
+        !(compositor.is_dx12() || compositor.is_metal() || compositor.is_vulkan_or_gl());
     {
         // Tell the UI up front whether the native path is viable, so a non-DX12
         // machine (or a missing overlay) never hides its JPEG canvas over a

@@ -27,6 +27,10 @@ pub struct Gpu {
     /// True when the device is the Metal backend — the macOS native preview
     /// composites a `CAMetalLayer` (wgpu `CoreAnimationLayer`) over the WKWebView.
     pub is_metal: bool,
+    /// True on the Vulkan or GL backend — the Linux native preview renders into
+    /// an X11 child window (wgpu `RawHandle`) raised over the WebKitGTK widget.
+    /// (Windows/macOS prefer DX12/Metal, so this stays false there.)
+    pub is_vulkan_or_gl: bool,
 }
 
 impl Gpu {
@@ -46,6 +50,7 @@ impl Gpu {
         let info = adapter.get_info();
         let is_dx12 = info.backend == wgpu::Backend::Dx12;
         let is_metal = info.backend == wgpu::Backend::Metal;
+        let is_vulkan_or_gl = matches!(info.backend, wgpu::Backend::Vulkan | wgpu::Backend::Gl);
         let adapter_summary = format!(
             "{} ({:?}, {:?})",
             if info.name.is_empty() {
@@ -79,6 +84,7 @@ impl Gpu {
             adapter_summary,
             is_dx12,
             is_metal,
+            is_vulkan_or_gl,
         })
     }
 

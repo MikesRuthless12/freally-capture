@@ -76,6 +76,7 @@ dispatch2 = "0.3"
 ashpd = { version = "0.13", features = ["screencast"] } # Linux: ScreenCast portal (tokio by default)
 pipewire = "0.10"       # Linux: consume the portal's PipeWire video stream
 x11rb = "0.13"          # Linux: the X11 capture path
+x11-dl = "2"            # Linux: the native-preview X11 child window (fcap-preview)
 nokhwa = "0.10"         # webcam / capture card
 jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)
 

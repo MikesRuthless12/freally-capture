@@ -472,6 +472,14 @@ impl Compositor {
         self.gpu.is_metal
     }
 
+    /// True on the Vulkan or GL backend — the Linux native preview renders into
+    /// an X11 child window (wgpu `RawHandle`). Gated alongside `is_dx12` /
+    /// `is_metal` so only a backend whose surface the OS can composite over the
+    /// webview advertises the native path.
+    pub fn is_vulkan_or_gl(&self) -> bool {
+        self.gpu.is_vulkan_or_gl
+    }
+
     /// Create a [`NativePreview`] from a surface the caller already built (the
     /// DirectComposition overlay path in `fcap-preview`), sharing this
     /// compositor's device.

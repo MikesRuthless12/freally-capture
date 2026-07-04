@@ -1488,6 +1488,7 @@ dependencies = [
  "tracing",
  "wgpu",
  "windows 0.58.0",
+ "x11-dl",
 ]
 
 [[package]]
@@ -1685,6 +1686,7 @@ dependencies = [
  "fcap-sources",
  "fcap-stream",
  "jpeg-encoder",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",

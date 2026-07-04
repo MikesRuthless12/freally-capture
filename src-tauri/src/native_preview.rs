@@ -17,9 +17,8 @@ use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
 use fcap_scene::ItemId;
 use tauri::{AppHandle, Runtime};
 // `Manager` (for `app.state` / `app.get_webview_window`) is only needed by the
-// native overlay bring-up in `try_create` (Windows + macOS); importing it on
-// Linux is unused.
-#[cfg(any(windows, target_os = "macos"))]
+// native overlay bring-up in `try_create` (Windows, macOS, Linux/X11).
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 use tauri::Manager;
 
 /// Tauri-managed native-preview state, shared main-thread ↔ render-thread.
@@ -65,9 +64,9 @@ impl NativePreviewState {
     }
 
     /// Install the overlay + its composition handle (main thread, in setup).
-    /// Windows + macOS only: the overlay is only ever constructed there
-    /// (`try_create`); on Linux the app keeps the JPEG path and installs none.
-    #[cfg(any(windows, target_os = "macos"))]
+    /// Windows, macOS, and Linux/X11 construct the overlay in `try_create`; where
+    /// it fails (or on Wayland) the app keeps the JPEG path and installs none.
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     pub fn install(&self, overlay: CompositionOverlay, handle: CompositionHandle) {
         *self
             .handle
@@ -169,9 +168,10 @@ impl Default for NativePreviewState {
 }
 
 /// Create the native preview overlay (main thread, in setup) — a
-/// DirectComposition visual on Windows, a `CAMetalLayer` on macOS — and install
-/// it into [`NativePreviewState`]. Any failure — or Linux — is logged honestly
-/// and leaves the state empty, so the app keeps the JPEG `preview://` path.
+/// DirectComposition visual on Windows, a `CAMetalLayer` on macOS, an X11 child
+/// window on Linux — and install it into [`NativePreviewState`]. Any failure —
+/// or Wayland — is logged honestly and leaves the state empty, so the app keeps
+/// the JPEG `preview://` path.
 pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(windows)]
     {
@@ -221,7 +221,40 @@ pub fn try_create<R: Runtime>(app: &AppHandle<R>) {
             }
         }
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let Some(window) = app.get_webview_window("main") else {
+            eprintln!("native preview: no main window — using the JPEG preview");
+            return;
+        };
+        // The Tauri window's X11 id (Xlib). On Wayland the handle is Wayland-
+        // shaped, so keep the JPEG path there (an X11 child window doesn't apply).
+        let parent = match window.window_handle() {
+            Ok(handle) => match handle.as_raw() {
+                RawWindowHandle::Xlib(xlib) => xlib.window as isize,
+                _ => {
+                    eprintln!("native preview: not X11 (Wayland?) — using the JPEG preview");
+                    return;
+                }
+            },
+            Err(err) => {
+                eprintln!("native preview: no window handle ({err}) — using the JPEG preview");
+                return;
+            }
+        };
+        match CompositionOverlay::create(parent, Bounds::default()) {
+            Ok(overlay) => {
+                let handle = overlay.handle();
+                app.state::<NativePreviewState>().install(overlay, handle);
+                println!("native preview: X11 child window created (GPU surface path)");
+            }
+            Err(err) => {
+                eprintln!("native preview unavailable ({err}) — using the JPEG preview")
+            }
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         let _ = app; // JPEG preview path only
     }
