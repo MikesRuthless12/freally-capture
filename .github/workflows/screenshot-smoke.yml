@@ -8,12 +8,14 @@
 #   * Windows + macOS: capture the screen and ASSERT the frame isn't blank (the
 #     `screenshot_check` example fails the job on a missing / uniform-black
 #     capture). Both genuinely render the full UI, so this is a real pixel gate.
-#   * Linux: WebKitGTK does NOT software-render its web content under headless
-#     Xvfb (no GPU/DRM — the frame stays black however the env is tuned), so a
-#     pixel gate can't apply. Instead assert the reliably-observable facts: the
-#     app launches, stays up, and maps a correctly-created window. Real Linux
-#     visual proof arrives with NP.5's native (lavapipe) Vulkan surface, which
-#     renders independently of WebKitGTK.
+#   * Linux: NP.5's native (lavapipe) Vulkan surface renders independently of
+#     WebKitGTK, so the pixel gate here asserts the seeded scene's *magenta*
+#     actually painted (`screenshot_check --expect-magenta`) — direct proof the
+#     native surface presented — on top of the alive + window-mapped checks the
+#     app step makes. (With the software GL driver installed below, WebKitGTK now
+#     software-renders the surrounding UI too, so the capture shows the full
+#     studio; but the enforced gate is the magenta — what NP.5 owns, and
+#     deterministic regardless of WebKitGTK's headless behaviour.)
 #
 # Runs on demand and on the native-preview branch. CI runners have no discrete
 # GPU (software rasterizer: WARP / lavapipe), so this proves the app boots +
@@ -102,11 +104,11 @@ jobs:
       - name: Launch + verify the window maps + screenshot (Linux, Xvfb)
         if: matrix.os == 'ubuntu-latest'
         env:
-          # Best-effort software-render hints. NOTE: even with all of these,
-          # WebKitGTK does not software-render its web content under headless
-          # Xvfb on the runners (no GPU/DRM) — the captured frame stays black.
-          # So Linux does NOT assert non-blank pixels (Windows + macOS do); it
-          # asserts the app launches and maps its window (see the gate below).
+          # Software-render hints for WebKitGTK. With the software GL driver
+          # (libgl1-mesa-dri, installed above) these now let WebKitGTK render its
+          # web content under headless Xvfb, so the captured frame shows the full
+          # UI. The *enforced* Linux gate, though, is the native surface's magenta
+          # (see the assert step) — deterministic regardless of WebKitGTK.
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -147,14 +149,15 @@ jobs:
           cat /tmp/fcap.log 2>/dev/null || echo "(no app log)"
           echo "--- xwininfo (freally window + its child windows) ---"
           xwininfo -root -tree 2>&1 | sed -n '/freally-capture/,+6p' || true
-          # Capture for the record: WebKitGTK stays black headless, but the
-          # native X11 surface should paint magenta if it worked.
+          # Capture the frame: the native X11 surface paints the seeded magenta,
+          # which the assert step below enforces (WebKitGTK renders the UI around
+          # it now too, but the magenta is the gate).
           import -window root screenshot-linux.png || echo "import failed"
-          # -- Linux gate: assert what is reliably observable headless ----------
-          # No pixel check here (WebKitGTK won't render under Xvfb). Fail only if
-          # the app died before capture or never created its top-level window —
-          # that catches a crash-on-launch, a missing system lib, or a GTK/WebKit
-          # init failure, which is the real smoke signal this job can give.
+          # -- Linux liveness checks (precise diagnostics before the pixel gate) -
+          # Fail fast with a specific message if the app died before capture or
+          # never created its top-level window — that pinpoints a crash-on-launch,
+          # a missing system lib, or a GTK/WebKit init failure. The magenta pixel
+          # gate (assert step below) then proves the native surface actually painted.
           if ! kill -0 "$APP_PID" 2>/dev/null; then
             echo "FAIL: the app process exited before capture — it did not stay up"
             exit 1
@@ -169,13 +172,13 @@ jobs:
           ls -la screenshot-linux.png || true
 
       # -- assert the frame rendered (the enforced pixel gate) -----------------
-      # Windows + macOS only — both render the full UI. Linux asserts launch +
-      # window-mapped in its own step above (WebKitGTK won't paint headless).
-      # bash runs on both runners (Git Bash on Windows); each matrix job produced
-      # exactly one screenshot-<os>.png. Runs before the upload so a blank frame
+      # All three OSes. Windows + macOS assert the frame isn't blank (full UI).
+      # Linux adds --expect-magenta: assert NP.5's native Vulkan surface actually
+      # painted the seeded magenta (its liveness checks ran in the step above).
+      # bash runs on every runner (Git Bash on Windows); each matrix job produced
+      # exactly one screenshot-<os>.png. Runs before the upload so a bad frame
       # still fails the job *and* keeps its artifact for debugging.
-      - name: Assert the screenshot rendered (not blank)
-        if: matrix.os != 'ubuntu-latest'
+      - name: Assert the screenshot rendered (pixel gate)
         shell: bash
         run: |
           shopt -s nullglob
@@ -184,7 +187,10 @@ jobs:
             echo "screenshot_check: no screenshot was captured — the launch/capture step failed"
             exit 1
           fi
-          cargo run --release -p fcap-sources --example screenshot_check -- "${shots[0]}"
+          # Linux: the native surface's magenta is the proof (WebKitGTK aside).
+          expect=()
+          if [ "$RUNNER_OS" = "Linux" ]; then expect=(--expect-magenta); fi
+          cargo run --release -p fcap-sources --example screenshot_check -- "${shots[0]}" "${expect[@]}"
 
       - name: Upload the screenshot
         if: always()
