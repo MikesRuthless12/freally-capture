@@ -1,0 +1,107 @@
+# Window-enumeration smoke — proves the source picker lists EVERY open window,
+# including MINIMIZED ones, on the platforms the author can't run locally
+# (macOS, Linux/X11). Deliberately SEPARATE from `screenshot-smoke` (the magenta
+# native-preview pixel gate): this exercises `fcap_capture::list_sources()`, not
+# the compositor.
+#
+# Each job opens two known windows, minimizes one, then runs the
+# `window_enum_check` probe, which asserts both titles appear in the enumeration.
+#   * Linux/X11: Xvfb + openbox + two xterms; xdotool minimizes one. openbox keeps
+#     iconified windows in `_NET_CLIENT_LIST`, so both must still list — this is
+#     the full, reliable minimized-window test.
+#   * macOS: two TextEdit documents; a best-effort AppleScript minimize. NOTE:
+#     SCK enumeration needs the Screen-Recording (TCC) permission — if the runner
+#     lacks it, the probe returns PermissionDenied (exit 3) and the job WARNS
+#     rather than fails (an environment limit, not a code defect). Reliably
+#     minimizing in CI is also TCC-gated, so macOS mainly proves the path
+#     compiles + lists windows; Linux carries the minimized assertion.
+#
+# Windows is verified by the author locally, so it is intentionally not in the
+# matrix here.
+name: Window enumeration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-preview, native-preview-wgpu]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  window-enum:
+    name: enumerate windows (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/linux-deps
+      - name: Install X11 test tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        # xvfb: headless X server. openbox: an EWMH window manager so windows are
+        # managed + tracked in _NET_CLIENT_LIST (incl. iconified). xdotool finds +
+        # minimizes them. xterm: two lightweight windows with known titles.
+        run: sudo apt-get update && sudo apt-get install -y xvfb openbox xdotool xterm
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the enumeration probe
+        run: cargo build --release -p fcap-capture --example window_enum_check
+
+      - name: Enumerate incl. a minimized window (Linux/X11)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
+          sleep 3
+          openbox &
+          sleep 2
+          xterm -T "FCAP Alpha Window" -e sleep 900 &
+          xterm -T "FCAP Beta Window" -e sleep 900 &
+          sleep 5
+          # Minimize Beta so we prove an ICONIFIED window is still enumerated.
+          WB=$(xdotool search --name "FCAP Beta Window" | head -1 || true)
+          echo "Beta window id: ${WB:-<none>}"
+          if [ -n "$WB" ]; then xdotool windowminimize "$WB"; sleep 2; fi
+          echo "--- live windows (xdotool) ---"
+          xdotool search --name "FCAP" getwindowname %@ 2>/dev/null || true
+          echo "--- probe (Beta is minimized) ---"
+          ./target/release/examples/window_enum_check --min-windows 2 \
+            --expect "FCAP Alpha Window" --expect "FCAP Beta Window"
+
+      - name: Enumerate incl. a minimized window (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo alpha > "$HOME/FCAP Alpha Window.txt"
+          echo beta  > "$HOME/FCAP Beta Window.txt"
+          open -a TextEdit "$HOME/FCAP Alpha Window.txt"
+          open -a TextEdit "$HOME/FCAP Beta Window.txt"
+          sleep 6
+          # Best-effort minimize (Accessibility/Automation TCC may block it in CI).
+          osascript -e 'tell application "System Events" to tell process "TextEdit"
+            repeat with w in windows
+              if name of w contains "FCAP Beta" then set value of attribute "AXMinimized" of w to true
+            end repeat
+          end tell' || echo "(AX minimize failed — Accessibility permission likely absent; Beta stays on screen)"
+          sleep 2
+          echo "--- probe ---"
+          set +e
+          ./target/release/examples/window_enum_check \
+            --expect "FCAP Alpha Window" --expect "FCAP Beta Window"
+          code=$?
+          set -e
+          if [ "$code" -eq 3 ]; then
+            echo "::warning title=macOS enumeration not verified::Screen Recording (TCC) permission is unavailable on this runner, so list_sources() returned PermissionDenied. The code compiled and failed cleanly, but the window listing itself can't be asserted in CI here — verify on a real Mac."
+            exit 0
+          fi
+          exit "$code"

@@ -26,8 +26,9 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_OUTPUT_DESC,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IsWindow,
-    IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowPlacement, GetWindowTextLengthW,
+    GetWindowTextW, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE, WINDOWPLACEMENT,
+    WS_EX_TOOLWINDOW,
 };
 
 use crate::{frame_channel, CaptureError, CaptureSession, SourceInfo, SourceKind};
@@ -275,7 +276,7 @@ unsafe extern "system" fn enum_windows_cb(
     let title = String::from_utf16_lossy(&title_buf[..copied as usize]);
 
     let mut rect = RECT::default();
-    let (width, height) = if unsafe { GetClientRect(hwnd, &mut rect) }.is_ok() {
+    let (mut width, mut height) = if unsafe { GetClientRect(hwnd, &mut rect) }.is_ok() {
         (
             (rect.right - rect.left).max(0) as u32,
             (rect.bottom - rect.top).max(0) as u32,
@@ -283,6 +284,22 @@ unsafe extern "system" fn enum_windows_cb(
     } else {
         (0, 0)
     };
+    // A minimized window reports a 0×0 client rect. Fall back to its restored
+    // (normal) size so it still appears in the picker and can be selected — the
+    // list should include every open window, minimized or not.
+    if (width == 0 || height == 0) && unsafe { IsIconic(hwnd) }.as_bool() {
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        if unsafe { GetWindowPlacement(hwnd, &mut placement) }.is_ok() {
+            let normal = placement.rcNormalPosition;
+            width = (normal.right - normal.left).max(0) as u32;
+            height = (normal.bottom - normal.top).max(0) as u32;
+        }
+    }
+    // Drop only genuinely sizeless windows (hidden helpers); a minimized window
+    // now carries its restored size from the fallback above.
     if width == 0 || height == 0 {
         return TRUE;
     }

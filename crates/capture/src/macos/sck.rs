@@ -77,7 +77,8 @@ struct SendContent(*mut SCShareableContent);
 // (retained) pointer across threads, never share it concurrently.
 unsafe impl Send for SendContent {}
 
-/// Fetch the current displays + on-screen windows (blocking, 10 s timeout).
+/// Fetch the current displays + windows, incl. minimized/off-screen ones
+/// (blocking, 10 s timeout).
 pub(crate) fn fetch_shareable_content() -> Result<Retained<SCShareableContent>, CaptureError> {
     let (tx, rx) = mpsc::channel::<Result<SendContent, ErrorInfo>>();
     let block = RcBlock::new(
@@ -103,10 +104,12 @@ pub(crate) fn fetch_shareable_content() -> Result<Retained<SCShareableContent>, 
             let _ = tx.send(result);
         },
     );
-    // SAFETY: SCK invokes the completion block exactly once.
+    // SAFETY: SCK invokes the completion block exactly once. onScreenWindowsOnly
+    // = false so minimized/off-screen windows are included (the picker lists every
+    // open window); `list_sources` trims non-app layers via windowLayer.
     unsafe {
         SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
-            true, true, &block,
+            true, false, &block,
         );
     }
     match rx.recv_timeout(Duration::from_secs(10)) {

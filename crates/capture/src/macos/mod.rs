@@ -69,7 +69,10 @@ pub(crate) fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
     for window in windows.iter() {
         // SAFETY: SCWindow getters on a live object.
         unsafe {
-            if !window.isOnScreen() || window.windowLayer() != 0 {
+            // Include off-screen windows too — a minimized window is off-screen,
+            // and the picker should list every open window. `windowLayer != 0`
+            // still drops non-normal layers (menu bar, Dock, overlays).
+            if window.windowLayer() != 0 {
                 continue;
             }
             let Some(title) = window.title() else {
