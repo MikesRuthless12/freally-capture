@@ -182,7 +182,13 @@ function FiltersButton({
   );
 }
 
-function AdvancedButton({ source, onOpenAdvanced }: { source: Source; onOpenAdvanced: () => void }) {
+function AdvancedButton({
+  source,
+  onOpenAdvanced,
+}: {
+  source: Source;
+  onOpenAdvanced: () => void;
+}) {
   return (
     <button
       type="button"

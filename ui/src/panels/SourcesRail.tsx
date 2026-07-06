@@ -35,6 +35,7 @@ import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
 import { spikeHost, spikeJoin, spikeStop } from "../remote/spike";
+import { inviteLink, joinTargetFromInput, mintInvite } from "../remote/invite";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -955,64 +956,135 @@ function MediaForm({
   );
 }
 
+const INVITE_TTLS: Array<[number, string]> = [
+  [15, "15 min"],
+  [30, "30 min"],
+  [60, "1 hour"],
+  [1440, "1 day"],
+];
+
 /**
- * Remote Guest transport spike (TASK-R1). HOST: start a session, share the
- * session id, and the guest's webcam lands in the scene when they call.
- * GUEST: paste the host's session id and share this machine's webcam.
- * Media flows P2P (WebRTC); only signaling touches the PeerJS broker —
- * nothing runs until a session is explicitly started here.
+ * Remote Guest transport spike (TASK-R1) + invites (TASK-R2/R3). HOST: start a
+ * session and share an expiring invite link; the guest's webcam lands in the
+ * scene when they join. GUEST: paste the invite link (or a raw session id) and
+ * share this machine's webcam. Media flows P2P (WebRTC); only signaling
+ * touches the PeerJS broker — nothing runs until a session is started here.
  */
 function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () => void }) {
   const [status, setStatus] = useState("idle — nothing touches the network yet");
   const [peerId, setPeerId] = useState<string | null>(null);
   const [hostId, setHostId] = useState("");
+  const [ttl, setTtl] = useState(30);
+  const [copied, setCopied] = useState(false);
+  const [link, setLink] = useState<string | null>(null);
+
+  // Minting reads Date.now(), so it only runs from event handlers (never in
+  // render): when hosting starts (the peer id arrives) and when the expiry
+  // changes. `id`/`minutes` are passed explicitly to dodge stale closures.
+  const mintLink = (id: string, minutes: number) =>
+    setLink(inviteLink(mintInvite(id, minutes, Date.now())));
+  const startHosting = () =>
+    spikeHost(sceneId, setStatus, (id) => {
+      setPeerId(id);
+      mintLink(id, ttl);
+    });
+  const changeTtl = (minutes: number) => {
+    setTtl(minutes);
+    if (peerId) mintLink(peerId, minutes);
+  };
+
+  const copyLink = () => {
+    if (!link) return;
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => setStatus("couldn't copy — select the link and copy manually"));
+  };
+  const join = () => {
+    const target = joinTargetFromInput(hostId, Date.now());
+    if ("error" in target) {
+      setStatus(target.error);
+      return;
+    }
+    spikeJoin(target.peerId, setStatus).catch((err) => setStatus(`join failed: ${err}`));
+  };
 
   return (
     <PickerShell title="Remote Guest (P2P spike)" onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <div className="flex flex-col gap-1.5">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-            Host — receive a guest
+            Host — invite a guest
           </p>
-          <button
-            type="button"
-            onClick={() => spikeHost(sceneId, setStatus, setPeerId)}
-            className="self-start rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
-          >
-            Start hosting
-          </button>
-          {peerId && (
-            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-              Session id
-              <input
-                readOnly
-                value={peerId}
-                onFocus={(event) => event.target.select()}
-                aria-label="Session id"
-                className="flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
-              />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={startHosting}
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+            >
+              Start hosting
+            </button>
+            <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
+              Expires
+              <select
+                value={ttl}
+                onChange={(event) => changeTtl(Number(event.target.value))}
+                aria-label="Invite expiry"
+                className="rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+              >
+                {INVITE_TTLS.map(([minutes, label]) => (
+                  <option key={minutes} value={minutes}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </label>
+          </div>
+          {link && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={link}
+                  onFocus={(event) => event.target.select()}
+                  aria-label="Invite link"
+                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+                />
+                <button
+                  type="button"
+                  onClick={copyLink}
+                  className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+                >
+                  {copied ? "Copied ✓" : "Copy"}
+                </button>
+              </div>
+              <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                Share this link (Discord / text / email). It carries your session and expires as
+                set. The guest opens it and joins with their webcam.
+              </p>
+            </>
           )}
         </div>
         <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-            Guest — join a host
+            Guest — join with an invite
           </p>
           <div className="flex gap-2">
             <input
               value={hostId}
               onChange={(event) => setHostId(event.target.value)}
-              placeholder="host session id"
-              aria-label="Host session id"
-              className="flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
+              placeholder="paste the invite link"
+              aria-label="Invite link or session id"
+              className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
             />
             <button
               type="button"
               disabled={!hostId.trim()}
-              onClick={() => {
-                spikeJoin(hostId, setStatus).catch((err) => setStatus(`join failed: ${err}`));
-              }}
-              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-60"
+              onClick={join}
+              className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-60"
             >
               Join with webcam
             </button>
