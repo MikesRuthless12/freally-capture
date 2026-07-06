@@ -60,6 +60,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   exponential backoff, 3 s doubling to 60 s), so it goes live the moment the window reopens or the
   device reconnects — no manual Retry needed (the Retry button stays for an on-demand nudge).
   Screen-picker portal and media sources are left alone.
+- **A captured window that closes mid-session is detected reliably.** Windows' capture-closed event
+  never fires for some elevated / tray-hiding apps, which would have left the source frozen "live"
+  on its last frame; the capture now also watches the window handle itself and errors out the moment
+  the window is really gone — which is exactly what arms the auto-recovery above.
 
 ## [0.55.0] — 2026-07-03 (Audio mixer + recording)
 

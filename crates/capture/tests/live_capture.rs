@@ -94,3 +94,64 @@ fn window_capture_rebinds_after_a_stale_handle() {
         "expected the re-bound window to deliver frames, got {frames}"
     );
 }
+
+/// A captured window whose process dies must END the capture with an error —
+/// never idle "live" on a frozen last frame (issue #6: WGC's `Closed` event is
+/// unreliable for some apps, so `wgc.rs` backstops it with an `IsWindow` poll;
+/// the error is what arms the studio's auto-recover). Spawns a throwaway
+/// console window with a unique title, captures it, kills the process, and
+/// asserts the frame stream errors within a bounded time.
+#[test]
+#[cfg(target_os = "windows")]
+#[ignore = "needs a real display session (not headless CI)"]
+fn window_capture_ends_when_the_window_dies() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    const TITLE: &str = "fcap-close-detect-probe";
+
+    let mut child = std::process::Command::new("cmd")
+        .args(["/k", &format!("title {TITLE}")])
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .expect("spawn the probe console");
+
+    // The console window takes a moment to appear and retitle.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let id = loop {
+        if let Some(source) = list_sources()
+            .expect("list sources")
+            .into_iter()
+            .find(|s| s.kind == SourceKind::Window && s.label.contains(TITLE))
+        {
+            break source.id;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the probe console window never appeared in the picker"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
+
+    let session = start_capture(&id).expect("start capturing the probe console");
+    let frames = count_frames(&session, Duration::from_secs(3));
+    assert!(frames >= 1, "expected live probe frames, got {frames}");
+
+    child.kill().expect("kill the probe console");
+    let _ = child.wait();
+
+    // The stream must error (WGC `Closed` or the `IsWindow` poll) — not idle.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match session.frames().recv_timeout(Duration::from_millis(200)) {
+            Ok(_) => assert!(
+                Instant::now() < deadline,
+                "the capture kept running after the captured window died"
+            ),
+            Err(err) => {
+                println!("capture ended as expected: {err}");
+                break;
+            }
+        }
+    }
+    session.stop();
+}

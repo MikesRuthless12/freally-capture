@@ -31,6 +31,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
@@ -138,13 +139,25 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
         .map_err(|err| CaptureError::Backend(format!("StartCapture: {err}")))?;
 
     // Frames now flow on WinRT worker threads; park here until told to stop,
-    // the window closes, or the consumer goes away.
+    // the window closes, or the consumer goes away. WGC's `Closed` event never
+    // fires for some elevated / tray-hiding apps (issue #6), so also poll the
+    // HWND itself — a dead window must end the session with an error, or the
+    // source would sit "live" on a frozen frame and auto-recover never arms.
+    let mut window_died = false;
     while !stop.load(Ordering::Relaxed) && !closed.load(Ordering::Relaxed) && sender.is_open() {
+        // SAFETY: IsWindow only validates the handle value.
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
+            window_died = true;
+            break;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 
     let _ = session.Close();
     let _ = pool.Close();
+    if window_died {
+        return Err(CaptureError::NotFound("the captured window closed".into()));
+    }
     Ok(())
 }
 
