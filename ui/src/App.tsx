@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   health,
+  remotePendingInvite,
   settingsGet,
   settingsSet,
   studioAddExistingSource,
@@ -14,7 +15,7 @@ import {
   studioSetItemTransform,
   studioSetItemVisible,
 } from "./api/commands";
-import { onAudio, onProgram, onStudio } from "./api/events";
+import { onAudio, onProgram, onRemoteInvite, onStudio } from "./api/events";
 import type {
   AudioLevelsPayload,
   Health,
@@ -29,9 +30,11 @@ import type {
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
+import { spikeSetJoinPrefill } from "./remote/spike";
 import { ControlsDock } from "./panels/ControlsDock";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
+import { RemoteSessionBar } from "./panels/RemoteSessionBar";
 import { ScenesRail } from "./panels/ScenesRail";
 import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
@@ -102,11 +105,24 @@ export default function App() {
     const unlistenAudio = onAudio((levels) => {
       if (!cancelled) setAudio(levels);
     }).catch(() => undefined);
+    // A clicked freally:// invite (OS deep link) → the session bar's join
+    // prompt. Held, never auto-joined.
+    const unlistenInvite = onRemoteInvite((url) => {
+      if (!cancelled) spikeSetJoinPrefill(url);
+    }).catch(() => undefined);
+    // A cold-start invite (the link LAUNCHED the app) fired before this
+    // listener existed — pick it up once.
+    remotePendingInvite()
+      .then((url) => {
+        if (!cancelled && url) spikeSetJoinPrefill(url);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
       void unlistenStudio.then((fn) => fn?.());
       void unlistenProgram.then((fn) => fn?.());
       void unlistenAudio.then((fn) => fn?.());
+      void unlistenInvite.then((fn) => fn?.());
     };
   }, []);
 
@@ -296,6 +312,8 @@ export default function App() {
           </span>
         </div>
       </header>
+
+      <RemoteSessionBar />
 
       <main className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-2">

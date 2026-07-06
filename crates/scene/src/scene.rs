@@ -184,6 +184,61 @@ impl Corner {
     }
 }
 
+/// The six one-click seats — the four corners plus vertically centered
+/// left/right. Same size and margins as the corner slots, so no two seats
+/// ever overlap. Order = the bump-to-free fill order.
+pub fn preset_seats() -> [NormRect; 6] {
+    let far = 1.0 - SLOT_MARGIN - SLOT_SIZE;
+    let mid = 0.5 - SLOT_SIZE / 2.0;
+    [
+        Corner::TopLeft.slot(),
+        Corner::TopRight.slot(),
+        NormRect {
+            x: SLOT_MARGIN,
+            y: mid,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        },
+        NormRect {
+            x: far,
+            y: mid,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        },
+        Corner::BottomLeft.slot(),
+        Corner::BottomRight.slot(),
+    ]
+}
+
+/// The centered shared view (a Desktop/Window capture or a promoted cam).
+/// Sized so it never overlaps the right-hand cam rail: cams sit beside the
+/// shared view, never on top of it.
+pub fn center_slot() -> NormRect {
+    NormRect {
+        x: 0.02,
+        y: 0.02,
+        w: 0.74,
+        h: 0.96,
+    }
+}
+
+/// The right-hand cam rail — four 16:9 seats (host + up to three guests)
+/// stacked beside the centered view. None overlap the center or each other.
+pub fn rail_seats() -> [NormRect; 4] {
+    let seat = |y: f32| NormRect {
+        x: 0.78,
+        y,
+        w: 0.20,
+        h: 0.20,
+    };
+    [seat(0.02), seat(0.27), seat(0.52), seat(0.77)]
+}
+
+/// Whether two normalized rects overlap (strictly — touching edges do not).
+pub fn rects_overlap(a: NormRect, b: NormRect) -> bool {
+    a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y
+}
+
 /// One item's pre-focus placement, restored exactly when focus toggles off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -191,6 +246,9 @@ pub struct FocusRestore {
     pub item: ItemId,
     pub transform: Transform,
     pub visible: bool,
+    /// The item's remembered seat, restored with it (seat-swap reads seats).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_slot: Option<NormRect>,
 }
 
 /// Highlight Speaker (Focus/Spotlight): `item` is promoted to fill the whole

@@ -773,9 +773,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let dto = {
                 let mut guard = lock_core(&core);
                 for (scene_id, item_id, transform) in fits {
+                    // resolve_pending (not set_item_transform): the item's
+                    // seat survives placement, so seat-swap can read it.
                     let _ = guard
                         .collection
-                        .set_item_transform(scene_id, item_id, transform);
+                        .resolve_pending(scene_id, item_id, transform);
                 }
                 guard.revision += 1;
                 guard.dirty_since.get_or_insert_with(Instant::now);

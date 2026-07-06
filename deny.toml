@@ -76,6 +76,10 @@ allow = ["CC0-1.0"]
 name = "libfuzzer-sys"  # feature-gated fuzzing shim (all-features graph only — never shipped)
 allow = ["NCSA"]
 
+[[licenses.exceptions]]
+name = "tiny-keccak"    # CC0 keccak hash inside tauri-plugin-deep-link's chain (TASK-R2)
+allow = ["CC0-1.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "warn"

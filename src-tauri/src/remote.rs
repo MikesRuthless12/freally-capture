@@ -38,6 +38,34 @@ fn lock_registry() -> std::sync::MutexGuard<'static, HashMap<SourceId, GuestChan
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// A `freally://` invite that arrived BEFORE the webview was listening — the
+/// cold-start deep link (the plugin emits its launch-arg URL during init,
+/// long before the UI registers `remote-invite`). Stored here; the UI takes
+/// it once on startup.
+fn pending_invite() -> &'static Mutex<Option<String>> {
+    static PENDING: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(None))
+}
+
+/// Stash a deep-link URL for the UI to pick up on startup.
+pub fn store_pending_invite(url: String) {
+    let mut guard = pending_invite()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = Some(url);
+}
+
+/// One-shot pickup of a cold-start invite (the UI calls this once its
+/// `remote-invite` listener is registered). The URL is untrusted input — the
+/// webview parses it with the invite validator and only shows a join prompt.
+#[tauri::command]
+pub fn remote_pending_invite() -> Option<String> {
+    pending_invite()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+}
+
 /// Open the push channels for a RemoteGuest source and hand back the video
 /// session the studio drains — the same shape as the OS capture backends.
 pub fn start_remote_guest(id: SourceId) -> Result<CaptureSession, CaptureError> {

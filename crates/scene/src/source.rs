@@ -278,6 +278,18 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. } | SourceSettings::AudioOutput { .. }
         )
     }
+
+    /// Whether this kind shows a shared screen (the Desktop/Window view).
+    /// The center-view rules treat these specially: one screen view at a
+    /// time — centering one hides the other visible ones.
+    pub fn is_screen_view(&self) -> bool {
+        matches!(
+            self,
+            SourceSettings::Display { .. }
+                | SourceSettings::Window { .. }
+                | SourceSettings::Portal {}
+        )
+    }
 }
 
 /// One shared source: identity + display name + settings (+ the mixer state

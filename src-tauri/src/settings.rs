@@ -45,6 +45,8 @@ pub struct Settings {
     pub mixer_layout: MixerLayout,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
+    /// Remote Guests networking (Phase R).
+    pub remote: RemoteSettings,
 }
 
 impl Default for Settings {
@@ -55,7 +57,59 @@ impl Default for Settings {
             monitor_device: None,
             mixer_layout: MixerLayout::default(),
             recording: RecordingSettings::default(),
+            remote: RemoteSettings::default(),
         }
+    }
+}
+
+/// Remote Guests (Phase R) networking. The TURN relay is strictly **opt-in**
+/// and the *user's own* (e.g. Oracle Always Free coturn) — never author-run
+/// infrastructure. Empty URL = direct P2P only (STUN), the free default.
+#[derive(Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RemoteSettings {
+    /// `turn:`/`turns:` URL of the user's own relay; empty = direct only.
+    pub turn_url: String,
+    pub turn_username: String,
+    /// A secret: redacted from Debug, never logged.
+    pub turn_credential: String,
+}
+
+// Manual Debug so a debug-printed Settings can never leak the credential.
+impl std::fmt::Debug for RemoteSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteSettings")
+            .field("turn_url", &self.turn_url)
+            .field("turn_username", &self.turn_username)
+            .field(
+                "turn_credential",
+                &if self.turn_credential.is_empty() {
+                    ""
+                } else {
+                    "[redacted]"
+                },
+            )
+            .finish()
+    }
+}
+
+impl RemoteSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.turn_url.is_empty()
+            && !self.turn_url.starts_with("turn:")
+            && !self.turn_url.starts_with("turns:")
+        {
+            return Err("TURN URL must start with turn: or turns:".to_owned());
+        }
+        if self.turn_url.len() > 512 || self.turn_url.chars().any(char::is_control) {
+            return Err("invalid TURN URL".to_owned());
+        }
+        for field in [&self.turn_username, &self.turn_credential] {
+            if field.len() > 256 || field.chars().any(char::is_control) {
+                return Err("invalid TURN credentials".to_owned());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -174,6 +228,7 @@ impl Settings {
             }
         }
         self.recording.validate()?;
+        self.remote.validate()?;
         Ok(())
     }
 }
@@ -363,6 +418,11 @@ mod tests {
                 split_minutes: 30,
                 ..RecordingSettings::default()
             },
+            remote: RemoteSettings {
+                turn_url: "turns:relay.example.net:5349".to_owned(),
+                turn_username: "me".to_owned(),
+                turn_credential: "s3cret".to_owned(),
+            },
         };
         store.set(next.clone()).expect("save settings");
 
@@ -395,6 +455,51 @@ mod tests {
             };
             assert!(settings.validate().is_err(), "should reject {bad:?}");
         }
+    }
+
+    #[test]
+    fn validate_bounds_the_turn_relay() {
+        let ok = Settings {
+            remote: RemoteSettings {
+                turn_url: "turn:relay.example.net:3478".to_owned(),
+                turn_username: "me".to_owned(),
+                turn_credential: "s3cret".to_owned(),
+            },
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+        assert!(
+            Settings::default().validate().is_ok(),
+            "empty = direct-only is fine"
+        );
+
+        for bad_url in [
+            "http://relay",
+            "stun:only",
+            "x".repeat(600).as_str(),
+            "turn:a\u{0007}",
+        ] {
+            let settings = Settings {
+                remote: RemoteSettings {
+                    turn_url: bad_url.to_owned(),
+                    ..RemoteSettings::default()
+                },
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "should reject {bad_url:?}");
+        }
+    }
+
+    #[test]
+    fn debug_never_prints_the_turn_credential() {
+        let settings = RemoteSettings {
+            turn_url: "turn:relay".to_owned(),
+            turn_username: "me".to_owned(),
+            turn_credential: "hunter2".to_owned(),
+        };
+        let printed = format!("{settings:?}");
+        assert!(!printed.contains("hunter2"), "credential leaked: {printed}");
+        assert!(printed.contains("[redacted]"));
     }
 
     #[test]

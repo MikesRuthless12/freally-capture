@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import qrcode from "qrcode-generator";
 
 import {
   audioInputDevices,
@@ -6,9 +7,12 @@ import {
   captureListSources,
   captureWindowThumbnail,
   openPrivacySettings,
+  settingsGet,
+  settingsSet,
   studioApplyLayout,
   studioRenameSource,
   studioRetrySource,
+  studioSetCenterView,
   studioSetFocus,
   videoDeviceFormats,
   videoDevicesList,
@@ -24,6 +28,7 @@ import type {
   ProgramStatus,
   Scene,
   SceneId,
+  Settings,
   SourceId,
   SourceSettings,
   VideoDevice,
@@ -35,14 +40,22 @@ import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
 import {
+  spikeGetState,
   spikeHost,
   spikeJoin,
-  spikeSetHostGate,
+  spikeSetInviteTtl,
+  spikeSetMic,
+  spikeSetSpeaker,
   spikeStop,
-  spikeToggleSelfMute,
+  spikeSubscribe,
 } from "../remote/spike";
-import { inviteLink, joinTargetFromInput, mintInvite } from "../remote/invite";
-import { type GateState, guestButton, guestCanToggle } from "../remote/mute";
+import {
+  listRemoteAudioDevices,
+  onDeviceChange,
+  type RemoteAudioDevices,
+  startMicTest,
+} from "../remote/devices";
+import { joinTargetFromInput } from "../remote/invite";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -272,6 +285,22 @@ export function SourcesRail({
                   >
                     ⛶
                   </button>
+                  {!audioOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!scene) return;
+                        studioSetCenterView(scene.id, item.id).catch((err) =>
+                          console.error("center view failed:", err),
+                        );
+                      }}
+                      title="Center — make this the shared center view (cams move to the rail)"
+                      aria-label={`Center ${source?.name ?? "source"}`}
+                      className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
+                    >
+                      ◉
+                    </button>
+                  )}
                   {isRenaming ? (
                     <input
                       autoFocus
@@ -971,42 +1000,31 @@ const INVITE_TTLS: Array<[number, string]> = [
 ];
 
 /**
- * Remote Guest transport spike (TASK-R1) + invites (TASK-R2/R3). HOST: start a
- * session and share an expiring invite link; the guest's webcam lands in the
- * scene when they join. GUEST: paste the invite link (or a raw session id) and
- * share this machine's webcam. Media flows P2P (WebRTC); only signaling
- * touches the PeerJS broker — nothing runs until a session is started here.
+ * Remote Guest setup (TASK-R1 + R2/R3 invites). HOST: start a session and
+ * share an expiring invite link; the guest's webcam lands in the scene when
+ * they join. GUEST: paste the invite link (or a raw session id) and share this
+ * machine's webcam. Media flows P2P (WebRTC); only signaling touches the
+ * PeerJS broker — nothing runs until a session is started here. Session state
+ * lives in the spike store, so closing this dialog changes nothing; the live
+ * controls (mute, stop) sit on the main-UI session bar.
  */
 function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () => void }) {
-  const [status, setStatus] = useState("idle — nothing touches the network yet");
-  const [peerId, setPeerId] = useState<string | null>(null);
+  const session = useSyncExternalStore(spikeSubscribe, spikeGetState);
   const [hostId, setHostId] = useState("");
   const [ttl, setTtl] = useState(30);
   const [copied, setCopied] = useState(false);
-  const [link, setLink] = useState<string | null>(null);
-  const [role, setRole] = useState<"host" | "guest" | null>(null);
-  const [gates, setGates] = useState<GateState | null>(null);
+  // Local-only errors (bad invite / copy failure) — the session status itself
+  // comes from the store.
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Minting reads Date.now(), so it only runs from event handlers (never in
-  // render): when hosting starts (the peer id arrives) and when the expiry
-  // changes. `id`/`minutes` are passed explicitly to dodge stale closures.
-  const mintLink = (id: string, minutes: number) =>
-    setLink(inviteLink(mintInvite(id, minutes, Date.now())));
+  const link = session.role === "host" ? session.invite : null;
   const startHosting = () => {
-    setRole("host");
-    spikeHost(
-      sceneId,
-      setStatus,
-      (id) => {
-        setPeerId(id);
-        mintLink(id, ttl);
-      },
-      setGates,
-    );
+    setFormError(null);
+    void spikeHost(sceneId, ttl);
   };
   const changeTtl = (minutes: number) => {
     setTtl(minutes);
-    if (peerId) mintLink(peerId, minutes);
+    spikeSetInviteTtl(minutes); // no-op unless hosting
   };
 
   const copyLink = () => {
@@ -1017,16 +1035,16 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
       })
-      .catch(() => setStatus("couldn't copy — select the link and copy manually"));
+      .catch(() => setFormError("couldn't copy — select the link and copy manually"));
   };
   const join = () => {
     const target = joinTargetFromInput(hostId, Date.now());
     if ("error" in target) {
-      setStatus(target.error);
+      setFormError(target.error);
       return;
     }
-    setRole("guest");
-    spikeJoin(target.peerId, setStatus, setGates).catch((err) => setStatus(`join failed: ${err}`));
+    setFormError(null);
+    spikeJoin(target.peerId).catch((err) => setFormError(`join failed: ${err}`));
   };
 
   return (
@@ -1082,9 +1100,18 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                 Share this link (Discord / text / email). It carries your session and expires as
                 set. The guest opens it and joins with their webcam.
               </p>
+              <div className="flex items-center gap-2">
+                <InviteQr link={link} />
+                <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                  Scan to carry the invite over. The freally:// link opens on a machine with Freally
+                  Capture installed; phone guests need the web join page (a later milestone).
+                </p>
+              </div>
             </>
           )}
         </div>
+        <RemoteDevicePickers micId={session.micId} speakerId={session.speakerId} />
+        <TurnRelaySection />
         <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
             Guest — join with an invite
@@ -1092,7 +1119,10 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
           <div className="flex gap-2">
             <input
               value={hostId}
-              onChange={(event) => setHostId(event.target.value)}
+              onChange={(event) => {
+                setHostId(event.target.value);
+                setFormError(null);
+              }}
               placeholder="paste the invite link"
               aria-label="Invite link or session id"
               className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
@@ -1107,28 +1137,25 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
             </button>
           </div>
         </div>
-        {gates && (
-          <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
-            <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-              Guest audio
-            </p>
-            {role === "host" ? (
-              <GuestMuteHostControl gates={gates} />
-            ) : (
-              <GuestMuteSelfControl gates={gates} />
-            )}
-          </div>
+        {session.active && (
+          <p className="m-0 border-t border-white/5 pt-2 text-[10px] leading-snug text-havoc-muted">
+            The live session controls (mute, end) stay on the bar at the top of the main window —
+            you can close this dialog.
+          </p>
         )}
         <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2">
-          <p className="m-0 flex-1 text-[11px] leading-snug text-havoc-muted">{status}</p>
+          <p
+            className={`m-0 flex-1 text-[11px] leading-snug ${
+              formError ? "text-amber-300" : "text-havoc-muted"
+            }`}
+          >
+            {formError ?? session.status}
+          </p>
           <button
             type="button"
             onClick={() => {
               spikeStop();
-              setPeerId(null);
-              setRole(null);
-              setGates(null);
-              setStatus("stopped");
+              setFormError(null);
             }}
             className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
           >
@@ -1140,66 +1167,264 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
   );
 }
 
-/** Host side: mute/unmute the connected guest (the host gate) + show whether
- * the guest has also self-muted. */
-function GuestMuteHostControl({ gates }: { gates: GateState }) {
+/** The invite link as a QR code (TASK-R3) — vendored zero-dep encoder, drawn
+ * as a plain SVG path (no innerHTML, CSP-safe). */
+function InviteQr({ link }: { link: string }) {
+  const rendered = useMemo(() => {
+    try {
+      const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
+      qr.addData(link);
+      qr.make();
+      const count = qr.getModuleCount();
+      let path = "";
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (qr.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`;
+        }
+      }
+      return { count, path };
+    } catch {
+      return null; // an over-long payload — the copyable link still works
+    }
+  }, [link]);
+  if (!rendered) return null;
   return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => spikeSetHostGate(!gates.hostGate)}
-        aria-pressed={gates.hostGate}
-        className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
-          gates.hostGate
-            ? "border-red-400/60 bg-red-500/20 text-red-300"
-            : "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text hover:bg-havoc-accent/25"
-        }`}
-      >
-        {gates.hostGate ? "Unmute guest" : "Mute guest"}
-      </button>
-      <span className="text-[11px] text-havoc-muted">
-        {gates.hostGate
-          ? "muted by you — the guest can't unmute themselves"
-          : gates.selfGate
-            ? "the guest muted themselves"
-            : "guest is live"}
-      </span>
+    <svg
+      viewBox={`0 0 ${rendered.count} ${rendered.count}`}
+      role="img"
+      aria-label="Invite link QR code"
+      className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
+    >
+      <path d={rendered.path} fill="#000" />
+    </svg>
+  );
+}
+
+/**
+ * The session's audio devices — which microphone THIS machine sends (host
+ * talkback / guest mic) and which output device the other side's audio plays
+ * through — plus a self-test loop: talk and hear yourself before going live.
+ * Selection applies live mid-session (replaceTrack / setSinkId) and persists.
+ */
+function RemoteDevicePickers({
+  micId,
+  speakerId,
+}: {
+  micId: string | null;
+  speakerId: string | null;
+}) {
+  const [devices, setDevices] = useState<RemoteAudioDevices>({ inputs: [], outputs: [] });
+  const [testNote, setTestNote] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const testStopRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      listRemoteAudioDevices()
+        .then((found) => {
+          if (!cancelled) setDevices(found);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const unlisten = onDeviceChange(refresh);
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, []);
+
+  const stopTest = useCallback(() => {
+    testStopRef.current?.();
+    testStopRef.current = null;
+    setTesting(false);
+  }, []);
+  // Closing the dialog releases the test mic.
+  useEffect(() => stopTest, [stopTest]);
+
+  const startTest = (mic: string | null, speaker: string | null) => {
+    setTestNote(null);
+    startMicTest(mic, speaker)
+      .then(({ stop, sink }) => {
+        testStopRef.current?.(); // a switch mid-test replaces the loop
+        testStopRef.current = stop;
+        setTesting(true);
+        if (sink !== "ok")
+          setTestNote("output routing unavailable — playing on the default device");
+        // The permission grant unlocks real device labels — refresh.
+        listRemoteAudioDevices()
+          .then(setDevices)
+          .catch(() => {});
+      })
+      .catch((err) => {
+        setTesting(false);
+        setTestNote(`mic test failed: ${err}`);
+      });
+  };
+
+  const pickMic = (next: string | null) => {
+    void spikeSetMic(next);
+    if (testStopRef.current) startTest(next, speakerId);
+  };
+  const pickSpeaker = (next: string | null) => {
+    void spikeSetSpeaker(next);
+    if (testStopRef.current) startTest(micId, next);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+        Session audio devices
+      </p>
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <span className="w-20 shrink-0">Microphone</span>
+        <select
+          value={micId ?? ""}
+          onChange={(event) => pickMic(event.target.value || null)}
+          aria-label="Session microphone"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+        >
+          <option value="">System default</option>
+          {devices.inputs.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <span className="w-20 shrink-0">Output</span>
+        <select
+          value={speakerId ?? ""}
+          onChange={(event) => pickSpeaker(event.target.value || null)}
+          aria-label="Session audio output"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+        >
+          <option value="">System default</option>
+          {devices.outputs.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => (testing ? stopTest() : startTest(micId, speakerId))}
+          aria-pressed={testing}
+          className={`shrink-0 rounded-md border px-3 py-1 text-[11px] font-semibold ${
+            testing
+              ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-300"
+              : "border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          }`}
+        >
+          {testing ? "Stop test" : "Test — hear yourself"}
+        </button>
+        <span className="text-[10px] leading-snug text-havoc-muted">
+          {testing
+            ? "talk into the mic — you're hearing the selected devices live"
+            : "loops your mic to the output (headphones avoid feedback)"}
+        </span>
+      </div>
+      {testNote && <p className="m-0 text-[10px] leading-snug text-amber-300">{testNote}</p>}
     </div>
   );
 }
 
-/** Guest side: the two-gate self-mute button — red (muted by host, locked),
- * yellow (self-muted, can unmute), or normal (live). */
-function GuestMuteSelfControl({ gates }: { gates: GateState }) {
-  const state = guestButton(gates);
-  const locked = !guestCanToggle(gates);
-  const label =
-    state === "hostMuted"
-      ? "Muted by host"
-      : state === "selfMuted"
-        ? "Self-muted — click to unmute"
-        : "Mute mic";
-  const className =
-    state === "hostMuted"
-      ? "border-red-400/60 bg-red-500/20 text-red-300"
-      : state === "selfMuted"
-        ? "border-amber-400/60 bg-amber-500/20 text-amber-300"
-        : "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text hover:bg-havoc-accent/25";
+/**
+ * TASK-R5: the opt-in TURN relay — the user's OWN relay (e.g. Oracle Cloud
+ * Always Free coturn), never author-run infrastructure. Direct P2P (STUN) is
+ * the free default and most sessions never need this; it exists for the
+ * both-sides-behind-strict-NAT case. The credential is a secret: stored in
+ * the local settings file only, never logged, redacted from diagnostics.
+ */
+function TurnRelaySection() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    settingsGet()
+      .then((loaded) => {
+        if (!cancelled) setSettings(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = (patch: Partial<Settings["remote"]>) => {
+    if (!settings) return;
+    const next = { ...settings, remote: { ...settings.remote, ...patch } };
+    setSettings(next);
+    setNote(null);
+    settingsSet(next).catch((err) => setNote(`couldn't save: ${err}`));
+  };
+
   return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        disabled={locked}
-        onClick={() => spikeToggleSelfMute()}
-        aria-pressed={state !== "live"}
-        className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed ${className}`}
-      >
-        {label}
-      </button>
-      {state === "hostMuted" && (
-        <span className="text-[11px] text-havoc-muted">waiting for the host to unmute you</span>
-      )}
-    </div>
+    <details className="border-t border-white/5 pt-2">
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+        Network — optional TURN relay (advanced)
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5">
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          Sessions connect directly (P2P) — free, no relay needed. If BOTH sides sit behind strict
+          NATs the direct path can fail; a TURN relay you run yourself carries the media then.
+          Skipping this is fine — most connections work direct-only.
+        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          Free option: Oracle Cloud "Always Free" runs coturn at no cost (note: Oracle asks for a
+          credit card at signup, but the Always-Free shape stays free). Steps: 1) create the free
+          VM, 2) install coturn, 3) open UDP 3478, 4) set a user/password, 5) enter{" "}
+          <span className="font-mono">turn:your-vm-ip:3478</span> + the credentials here. Your
+          credential stays in your local settings file and is never logged.
+        </p>
+        {settings ? (
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">TURN URL</span>
+              <input
+                value={settings.remote.turnUrl}
+                onChange={(event) => save({ turnUrl: event.target.value })}
+                placeholder="turn:host:3478 (empty = direct only)"
+                aria-label="TURN URL"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">Username</span>
+              <input
+                value={settings.remote.turnUsername}
+                onChange={(event) => save({ turnUsername: event.target.value })}
+                aria-label="TURN username"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">Credential</span>
+              <input
+                type="password"
+                value={settings.remote.turnCredential}
+                onChange={(event) => save({ turnCredential: event.target.value })}
+                aria-label="TURN credential"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+              The relay engages once all three fields are set (a TURN server requires the
+              credentials) and applies to the next session you start or join. Verify it with a
+              relay-only test call between your own two machines.
+            </p>
+          </>
+        ) : (
+          <p className="m-0 text-[10px] text-havoc-muted">settings unavailable (browser mode)</p>
+        )}
+        {note && <p className="m-0 text-[10px] text-amber-300">{note}</p>}
+      </div>
+    </details>
   );
 }
 

@@ -33,6 +33,16 @@ export type Settings = {
   mixerLayout: MixerLayout;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
+  /** Remote Guests networking (Phase R). */
+  remote: RemoteSettings;
+};
+
+/** Remote Guests networking — the user's own **opt-in** TURN relay (never
+ * author-served). Empty URL = direct P2P only. The credential is a secret. */
+export type RemoteSettings = {
+  turnUrl: string;
+  turnUsername: string;
+  turnCredential: string;
 };
 
 /** Recording containers; `frec` is the owned lossless default. */
@@ -236,7 +246,9 @@ export type SourceKindName = SourceSettings["kind"];
 
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
-  return kind === "audioInput" || kind === "audioOutput" || kind === "media";
+  return (
+    kind === "audioInput" || kind === "audioOutput" || kind === "media" || kind === "remoteGuest"
+  );
 }
 
 /** One shared source: identity + name + flattened settings (+ audio strip). */

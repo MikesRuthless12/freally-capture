@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use fcap_scene::{
-    BlendMode, Corner, FilterId, FilterKind, ItemId, SceneId, Source, SourceId, SourceSettings,
-    Transform,
+    BlendMode, Corner, FilterId, FilterKind, ItemId, NormRect, SceneId, Source, SourceId,
+    SourceSettings, Transform,
 };
 
 use crate::studio::{StudioDto, StudioState};
@@ -214,6 +214,38 @@ pub fn studio_apply_layout(
             .map(|slot| (slot.item_id, slot.corner))
             .collect();
         collection.apply_layout(scene_id, center, &corners)
+    })
+}
+
+/// Seat one item into a normalized canvas slot — the one-click position
+/// presets (top/middle/bottom × left/right) for a remote guest or any item.
+/// The model validates the slot (untrusted webview input).
+#[tauri::command]
+pub fn studio_set_item_slot(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    slot: NormRect,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| {
+        collection.set_item_slot(scene_id, item_id, slot)
+    })
+}
+
+/// Center-view routing: `Some(item)` promotes that capture into the center
+/// seat (the displaced center swaps onto the mover's old seat; overlapping
+/// cams bump to the rail; one screen view at a time). `None` retires the
+/// center onto the rail.
+#[tauri::command]
+pub fn studio_set_center_view(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: Option<ItemId>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| {
+        collection.set_center_view(scene_id, item_id)
     })
 }
 

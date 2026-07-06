@@ -5,8 +5,21 @@ import {
   nativePreviewActive,
   nativePreviewSetRegion,
   nativePreviewSetSelection,
+  studioSetFocus,
 } from "../api/commands";
 import type { Collection, ItemId, ProgramStatus, Scene, SceneItem, Transform } from "../api/types";
+import {
+  boundsOf,
+  clampMoveAgainstObstacles,
+  clampMoveDelta,
+  clampScalesToCanvas,
+  edgeDistances,
+  intersects,
+  MIN_SCALE,
+  slideIntoCanvas,
+  type Box,
+  type Size,
+} from "../lib/constrain";
 import {
   canvasToLocal,
   contentSize,
@@ -32,7 +45,6 @@ const FRAME_POLL_MS = 33;
 const HANDLE_RADIUS = 7;
 /** Rotate handle offset above the top edge, display px. */
 const ROTATE_OFFSET = 22;
-const MIN_SCALE = 0.01;
 
 type DragState = {
   mode: "move" | "scale-corner" | "scale-edge" | "rotate" | "crop-edge";
@@ -46,8 +58,14 @@ type DragState = {
   pointer: Vec2;
   /** Fixed point (opposite corner/edge midpoint), program px. */
   fixed: Vec2;
+  /** The canvas bounds — the item may never move or scale past them. */
+  canvas: Size;
+  /** Other remote-guest boxes — a guest drag stops dead against them. */
+  obstacles: Box[];
   /** For edge drags: which edge (0=left 1=right 2=top 3=bottom). */
   edge?: number;
+  /** For corner drags: which corner index holds still (the anchor). */
+  fixedIndex?: number;
   /** For rotate: the cursor's start angle minus the item's start rotation. */
   angleOffset?: number;
 };
@@ -240,6 +258,34 @@ export function PreviewPanel({
     [program],
   );
 
+  // OBS-style px-to-edge readout, shown only during a drag/resize.
+  const [dragReadout, setDragReadout] = useState<{
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  } | null>(null);
+
+  /** Other visible remote-guest boxes — a guest may never overlap a guest. */
+  const guestObstacles = useCallback(
+    (moving: SceneItem): Box[] => {
+      if (!scene || !collection) return [];
+      const kindOf = (item: SceneItem) =>
+        collection.sources.find((source) => source.id === item.source)?.kind;
+      if (kindOf(moving) !== "remoteGuest") return [];
+      return scene.items
+        .filter((item) => item.id !== moving.id && item.visible && kindOf(item) === "remoteGuest")
+        .flatMap((item) => {
+          const source = sourceSize(item);
+          if (!source) return [];
+          const content = contentSize(source.w, source.h, item.transform.crop);
+          if (!content) return [];
+          return [boundsOf(item.transform, content)];
+        });
+    },
+    [scene, collection, sourceSize],
+  );
+
   const selected = scene?.items.find((item) => item.id === selectedItem) ?? null;
   const selectedGeometry = useMemo(() => {
     if (!selected || selected.pendingFit) return null;
@@ -300,6 +346,8 @@ export function PreviewPanel({
         content,
         source,
         pointer: p,
+        canvas: { w: programW, h: programH },
+        obstacles: guestObstacles(selected),
       };
       if (near(rotate)) {
         const angle = Math.atan2(p.y - t.y, p.x - t.x);
@@ -316,6 +364,7 @@ export function PreviewPanel({
             ...start,
             mode: "scale-corner",
             fixed: corner[3 - cornerHit], // (0,0)↔(w,h), (w,0)↔(0,h)
+            fixedIndex: 3 - cornerHit,
           };
         } else {
           const edgeHit = mids.findIndex(near);
@@ -358,6 +407,8 @@ export function PreviewPanel({
             source,
             pointer: p,
             fixed: { x: item.transform.x, y: item.transform.y },
+            canvas: { w: programW, h: programH },
+            obstacles: guestObstacles(item),
           };
           (event.target as Element).setPointerCapture(event.pointerId);
         }
@@ -376,13 +427,41 @@ export function PreviewPanel({
       return;
     }
     const next = applyDrag(drag, p, event.shiftKey);
-    if (next) onItemTransform(drag.itemId, next);
+    if (next) {
+      onItemTransform(drag.itemId, next);
+      const content = contentSize(drag.source.w, drag.source.h, next.crop) ?? drag.content;
+      setDragReadout(edgeDistances(boundsOf(next, content), drag.canvas));
+    }
   };
 
   const endDrag = (event: React.PointerEvent) => {
     if (dragRef.current) {
       updateDrag(event);
       dragRef.current = null;
+      setDragReadout(null);
+    }
+  };
+
+  // Highlight Speaker, "click the slot": double-click an item to spotlight it
+  // (fill the canvas); double-click it again — or empty space — to restore.
+  const toggleFocusAt = (event: React.MouseEvent) => {
+    if (!scene) return;
+    const p = toProgram(event);
+    for (let index = scene.items.length - 1; index >= 0; index -= 1) {
+      const item = scene.items[index];
+      if (!item.visible) continue;
+      const source = sourceSize(item);
+      if (!source) continue;
+      const content = contentSize(source.w, source.h, item.transform.crop);
+      if (!content) continue;
+      if (hitTest(item.transform, content, p)) {
+        const next = scene.focus?.item === item.id ? null : item.id;
+        studioSetFocus(scene.id, next).catch((err) => console.error("focus toggle failed:", err));
+        return;
+      }
+    }
+    if (scene.focus) {
+      studioSetFocus(scene.id, null).catch((err) => console.error("focus restore failed:", err));
     }
   };
 
@@ -436,6 +515,7 @@ export function PreviewPanel({
               onPointerMove={updateDrag}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
+              onDoubleClick={toggleFocusAt}
             >
               {overlay && (
                 <g>
@@ -489,6 +569,17 @@ export function PreviewPanel({
               )}
             </svg>
           </>
+        )}
+        {dragReadout && (
+          <div
+            className="pointer-events-none absolute z-10 rounded-md border border-white/10 bg-black/75 px-2 py-1 font-mono text-[10px] leading-tight text-havoc-text"
+            style={{ left: box.left + 8, top: box.top + 8 }}
+            role="status"
+            aria-label="Pixels to the frame edges"
+          >
+            px to edge&ensp;L {dragReadout.left} · T {dragReadout.top} · R {dragReadout.right} · B{" "}
+            {dragReadout.bottom}
+          </div>
         )}
         {!running || emptyScene ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
@@ -559,16 +650,31 @@ function rotateHandle(t: Transform, content: { w: number; h: number }, displaySc
   return { x: top.x + Math.sin(radians) * offset, y: top.y - Math.cos(radians) * offset };
 }
 
-/** Compute the dragged transform. Returns null when the drag is degenerate. */
+/** A guest transform that would overlap another guest is refused — the drag
+ * freezes at the last valid state ("hits the outside bounds → no further"). */
+function guestBlocked(
+  drag: DragState,
+  next: Transform,
+  content: { w: number; h: number },
+): boolean {
+  if (drag.obstacles.length === 0) return false;
+  const box = boundsOf(next, content);
+  return drag.obstacles.some((obstacle) => intersects(box, obstacle));
+}
+
+/** Compute the dragged transform. Returns null when the drag is degenerate
+ * (or refused — a guest may never overlap a guest). Every mode ends inside
+ * the canvas: moves clamp, sizes cap, the rest slides back in. */
 function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
   const t = drag.start;
   switch (drag.mode) {
     case "move": {
-      return {
-        ...t,
-        x: drag.fixed.x + (p.x - drag.pointer.x),
-        y: drag.fixed.y + (p.y - drag.pointer.y),
-      };
+      const startBox = boundsOf(t, drag.content);
+      let dx = p.x - drag.pointer.x;
+      let dy = p.y - drag.pointer.y;
+      ({ dx, dy } = clampMoveDelta(startBox, dx, dy, drag.canvas));
+      ({ dx, dy } = clampMoveAgainstObstacles(startBox, dx, dy, drag.obstacles));
+      return { ...t, x: drag.fixed.x + dx, y: drag.fixed.y + dy };
     }
     case "rotate": {
       const angle = (Math.atan2(p.y - t.y, p.x - t.x) * 180) / Math.PI;
@@ -576,7 +682,12 @@ function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
       if (shift) rotation = Math.round(rotation / 15) * 15;
       // Normalize to (-180, 180] for readable numbers.
       rotation = ((((rotation + 180) % 360) + 360) % 360) - 180;
-      return { ...t, rotation };
+      // A rotation can widen the bounding box past the frame: shrink to fit
+      // (aspect kept), then slide back inside.
+      let next: Transform = { ...t, rotation };
+      next = { ...next, ...clampScalesToCanvas(next, drag.content, drag.canvas, true) };
+      next = slideIntoCanvas(next, drag.content, drag.canvas);
+      return guestBlocked(drag, next, drag.content) ? null : next;
     }
     case "scale-corner": {
       // Opposite corners stay opposite through the shared center.
@@ -605,7 +716,30 @@ function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
         scaleX = Math.max(t.scaleX * k, MIN_SCALE);
         scaleY = Math.max(t.scaleY * k, MIN_SCALE);
       }
-      return { ...t, x: center.x, y: center.y, scaleX, scaleY };
+      // Cap the size at the frame. When the cap engages, re-anchor on the
+      // fixed corner so growth stops dead instead of drifting.
+      const raw = { scaleX, scaleY };
+      const capped = clampScalesToCanvas(
+        { ...t, scaleX, scaleY },
+        drag.content,
+        drag.canvas,
+        !shift,
+      );
+      let next: Transform = { ...t, x: center.x, y: center.y, ...capped };
+      if (capped.scaleX !== raw.scaleX || capped.scaleY !== raw.scaleY) {
+        const f = drag.fixedIndex ?? 3;
+        const signX = f === 0 || f === 2 ? 1 : -1;
+        const signY = f === 0 || f === 1 ? 1 : -1;
+        const hx = ((drag.content.w * capped.scaleX) / 2) * signX;
+        const hy = ((drag.content.h * capped.scaleY) / 2) * signY;
+        next = {
+          ...next,
+          x: drag.fixed.x + cos * hx - sin * hy,
+          y: drag.fixed.y + sin * hx + cos * hy,
+        };
+      }
+      next = slideIntoCanvas(next, drag.content, drag.canvas);
+      return guestBlocked(drag, next, drag.content) ? null : next;
     }
     case "scale-edge": {
       const edge = drag.edge ?? 0;
@@ -620,14 +754,25 @@ function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
         (p.x - drag.fixed.x) * axis.x + (p.y - drag.fixed.y) * axis.y,
         MIN_SCALE * (horizontal ? drag.content.w : drag.content.h),
       );
-      const scale = extent / (horizontal ? drag.content.w : drag.content.h);
+      const rawScale = extent / (horizontal ? drag.content.w : drag.content.h);
+      // Cap the dragged axis at the frame (the other axis stays untouched).
+      const capped = clampScalesToCanvas(
+        horizontal ? { ...t, scaleX: rawScale } : { ...t, scaleY: rawScale },
+        drag.content,
+        drag.canvas,
+        false,
+      );
+      const scale = horizontal ? capped.scaleX : capped.scaleY;
+      const cappedExtent = scale * (horizontal ? drag.content.w : drag.content.h);
       const center = {
-        x: drag.fixed.x + (axis.x * extent) / 2,
-        y: drag.fixed.y + (axis.y * extent) / 2,
+        x: drag.fixed.x + (axis.x * cappedExtent) / 2,
+        y: drag.fixed.y + (axis.y * cappedExtent) / 2,
       };
-      return horizontal
+      let next: Transform = horizontal
         ? { ...t, x: center.x, y: center.y, scaleX: scale }
         : { ...t, x: center.x, y: center.y, scaleY: scale };
+      next = slideIntoCanvas(next, drag.content, drag.canvas);
+      return guestBlocked(drag, next, drag.content) ? null : next;
     }
     case "crop-edge": {
       // Alt-drag: crop the dragged edge; the opposite edge stays put and the
@@ -668,12 +813,15 @@ function applyDrag(drag: DragState, p: Vec2, shift: boolean): Transform | null {
         ? { x: Math.cos(radians) * sign, y: Math.sin(radians) * sign }
         : { x: -Math.sin(radians) * sign, y: Math.cos(radians) * sign };
       const extent = horizontal ? content.w * t.scaleX : content.h * t.scaleY;
-      return {
+      const next: Transform = {
         ...t,
         crop,
         x: drag.fixed.x + (axis.x * extent) / 2,
         y: drag.fixed.y + (axis.y * extent) / 2,
       };
+      // Cropping only shrinks, but the glued edge can sit outside a canvas
+      // the item was flush against — slide back in against the NEW content.
+      return slideIntoCanvas(next, content, drag.canvas);
     }
   }
 }

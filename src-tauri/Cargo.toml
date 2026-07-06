@@ -35,6 +35,8 @@ fcap-audio = { path = "../crates/audio" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
 fcap-preview = { path = "../crates/preview" }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 # Linux only: read the Tauri window's X11 id (RawWindowHandle::Xlib) to parent
 # the native-preview child window. Matches Tauri's raw-window-handle 0.6.

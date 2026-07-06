@@ -258,6 +258,15 @@ This is a networked feature — it must not ship without a focused review:
   files, other sources, or the network beyond the session.
 - **Supply chain** — vendored PeerJS (no CDN, CSP-safe); every new Rust dep
   through cargo-deny / cargo-audit.
+- **Host-id reclaim risk (TASK-R11, documented 2026-07-06)** — resilience
+  persists the host's peer id so a relaunched host reclaims its invite links.
+  The id is embedded in every invite link, so once the real host is OFFLINE,
+  anyone holding a valid link could claim that id on the broker and pose as
+  the host. Bounded impact: link-holders were invited (they already send/see
+  session media), the impostor gains no access to the real host's machine or
+  files, and expiry still bounds the window. Mitigations to weigh at the R9
+  review: a host secret in the reclaim handshake (needs a session-keeper or
+  server), shorter default TTLs, and the existing ban-rotates-the-id rule.
 - Runs the builtin security-review pass on the branch before merge.
 
 ---
