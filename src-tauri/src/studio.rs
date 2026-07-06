@@ -44,6 +44,14 @@ const TICK: Duration = Duration::from_millis(16);
 const READBACK_INTERVAL: Duration = Duration::from_millis(33);
 const PROGRAM_EVENT_INTERVAL: Duration = Duration::from_secs(1);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(800);
+/// Auto-recover backoff (OBS-style): the first re-attempt of an errored
+/// device/window capture fires this soon after it fails…
+const AUTO_RETRY_MIN: Duration = Duration::from_secs(3);
+/// …and each further attempt doubles the wait up to this cap, so a source whose
+/// window/device never returns settles to an occasional retry instead of
+/// thrashing its status every few seconds — while still recovering within the
+/// cap once it comes back.
+const AUTO_RETRY_MAX: Duration = Duration::from_secs(60);
 const PREVIEW_MAX_WIDTH: u32 = 1280;
 const PREVIEW_MAX_HEIGHT: u32 = 720;
 const PREVIEW_JPEG_QUALITY: u8 = 75;
@@ -477,6 +485,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut composed_this_second = 0u32;
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
+    // Per-source auto-recover backoff: source id → (next attempt time, last wait).
+    let mut retry_schedule: HashMap<SourceId, (Instant, Duration)> = HashMap::new();
     let mut statuses_changed = true;
 
     // The native preview surface (the "OBS feel" path): created lazily once
@@ -910,6 +920,54 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             statuses_changed = false;
         }
 
+        // -- 7b. Auto-recover errored device/window captures (OBS-style) --------
+        // Re-attempt sources that errored because their window / display /
+        // camera wasn't available, so they re-bind on their own the moment it
+        // comes back — no manual Retry. Bumping the retry nonce (+ revision) is
+        // exactly what the manual Retry does; the next tick's reconcile restarts
+        // them. Each source backs off (AUTO_RETRY_MIN doubling to AUTO_RETRY_MAX)
+        // so a never-returning source settles to an occasional retry instead of
+        // thrashing waiting↔error; recovering (going live) or leaving the scene
+        // clears its schedule, so a fresh error starts the backoff over.
+        {
+            let now = Instant::now();
+            // Keep a schedule entry across the transient waiting↔error churn of a
+            // retry; drop it only once the source recovered or left the scene.
+            retry_schedule.retain(|id, _| {
+                scene_sources.iter().any(|source| source.id == *id)
+                    && statuses.get(id).map(|status| status.state) != Some("live")
+            });
+            let mut due: Vec<SourceId> = Vec::new();
+            for source in &scene_sources {
+                let errored = auto_recoverable(&source.settings)
+                    && statuses
+                        .get(&source.id)
+                        .is_some_and(|status| status.state == "error");
+                if !errored {
+                    continue;
+                }
+                match retry_schedule.get_mut(&source.id) {
+                    // Newly errored: wait one MIN interval before the first try.
+                    None => {
+                        retry_schedule.insert(source.id, (now + AUTO_RETRY_MIN, AUTO_RETRY_MIN));
+                    }
+                    Some((next, backoff)) if now >= *next => {
+                        due.push(source.id);
+                        *backoff = (*backoff * 2).min(AUTO_RETRY_MAX);
+                        *next = now + *backoff;
+                    }
+                    Some(_) => {}
+                }
+            }
+            if !due.is_empty() {
+                let mut guard = lock_core(&core);
+                for id in &due {
+                    *guard.retry_nonces.entry(*id).or_insert(0) += 1;
+                }
+                guard.revision += 1;
+            }
+        }
+
         // -- 8. Autosave (debounced behind the last mutation) --------------------
         {
             let mut guard = lock_core(&core);
@@ -946,6 +1004,19 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
+    )
+}
+
+/// Which source kinds auto-recover on a timer: hardware / window captures that
+/// can come back (a reopened window, a replugged display, a reconnected
+/// camera). Portal and media are excluded on purpose — a portal retry would
+/// re-pop the system picker dialog, and a bad media path won't fix itself.
+fn auto_recoverable(settings: &SourceSettings) -> bool {
+    matches!(
+        settings,
+        SourceSettings::Display { .. }
+            | SourceSettings::Window { .. }
+            | SourceSettings::VideoDevice { .. }
     )
 }
 

@@ -13,8 +13,8 @@ pub(crate) mod wgc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use windows::core::Interface;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, TRUE};
+use windows::core::{Interface, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, FALSE, HWND, LPARAM, RECT, TRUE};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
@@ -25,12 +25,18 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, DXGI_ERROR_NOT_FOUND,
     DXGI_OUTPUT_DESC,
 };
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowPlacement, GetWindowTextLengthW,
-    GetWindowTextW, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE, WINDOWPLACEMENT,
-    WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetClientRect, GetWindowLongPtrW, GetWindowPlacement,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    IsWindowVisible, GWL_EXSTYLE, WINDOWPLACEMENT, WS_EX_TOOLWINDOW,
 };
 
+use crate::window_match::{
+    decode_window_id, encode_window_id, resolve_best, same_window, WindowKey,
+};
 use crate::{frame_channel, CaptureError, CaptureSession, SourceInfo, SourceKind};
 
 const DISPLAY_PREFIX: &str = "display:";
@@ -58,15 +64,15 @@ pub(crate) fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
         return Ok(CaptureSession::from_parts(receiver, stop, join));
     }
     if let Some(raw) = id.strip_prefix(WINDOW_PREFIX) {
-        let hwnd_raw: isize = raw
-            .parse()
-            .map_err(|_| CaptureError::NotFound(format!("bad window id: {id}")))?;
-        // SAFETY: constructing a HWND from an integer is always sound; validity
-        // is checked by IsWindow below and again by CreateForWindow.
-        let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
-        if !unsafe { IsWindow(hwnd) }.as_bool() {
-            return Err(CaptureError::NotFound("the window no longer exists".into()));
-        }
+        let (stored_hwnd, key) = decode_window_id(raw)
+            .ok_or_else(|| CaptureError::NotFound(format!("bad window id: {id}")))?;
+        // A HWND is only valid within the session it was picked in — a handle
+        // is process-lifetime and Windows recycles the integers. Across an app
+        // (or target-app) restart the stored one is stale, so re-bind to the
+        // *same* window by its durable identity (executable + class + title),
+        // the way OBS re-attaches a Window Capture on launch.
+        let hwnd_raw = resolve_target_hwnd(stored_hwnd, &key)
+            .ok_or_else(|| CaptureError::NotFound("the window is no longer open".into()))?;
         let (sender, receiver) = frame_channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
@@ -220,17 +226,38 @@ pub(crate) fn create_d3d_device(
 }
 
 // ---------------------------------------------------------------------------
-// Windows (EnumWindows)
+// Windows (EnumWindows) — enumeration + durable re-resolution
 // ---------------------------------------------------------------------------
 
+/// One enumerated top-level window: the live handle plus its identity + size.
+struct EnumWindow {
+    hwnd: isize,
+    key: WindowKey,
+    width: u32,
+    height: u32,
+}
+
 fn list_windows() -> Vec<SourceInfo> {
-    let mut windows_out: Vec<SourceInfo> = Vec::new();
+    enumerate_windows()
+        .into_iter()
+        .map(|w| SourceInfo {
+            id: format!("{WINDOW_PREFIX}{}", encode_window_id(w.hwnd as u64, &w.key)),
+            kind: SourceKind::Window,
+            label: w.key.title.clone(),
+            width: w.width,
+            height: w.height,
+        })
+        .collect()
+}
+
+fn enumerate_windows() -> Vec<EnumWindow> {
+    let mut windows_out: Vec<EnumWindow> = Vec::new();
     // SAFETY: the LPARAM carries a pointer to `windows_out`, which outlives
     // the synchronous EnumWindows call; the callback is the only writer.
     unsafe {
         let _ = EnumWindows(
             Some(enum_windows_cb),
-            LPARAM(&mut windows_out as *mut Vec<SourceInfo> as isize),
+            LPARAM(&mut windows_out as *mut Vec<EnumWindow> as isize),
         );
     }
     windows_out
@@ -240,8 +267,8 @@ unsafe extern "system" fn enum_windows_cb(
     hwnd: HWND,
     lparam: LPARAM,
 ) -> windows::Win32::Foundation::BOOL {
-    // SAFETY: lparam is the Vec pointer passed by `list_windows` above.
-    let out = unsafe { &mut *(lparam.0 as *mut Vec<SourceInfo>) };
+    // SAFETY: lparam is the Vec pointer passed by `enumerate_windows` above.
+    let out = unsafe { &mut *(lparam.0 as *mut Vec<EnumWindow>) };
 
     if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
         return TRUE;
@@ -264,16 +291,10 @@ unsafe extern "system" fn enum_windows_cb(
     if cloak_ok.is_ok() && cloaked != 0 {
         return TRUE;
     }
-    let title_len = unsafe { GetWindowTextLengthW(hwnd) };
-    if title_len <= 0 {
+    let title = title_of(hwnd);
+    if title.is_empty() {
         return TRUE;
     }
-    let mut title_buf = vec![0u16; title_len as usize + 1];
-    let copied = unsafe { GetWindowTextW(hwnd, &mut title_buf) };
-    if copied <= 0 {
-        return TRUE;
-    }
-    let title = String::from_utf16_lossy(&title_buf[..copied as usize]);
 
     let mut rect = RECT::default();
     let (mut width, mut height) = if unsafe { GetClientRect(hwnd, &mut rect) }.is_ok() {
@@ -304,12 +325,115 @@ unsafe extern "system" fn enum_windows_cb(
         return TRUE;
     }
 
-    out.push(SourceInfo {
-        id: format!("{WINDOW_PREFIX}{}", hwnd.0 as isize),
-        kind: SourceKind::Window,
-        label: title,
+    let key = WindowKey::new(exe_of(hwnd), class_of(hwnd), title);
+    out.push(EnumWindow {
+        hwnd: hwnd.0 as isize,
+        key,
         width,
         height,
     });
     TRUE
+}
+
+// -- per-window inspection ---------------------------------------------------
+
+/// The window title (empty when it has none — the enumeration skips those).
+fn title_of(hwnd: HWND) -> String {
+    // SAFETY: length-then-copy, the standard GetWindowText pattern.
+    let len = unsafe { GetWindowTextLengthW(hwnd) };
+    if len <= 0 {
+        return String::new();
+    }
+    let mut buf = vec![0u16; len as usize + 1];
+    let copied = unsafe { GetWindowTextW(hwnd, &mut buf) };
+    if copied <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buf[..copied as usize])
+}
+
+/// The Win32 window class (empty on failure).
+fn class_of(hwnd: HWND) -> String {
+    let mut buf = [0u16; 256];
+    // SAFETY: GetClassNameW writes up to buf.len()-1 UTF-16 units + a NUL.
+    let len = unsafe { GetClassNameW(hwnd, &mut buf) };
+    if len <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buf[..len as usize])
+}
+
+/// The owning process's image *file name*, e.g. `chrome.exe` (empty when it
+/// can't be read — a protected/elevated process we can't open; matching then
+/// leans on class + title).
+fn exe_of(hwnd: HWND) -> String {
+    let mut pid: u32 = 0;
+    // SAFETY: writes the local `pid` out-param; the thread-id return is unused.
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if pid == 0 {
+        return String::new();
+    }
+    // SAFETY: a limited-query open; fails (handled) for protected processes.
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) }) else {
+        return String::new();
+    };
+    // Roomy enough for deep install paths (beyond legacy MAX_PATH) so the exe
+    // never silently truncates to an empty match key.
+    let mut buf = [0u16; 512];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf`/`len` are locals; the PWSTR points into `buf`.
+    let queried = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    // SAFETY: pairs with the successful OpenProcess above.
+    let _ = unsafe { CloseHandle(handle) };
+    if queried.is_err() {
+        return String::new();
+    }
+    let full = String::from_utf16_lossy(&buf[..len as usize]);
+    // Keep just the file name (drop the directory path).
+    full.rsplit(['\\', '/']).next().unwrap_or(&full).to_string()
+}
+
+// -- re-resolution -----------------------------------------------------------
+
+/// Resolve the HWND to actually capture. Trust the stored handle only while it
+/// still points at the *same* window (handles are process-lifetime and get
+/// recycled); otherwise re-find the window by its durable [`WindowKey`].
+fn resolve_target_hwnd(stored_hwnd: u64, key: &WindowKey) -> Option<isize> {
+    let hwnd = HWND(stored_hwnd as *mut core::ffi::c_void);
+    // SAFETY: constructing a HWND from an integer is sound; IsWindow validates.
+    if unsafe { IsWindow(hwnd) }.as_bool() {
+        // Legacy ids carry no identity — preserve the original trust-the-handle
+        // behavior. With one, confirm the live window is still ours before
+        // trusting it (guards against a recycled handle value).
+        if key.is_empty() || same_window(key, &current_key(hwnd)) {
+            return Some(stored_hwnd as isize);
+        }
+    }
+    // Stale or recycled handle: re-bind by identity (needs something to match).
+    if key.is_empty() {
+        return None;
+    }
+    resolve_window(key)
+}
+
+/// The live identity of an existing window (to validate a stored handle).
+fn current_key(hwnd: HWND) -> WindowKey {
+    WindowKey::new(exe_of(hwnd), class_of(hwnd), title_of(hwnd))
+}
+
+/// The best live match for `target` among all enumerated windows, or `None`.
+/// (The scoring itself lives in `window_match`, shared with macOS + Linux.)
+fn resolve_window(target: &WindowKey) -> Option<isize> {
+    let candidates: Vec<(u64, WindowKey)> = enumerate_windows()
+        .into_iter()
+        .map(|w| (w.hwnd as u64, w.key))
+        .collect();
+    resolve_best(target, &candidates).map(|hwnd| hwnd as isize)
 }

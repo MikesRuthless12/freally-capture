@@ -32,6 +32,9 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod win;
+/// Durable window identity + re-resolution, shared by the per-OS window paths.
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+mod window_match;
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

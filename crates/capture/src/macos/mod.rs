@@ -19,7 +19,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
+use objc2_screen_capture_kit::SCWindow;
 
+use crate::window_match::{decode_window_id, encode_window_id, WindowKey};
 use crate::{frame_channel, CaptureError, CaptureSession, SourceInfo, SourceKind};
 
 const DISPLAY_PREFIX: &str = "display:";
@@ -37,6 +39,25 @@ fn ensure_permission() -> Result<(), CaptureError> {
         return Ok(());
     }
     Err(CaptureError::PermissionDenied)
+}
+
+/// The durable identity of a window — the owning app's name as the anchor plus
+/// the title. Used both to list windows and to re-bind a persisted one after a
+/// restart, since a `CGWindowID` is only valid within the session it was picked
+/// in (like an HWND). macOS has no per-window "class", so that field stays empty.
+pub(super) fn window_key(window: &SCWindow) -> WindowKey {
+    // SAFETY: property getters on a live SCWindow from the shareable snapshot.
+    unsafe {
+        let app = window
+            .owningApplication()
+            .map(|app| app.applicationName().to_string())
+            .unwrap_or_default();
+        let title = window
+            .title()
+            .map(|title| title.to_string())
+            .unwrap_or_default();
+        WindowKey::new(app, String::new(), title)
+    }
 }
 
 pub(crate) fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
@@ -92,8 +113,12 @@ pub(crate) fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
             if width == 0 || height == 0 {
                 continue;
             }
+            let key = window_key(&window);
             sources.push(SourceInfo {
-                id: format!("{WINDOW_PREFIX}{}", window.windowID()),
+                id: format!(
+                    "{WINDOW_PREFIX}{}",
+                    encode_window_id(u64::from(window.windowID()), &key)
+                ),
                 kind: SourceKind::Window,
                 label: match app_name {
                     Some(app) => format!("{app} — {title}"),
@@ -115,10 +140,12 @@ pub(crate) fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
                 .map_err(|_| CaptureError::NotFound(format!("bad display id: {id}")))?,
         )
     } else if let Some(raw) = id.strip_prefix(WINDOW_PREFIX) {
-        sck::Target::Window(
-            raw.parse()
-                .map_err(|_| CaptureError::NotFound(format!("bad window id: {id}")))?,
-        )
+        let (window_id, key) = decode_window_id(raw)
+            .ok_or_else(|| CaptureError::NotFound(format!("bad window id: {id}")))?;
+        sck::Target::Window {
+            window_id: window_id as u32,
+            key,
+        }
     } else {
         return Err(CaptureError::NotFound(format!("unknown source id: {id}")));
     };

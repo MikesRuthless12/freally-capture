@@ -24,6 +24,7 @@ use objc2_screen_capture_kit::{
     SCStreamOutput, SCStreamOutputType,
 };
 
+use crate::window_match::{resolve_best, same_window, WindowKey};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
 /// FourCC `'BGRA'` — `kCVPixelFormatType_32BGRA` (spelled out so we don't
@@ -67,7 +68,7 @@ impl ErrorInfo {
 
 pub(crate) enum Target {
     Display(u32),
-    Window(u32),
+    Window { window_id: u32, key: WindowKey },
 }
 
 /// A retained `SCShareableContent` pointer that may cross the completion
@@ -249,14 +250,39 @@ fn run_inner(target: Target, sender: &FrameSender, stop: &AtomicBool) -> Result<
             };
             (filter, rect.size.width as u32, rect.size.height as u32)
         }
-        Target::Window(window_id) => {
+        Target::Window { window_id, key } => {
             // SAFETY: getters on the retained snapshot.
             let windows = unsafe { content.windows() };
-            let window = windows
+            // A CGWindowID is only valid within the session it was picked in,
+            // like an HWND — stale after a restart. Trust the stored id only
+            // while it still points at the *same* window; otherwise re-bind by
+            // durable identity (owning app + title), the way OBS does.
+            // SAFETY: SCWindow getter.
+            let mut window = windows
                 .iter()
-                // SAFETY: SCWindow getter.
-                .find(|window| unsafe { window.windowID() } == window_id)
-                .ok_or_else(|| CaptureError::NotFound("the window was closed".into()))?;
+                .find(|window| unsafe { window.windowID() } == window_id);
+            let exact_ok = match &window {
+                Some(found) => key.is_empty() || same_window(&key, &super::window_key(found)),
+                None => false,
+            };
+            if !exact_ok {
+                window = None;
+                if !key.is_empty() {
+                    let candidates: Vec<(u64, WindowKey)> = windows
+                        .iter()
+                        // SAFETY: SCWindow getter.
+                        .map(|w| (u64::from(unsafe { w.windowID() }), super::window_key(&w)))
+                        .collect();
+                    if let Some(target) = resolve_best(&key, &candidates) {
+                        window = windows
+                            .iter()
+                            // SAFETY: SCWindow getter.
+                            .find(|w| u64::from(unsafe { w.windowID() }) == target);
+                    }
+                }
+            }
+            let window = window
+                .ok_or_else(|| CaptureError::NotFound("the window is no longer open".into()))?;
             // SAFETY: SCWindow getter.
             let rect = unsafe { window.frame() };
             // SAFETY: documented initializer with a retained window.

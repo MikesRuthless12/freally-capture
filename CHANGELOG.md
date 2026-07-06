@@ -24,6 +24,20 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   land next**; until they do, those platforms keep the existing JPEG preview, which also stays as the
   universal fallback everywhere. *(Windows-only so far — not yet in a tagged release.)*
 
+### Added — Window Capture that re-binds on restart + auto-recovery
+- **A Window Capture re-attaches to the *same* window when you relaunch the app** — the way OBS Studio
+  does. An OS window handle (Windows `HWND`, macOS `CGWindowID`, X11 XID) is only valid for one session,
+  so a saved Window source now also stores the window's **durable identity** — its executable / owning
+  app, its window class, and its title — and on start **re-resolves the live window by matching that
+  identity**, anchored on the app so it never binds to an unrelated program (class + title break ties
+  between several windows of the same app). Handle-only ids from older saved scenes still load. *Windows
+  is verified on hardware; macOS (ScreenCaptureKit) and Linux/X11 share the same matcher and are
+  validated in CI; Wayland is unaffected — its system portal re-picks the source and is already durable.*
+- **Errored captures recover on their own.** A Display / Window / Video Capture source that failed
+  because its window, monitor, or camera wasn't there yet is **retried automatically every few seconds**,
+  so it goes live the moment the window reopens or the device reconnects — no manual Retry needed (the
+  Retry button stays for an on-demand nudge). Screen-picker portal and media sources are left alone.
+
 ## [0.55.0] — 2026-07-03 (Audio mixer + recording)
 
 > The 0.55.0 rung is **Phase 3 (audio mixer + filters)** plus **Phase 4 (recording)** — the studio can

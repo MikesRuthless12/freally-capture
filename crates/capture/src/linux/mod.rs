@@ -81,10 +81,12 @@ pub(crate) fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
         return x11::start(x11::Target::Screen(screen));
     }
     if let Some(raw) = id.strip_prefix(X11_WINDOW_PREFIX) {
-        let window: u32 = raw
-            .parse()
-            .map_err(|_| CaptureError::NotFound(format!("bad window id: {id}")))?;
-        return x11::start(x11::Target::Window(window));
+        let (xid, key) = crate::window_match::decode_window_id(raw)
+            .ok_or_else(|| CaptureError::NotFound(format!("bad window id: {id}")))?;
+        return x11::start(x11::Target::Window {
+            xid: xid as u32,
+            key,
+        });
     }
     Err(CaptureError::NotFound(format!("unknown source id: {id}")))
 }
