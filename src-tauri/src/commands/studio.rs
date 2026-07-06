@@ -217,6 +217,22 @@ pub fn studio_apply_layout(
     })
 }
 
+/// Highlight Speaker (Focus/Spotlight): `Some(item)` promotes that item to
+/// fill the canvas (hiding the other video items); `None` restores the exact
+/// pre-focus layout.
+#[tauri::command]
+pub fn studio_set_focus(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: Option<ItemId>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| match item_id {
+        Some(item) => collection.set_focus(scene_id, item),
+        None => collection.clear_focus(scene_id),
+    })
+}
+
 // -- sources ------------------------------------------------------------------
 
 #[tauri::command]

@@ -181,6 +181,15 @@ export function studioApplyLayout(
   return invoke("studio_apply_layout", { sceneId, center, corners });
 }
 
+/**
+ * Highlight Speaker (Focus/Spotlight): pass an item to promote it to fill the
+ * canvas (the other video items hide); pass `null` to restore the exact
+ * pre-focus layout.
+ */
+export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise<void> {
+  return invoke("studio_set_focus", { sceneId, itemId });
+}
+
 export function studioRenameSource(sourceId: SourceId, name: string): Promise<void> {
   return invoke("studio_rename_source", { sourceId, name });
 }

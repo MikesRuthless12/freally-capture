@@ -9,6 +9,7 @@ import {
   studioGet,
   studioRemoveItem,
   studioReorderItem,
+  studioSetFocus,
   studioSetItemLocked,
   studioSetItemTransform,
   studioSetItemVisible,
@@ -121,6 +122,28 @@ export default function App() {
     selectedItem && activeScene?.items.some((item) => item.id === selectedItem)
       ? selectedItem
       : null;
+
+  // Highlight Speaker keyboard toggle: "F" focuses the selected item (fills
+  // the canvas) or, when a focus is active, restores the layout — never while
+  // typing in a field.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "f" && event.key !== "F") return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (!activeScene) return;
+      const focused = activeScene.focus?.item ?? null;
+      const next = focused ? null : effectiveSelection;
+      if (!focused && !next) return;
+      event.preventDefault();
+      studioSetFocus(activeScene.id, next).catch((err) =>
+        console.error("focus toggle failed:", err),
+      );
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeScene, effectiveSelection]);
 
   const addItem = useCallback(
     (settings: SourceSettings, name?: string) => {

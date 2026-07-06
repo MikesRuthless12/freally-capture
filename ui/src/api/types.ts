@@ -383,10 +383,24 @@ export type SceneItem = {
 };
 
 /** One scene: ordered items, index = z-order, `items[0]` bottom-most. */
+/** One item's pre-focus placement (Highlight Speaker restore buffer). */
+export type FocusRestore = {
+  item: ItemId;
+  transform: Transform;
+  visible: boolean;
+};
+
+/** Highlight Speaker: `item` fills the canvas; `prior` restores on toggle-off. */
+export type FocusState = {
+  item: ItemId;
+  prior: FocusRestore[];
+};
+
 export type Scene = {
   id: SceneId;
   name: string;
   items: SceneItem[];
+  focus?: FocusState | null;
 };
 
 /** The whole model (the on-disk scene-collection format). */

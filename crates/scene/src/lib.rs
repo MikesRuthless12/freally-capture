@@ -29,7 +29,10 @@ pub use audio::{
     MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
-pub use scene::{BlendMode, Corner, Crop, ItemId, NormRect, Scene, SceneId, SceneItem, Transform};
+pub use scene::{
+    BlendMode, Corner, Crop, FocusRestore, FocusState, ItemId, NormRect, Scene, SceneId, SceneItem,
+    Transform,
+};
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 
 use serde::{Deserialize, Serialize};
@@ -149,6 +152,22 @@ impl Collection {
         }
         // …then sources nothing references.
         self.gc_sources();
+        // A focus pointing at a vanished item could never be toggled off from
+        // the UI — restore its snapshot and drop it.
+        let dangling_focus: Vec<SceneId> = self
+            .scenes
+            .iter()
+            .filter(|scene| {
+                scene
+                    .focus
+                    .as_ref()
+                    .is_some_and(|focus| !scene.items.iter().any(|item| item.id == focus.item))
+            })
+            .map(|scene| scene.id)
+            .collect();
+        for scene_id in dangling_focus {
+            let _ = self.clear_focus(scene_id);
+        }
         // Audio state exists exactly on audio-capable sources, inside range.
         for source in &mut self.sources {
             if source.settings.has_audio() {
@@ -350,6 +369,17 @@ impl Collection {
 
     /// Remove an item; its source leaves the pool too if nothing else shows it.
     pub fn remove_item(&mut self, scene_id: SceneId, item_id: ItemId) -> Result<(), SceneError> {
+        // Removing the focused item first restores the pre-focus layout —
+        // otherwise the scene would be left with everything hidden and no
+        // focus toggle to undo it.
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if scene
+            .focus
+            .as_ref()
+            .is_some_and(|focus| focus.item == item_id)
+        {
+            self.clear_focus(scene_id)?;
+        }
         let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
         let index = scene
             .items
@@ -447,6 +477,76 @@ impl Collection {
         for (id, _) in corners {
             self.reorder_item(scene_id, *id, index)?;
             index += 1;
+        }
+        Ok(())
+    }
+
+    /// Highlight Speaker (Focus/Spotlight): promote one item to fill the
+    /// whole canvas and hide the other video items, snapshotting every item's
+    /// placement + visibility so [`Self::clear_focus`] restores the layout
+    /// exactly. Audio-only items are untouched — they render nothing, and
+    /// hiding them would silence their audio mid-show. Focusing while already
+    /// focused re-targets: the original snapshot is restored first, so
+    /// stepping through several speakers always returns to the true
+    /// pre-focus layout. The promoted item resolves to a whole-canvas fit on
+    /// its next sized frame (the same mechanism as a freshly added item).
+    pub fn set_focus(&mut self, scene_id: SceneId, item_id: ItemId) -> Result<(), SceneError> {
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if scene.focus.is_some() {
+            self.clear_focus(scene_id)?;
+        }
+        let audio_only: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|source| source.settings.is_audio_only())
+            .map(|source| source.id)
+            .collect();
+
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if !scene.items.iter().any(|item| item.id == item_id) {
+            return Err(SceneError::ItemNotFound);
+        }
+        let prior = scene
+            .items
+            .iter()
+            .map(|item| FocusRestore {
+                item: item.id,
+                transform: item.transform,
+                visible: item.visible,
+            })
+            .collect();
+        for item in scene.items.iter_mut() {
+            if item.id == item_id {
+                item.visible = true;
+                item.pending_fit = true;
+                item.pending_slot = None; // whole-canvas fit
+            } else if !audio_only.contains(&item.source) {
+                item.visible = false;
+            }
+        }
+        scene.focus = Some(FocusState {
+            item: item_id,
+            prior,
+        });
+        Ok(())
+    }
+
+    /// Toggle Focus off: restore every snapshotted item's placement +
+    /// visibility exactly. Items added while focused keep their current
+    /// state; snapshot entries whose item was removed are skipped. A scene
+    /// with no focus is a no-op.
+    pub fn clear_focus(&mut self, scene_id: SceneId) -> Result<(), SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let Some(focus) = scene.focus.take() else {
+            return Ok(());
+        };
+        for saved in focus.prior {
+            if let Some(item) = scene.item_mut(saved.item) {
+                item.transform = saved.transform;
+                item.visible = saved.visible;
+                item.pending_fit = false;
+                item.pending_slot = None;
+            }
         }
         Ok(())
     }
@@ -1506,6 +1606,159 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn focus_promotes_hides_and_restores_exactly() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, cam) = collection
+            .add_item_with_new_source(scene, color("Cam"))
+            .expect("add cam");
+        let (_, screen) = collection
+            .add_item_with_new_source(scene, color("Screen"))
+            .expect("add screen");
+        let placed = Transform {
+            x: 111.0,
+            y: 222.0,
+            ..Transform::default()
+        };
+        collection
+            .set_item_transform(scene, cam, placed)
+            .expect("place the cam");
+
+        collection.set_focus(scene, cam).expect("focus the cam");
+        let s = collection.scene(scene).expect("scene");
+        let focused = s.item(cam).expect("cam item");
+        assert!(focused.visible && focused.pending_fit && focused.pending_slot.is_none());
+        assert!(!s.item(screen).expect("screen item").visible, "others hide");
+        assert_eq!(s.focus.as_ref().expect("focus set").item, cam);
+
+        collection.clear_focus(scene).expect("unfocus");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.focus.is_none());
+        let cam_item = s.item(cam).expect("cam item");
+        assert_eq!(cam_item.transform, placed, "transform restored exactly");
+        assert!(!cam_item.pending_fit, "no stray refit after restore");
+        assert!(
+            s.item(screen).expect("screen item").visible,
+            "visibility restored"
+        );
+    }
+
+    #[test]
+    fn focus_leaves_audio_only_items_audible() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, mic) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        let (_, cam) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::Color {
+                        color: Rgba::new(1, 2, 3, 255),
+                        width: 100,
+                        height: 50,
+                    },
+                ),
+            )
+            .expect("add cam");
+
+        collection.set_focus(scene, cam).expect("focus the cam");
+        let s = collection.scene(scene).expect("scene");
+        assert!(
+            s.item(mic).expect("mic item").visible,
+            "hiding an audio-only item would mute it mid-show"
+        );
+    }
+
+    #[test]
+    fn refocus_retargets_from_the_original_layout() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, a) = collection
+            .add_item_with_new_source(scene, color("A"))
+            .expect("add a");
+        let (_, b) = collection
+            .add_item_with_new_source(scene, color("B"))
+            .expect("add b");
+
+        collection.set_focus(scene, a).expect("focus a");
+        collection.set_focus(scene, b).expect("re-focus b");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.item(b).expect("b").visible && s.item(b).expect("b").pending_fit);
+        assert!(!s.item(a).expect("a").visible, "a returns to non-focused");
+
+        collection.clear_focus(scene).expect("unfocus");
+        let s = collection.scene(scene).expect("scene");
+        assert!(
+            s.item(a).expect("a").visible && s.item(b).expect("b").visible,
+            "the ORIGINAL layout returns, not the intermediate focus"
+        );
+    }
+
+    #[test]
+    fn removing_the_focused_item_restores_the_layout() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, a) = collection
+            .add_item_with_new_source(scene, color("A"))
+            .expect("add a");
+        let (_, b) = collection
+            .add_item_with_new_source(scene, color("B"))
+            .expect("add b");
+
+        collection.set_focus(scene, a).expect("focus a");
+        collection
+            .remove_item(scene, a)
+            .expect("remove the focused item");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.focus.is_none(), "focus cleared with its item");
+        assert!(
+            s.item(b).expect("b").visible,
+            "the hidden others come back instead of staying stranded"
+        );
     }
 
     #[test]

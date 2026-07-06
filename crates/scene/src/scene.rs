@@ -184,6 +184,25 @@ impl Corner {
     }
 }
 
+/// One item's pre-focus placement, restored exactly when focus toggles off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusRestore {
+    pub item: ItemId,
+    pub transform: Transform,
+    pub visible: bool,
+}
+
+/// Highlight Speaker (Focus/Spotlight): `item` is promoted to fill the whole
+/// canvas while the other video items hide; `prior` holds the exact layout to
+/// restore when focus toggles off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusState {
+    pub item: ItemId,
+    pub prior: Vec<FocusRestore>,
+}
+
 fn default_visible() -> bool {
     true
 }
@@ -243,6 +262,10 @@ pub struct Scene {
     pub name: String,
     #[serde(default)]
     pub items: Vec<SceneItem>,
+    /// Highlight Speaker: present while one item is promoted to fill the
+    /// canvas (Focus/Spotlight); absent in a normal layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<FocusState>,
 }
 
 impl Scene {
@@ -251,6 +274,7 @@ impl Scene {
             id: SceneId::new(),
             name: name.into(),
             items: Vec::new(),
+            focus: None,
         }
     }
 

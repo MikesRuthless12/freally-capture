@@ -9,6 +9,7 @@ import {
   studioApplyLayout,
   studioRenameSource,
   studioRetrySource,
+  studioSetFocus,
   videoDeviceFormats,
   videoDevicesList,
 } from "../api/commands";
@@ -218,6 +219,7 @@ export function SourcesRail({
             const status = audioOnly ? audio?.sources[item.source] : program?.sources[item.source];
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
+            const isFocused = scene?.focus?.item === item.id;
             return (
               <li key={item.id}>
                 <div
@@ -238,6 +240,29 @@ export function SourcesRail({
                     }`}
                   >
                     {item.visible ? "👁" : "–"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!scene) return;
+                      studioSetFocus(scene.id, isFocused ? null : item.id).catch((err) =>
+                        console.error("focus toggle failed:", err),
+                      );
+                    }}
+                    title={
+                      isFocused
+                        ? "Unfocus — restore the layout"
+                        : "Focus — fill the canvas (Highlight Speaker)"
+                    }
+                    aria-label={`${isFocused ? "Unfocus" : "Focus"} ${source?.name ?? "source"}`}
+                    aria-pressed={isFocused}
+                    className={`shrink-0 rounded px-1 text-xs ${
+                      isFocused
+                        ? "text-havoc-accent"
+                        : "text-havoc-muted opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    ⛶
                   </button>
                   {isRenaming ? (
                     <input
