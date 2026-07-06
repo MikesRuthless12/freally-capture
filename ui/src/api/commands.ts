@@ -13,6 +13,7 @@ import type {
   AudioFilterKind,
   BlendMode,
   CaptureSource,
+  CornerSlot,
   EncoderCatalog,
   FfmpegStatus,
   FilterId,
@@ -165,6 +166,19 @@ export function studioSetItemBlend(
   blend: BlendMode,
 ): Promise<void> {
   return invoke("studio_set_item_blend", { sceneId, itemId, blend });
+}
+
+/**
+ * Arrange the scene as a centered screen with up to four corner cameras.
+ * `center` becomes the backdrop (bottom of z-order); each corner item fits
+ * into its slot on top. Placement resolves on each source's next sized frame.
+ */
+export function studioApplyLayout(
+  sceneId: SceneId,
+  center: ItemId | null,
+  corners: CornerSlot[],
+): Promise<void> {
+  return invoke("studio_apply_layout", { sceneId, center, corners });
 }
 
 export function studioRenameSource(sourceId: SourceId, name: string): Promise<void> {

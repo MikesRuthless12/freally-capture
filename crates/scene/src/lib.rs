@@ -29,7 +29,7 @@ pub use audio::{
     MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
-pub use scene::{BlendMode, Crop, ItemId, Scene, SceneId, SceneItem, Transform};
+pub use scene::{BlendMode, Corner, Crop, ItemId, NormRect, Scene, SceneId, SceneItem, Transform};
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 
 use serde::{Deserialize, Serialize};
@@ -397,8 +397,57 @@ impl Collection {
     ) -> Result<(), SceneError> {
         let item = self.item_mut(scene_id, item_id)?;
         item.transform = transform;
-        // A user-driven transform supersedes the first-frame auto-fit.
+        // A user-driven transform supersedes any pending first-frame placement.
         item.pending_fit = false;
+        item.pending_slot = None;
+        Ok(())
+    }
+
+    /// Arrange a scene as a centered screen with up to four corner cameras —
+    /// the screen-plus-corners layout (host + up to three guests). `center`
+    /// fills the canvas as the backdrop (bottom of the z-order); each
+    /// `(item, corner)` fits into its corner on top. Placement resolves on
+    /// each source's next sized frame — the same first-frame mechanism as a
+    /// freshly added item — so any camera resolution lands correctly. Every
+    /// referenced item must already live in the scene; a bad id is a no-op.
+    pub fn apply_layout(
+        &mut self,
+        scene_id: SceneId,
+        center: Option<ItemId>,
+        corners: &[(ItemId, Corner)],
+    ) -> Result<(), SceneError> {
+        // Validate every id first so a bad reference changes nothing.
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let present = |id: ItemId| scene.items.iter().any(|item| item.id == id);
+        let unknown =
+            center.is_some_and(|c| !present(c)) || corners.iter().any(|(id, _)| !present(*id));
+        if unknown {
+            return Err(SceneError::ItemNotFound);
+        }
+
+        // Stage placement intents (resolved on each source's next sized frame).
+        if let Some(center) = center {
+            let item = self.item_mut(scene_id, center)?;
+            item.pending_fit = true;
+            item.pending_slot = None; // whole-canvas fit (never upscales)
+        }
+        for (id, corner) in corners {
+            let item = self.item_mut(scene_id, *id)?;
+            item.pending_fit = true;
+            item.pending_slot = Some(corner.slot());
+        }
+
+        // Z-order: screen at the bottom, corners above it in order; any other
+        // items (overlays) stay on top.
+        let mut index = 0;
+        if let Some(center) = center {
+            self.reorder_item(scene_id, center, index)?;
+            index += 1;
+        }
+        for (id, _) in corners {
+            self.reorder_item(scene_id, *id, index)?;
+            index += 1;
+        }
         Ok(())
     }
 
@@ -1457,6 +1506,103 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn apply_layout_seats_the_screen_and_corners() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, screen) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add screen");
+        let (_, cam1) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam 1",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam1");
+        let (_, cam2) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam 2",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam2");
+
+        collection
+            .apply_layout(
+                scene,
+                Some(screen),
+                &[(cam2, Corner::TopRight), (cam1, Corner::TopLeft)],
+            )
+            .expect("apply layout");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        // Screen sits at the bottom; corners follow in the given order.
+        assert_eq!(scene_ref.items[0].id, screen);
+        assert_eq!(scene_ref.items[1].id, cam2);
+        assert_eq!(scene_ref.items[2].id, cam1);
+        // The screen fills the canvas (no slot); each camera takes its corner.
+        let screen_item = scene_ref.item(screen).expect("screen item");
+        assert!(screen_item.pending_fit);
+        assert_eq!(screen_item.pending_slot, None);
+        assert_eq!(
+            scene_ref.item(cam2).expect("cam2").pending_slot,
+            Some(Corner::TopRight.slot())
+        );
+        assert_eq!(
+            scene_ref.item(cam1).expect("cam1").pending_slot,
+            Some(Corner::TopLeft.slot())
+        );
+    }
+
+    #[test]
+    fn apply_layout_rejects_an_unknown_item_without_mutating() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, screen) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add screen");
+        let before = collection.scene(scene).expect("scene").items.clone();
+
+        let result =
+            collection.apply_layout(scene, Some(screen), &[(ItemId::new(), Corner::TopLeft)]);
+
+        assert!(matches!(result, Err(SceneError::ItemNotFound)));
+        assert_eq!(
+            collection.scene(scene).expect("scene").items,
+            before,
+            "a bad id leaves the scene untouched"
+        );
     }
 
     #[test]

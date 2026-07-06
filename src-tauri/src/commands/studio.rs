@@ -7,11 +7,12 @@
 //! (JS sends camelCase argument names; Tauri maps them onto these
 //! snake_case parameters, same as the Phase 1 commands.)
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use fcap_scene::{
-    BlendMode, FilterId, FilterKind, ItemId, SceneId, Source, SourceId, SourceSettings, Transform,
+    BlendMode, Corner, FilterId, FilterKind, ItemId, SceneId, Source, SourceId, SourceSettings,
+    Transform,
 };
 
 use crate::studio::{StudioDto, StudioState};
@@ -185,6 +186,34 @@ pub fn studio_set_item_blend(
 ) -> Result<(), String> {
     state.mutate(&app, |collection| {
         collection.set_item_blend(scene_id, item_id, blend)
+    })
+}
+
+/// One corner assignment in a layout request (JS sends `{ itemId, corner }`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CornerSlot {
+    pub item_id: ItemId,
+    pub corner: Corner,
+}
+
+/// Arrange the scene as a centered screen with up to four corner cameras — the
+/// screen-plus-corners layout. `center` (if any) becomes the backdrop at the
+/// bottom of the z-order; each corner item fits into its slot on top.
+#[tauri::command]
+pub fn studio_apply_layout(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    center: Option<ItemId>,
+    corners: Vec<CornerSlot>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| {
+        let corners: Vec<(ItemId, Corner)> = corners
+            .iter()
+            .map(|slot| (slot.item_id, slot.corner))
+            .collect();
+        collection.apply_layout(scene_id, center, &corners)
     })
 }
 

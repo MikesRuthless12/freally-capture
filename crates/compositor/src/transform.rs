@@ -110,6 +110,30 @@ pub fn fit_to_canvas(source_w: u32, source_h: u32, canvas_w: u32, canvas_h: u32)
     }
 }
 
+/// A transform that fit-contains a source into a target rectangle (canvas
+/// pixels), centered in it and keeping the source's aspect ratio. Unlike
+/// [`fit_to_canvas`] this *may* upscale, so every corner-cam slot renders at a
+/// consistent size regardless of the camera's native resolution — the
+/// placement for the screen-plus-corners layout.
+pub fn fit_into_slot(
+    source_w: u32,
+    source_h: u32,
+    slot_x: f32,
+    slot_y: f32,
+    slot_w: f32,
+    slot_h: f32,
+) -> Transform {
+    let scale = (slot_w / source_w.max(1) as f32).min(slot_h / source_h.max(1) as f32);
+    Transform {
+        x: slot_x + slot_w * 0.5,
+        y: slot_y + slot_h * 0.5,
+        scale_x: scale,
+        scale_y: scale,
+        rotation: 0.0,
+        crop: Crop::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +258,31 @@ mod tests {
 
         let small = fit_to_canvas(640, 360, 1920, 1080);
         assert!((small.scale_x - 1.0).abs() < EPS, "never upscales");
+    }
+
+    #[test]
+    fn fit_into_slot_centers_and_contains() {
+        // A 1920×1080 camera into a 576×324 corner slot at (1324, 21):
+        // 16:9 into 16:9 fills exactly, scale = 576/1920 = 0.3, positioned at
+        // the slot's center.
+        let t = fit_into_slot(1920, 1080, 1324.0, 21.0, 576.0, 324.0);
+        assert!((t.scale_x - 0.3).abs() < EPS);
+        assert!((t.scale_y - 0.3).abs() < EPS);
+        assert!((t.x - (1324.0 + 288.0)).abs() < EPS);
+        assert!((t.y - (21.0 + 162.0)).abs() < EPS);
+    }
+
+    #[test]
+    fn fit_into_slot_keeps_aspect_when_source_and_slot_differ() {
+        // A 4:3 (640×480) camera into a 16:9 slot (576×324): the height binds,
+        // scale = min(576/640, 324/480) = min(0.9, 0.675) = 0.675, and both
+        // axes share it so the picture never stretches.
+        let t = fit_into_slot(640, 480, 0.0, 0.0, 576.0, 324.0);
+        assert!((t.scale_x - 0.675).abs() < EPS, "height-bound fit-contain");
+        assert!(
+            (t.scale_x - t.scale_y).abs() < EPS,
+            "uniform scale keeps aspect"
+        );
     }
 
     #[test]
