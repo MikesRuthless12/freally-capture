@@ -150,10 +150,10 @@ pub enum SourceSettings {
         #[serde(default = "default_true")]
         hw_decode: bool,
     },
-    /// A remote guest's live feed (Remote Guests, P2P/WebRTC) — frames are
-    /// pushed from the webview's WebRTC session over IPC; there is no OS
-    /// device behind this kind. (Video-only for the transport spike; guest
-    /// audio joins the mixer with the productionized bridge, TASK-R4.)
+    /// A remote guest's live feed (Remote Guests, P2P/WebRTC) — video frames
+    /// *and* mic audio are pushed from the webview's WebRTC session over IPC;
+    /// there is no OS device behind this kind. Video composites onto the
+    /// canvas; audio joins the mixer as its own strip (like Media).
     RemoteGuest {
         /// The guest's display label (from the session).
         #[serde(default)]
@@ -266,6 +266,7 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. }
                 | SourceSettings::AudioOutput { .. }
                 | SourceSettings::Media { .. }
+                | SourceSettings::RemoteGuest { .. }
         )
     }
 

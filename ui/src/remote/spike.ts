@@ -69,8 +69,8 @@ export function spikeHost(
 /** Guest: share the webcam and call the host's session id. */
 export async function spikeJoin(hostId: string, onStatus: SpikeStatus): Promise<void> {
   spikeStop();
-  onStatus("requesting the webcam…");
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  onStatus("requesting the webcam + mic…");
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   const peer = new Peer();
   const session: LiveSession = {
     peer,
@@ -117,6 +117,9 @@ async function addAndPump(
     alive = false;
     video.srcObject = null;
   });
+
+  pumpGuestAudio(stream, added.sourceId, session);
+
   let pushed = 0;
   const pump = () => {
     if (!alive) return;
@@ -147,4 +150,46 @@ async function addAndPump(
     video.requestVideoFrameCallback(pump);
   };
   video.requestVideoFrameCallback(pump);
+}
+
+/** The mixer's ring rate. WebRTC audio is 48 kHz; we tap it at that rate so
+ * no resampling is needed on either side. */
+const AUDIO_RATE = 48_000;
+
+/**
+ * Tap the guest's WebRTC mic and push interleaved-stereo 48 kHz f32 to the
+ * mixer over IPC — the guest becomes a mixer strip like any audio source. The
+ * ScriptProcessor's output is left silent (we never write it), so this taps
+ * the audio without playing it out the host speakers.
+ */
+function pumpGuestAudio(stream: MediaStream, sourceId: string, session: LiveSession): void {
+  if (stream.getAudioTracks().length === 0) return;
+  const AudioCtx: typeof AudioContext =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const ctx = new AudioCtx({ sampleRate: AUDIO_RATE });
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 2, 2);
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer;
+    const left = input.getChannelData(0);
+    const right = input.numberOfChannels > 1 ? input.getChannelData(1) : left;
+    const interleaved = new Float32Array(left.length * 2);
+    for (let i = 0; i < left.length; i += 1) {
+      interleaved[2 * i] = left[i];
+      interleaved[2 * i + 1] = right[i];
+    }
+    invoke("remote_guest_push_audio", new Uint8Array(interleaved.buffer), {
+      headers: { "x-fcap-source": sourceId },
+    }).catch(() => {
+      // The source is still starting / already stopped — drop the block.
+    });
+  };
+  source.connect(processor);
+  processor.connect(ctx.destination); // required to pump; output stays silent
+  session.stops.push(() => {
+    processor.disconnect();
+    source.disconnect();
+    void ctx.close();
+  });
 }
