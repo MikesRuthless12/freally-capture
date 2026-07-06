@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Dxgi::{
     DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR, DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR,
@@ -21,8 +21,8 @@ use windows::Win32::Graphics::Gdi::{
     GetObjectW, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DrawIconEx, GetCursorInfo, GetIconInfo, GetWindowRect, CURSORINFO, CURSOR_SHOWING, DI_NORMAL,
-    HICON, ICONINFO,
+    DrawIconEx, GetAncestor, GetCursorInfo, GetIconInfo, GetWindowRect, WindowFromPoint,
+    CURSORINFO, CURSOR_SHOWING, DI_NORMAL, GA_ROOT, HICON, ICONINFO,
 };
 
 use crate::Frame;
@@ -246,12 +246,34 @@ impl CursorTracker {
         // normally 1:1; a mid-resize frame may briefly differ).
         let x = (i64::from(info.ptScreenPos.x - rect.left) * i64::from(frame_w) / rect_w) as i32;
         let y = (i64::from(info.ptScreenPos.y - rect.top) * i64::from(frame_h) / rect_h) as i32;
-        let over = x >= 0 && (x as u32) < frame_w && y >= 0 && (y as u32) < frame_h;
+        let in_frame = x >= 0 && (x as u32) < frame_w && y >= 0 && (y as u32) < frame_h;
+        // Occlusion hit-test (matches OBS): draw the cursor only when the
+        // captured window is actually the frontmost window under the pointer.
+        // Keying off the bounding rect alone would paint the cursor onto
+        // pixels another window covers — Freally itself on top, or any app over
+        // the captured window — and onto parts of the window hidden behind
+        // another. `WindowFromPoint` returns whatever window owns that screen
+        // pixel; only when its top-level root is ours is the cursor really
+        // "over" the capture.
+        let over = in_frame && Self::cursor_over_window(hwnd, info.ptScreenPos);
         CursorKey {
             over,
             x,
             y,
             cursor: info.hCursor.0 as isize,
+        }
+    }
+
+    /// Whether `target`'s top-level window is the frontmost window at screen
+    /// point `pt` — the occlusion test behind [`Self::sample`]'s `over`.
+    fn cursor_over_window(target: HWND, pt: POINT) -> bool {
+        // SAFETY: a plain hit-test + ancestor walk over live window handles.
+        unsafe {
+            let hit = WindowFromPoint(pt);
+            if hit.is_invalid() {
+                return false;
+            }
+            GetAncestor(hit, GA_ROOT).0 == GetAncestor(target, GA_ROOT).0
         }
     }
 
