@@ -150,6 +150,15 @@ pub enum SourceSettings {
         #[serde(default = "default_true")]
         hw_decode: bool,
     },
+    /// A remote guest's live feed (Remote Guests, P2P/WebRTC) — frames are
+    /// pushed from the webview's WebRTC session over IPC; there is no OS
+    /// device behind this kind. (Video-only for the transport spike; guest
+    /// audio joins the mixer with the productionized bridge, TASK-R4.)
+    RemoteGuest {
+        /// The guest's display label (from the session).
+        #[serde(default)]
+        label: String,
+    },
     /// A solid color block.
     Color {
         #[serde(default = "Rgba::default_color")]
@@ -224,6 +233,7 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "videoDevice",
             SourceSettings::Image { .. } => "image",
             SourceSettings::Media { .. } => "media",
+            SourceSettings::RemoteGuest { .. } => "remoteGuest",
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
@@ -240,6 +250,7 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "Video Capture Device",
             SourceSettings::Image { .. } => "Image",
             SourceSettings::Media { .. } => "Media",
+            SourceSettings::RemoteGuest { .. } => "Remote Guest",
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",

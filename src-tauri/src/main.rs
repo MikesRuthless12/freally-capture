@@ -16,6 +16,7 @@ mod events;
 mod native_preview;
 mod preview;
 mod recording;
+mod remote;
 mod settings;
 mod studio;
 
@@ -108,6 +109,7 @@ fn main() {
             commands::studio::studio_reorder_filter,
             commands::studio::studio_update_filter,
             commands::studio::studio_set_filter_enabled,
+            remote::remote_guest_push_frame,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
             commands::audio::audio_loopback_devices,

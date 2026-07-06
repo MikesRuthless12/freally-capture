@@ -198,6 +198,7 @@ export type SourceSettings =
   | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
   | { kind: "image"; path: string }
   | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
+  | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }

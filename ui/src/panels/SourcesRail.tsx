@@ -19,6 +19,7 @@ import type {
   ItemId,
   ProgramStatus,
   Scene,
+  SceneId,
   SourceId,
   SourceSettings,
   VideoDevice,
@@ -28,6 +29,7 @@ import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
+import { spikeHost, spikeJoin, spikeStop } from "../remote/spike";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -53,6 +55,7 @@ type PickerMode =
   | "webcam"
   | "image"
   | "media"
+  | "remoteGuest"
   | "color"
   | "text"
   | "audioInput"
@@ -66,6 +69,7 @@ const KIND_BADGE: Record<string, string> = {
   videoDevice: "Camera",
   image: "Image",
   media: "Media",
+  remoteGuest: "Guest",
   color: "Color",
   text: "Text",
   audioInput: "Audio In",
@@ -78,6 +82,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["webcam", "Video Capture Device"],
   ["image", "Image"],
   ["media", "Media (video/image file)"],
+  ["remoteGuest", "Remote Guest (P2P spike)"],
   ["color", "Color"],
   ["text", "Text"],
   ["audioInput", "Audio Input Capture"],
@@ -376,6 +381,8 @@ export function SourcesRail({
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "media" ? (
         <MediaForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "remoteGuest" && scene ? (
+        <RemoteGuestForm sceneId={scene.id} onClose={() => setPicker(null)} />
       ) : picker === "color" ? (
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
@@ -898,6 +905,88 @@ function MediaForm({
         >
           Add media
         </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/**
+ * Remote Guest transport spike (TASK-R1). HOST: start a session, share the
+ * session id, and the guest's webcam lands in the scene when they call.
+ * GUEST: paste the host's session id and share this machine's webcam.
+ * Media flows P2P (WebRTC); only signaling touches the PeerJS broker —
+ * nothing runs until a session is explicitly started here.
+ */
+function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () => void }) {
+  const [status, setStatus] = useState("idle — nothing touches the network yet");
+  const [peerId, setPeerId] = useState<string | null>(null);
+  const [hostId, setHostId] = useState("");
+
+  return (
+    <PickerShell title="Remote Guest (P2P spike)" onClose={onClose}>
+      <div className="flex flex-col gap-3 text-xs text-havoc-text">
+        <div className="flex flex-col gap-1.5">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+            Host — receive a guest
+          </p>
+          <button
+            type="button"
+            onClick={() => spikeHost(sceneId, setStatus, setPeerId)}
+            className="self-start rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+          >
+            Start hosting
+          </button>
+          {peerId && (
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              Session id
+              <input
+                readOnly
+                value={peerId}
+                onFocus={(event) => event.target.select()}
+                aria-label="Session id"
+                className="flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
+              />
+            </label>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+            Guest — join a host
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={hostId}
+              onChange={(event) => setHostId(event.target.value)}
+              placeholder="host session id"
+              aria-label="Host session id"
+              className="flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
+            />
+            <button
+              type="button"
+              disabled={!hostId.trim()}
+              onClick={() => {
+                spikeJoin(hostId, setStatus).catch((err) => setStatus(`join failed: ${err}`));
+              }}
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-60"
+            >
+              Join with webcam
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2">
+          <p className="m-0 flex-1 text-[11px] leading-snug text-havoc-muted">{status}</p>
+          <button
+            type="button"
+            onClick={() => {
+              spikeStop();
+              setPeerId(null);
+              setStatus("stopped");
+            }}
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          >
+            Stop session
+          </button>
+        </div>
       </div>
     </PickerShell>
   );
