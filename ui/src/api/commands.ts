@@ -56,6 +56,15 @@ export function captureListSources(): Promise<CaptureSource[]> {
   return invoke<CaptureSource[]>("capture_list_sources");
 }
 
+/**
+ * A one-shot JPEG thumbnail (`data:` URI) of a window source, or `null` when
+ * none is available (minimized/GPU-composited window, or an unsupported
+ * platform). The picker re-requests this on a timer for a live preview.
+ */
+export function captureWindowThumbnail(id: string, maxDim?: number): Promise<string | null> {
+  return invoke<string | null>("capture_window_thumbnail", { id, maxDim });
+}
+
 /** Enumerate webcams / capture cards. */
 export function videoDevicesList(): Promise<VideoDevice[]> {
   return invoke<VideoDevice[]>("video_devices_list");

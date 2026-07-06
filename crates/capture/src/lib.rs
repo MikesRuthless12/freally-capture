@@ -119,6 +119,16 @@ pub struct SourceInfo {
     pub height: u32,
 }
 
+/// A one-shot, downscaled **RGBA** thumbnail of a window — for the source
+/// picker. Grab it repeatedly (see [`window_thumbnail`]) for a live preview.
+#[derive(Debug, Clone)]
+pub struct Thumbnail {
+    pub width: u32,
+    pub height: u32,
+    /// Tightly-packed RGBA — `width * height * 4` bytes, opaque alpha.
+    pub rgba: Vec<u8>,
+}
+
 // ---------------------------------------------------------------------------
 // Latest-wins frame channel
 // ---------------------------------------------------------------------------
@@ -351,6 +361,87 @@ pub fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
             "no capture backend for {}",
             std::env::consts::OS
         )))
+    }
+}
+
+/// Grab a one-shot [`Thumbnail`] of the window `id` (from [`list_sources`]),
+/// downscaled so its longer side is at most `max_dim`. It runs the *real*
+/// capture path ([`start_capture`]) just long enough for one frame, so the
+/// preview matches what a capture actually shows — including GPU-rendered apps
+/// (games, DAWs like FL Studio, browsers) that a GDI grab captures only partly.
+/// The picker calls this on a timer for a live preview.
+///
+/// Blocking: it starts and stops a short capture — call it off the UI thread.
+pub fn window_thumbnail(id: &str, max_dim: u32) -> Result<Thumbnail, CaptureError> {
+    let session = start_capture(id)?;
+    // Wait for the first composited frame (the backend needs a beat to warm up).
+    let deadline = Instant::now() + Duration::from_millis(1200);
+    let mut latest: Option<Frame> = None;
+    while Instant::now() < deadline {
+        match session.frames().recv_timeout(Duration::from_millis(150)) {
+            Ok(Some(frame)) => {
+                latest = Some(frame);
+                break;
+            }
+            Ok(None) => continue,
+            Err(err) => {
+                session.stop();
+                return Err(err);
+            }
+        }
+    }
+    session.stop();
+    latest
+        .map(|frame| downscale_frame_to_thumbnail(&frame, max_dim.max(1)))
+        .ok_or_else(|| CaptureError::Backend("no frame arrived for the thumbnail".into()))
+}
+
+/// Box-average downscale of a captured [`Frame`] (BGRA/RGBA, rows padded to
+/// `stride`) into tightly-packed opaque RGBA, longer side clamped to `max_dim`.
+fn downscale_frame_to_thumbnail(frame: &Frame, max_dim: u32) -> Thumbnail {
+    let src_w = frame.width.max(1);
+    let src_h = frame.height.max(1);
+    let scale = (f64::from(max_dim) / f64::from(src_w.max(src_h))).min(1.0);
+    let dst_w = ((f64::from(src_w) * scale).round() as u32).max(1);
+    let dst_h = ((f64::from(src_h) * scale).round() as u32).max(1);
+    let stride = frame.stride as usize;
+    // Channel offsets into each 4-byte source pixel for R, G, B.
+    let (ro, go, bo) = match frame.format {
+        PixelFormat::Bgra8 => (2usize, 1usize, 0usize),
+        PixelFormat::Rgba8 => (0usize, 1usize, 2usize),
+    };
+    let mut rgba = vec![0u8; (dst_w * dst_h * 4) as usize];
+    for dy in 0..dst_h {
+        let sy0 = dy * src_h / dst_h;
+        let sy1 = ((dy + 1) * src_h / dst_h).max(sy0 + 1).min(src_h);
+        for dx in 0..dst_w {
+            let sx0 = dx * src_w / dst_w;
+            let sx1 = ((dx + 1) * src_w / dst_w).max(sx0 + 1).min(src_w);
+            let (mut r, mut g, mut b, mut count) = (0u32, 0u32, 0u32, 0u32);
+            for sy in sy0..sy1 {
+                let row = sy as usize * stride;
+                for sx in sx0..sx1 {
+                    let px = row + sx as usize * 4;
+                    if px + 3 < frame.data.len() {
+                        r += u32::from(frame.data[px + ro]);
+                        g += u32::from(frame.data[px + go]);
+                        b += u32::from(frame.data[px + bo]);
+                        count += 1;
+                    }
+                }
+            }
+            let count = count.max(1);
+            let o = (dy * dst_w + dx) as usize * 4;
+            rgba[o] = (r / count) as u8;
+            rgba[o + 1] = (g / count) as u8;
+            rgba[o + 2] = (b / count) as u8;
+            rgba[o + 3] = 255;
+        }
+    }
+    Thumbnail {
+        width: dst_w,
+        height: dst_h,
+        rgba,
     }
 }
 

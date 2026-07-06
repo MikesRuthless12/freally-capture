@@ -131,6 +131,8 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
     let session = pool
         .CreateCaptureSession(&item)
         .map_err(|err| CaptureError::Backend(format!("capture session: {err}")))?;
+    // Hide the OS "yellow capture border" (best-effort; older Windows rejects it).
+    let _ = session.SetIsBorderRequired(false);
     session
         .StartCapture()
         .map_err(|err| CaptureError::Backend(format!("StartCapture: {err}")))?;

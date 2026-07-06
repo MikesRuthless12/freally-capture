@@ -4,11 +4,14 @@ import { useEffect } from "react";
 export function PickerShell({
   title,
   onClose,
+  onRefresh,
   children,
   wide = false,
 }: {
   title: string;
   onClose: () => void;
+  /** When set, a refresh button appears to the left of the close button. */
+  onRefresh?: () => void;
   children: React.ReactNode;
   wide?: boolean;
 }) {
@@ -31,14 +34,27 @@ export function PickerShell({
           <h3 className="m-0 text-xs font-semibold tracking-wider text-havoc-muted uppercase">
             {title}
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded px-1.5 text-sm text-havoc-muted hover:text-havoc-text"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-1">
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                aria-label="Refresh"
+                title="Refresh the list"
+                className="rounded px-1.5 text-sm text-havoc-muted hover:text-havoc-text"
+              >
+                ↻
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded px-1.5 text-sm text-havoc-muted hover:text-havoc-text"
+            >
+              ×
+            </button>
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
       </div>

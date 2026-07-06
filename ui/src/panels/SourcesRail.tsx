@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   audioInputDevices,
   audioLoopbackDevices,
   captureListSources,
+  captureWindowThumbnail,
   openPrivacySettings,
   studioRenameSource,
   studioRetrySource,
@@ -408,28 +409,44 @@ function CapturePicker({
 }) {
   const [entries, setEntries] = useState<CaptureSource[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadedRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refresh = useCallback(() => {
     captureListSources()
       .then((all) => {
-        if (cancelled) return;
         // The portal pseudo-source stands in for both modes (Wayland).
         setEntries(all.filter((s) => s.kind === mode || s.kind === "portal"));
+        setError(null);
+        loadedRef.current = true;
       })
       .catch((err) => {
-        if (!cancelled) setError(String(err));
+        // Only surface a failure before the first successful load; ignore
+        // transient refresh errors so the last good list stays put.
+        if (!loadedRef.current) setError(String(err));
       });
-    return () => {
-      cancelled = true;
-    };
   }, [mode]);
+
+  useEffect(() => {
+    refresh();
+    // Re-scan while the picker is open so a window you restore (e.g. from the
+    // system tray) shows up within a couple seconds without reopening — the ↻
+    // button in the header does the same on demand.
+    const timer = window.setInterval(refresh, 2000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
 
   const title = mode === "display" ? "Add a Display Capture" : "Add a Window Capture";
   const hasPortal = entries?.some((s) => s.kind === "portal") ?? false;
+  // Window mode shows a live thumbnail grid; everything else (displays, and the
+  // Wayland portal entry in either mode) stays a text row.
+  const windowTiles =
+    mode === "window" ? (entries ?? []).filter((entry) => entry.kind === "window") : [];
+  const listEntries = (entries ?? []).filter(
+    (entry) => !(mode === "window" && entry.kind === "window"),
+  );
 
   return (
-    <PickerShell title={title} onClose={onClose}>
+    <PickerShell title={title} onClose={onClose} onRefresh={refresh}>
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : entries === null ? (
@@ -440,44 +457,138 @@ function CapturePicker({
         </p>
       ) : (
         <>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
-            {entries.map((entry) => (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onPick(
-                      entry.kind === "portal"
-                        ? { kind: "portal" }
-                        : {
-                            kind: entry.kind as "display" | "window",
-                            captureId: entry.id,
-                            label: entry.label,
-                          },
-                      entry.label,
-                    )
+          {windowTiles.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {windowTiles.map((entry, index) => (
+                <WindowThumbTile
+                  key={entry.id}
+                  entry={entry}
+                  index={index}
+                  onPick={() =>
+                    onPick({ kind: "window", captureId: entry.id, label: entry.label }, entry.label)
                   }
-                  className="w-full truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
-                >
-                  {entry.label}
-                  {entry.width > 0 && (
-                    <span className="ml-1.5 text-havoc-muted">
-                      {entry.width}×{entry.height}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+                />
+              ))}
+            </div>
+          )}
+          {listEntries.length > 0 && (
+            <ul
+              className={`m-0 flex list-none flex-col gap-1 p-0 ${windowTiles.length > 0 ? "mt-2" : ""}`}
+            >
+              {listEntries.map((entry) => (
+                <li key={entry.id}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onPick(
+                        entry.kind === "portal"
+                          ? { kind: "portal" }
+                          : {
+                              kind: entry.kind as "display" | "window",
+                              captureId: entry.id,
+                              label: entry.label,
+                            },
+                        entry.label,
+                      )
+                    }
+                    className="w-full truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
+                  >
+                    {entry.label}
+                    {entry.width > 0 && (
+                      <span className="ml-1.5 text-havoc-muted">
+                        {entry.width}×{entry.height}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {hasPortal && (
             <p className="mt-2 mb-0 text-[11px] leading-relaxed text-havoc-muted">
               On Wayland, the system dialog picks the screen or window — apps can’t capture globally
               there, so that’s the honest (and only) path.
             </p>
           )}
+          {mode === "window" && windowTiles.length > 0 && (
+            <p className="mt-2 mb-0 text-[10px] leading-snug text-havoc-muted">
+              Previews update live. A minimized window shows its last frame (or none) until you
+              restore it.
+            </p>
+          )}
         </>
       )}
     </PickerShell>
+  );
+}
+
+/**
+ * One window tile with a *live* preview: it re-requests the thumbnail on a ~1 s
+ * timer while the picker is open. Visible windows update; a minimized one keeps
+ * its last frame (or shows a placeholder until/unless it's restored).
+ */
+function WindowThumbTile({
+  entry,
+  index,
+  onPick,
+}: {
+  entry: CaptureSource;
+  index: number;
+  onPick: () => void;
+}) {
+  const [thumb, setThumb] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    let interval: number | undefined;
+    const tick = () => {
+      if (inFlight) return;
+      inFlight = true;
+      captureWindowThumbnail(entry.id, 320)
+        .then((uri) => {
+          if (!cancelled && uri) setThumb(uri);
+        })
+        .catch(() => {
+          // Keep the last good frame; the placeholder covers the "never" case.
+        })
+        .finally(() => {
+          inFlight = false;
+          if (!cancelled) setTried(true);
+        });
+    };
+    // Each grab briefly spins up the real capture backend, so stagger the first
+    // one by tile index (no burst when the picker opens), then refresh on a
+    // gentle interval for a live-ish preview.
+    const startDelay = Math.min(index * 250, 1500);
+    const kickoff = window.setTimeout(() => {
+      tick();
+      interval = window.setInterval(tick, 3000);
+    }, startDelay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(kickoff);
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [entry.id, index]);
+
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      title={entry.label}
+      className="group flex flex-col overflow-hidden rounded-md border border-white/10 text-left transition-colors hover:border-havoc-accent/50"
+    >
+      <div className="flex aspect-video w-full items-center justify-center bg-black/40">
+        {thumb ? (
+          <img src={thumb} alt="" className="h-full w-full object-contain" />
+        ) : (
+          <span className="text-[10px] text-havoc-muted">{tried ? "no preview" : "loading…"}</span>
+        )}
+      </div>
+      <span className="truncate px-1.5 py-1 text-[11px] text-havoc-text">{entry.label}</span>
+    </button>
   );
 }
 

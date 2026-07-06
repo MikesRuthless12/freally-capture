@@ -82,6 +82,7 @@ fn main() {
             commands::settings_get,
             commands::settings_set,
             commands::capture_list_sources,
+            commands::capture_window_thumbnail,
             commands::video_devices_list,
             commands::video_device_formats,
             commands::open_privacy_settings,

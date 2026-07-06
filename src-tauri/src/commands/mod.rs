@@ -133,6 +133,61 @@ pub async fn capture_list_sources() -> Result<Vec<CaptureSourceDto>, String> {
     .map_err(|err| format!("capture listing task failed: {err}"))?
 }
 
+/// A one-shot JPEG thumbnail (`data:` URI) of the window `id`, for the picker's
+/// live preview (the UI re-requests it on a timer). `Ok(None)` = no thumbnail
+/// available — a minimized / GPU-composited window, or a platform without it yet
+/// — so the UI shows a placeholder instead of an error.
+#[tauri::command]
+pub async fn capture_window_thumbnail(
+    id: String,
+    max_dim: Option<u32>,
+) -> Result<Option<String>, String> {
+    let max = max_dim.unwrap_or(320).clamp(32, 1024);
+    tauri::async_runtime::spawn_blocking(move || {
+        fcap_capture::window_thumbnail(&id, max)
+            .ok()
+            .and_then(|thumb| thumbnail_data_uri(&thumb))
+    })
+    .await
+    .map_err(|err| format!("thumbnail task failed: {err}"))
+}
+
+/// Encode an RGBA [`fcap_capture::Thumbnail`] as a `data:image/jpeg` URI.
+fn thumbnail_data_uri(thumb: &fcap_capture::Thumbnail) -> Option<String> {
+    // Thumbnails are clamped to <=1024px, so both dimensions fit a u16.
+    let width = u16::try_from(thumb.width).ok()?;
+    let height = u16::try_from(thumb.height).ok()?;
+    let mut jpeg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpeg, 80)
+        .encode(&thumb.rgba, width, height, jpeg_encoder::ColorType::Rgba)
+        .ok()?;
+    Some(format!("data:image/jpeg;base64,{}", base64_encode(&jpeg)))
+}
+
+/// Minimal standard base64 (padded) — a few KB per thumbnail, not worth a dep.
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len() * 4 / 3 + 4);
+    for chunk in data.chunks(3) {
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let n = (u32::from(chunk[0]) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+        out.push(char::from(ALPHABET[((n >> 18) & 63) as usize]));
+        out.push(char::from(ALPHABET[((n >> 12) & 63) as usize]));
+        out.push(if chunk.len() > 1 {
+            char::from(ALPHABET[((n >> 6) & 63) as usize])
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            char::from(ALPHABET[(n & 63) as usize])
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 /// One webcam / capture card.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
