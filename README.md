@@ -11,7 +11,8 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — Phase 4 (recording, 0.55.0) complete.** Real capture is in: per-OS
+> **Status: in development — Phase 4 (recording) complete; 0.56.0 adds the native GPU preview on
+> all three OSes.** Real capture is in: per-OS
 > screen/window capture (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux
 > ScreenCast portal + X11) and webcams/capture cards. The **owned wgpu GPU compositor** (per-item
 > move/scale/rotate/crop, seven blend modes, 60 fps @ 1080p verified on hardware), the **owned
@@ -25,11 +26,14 @@ leaves your machine is the stream you chose to send.
 > (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264/x265/AV1 fallback, **multi-track** mp4/mkv/mov/webm
 > + file splitting + **pause/resume**, HEVC/AV1 + **remux-to-mp4**, and a **Media source** (video/image
 > files, audio in the mixer) — with the patent-encumbered wire codecs driven through the
-> **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). Streaming lands next
-> (0.70.0). **In progress now:** a **native GPU preview** ("OBS feel") that paints the compositor's GPU
-> output straight to the screen with no read-back/encode round-trip — **real-time on Windows** via
-> **DirectComposition** (macOS/Linux next), with the interactive selection box + transform handles drawn
-> into the GPU frame; the JPEG preview stays as the universal fallback. The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
+> **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). **0.56.0 makes the
+> preview feel like OBS:** a **native GPU preview** paints the compositor's GPU output straight to the
+> screen with no read-back/encode round-trip — **Windows** (DirectComposition), **macOS** (CAMetalLayer),
+> and **Linux** (X11/Vulkan; Wayland keeps the JPEG preview) — with the interactive selection box +
+> transform handles drawn into the GPU frame; the JPEG preview stays as the universal fallback. The
+> **Window Capture picker shows live thumbnails** (in-memory only), lists **minimized** windows,
+> **re-binds to the same window across a restart**, and errored captures **auto-recover**. Streaming
+> lands next (0.70.0). The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
 > go-to-market plan) is **maintained privately** and is not published here.
 > **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
 
