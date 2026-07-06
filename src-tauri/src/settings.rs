@@ -18,6 +18,17 @@ use serde::{Deserialize, Serialize};
 
 use fcap_encode::mux::{Container, EncPreset, RateControl, RcMode};
 
+/// How the Audio Mixer lays out its channel strips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MixerLayout {
+    /// Strips stacked as horizontal rows (the compact default).
+    #[default]
+    Horizontal,
+    /// OBS-style vertical strips side by side, with tall meters + faders.
+    Vertical,
+}
+
 /// User-facing settings. Every field defaults (`serde(default)`) so missing
 /// keys never brick the app, and unknown keys from newer builds are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,6 +41,8 @@ pub struct Settings {
     pub show_stats_dock: bool,
     /// The audio monitor output device name (`None`/empty = the OS default).
     pub monitor_device: Option<String>,
+    /// Audio Mixer strip orientation.
+    pub mixer_layout: MixerLayout,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
 }
@@ -40,6 +53,7 @@ impl Default for Settings {
             language: "en".to_owned(),
             show_stats_dock: true,
             monitor_device: None,
+            mixer_layout: MixerLayout::default(),
             recording: RecordingSettings::default(),
         }
     }
@@ -343,6 +357,7 @@ mod tests {
             language: "de".to_owned(),
             show_stats_dock: false,
             monitor_device: Some("Speakers (Realtek)".to_owned()),
+            mixer_layout: MixerLayout::Vertical,
             recording: RecordingSettings {
                 container: Container::Mkv,
                 split_minutes: 30,

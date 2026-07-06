@@ -21,11 +21,16 @@ export type Health = {
 };
 
 /** The persisted user settings (`settings.json` in the OS config dir). */
+/** Audio Mixer strip orientation. */
+export type MixerLayout = "horizontal" | "vertical";
+
 export type Settings = {
   language: string;
   showStatsDock: boolean;
   /** The audio monitor output device name (null/"" = the OS default). */
   monitorDevice: string | null;
+  /** Audio Mixer strip orientation. */
+  mixerLayout: MixerLayout;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
 };
