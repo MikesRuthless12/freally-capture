@@ -34,8 +34,15 @@ import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
-import { spikeHost, spikeJoin, spikeStop } from "../remote/spike";
+import {
+  spikeHost,
+  spikeJoin,
+  spikeSetHostGate,
+  spikeStop,
+  spikeToggleSelfMute,
+} from "../remote/spike";
 import { inviteLink, joinTargetFromInput, mintInvite } from "../remote/invite";
+import { type GateState, guestButton, guestCanToggle } from "../remote/mute";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -977,17 +984,26 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
   const [ttl, setTtl] = useState(30);
   const [copied, setCopied] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [role, setRole] = useState<"host" | "guest" | null>(null);
+  const [gates, setGates] = useState<GateState | null>(null);
 
   // Minting reads Date.now(), so it only runs from event handlers (never in
   // render): when hosting starts (the peer id arrives) and when the expiry
   // changes. `id`/`minutes` are passed explicitly to dodge stale closures.
   const mintLink = (id: string, minutes: number) =>
     setLink(inviteLink(mintInvite(id, minutes, Date.now())));
-  const startHosting = () =>
-    spikeHost(sceneId, setStatus, (id) => {
-      setPeerId(id);
-      mintLink(id, ttl);
-    });
+  const startHosting = () => {
+    setRole("host");
+    spikeHost(
+      sceneId,
+      setStatus,
+      (id) => {
+        setPeerId(id);
+        mintLink(id, ttl);
+      },
+      setGates,
+    );
+  };
   const changeTtl = (minutes: number) => {
     setTtl(minutes);
     if (peerId) mintLink(peerId, minutes);
@@ -1009,7 +1025,8 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
       setStatus(target.error);
       return;
     }
-    spikeJoin(target.peerId, setStatus).catch((err) => setStatus(`join failed: ${err}`));
+    setRole("guest");
+    spikeJoin(target.peerId, setStatus, setGates).catch((err) => setStatus(`join failed: ${err}`));
   };
 
   return (
@@ -1090,6 +1107,18 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
             </button>
           </div>
         </div>
+        {gates && (
+          <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+            <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+              Guest audio
+            </p>
+            {role === "host" ? (
+              <GuestMuteHostControl gates={gates} />
+            ) : (
+              <GuestMuteSelfControl gates={gates} />
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2">
           <p className="m-0 flex-1 text-[11px] leading-snug text-havoc-muted">{status}</p>
           <button
@@ -1097,6 +1126,8 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
             onClick={() => {
               spikeStop();
               setPeerId(null);
+              setRole(null);
+              setGates(null);
               setStatus("stopped");
             }}
             className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
@@ -1106,6 +1137,69 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
         </div>
       </div>
     </PickerShell>
+  );
+}
+
+/** Host side: mute/unmute the connected guest (the host gate) + show whether
+ * the guest has also self-muted. */
+function GuestMuteHostControl({ gates }: { gates: GateState }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => spikeSetHostGate(!gates.hostGate)}
+        aria-pressed={gates.hostGate}
+        className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
+          gates.hostGate
+            ? "border-red-400/60 bg-red-500/20 text-red-300"
+            : "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text hover:bg-havoc-accent/25"
+        }`}
+      >
+        {gates.hostGate ? "Unmute guest" : "Mute guest"}
+      </button>
+      <span className="text-[11px] text-havoc-muted">
+        {gates.hostGate
+          ? "muted by you — the guest can't unmute themselves"
+          : gates.selfGate
+            ? "the guest muted themselves"
+            : "guest is live"}
+      </span>
+    </div>
+  );
+}
+
+/** Guest side: the two-gate self-mute button — red (muted by host, locked),
+ * yellow (self-muted, can unmute), or normal (live). */
+function GuestMuteSelfControl({ gates }: { gates: GateState }) {
+  const state = guestButton(gates);
+  const locked = !guestCanToggle(gates);
+  const label =
+    state === "hostMuted"
+      ? "Muted by host"
+      : state === "selfMuted"
+        ? "Self-muted — click to unmute"
+        : "Mute mic";
+  const className =
+    state === "hostMuted"
+      ? "border-red-400/60 bg-red-500/20 text-red-300"
+      : state === "selfMuted"
+        ? "border-amber-400/60 bg-amber-500/20 text-amber-300"
+        : "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text hover:bg-havoc-accent/25";
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        disabled={locked}
+        onClick={() => spikeToggleSelfMute()}
+        aria-pressed={state !== "live"}
+        className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed ${className}`}
+      >
+        {label}
+      </button>
+      {state === "hostMuted" && (
+        <span className="text-[11px] text-havoc-muted">waiting for the host to unmute you</span>
+      )}
+    </div>
   );
 }
 

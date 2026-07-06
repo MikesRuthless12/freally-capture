@@ -10,28 +10,49 @@
  * Proof-of-concept: the efficient frame path, guest audio, and per-guest
  * status land with TASK-R4; invites/tokens with TASK-R2/R3.
  */
-import Peer from "peerjs";
+import Peer, { type DataConnection } from "peerjs";
 import { invoke } from "@tauri-apps/api/core";
 
 import { studioAddItem } from "../api/commands";
 import type { SceneId } from "../api/types";
+import { GATES_CLEAR, type GateState, guestToggleSelf } from "./mute";
 
 /** Downscale bound for the spike's IPC frames (keeps a push ≤ ~0.9 MB). */
 const MAX_FRAME_WIDTH = 640;
 
 export type SpikeStatus = (message: string) => void;
+export type GateListener = (gates: GateState) => void;
 
 /** rVFC is not in every lib.dom yet — the narrow slice the pump needs. */
 type VideoWithRvfc = HTMLVideoElement & {
   requestVideoFrameCallback: (callback: () => void) => number;
 };
 
-type LiveSession = { peer: Peer; stops: Array<() => void> };
+/** A control message on the host↔guest data channel. */
+type GateMsg = { t: "host"; muted: boolean } | { t: "self"; muted: boolean };
+
+type LiveSession = {
+  peer: Peer;
+  stops: Array<() => void>;
+  role: "host" | "guest";
+  /** Authoritative gate state for this guest (both sides converge on it). */
+  gates: GateState;
+  onGates?: GateListener;
+  /** The control channel (present once the peers connect). */
+  data?: DataConnection;
+  /** The guest's own outbound mic track — self-mute flips `.enabled`. */
+  micTrack?: MediaStreamTrack;
+};
 let live: LiveSession | null = null;
+
+function emitGates(session: LiveSession): void {
+  session.onGates?.(session.gates);
+}
 
 /** Tear down whichever spike session (host or guest) is running. */
 export function spikeStop(): void {
   live?.stops.forEach((stop) => stop());
+  live?.data?.close();
   live?.peer.destroy();
   live = null;
 }
@@ -42,10 +63,11 @@ export function spikeHost(
   sceneId: SceneId,
   onStatus: SpikeStatus,
   onPeerId: (id: string) => void,
+  onGates?: GateListener,
 ): void {
   spikeStop();
   const peer = new Peer();
-  const session: LiveSession = { peer, stops: [] };
+  const session: LiveSession = { peer, stops: [], role: "host", gates: GATES_CLEAR, onGates };
   live = session;
   onStatus("connecting to the signaling broker…");
   peer.on("open", (id) => {
@@ -53,6 +75,21 @@ export function spikeHost(
     onStatus("hosting — share the session id; waiting for a guest…");
   });
   peer.on("error", (err) => onStatus(`peer error: ${err.type}`));
+  // The guest opens a control channel (mute state) alongside the media call.
+  peer.on("connection", (conn) => {
+    session.data = conn;
+    conn.on("data", (raw) => {
+      const msg = raw as GateMsg;
+      if (msg?.t === "self") {
+        session.gates = { ...session.gates, selfGate: msg.muted };
+        emitGates(session);
+      }
+    });
+    conn.on("open", () => {
+      conn.send({ t: "host", muted: session.gates.hostGate } satisfies GateMsg);
+      emitGates(session); // let the host UI know a guest is connected
+    });
+  });
   peer.on("call", (call) => {
     onStatus("guest calling — answering (receive-only)…");
     call.answer();
@@ -66,8 +103,12 @@ export function spikeHost(
   });
 }
 
-/** Guest: share the webcam and call the host's session id. */
-export async function spikeJoin(hostId: string, onStatus: SpikeStatus): Promise<void> {
+/** Guest: share the webcam + mic and call the host's session id. */
+export async function spikeJoin(
+  hostId: string,
+  onStatus: SpikeStatus,
+  onGates?: GateListener,
+): Promise<void> {
   spikeStop();
   onStatus("requesting the webcam + mic…");
   const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -75,15 +116,53 @@ export async function spikeJoin(hostId: string, onStatus: SpikeStatus): Promise<
   const session: LiveSession = {
     peer,
     stops: [() => stream.getTracks().forEach((track) => track.stop())],
+    role: "guest",
+    gates: GATES_CLEAR,
+    onGates,
+    micTrack: stream.getAudioTracks()[0],
   };
   live = session;
+  const id = hostId.trim();
   peer.on("open", () => {
     onStatus("calling the host…");
-    const call = peer.call(hostId.trim(), stream);
+    // Control channel first (mute state), then the media call.
+    const conn = peer.connect(id);
+    session.data = conn;
+    conn.on("open", () => emitGates(session)); // reveal the guest's mute button
+    conn.on("data", (raw) => {
+      const msg = raw as GateMsg;
+      if (msg?.t === "host") {
+        session.gates = { ...session.gates, hostGate: msg.muted };
+        emitGates(session);
+      }
+    });
+    const call = peer.call(id, stream);
     call.on("close", () => onStatus("call closed"));
-    onStatus("sharing the webcam with the host — keep this app open.");
+    onStatus("sharing the webcam + mic with the host — keep this app open.");
   });
   peer.on("error", (err) => onStatus(`peer error: ${err.type}`));
+}
+
+/** Host action: set/clear the host gate for the connected guest. */
+export function spikeSetHostGate(muted: boolean): void {
+  const session = live;
+  if (!session || session.role !== "host") return;
+  session.gates = { ...session.gates, hostGate: muted };
+  session.data?.send({ t: "host", muted } satisfies GateMsg);
+  emitGates(session);
+}
+
+/** Guest action: toggle the self gate (no-op while the host gate is set), mute
+ * the mic at the source, and tell the host. */
+export function spikeToggleSelfMute(): void {
+  const session = live;
+  if (!session || session.role !== "guest") return;
+  const next = guestToggleSelf(session.gates);
+  if (next === session.gates) return; // locked by the host gate
+  session.gates = next;
+  if (session.micTrack) session.micTrack.enabled = !next.selfGate;
+  session.data?.send({ t: "self", muted: next.selfGate } satisfies GateMsg);
+  emitGates(session);
 }
 
 /** The webview → compositor bridge: rVFC → canvas → RGBA → raw-payload IPC. */
@@ -171,6 +250,9 @@ function pumpGuestAudio(stream: MediaStream, sourceId: string, session: LiveSess
   const source = ctx.createMediaStreamSource(stream);
   const processor = ctx.createScriptProcessor(4096, 2, 2);
   processor.onaudioprocess = (event) => {
+    // Host gate: drop the guest's audio when the host has muted them (the
+    // guest's own self-mute is already silenced at their mic via track.enabled).
+    if (session.gates.hostGate) return;
     const input = event.inputBuffer;
     const left = input.getChannelData(0);
     const right = input.numberOfChannels > 1 ? input.getChannelData(1) : left;
