@@ -1,0 +1,51 @@
+# fcap-preview — the native preview child window (the "OBS feel" surface host).
+[package]
+name = "fcap-preview"
+description = "Freally Capture — the native preview child window that hosts the GPU preview surface over the webview's preview region."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+raw-window-handle = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# The DirectComposition overlay creates the wgpu preview surface itself (wgpu's
+# unsafe CompositionVisual target), then hands the Surface to fcap-compositor.
+wgpu = { workspace = true }
+
+# Windows: the DirectComposition overlay + child surface are created here (one
+# of the two places this crate uses `unsafe`, in a small audited module). Linux
+# still gets the honest stub so the app falls back to the JPEG preview:// path.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# macOS: a CAMetalLayer composited above the WKWebView (wgpu `CoreAnimationLayer`,
+# zero-copy) — the analog of the Windows DComp visual. All AppKit / Core Animation
+# `unsafe` is isolated in `mac_metal` via raw `objc2` message sends; CGRect &c.
+# come from objc2-core-foundation (the `objc2` feature provides the Encode impls
+# raw msg_send needs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-core-foundation = { workspace = true, features = ["objc2", "CFCGTypes"] }
+
+# Linux/X11: a child window raised over the WebKitGTK widget, whose Xlib id +
+# display feed wgpu's `RawHandle` surface. x11-dl loads libX11 at runtime (dlopen)
+# so nothing links against system X11 here; raw-window-handle (a base dep) builds
+# the Xlib handles. Wayland falls back to the JPEG path.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = { workspace = true }

@@ -31,8 +31,26 @@ use windows::Win32::System::WinRT::Direct3D11::{
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 
+use super::pointer::{CursorKey, CursorTracker};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
+
+/// Keep-alive tick: cursor pump cadence + how often the HWND is re-validated.
+const CURSOR_TICK: Duration = Duration::from_millis(16);
+
+/// Cursor-drawing state shared by the FrameArrived handler (WinRT worker
+/// threads) and the keep-alive pump. WGC only composites the cursor into
+/// captures of the *focused* window, so we draw it ourselves on every frame —
+/// and synthesize frames from `base` when the cursor moves over a window
+/// whose content is static (see `win/pointer.rs`).
+struct CursorShared {
+    /// The last frame as delivered by WGC, *without* the cursor.
+    base: Option<Frame>,
+    tracker: CursorTracker,
+    /// What the last emitted frame drew — unchanged ⇒ nothing to synthesize.
+    last_drawn: CursorKey,
+}
 
 /// Everything the FrameArrived handler needs, serialized behind one lock
 /// (WinRT may deliver callbacks from multiple worker threads).
@@ -113,14 +131,26 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
         staging: None,
         pool_size: size,
     }));
+    let cursor_shared = Arc::new(Mutex::new(CursorShared {
+        base: None,
+        tracker: CursorTracker::new(),
+        last_drawn: CursorKey::AWAY,
+    }));
     let handler_ctx = Arc::clone(&copy_ctx);
+    let handler_cursor = Arc::clone(&cursor_shared);
     let handler_sender = sender.clone();
     pool.FrameArrived(&TypedEventHandler::new(
         move |pool: &Option<Direct3D11CaptureFramePool>, _| {
             let Some(pool) = pool.as_ref() else {
                 return Ok(());
             };
-            if let Err(err) = on_frame(pool, &handler_ctx, &handler_sender) {
+            if let Err(err) = on_frame(
+                pool,
+                &handler_ctx,
+                &handler_cursor,
+                hwnd_raw,
+                &handler_sender,
+            ) {
                 handler_sender.close(Some(err));
             }
             Ok(())
@@ -131,24 +161,70 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
     let session = pool
         .CreateCaptureSession(&item)
         .map_err(|err| CaptureError::Backend(format!("capture session: {err}")))?;
+    // Hide the OS "yellow capture border" (best-effort; older Windows rejects it).
+    let _ = session.SetIsBorderRequired(false);
+    // We draw the cursor ourselves (WGC only composites it for the *focused*
+    // window — see win/pointer.rs). Best-effort: a failure just risks a
+    // doubled cursor while the captured window is focused.
+    let _ = session.SetIsCursorCaptureEnabled(false);
     session
         .StartCapture()
         .map_err(|err| CaptureError::Backend(format!("StartCapture: {err}")))?;
 
     // Frames now flow on WinRT worker threads; park here until told to stop,
-    // the window closes, or the consumer goes away.
+    // the window closes, or the consumer goes away. WGC's `Closed` event never
+    // fires for some elevated / tray-hiding apps (issue #6), so also poll the
+    // HWND itself — a dead window must end the session with an error, or the
+    // source would sit "live" on a frozen frame and auto-recover never arms.
+    // Each tick also pumps the cursor: WGC sends nothing for a cursor gliding
+    // over a static window, so cursor-only changes synthesize a frame here.
+    let mut window_died = false;
     while !stop.load(Ordering::Relaxed) && !closed.load(Ordering::Relaxed) && sender.is_open() {
-        std::thread::sleep(Duration::from_millis(50));
+        // SAFETY: IsWindow only validates the handle value.
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
+            window_died = true;
+            break;
+        }
+        pump_cursor(&cursor_shared, hwnd_raw, sender);
+        std::thread::sleep(CURSOR_TICK);
     }
 
     let _ = session.Close();
     let _ = pool.Close();
+    if window_died {
+        return Err(CaptureError::NotFound("the captured window closed".into()));
+    }
     Ok(())
+}
+
+/// Emit a synthesized frame when the drawn-cursor state changed but no new
+/// WGC frame arrived (the cursor moving over a static, unfocused window).
+fn pump_cursor(cursor: &Mutex<CursorShared>, hwnd_raw: isize, sender: &FrameSender) {
+    let mut state = cursor.lock().expect("wgc cursor state poisoned");
+    let (key, mut frame) = {
+        let Some(base) = state.base.as_ref() else {
+            return; // no frame yet to draw onto
+        };
+        let key = CursorTracker::sample(hwnd_raw, base.width, base.height);
+        if key == state.last_drawn {
+            return;
+        }
+        (key, base.clone())
+    };
+    frame.captured_at = Instant::now();
+    if key.over {
+        state.tracker.blend(&mut frame, key);
+    }
+    state.last_drawn = key;
+    drop(state);
+    sender.send(frame);
 }
 
 fn on_frame(
     pool: &Direct3D11CaptureFramePool,
     ctx: &Mutex<CopyContext>,
+    cursor: &Mutex<CursorShared>,
+    hwnd_raw: isize,
     sender: &FrameSender,
 ) -> Result<(), CaptureError> {
     let Ok(frame) = pool.TryGetNextFrame() else {
@@ -209,14 +285,26 @@ fn on_frame(
     // SAFETY: paired with the successful Map above.
     unsafe { context.Unmap(staging_tex, 0) };
 
-    sender.send(Frame {
+    let mut frame = Frame {
         width,
         height,
         stride,
         format: PixelFormat::Bgra8,
         data,
         captured_at: Instant::now(),
-    });
+    };
+    {
+        // Keep the pristine image for cursor-only synthesis, then draw the
+        // cursor into the outgoing copy.
+        let mut cursor = cursor.lock().expect("wgc cursor state poisoned");
+        let key = CursorTracker::sample(hwnd_raw, width, height);
+        cursor.base = Some(frame.clone());
+        if key.over {
+            cursor.tracker.blend(&mut frame, key);
+        }
+        cursor.last_drawn = key;
+    }
+    sender.send(frame);
 
     // Track window resizes: recreate the pool at the new content size so the
     // next frames aren't cropped or letterboxed.

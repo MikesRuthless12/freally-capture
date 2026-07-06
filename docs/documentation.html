@@ -311,9 +311,9 @@
         <!-- Getting started -->
         <section id="getting-started">
           <h2>Getting started</h2>
-          <p class="section-intro">Freally Capture is in development. As of <strong>0.55.0</strong>, you can build scenes on the GPU compositor, mix audio across up to 6 tracks, and <strong>record</strong> multi-track to disk. Streaming and the studio MVP land next (0.70.0).</p>
+          <p class="section-intro">Freally Capture is in development. As of <strong>0.56.0</strong>, you can build scenes on the GPU compositor, mix audio across up to 6 tracks, <strong>record</strong> multi-track to disk, and the preview is a <strong>native GPU surface</strong> ("OBS feel") on Windows, macOS, and Linux. Streaming and the studio MVP land next (0.70.0).</p>
 
-          <div class="warn"><strong>Status:</strong> early development. Capture, the GPU compositor + filters, the audio mixer, and <strong>multi-track recording</strong> are in (0.55.0); streaming and the virtual camera are still to come — download early builds from the <a href="index.html" style="color:var(--accent)">Releases page</a>.</div>
+          <div class="warn"><strong>Status:</strong> early development. Capture, the GPU compositor + filters, the audio mixer, <strong>multi-track recording</strong> (0.55.0), and the <strong>native GPU preview</strong> (0.56.0) are in; streaming and the virtual camera are still to come — download early builds from the <a href="index.html" style="color:var(--accent)">Releases page</a>.</div>
 
           <h3>Windows / macOS / Linux</h3>
           <ol class="steps">
@@ -337,6 +337,7 @@
             <li><span>Create more scenes in the <strong>Scenes</strong> rail (e.g. "Starting Soon", "Gameplay", "BRB") and switch between them.</span></li>
           </ol>
           <div class="tip"><strong>Tip:</strong> A source added to one scene can be reused in others — change its properties once and it updates everywhere it appears.</div>
+          <div class="tip"><strong>Real-time preview:</strong> on <strong>Windows</strong>, the program preview is painted straight from the GPU compositor ("OBS feel") — drag, scale, and rotate feel instant, with the selection box and handles drawn right into the GPU frame. macOS and Linux use the same on-canvas editing over the standard preview while the native path lands there next.</div>
         </section>
 
         <!-- Filters & transitions -->

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import {
+  nativePreviewActive,
+  nativePreviewSetRegion,
+  nativePreviewSetSelection,
+} from "../api/commands";
 import type { Collection, ItemId, ProgramStatus, Scene, SceneItem, Transform } from "../api/types";
 import {
   canvasToLocal,
@@ -65,10 +70,17 @@ export function PreviewPanel({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const dragRef = useRef<DragState | null>(null);
+  // The native GPU preview surface (the "OBS feel" path): when active, a
+  // native child window paints the program region and the JPEG canvas is
+  // suppressed. Off Windows this stays false → the JPEG path renders.
+  const [nativeActive, setNativeActive] = useState(false);
+  const [hoverCursor, setHoverCursor] = useState("default");
+  const lastRegion = useRef("");
 
   const programW = collection?.canvasWidth ?? 1920;
   const programH = collection?.canvasHeight ?? 1080;
   const running = program?.state === "running";
+  const emptyScene = (scene?.items.length ?? 0) === 0;
 
   // The displayed box: the program frame letterboxed inside the container.
   useEffect(() => {
@@ -92,9 +104,76 @@ export function PreviewPanel({
     return () => observer.disconnect();
   }, [programW, programH]);
 
-  // Poll the composed frame onto the canvas while the studio runs.
+  // Is the native GPU preview viable? (Windows DX12 + overlay, not failed.) It
+  // can flip false mid-session (surface build error, device lost), so re-poll
+  // rather than checking once — when it drops, the JPEG canvas + poll return.
   useEffect(() => {
-    if (!running) return;
+    let alive = true;
+    const poll = () =>
+      nativePreviewActive()
+        .then((on) => alive && setNativeActive(on))
+        .catch(() => alive && setNativeActive(false));
+    void poll();
+    const timer = setInterval(poll, 1000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  // While native, keep the child window positioned over the letterboxed
+  // program area (physical px, window-client relative) and shown only when
+  // there's a live scene to paint (so the empty/starting HTML hints aren't
+  // hidden behind it). A light interval catches layout drift as docks resize.
+  useEffect(() => {
+    if (!nativeActive) return;
+    const report = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = Math.round((rect.left + box.left) * dpr);
+      const y = Math.round((rect.top + box.top) * dpr);
+      const w = Math.round(box.width * dpr);
+      const h = Math.round(box.height * dpr);
+      const visible = running && !emptyScene;
+      const key = `${x},${y},${w},${h},${visible}`;
+      if (key !== lastRegion.current) {
+        lastRegion.current = key;
+        void nativePreviewSetRegion(x, y, w, h, visible).catch(() => undefined);
+      }
+    };
+    report();
+    const timer = setInterval(report, 150);
+    // Only stop the interval here — do NOT hide the region. This effect re-runs
+    // on every `box` change (a resize spawns a new box object each tick), and
+    // hiding on each re-run flashes the native preview blank. The hide lives in
+    // the deactivate/unmount effect below, which only fires when nativeActive flips.
+    return () => clearInterval(timer);
+  }, [nativeActive, box, running, emptyScene]);
+
+  // Hide the native overlay when it stops being viable or the panel unmounts,
+  // decoupled from per-layout reporting so an ordinary resize never flashes it.
+  useEffect(() => {
+    if (!nativeActive) return;
+    return () => {
+      lastRegion.current = "";
+      void nativePreviewSetRegion(0, 0, 0, 0, false).catch(() => undefined);
+    };
+  }, [nativeActive]);
+
+  // Tell the native surface which item is selected, so it can draw the box +
+  // handles *into* the GPU frame (they're hidden under the opaque surface).
+  // Also fires with `null` on deselect. Only matters on the native path.
+  useEffect(() => {
+    if (!nativeActive) return;
+    void nativePreviewSetSelection(selectedItem).catch(() => undefined);
+  }, [nativeActive, selectedItem]);
+
+  // Poll the composed frame onto the canvas while the studio runs (skipped
+  // when the native surface is painting the region).
+  useEffect(() => {
+    if (!running || nativeActive) return;
     // jsdom (tests) has neither the scheme nor createImageBitmap.
     if (typeof createImageBitmap === "undefined") return;
     let stopped = false;
@@ -131,7 +210,7 @@ export function PreviewPanel({
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [running]);
+  }, [running, nativeActive]);
 
   const displayScale = box.width > 0 ? box.width / programW : 1;
   const toProgram = useCallback(
@@ -170,6 +249,35 @@ export function PreviewPanel({
     if (!content) return null;
     return { source, content };
   }, [selected, sourceSize]);
+
+  /** The cursor for a pointer position: resize on handles, move on the body. */
+  const cursorFor = useCallback(
+    (p: Vec2): string => {
+      if (!selected || !selectedGeometry || selected.locked) return "default";
+      const { content } = selectedGeometry;
+      const t = selected.transform;
+      const corner = itemCorners(t, content);
+      const mids = edgeMidpoints(corner);
+      const rotate = rotateHandle(t, content, displayScale);
+      const near = (a: Vec2) => distance(a, p) * displayScale <= HANDLE_RADIUS;
+      if (near(rotate)) return "grab";
+      const c = corner.findIndex(near);
+      if (c >= 0) return c === 0 || c === 3 ? "nwse-resize" : "nesw-resize";
+      const e = mids.findIndex(near);
+      if (e >= 0) return e <= 1 ? "ew-resize" : "ns-resize";
+      return hitTest(t, content, p) ? "move" : "default";
+    },
+    [selected, selectedGeometry, displayScale],
+  );
+
+  // Restore the move affordance the instant an item is selected (keyboard, or a
+  // click that doesn't move) — updateDrag refines the per-handle cursor on the
+  // first pointer move. Keyed on the item id only, so an ordinary scene tick
+  // never resets a hovered handle cursor out from under the pointer.
+  useEffect(() => {
+    setHoverCursor(selected && !selected.locked ? "move" : "default");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItem]);
 
   // -- pointer interactions ---------------------------------------------------
 
@@ -261,9 +369,12 @@ export function PreviewPanel({
   };
 
   const updateDrag = (event: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
     const p = toProgram(event);
+    const drag = dragRef.current;
+    if (!drag) {
+      setHoverCursor(cursorFor(p));
+      return;
+    }
     const next = applyDrag(drag, p, event.shiftKey);
     if (next) onItemTransform(drag.itemId, next);
   };
@@ -288,8 +399,6 @@ export function PreviewPanel({
     return { corner, mids, rotate, locked: selected.locked };
   }, [selected, selectedGeometry, displayScale]);
 
-  const emptyScene = (scene?.items.length ?? 0) === 0;
-
   return (
     <section
       aria-label="Program preview"
@@ -298,18 +407,20 @@ export function PreviewPanel({
       <div ref={containerRef} className="relative min-h-0 flex-1">
         {running && (
           <>
-            <canvas
-              ref={canvasRef}
-              role="img"
-              aria-label="Program output"
-              className="absolute"
-              style={{
-                left: box.left,
-                top: box.top,
-                width: box.width,
-                height: box.height,
-              }}
-            />
+            {!nativeActive && (
+              <canvas
+                ref={canvasRef}
+                role="img"
+                aria-label="Program output"
+                className="absolute"
+                style={{
+                  left: box.left,
+                  top: box.top,
+                  width: box.width,
+                  height: box.height,
+                }}
+              />
+            )}
             <svg
               role="application"
               aria-label="Canvas editor"
@@ -319,7 +430,7 @@ export function PreviewPanel({
                 top: box.top,
                 width: box.width,
                 height: box.height,
-                cursor: overlay ? "move" : "default",
+                cursor: hoverCursor,
               }}
               onPointerDown={beginDrag}
               onPointerMove={updateDrag}

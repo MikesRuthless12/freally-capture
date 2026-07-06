@@ -297,10 +297,11 @@ impl Compositor {
                 let (blend, _) = blend_config(mode);
                 let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("fcap item pipeline"),
+                    cache: None,
                     layout: Some(&pipeline_layout),
                     vertex: wgpu::VertexState {
                         module: &shader,
-                        entry_point: "vs_main",
+                        entry_point: Some("vs_main"),
                         compilation_options: Default::default(),
                         buffers: &[],
                     },
@@ -313,7 +314,7 @@ impl Compositor {
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: "fs_main",
+                        entry_point: Some("fs_main"),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: PROGRAM_FORMAT,
@@ -446,6 +447,66 @@ impl Compositor {
         &self.gpu.adapter_summary
     }
 
+    // -- native preview surface (the "OBS feel" path) -----------------------
+
+    /// The wgpu instance this compositor's device came from — the
+    /// DirectComposition overlay builds its surface against the same adapter.
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.gpu.instance
+    }
+
+    /// True when the compositor is on the DX12 backend — the only backend that
+    /// can build a DirectComposition `CompositionVisual` surface. The app gates
+    /// the native preview on this so a non-DX12 machine stays on the JPEG path
+    /// instead of advertising a native surface it can never present.
+    pub fn is_dx12(&self) -> bool {
+        self.gpu.is_dx12
+    }
+
+    /// True when the compositor is on the Metal backend — the backend that can
+    /// build a `CoreAnimationLayer` (CAMetalLayer) surface for the macOS native
+    /// preview. The app gates the native preview on DX12-or-Metal so other
+    /// backends stay on the JPEG path instead of advertising an unpresentable
+    /// native surface.
+    pub fn is_metal(&self) -> bool {
+        self.gpu.is_metal
+    }
+
+    /// True on the Vulkan or GL backend — the Linux native preview renders into
+    /// an X11 child window (wgpu `RawHandle`). Gated alongside `is_dx12` /
+    /// `is_metal` so only a backend whose surface the OS can composite over the
+    /// webview advertises the native path.
+    pub fn is_vulkan_or_gl(&self) -> bool {
+        self.gpu.is_vulkan_or_gl
+    }
+
+    /// Create a [`NativePreview`] from a surface the caller already built (the
+    /// DirectComposition overlay path in `fcap-preview`), sharing this
+    /// compositor's device.
+    pub fn native_preview_from_surface(
+        &self,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<crate::NativePreview, CompositorError> {
+        crate::NativePreview::from_surface(&self.gpu, surface, width, height)
+    }
+
+    /// Blit the current program frame onto the preview surface and present —
+    /// no readback. `Ok(false)` if the frame was skipped (surface not ready).
+    pub fn present_native(
+        &self,
+        preview: &mut crate::NativePreview,
+        overlay: Option<&crate::PreviewOverlay>,
+    ) -> Result<bool, CompositorError> {
+        preview.present(&self.gpu, &self.program_view, overlay)
+    }
+
+    /// Reconfigure the preview surface after its window resized.
+    pub fn resize_native(&self, preview: &mut crate::NativePreview, width: u32, height: u32) {
+        preview.resize(&self.gpu, width, height);
+    }
+
     /// CPU cost of the last [`render`](Self::render) (encode + submit).
     pub fn last_render_cpu_micros(&self) -> u64 {
         self.last_render_cpu_micros
@@ -562,14 +623,14 @@ impl Compositor {
 
         let slot = self.sources.get(&source).expect("slot was just ensured");
         self.gpu.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &slot.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &frame.data[..needed],
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(frame.stride),
                 rows_per_image: Some(frame.height),
@@ -777,6 +838,7 @@ impl Compositor {
                 label: Some("fcap filter pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -806,6 +868,7 @@ impl Compositor {
                 label: Some("fcap program pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.program_view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -923,15 +986,15 @@ impl Compositor {
                 label: Some("fcap readback"),
             });
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.program,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded as u32),
                     rows_per_image: Some(height),
@@ -950,7 +1013,7 @@ impl Compositor {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        self.gpu.device.poll(wgpu::Maintain::Wait);
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
         rx.recv()
             .map_err(|_| CompositorError::Readback("map callback dropped".into()))?
             .map_err(|err| CompositorError::Readback(err.to_string()))?;

@@ -44,6 +44,14 @@ const TICK: Duration = Duration::from_millis(16);
 const READBACK_INTERVAL: Duration = Duration::from_millis(33);
 const PROGRAM_EVENT_INTERVAL: Duration = Duration::from_secs(1);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(800);
+/// Auto-recover backoff (OBS-style): the first re-attempt of an errored
+/// device/window capture fires this soon after it fails…
+const AUTO_RETRY_MIN: Duration = Duration::from_secs(3);
+/// …and each further attempt doubles the wait up to this cap, so a source whose
+/// window/device never returns settles to an occasional retry instead of
+/// thrashing its status every few seconds — while still recovering within the
+/// cap once it comes back.
+const AUTO_RETRY_MAX: Duration = Duration::from_secs(60);
 const PREVIEW_MAX_WIDTH: u32 = 1280;
 const PREVIEW_MAX_HEIGHT: u32 = 720;
 const PREVIEW_JPEG_QUALITY: u8 = 75;
@@ -192,6 +200,68 @@ impl StudioState {
             persist(&mut core);
         }
     }
+}
+
+/// **Test-only** (env `FCAP_SMOKE`): seed a bright **magenta** color source into
+/// the active scene and force the native preview region on, so the headless
+/// `screenshot-smoke` job actually exercises the native GPU surface. The UI
+/// never reports a preview region without interaction, so without this the
+/// render loop builds no surface and the screenshot shows only the HTML shell
+/// (the same on every OS — the native surface was only ever proven interactively
+/// on real hardware). A no-op unless the env var is set; never touches normal use.
+pub fn seed_smoke_scene<R: Runtime>(app: &AppHandle<R>) {
+    use fcap_scene::{Rgba, Source, SourceSettings, Transform};
+
+    let studio = app.state::<StudioState>();
+    let seeded = studio.mutate(app, |collection| {
+        let scene_id = collection.active_scene().id;
+        let magenta = Source::new(
+            "Smoke Magenta",
+            SourceSettings::Color {
+                color: Rgba::new(255, 0, 255, 255),
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let (_source_id, item_id) = collection.add_item_with_new_source(scene_id, magenta)?;
+        // Resize to a centered ~55% box (mimics a manual resize). A full-canvas
+        // item pushes the selection box + handles to the surface edges and the
+        // rotate handle above the top edge — all clipped; a smaller centered box
+        // keeps the whole overlay on-screen. This also clears `pending_fit`, so
+        // the first-frame auto-fit won't overwrite it back to fill-canvas.
+        let transform = Transform {
+            x: 960.0,
+            y: 540.0,
+            scale_x: 0.55,
+            scale_y: 0.55,
+            ..Default::default()
+        };
+        collection.set_item_transform(scene_id, item_id, transform)?;
+        Ok(item_id)
+    });
+
+    let native = app.state::<crate::native_preview::NativePreviewState>();
+    // Force the preview region on (physical px, parent-client top-left) so the
+    // studio thread builds + presents the native surface. A large central rect
+    // that stays visible at 1x or 2x backing scale — exact placement doesn't
+    // matter here; the "surface created" log line + a magenta frame are the proof.
+    native.set_region(
+        fcap_preview::Bounds {
+            x: 100,
+            y: 100,
+            width: 1000,
+            height: 600,
+        },
+        true,
+    );
+    match seeded {
+        // Select the seeded item so the selection box + corner/edge handles + the
+        // rotate handle draw *into* the native GPU frame (NP.3b) — proving the
+        // interactive overlay on the surface, not just the surface itself.
+        Ok(item_id) => native.set_selection(Some(item_id)),
+        Err(err) => eprintln!("smoke: could not seed the magenta scene: {err}"),
+    }
+    println!("smoke: seeded + selected the magenta scene, forced the preview region on");
 }
 
 /// One audio source the engine should run (see [`StudioState::audio_specs`]).
@@ -363,6 +433,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             guard.collection.canvas_height,
         )
     };
+    println!("studio: creating the compositor ({canvas_w}x{canvas_h})...");
     let mut compositor = match Compositor::new(canvas_w, canvas_h) {
         Ok(compositor) => compositor,
         Err(err) => {
@@ -414,7 +485,31 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut composed_this_second = 0u32;
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
+    // Per-source auto-recover backoff: source id → (next attempt time, last wait).
+    let mut retry_schedule: HashMap<SourceId, (Instant, Duration)> = HashMap::new();
     let mut statuses_changed = true;
+
+    // The native preview surface (the "OBS feel" path): created lazily once
+    // the UI reports a non-zero preview region, then presented every frame
+    // with no readback. `None` while unsupported/uncreated; `disabled` stops
+    // retrying after a creation failure so it can't spin.
+    let mut native_surface: Option<(fcap_compositor::NativePreview, u64)> = None;
+    // The native GPU preview needs the DX12 backend (DirectComposition only
+    // accepts DirectX swapchains); on any other adapter it stays disabled and
+    // the JPEG path renders.
+    // The native preview needs a backend whose swapchain the OS compositor
+    // accepts: DX12 for the Windows DirectComposition visual, Metal for the
+    // macOS CAMetalLayer, Vulkan/GL for the Linux X11 child window. Anything
+    // else stays on the JPEG path.
+    let mut native_disabled =
+        !(compositor.is_dx12() || compositor.is_metal() || compositor.is_vulkan_or_gl());
+    {
+        // Tell the UI up front whether the native path is viable, so a non-DX12
+        // machine (or a missing overlay) never hides its JPEG canvas over a
+        // surface that can never present.
+        let native = app.state::<crate::native_preview::NativePreviewState>();
+        native.set_viable(!native_disabled && native.composition_handle().is_some());
+    }
 
     loop {
         let tick_started = Instant::now();
@@ -688,6 +783,74 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         }
         composed_this_second += 1;
 
+        // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
+        if !native_disabled {
+            let native = app.state::<crate::native_preview::NativePreviewState>();
+            if let Some(handle) = native.composition_handle() {
+                let (gen, bounds) = native.region();
+                let sized = bounds.width > 0 && bounds.height > 0;
+                if sized && native.is_visible() {
+                    match &mut native_surface {
+                        None => match handle
+                            .create_surface(compositor.instance())
+                            .map_err(|err| err.to_string())
+                            .and_then(|surface| {
+                                compositor
+                                    .native_preview_from_surface(
+                                        surface,
+                                        bounds.width,
+                                        bounds.height,
+                                    )
+                                    .map_err(|err| err.to_string())
+                            }) {
+                            Ok(surface) => {
+                                println!(
+                                    "native preview: surface created {}x{} at ({},{})",
+                                    bounds.width, bounds.height, bounds.x, bounds.y
+                                );
+                                native_surface = Some((surface, gen));
+                                // wgpu just bound the swapchain to the visual;
+                                // commit so DComp composites it immediately, not
+                                // only after the next resize.
+                                native.commit();
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "studio: native preview surface failed ({err}) — \
+                                     falling back to the JPEG preview"
+                                );
+                                native_disabled = true;
+                                native.set_viable(false);
+                            }
+                        },
+                        Some((surface, seen_gen)) => {
+                            if *seen_gen != gen {
+                                compositor.resize_native(surface, bounds.width, bounds.height);
+                                *seen_gen = gen;
+                            }
+                        }
+                    }
+                }
+                if native.is_visible() {
+                    // The selection box + handles, drawn into the native frame
+                    // (they'd sit hidden under the opaque surface otherwise).
+                    let overlay =
+                        native_selection_overlay(native.selection(), &scene, &compositor, canvas);
+                    if let Some((surface, _)) = &mut native_surface {
+                        match compositor.present_native(surface, overlay.as_ref()) {
+                            Ok(_) => {}
+                            Err(err) => {
+                                eprintln!("studio: native present failed ({err})");
+                                native_disabled = true;
+                                native_surface = None;
+                                native.set_viable(false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // The recorder wants the full-res program frame every tick while a
         // session runs; the preview JPEG keeps its ~30 fps cadence. One
         // readback serves both.
@@ -757,6 +920,54 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             statuses_changed = false;
         }
 
+        // -- 7b. Auto-recover errored device/window captures (OBS-style) --------
+        // Re-attempt sources that errored because their window / display /
+        // camera wasn't available, so they re-bind on their own the moment it
+        // comes back — no manual Retry. Bumping the retry nonce (+ revision) is
+        // exactly what the manual Retry does; the next tick's reconcile restarts
+        // them. Each source backs off (AUTO_RETRY_MIN doubling to AUTO_RETRY_MAX)
+        // so a never-returning source settles to an occasional retry instead of
+        // thrashing waiting↔error; recovering (going live) or leaving the scene
+        // clears its schedule, so a fresh error starts the backoff over.
+        {
+            let now = Instant::now();
+            // Keep a schedule entry across the transient waiting↔error churn of a
+            // retry; drop it only once the source recovered or left the scene.
+            retry_schedule.retain(|id, _| {
+                scene_sources.iter().any(|source| source.id == *id)
+                    && statuses.get(id).map(|status| status.state) != Some("live")
+            });
+            let mut due: Vec<SourceId> = Vec::new();
+            for source in &scene_sources {
+                let errored = auto_recoverable(&source.settings)
+                    && statuses
+                        .get(&source.id)
+                        .is_some_and(|status| status.state == "error");
+                if !errored {
+                    continue;
+                }
+                match retry_schedule.get_mut(&source.id) {
+                    // Newly errored: wait one MIN interval before the first try.
+                    None => {
+                        retry_schedule.insert(source.id, (now + AUTO_RETRY_MIN, AUTO_RETRY_MIN));
+                    }
+                    Some((next, backoff)) if now >= *next => {
+                        due.push(source.id);
+                        *backoff = (*backoff * 2).min(AUTO_RETRY_MAX);
+                        *next = now + *backoff;
+                    }
+                    Some(_) => {}
+                }
+            }
+            if !due.is_empty() {
+                let mut guard = lock_core(&core);
+                for id in &due {
+                    *guard.retry_nonces.entry(*id).or_insert(0) += 1;
+                }
+                guard.revision += 1;
+            }
+        }
+
         // -- 8. Autosave (debounced behind the last mutation) --------------------
         {
             let mut guard = lock_core(&core);
@@ -794,6 +1005,83 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
     )
+}
+
+/// Which source kinds auto-recover on a timer: hardware / window captures that
+/// can come back (a reopened window, a replugged display, a reconnected
+/// camera). Portal and media are excluded on purpose — a portal retry would
+/// re-pop the system picker dialog, and a bad media path won't fix itself.
+fn auto_recoverable(settings: &SourceSettings) -> bool {
+    matches!(
+        settings,
+        SourceSettings::Display { .. }
+            | SourceSettings::Window { .. }
+            | SourceSettings::VideoDevice { .. }
+    )
+}
+
+/// The native preview's selection overlay, computed from the model: the
+/// selected item's four content corners (canvas px) + its locked flag, or
+/// `None` when nothing usable is selected (no selection, awaiting first frame,
+/// no known size, or fully cropped). Preview-only chrome — this never touches
+/// the program frame the recorder and stream read.
+fn native_selection_overlay(
+    selection: Option<fcap_scene::ItemId>,
+    scene: &fcap_scene::Scene,
+    compositor: &Compositor,
+    canvas: (u32, u32),
+) -> Option<fcap_compositor::PreviewOverlay> {
+    let id = selection?;
+    let item = scene.items.iter().find(|it| it.id == id)?;
+    if item.pending_fit {
+        return None;
+    }
+    let (source_w, source_h) = compositor.source_size(item.source)?;
+    let (eff_w, eff_h) = effective_source_size(source_w, source_h, &item.filters);
+    let content = fcap_compositor::transform::content_size(eff_w, eff_h, &item.transform.crop)?;
+    Some(fcap_compositor::PreviewOverlay {
+        corners: fcap_compositor::transform::corners(&item.transform, content),
+        canvas: (canvas.0 as f32, canvas.1 as f32),
+        locked: item.locked,
+    })
+}
+
+/// The source size the compositor actually composes for an item: the reported
+/// resolution after its enabled Crop *filters* (the only size-changing filter
+/// kind), folded in chain order with the engine's skip semantics. Mirrors
+/// `effectiveSourceSize` in `ui/src/lib/transform.ts` so the native selection
+/// box hugs the same pixels the HTML one does.
+fn effective_source_size(
+    source_w: u32,
+    source_h: u32,
+    filters: &[fcap_scene::Filter],
+) -> (u32, u32) {
+    let mut w = source_w;
+    let mut h = source_h;
+    for filter in filters {
+        if !filter.enabled {
+            continue;
+        }
+        if let FilterKind::Crop {
+            left,
+            top,
+            right,
+            bottom,
+        } = filter.kind
+        {
+            if left == 0 && top == 0 && right == 0 && bottom == 0 {
+                continue;
+            }
+            let out_w = w.saturating_sub(left).saturating_sub(right);
+            let out_h = h.saturating_sub(top).saturating_sub(bottom);
+            if out_w == 0 || out_h == 0 {
+                continue; // the engine skips a crop that would zero an axis
+            }
+            w = out_w;
+            h = out_h;
+        }
+    }
+    (w, h)
 }
 
 /// A change-detection fingerprint of a source's settings.

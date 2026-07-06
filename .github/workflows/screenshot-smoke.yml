@@ -1,0 +1,201 @@
+# Cross-OS "loads cleanly" screenshot smoke.
+#
+# Builds the release binary on Windows / macOS / Linux, launches it, and checks
+# it came up — so the studio UI (and, as they land, the per-OS native preview
+# surfaces) is verified on every OS without owning that hardware.
+#
+# The check is per-OS, matched to what each headless runner can actually prove:
+#   * Windows + macOS: capture the screen and ASSERT the frame isn't blank (the
+#     `screenshot_check` example fails the job on a missing / uniform-black
+#     capture). Both genuinely render the full UI, so this is a real pixel gate.
+#   * Linux: NP.5's native (lavapipe) Vulkan surface renders independently of
+#     WebKitGTK, so the pixel gate here asserts the seeded scene's *magenta*
+#     actually painted (`screenshot_check --expect-magenta`) — direct proof the
+#     native surface presented — on top of the alive + window-mapped checks the
+#     app step makes. (With the software GL driver installed below, WebKitGTK now
+#     software-renders the surrounding UI too, so the capture shows the full
+#     studio; but the enforced gate is the magenta — what NP.5 owns, and
+#     deterministic regardless of WebKitGTK's headless behaviour.)
+#
+# Runs on demand and on the native-preview branch. CI runners have no discrete
+# GPU (software rasterizer: WARP / lavapipe), so this proves the app boots +
+# comes up cleanly, not raw performance.
+name: Screenshot smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-preview, native-preview-wgpu]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A launched app that panics should still let us grab the screenshot.
+  RUST_BACKTRACE: 1
+  # Seed a magenta scene + force the preview region on launch, so the headless
+  # screenshot actually exercises the native GPU surface (Windows DComp / macOS
+  # CAMetalLayer) — the UI never reports a region without interaction. A magenta
+  # frame + the "native preview: surface created" log line prove the native path.
+  FCAP_SMOKE: "1"
+
+jobs:
+  screenshot:
+    name: launch + screenshot (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/linux-deps
+      - name: Install Linux screenshot tools
+        if: matrix.os == 'ubuntu-latest'
+        # openbox: a minimal window manager so the app window is managed + mapped
+        # under Xvfb. xdotool locates + sizes it (headless GTK brings the window
+        # up collapsed at ~10x10); x11-utils' xwininfo logs the geometry.
+        # mesa-vulkan-drivers (lavapipe) + libgl1-mesa-dri give wgpu a *software*
+        # GPU adapter — without one the headless runner has no GPU at all and the
+        # compositor's request_adapter hangs, so the native preview never runs.
+        run: sudo apt-get update && sudo apt-get install -y xvfb imagemagick openbox x11-utils xdotool mesa-vulkan-drivers libgl1-mesa-dri dbus-x11
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app (release, UI embedded)
+        run: npm run tauri -- build --no-bundle
+
+      # -- launch + screenshot, per OS -----------------------------------------
+      - name: Launch + screenshot (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = "target/release/freally-capture.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 25
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD/screenshot-windows.png")
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "captured: $(Test-Path screenshot-windows.png)"
+
+      - name: Launch + screenshot (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          ./target/release/freally-capture &
+          APP_PID=$!
+          sleep 25
+          screencapture -x screenshot-macos.png || echo "screencapture failed"
+          kill $APP_PID 2>/dev/null || true
+          ls -la screenshot-macos.png || true
+
+      - name: Launch + verify the window maps + screenshot (Linux, Xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          # Software-render hints for WebKitGTK. With the software GL driver
+          # (libgl1-mesa-dri, installed above) these now let WebKitGTK render its
+          # web content under headless Xvfb, so the captured frame shows the full
+          # UI. The *enforced* Linux gate, though, is the native surface's magenta
+          # (see the assert step) — deterministic regardless of WebKitGTK.
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          # Force the X11 GDK backend so GTK never tries Wayland on the runner.
+          GDK_BACKEND: "x11"
+          # Surface wgpu's adapter/surface diagnostics (env_logger reads this) so
+          # a hanging/failing Compositor::new shows *why* in /tmp/fcap.log.
+          RUST_LOG: "info,wgpu_core=info,wgpu_hal=debug"
+          # WebKitGTK's WebView creation blocks in tauri build() on the bare
+          # runner: it wants a D-Bus session (below, dbus-run-session) and the
+          # a11y bridge (org.a11y.Bus) which isn't there — disable the bridge.
+          NO_AT_BRIDGE: "1"
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
+          sleep 3
+          # openbox manages + maps the window (without a WM it isn't managed).
+          openbox &
+          sleep 2
+          # Run under a private D-Bus session so WebKitGTK's WebView creation
+          # completes (it otherwise blocks in tauri build() on the bare runner).
+          # stdbuf line-buffers so the log survives the kill.
+          dbus-run-session -- stdbuf -oL -eL ./target/release/freally-capture >/tmp/fcap.log 2>&1 &
+          APP_PID=$!
+          # Headless GTK brings the window up collapsed at ~10x10; give it a
+          # moment to map, then size it to the screen so the (documentary)
+          # screenshot shows the real window rectangle rather than a speck.
+          sleep 12
+          WIN=$(xdotool search --class '[Ff]really' 2>/dev/null | head -1 || true)
+          echo "app window id: ${WIN:-<none>}"
+          if [ -n "$WIN" ]; then
+            xdotool windowsize "$WIN" 1600 1000
+            xdotool windowmove "$WIN" 0 0
+            xdotool windowactivate "$WIN" 2>/dev/null || true
+          fi
+          sleep 6
+          echo "=== fcap app log (native-preview diagnostics) ==="
+          cat /tmp/fcap.log 2>/dev/null || echo "(no app log)"
+          echo "--- xwininfo (freally window + its child windows) ---"
+          xwininfo -root -tree 2>&1 | sed -n '/freally-capture/,+6p' || true
+          # Capture the frame: the native X11 surface paints the seeded magenta,
+          # which the assert step below enforces (WebKitGTK renders the UI around
+          # it now too, but the magenta is the gate).
+          import -window root screenshot-linux.png || echo "import failed"
+          # -- Linux liveness checks (precise diagnostics before the pixel gate) -
+          # Fail fast with a specific message if the app died before capture or
+          # never created its top-level window — that pinpoints a crash-on-launch,
+          # a missing system lib, or a GTK/WebKit init failure. The magenta pixel
+          # gate (assert step below) then proves the native surface actually painted.
+          if ! kill -0 "$APP_PID" 2>/dev/null; then
+            echo "FAIL: the app process exited before capture — it did not stay up"
+            exit 1
+          fi
+          if [ -z "$WIN" ]; then
+            echo "FAIL: no Freally Capture window mapped — the app never created its window"
+            kill "$APP_PID" 2>/dev/null || true
+            exit 1
+          fi
+          echo "OK: app alive (pid $APP_PID) and window $WIN mapped"
+          kill "$APP_PID" 2>/dev/null || true
+          ls -la screenshot-linux.png || true
+
+      # -- assert the frame rendered (the enforced pixel gate) -----------------
+      # All three OSes. Windows + macOS assert the frame isn't blank (full UI).
+      # Linux adds --expect-magenta: assert NP.5's native Vulkan surface actually
+      # painted the seeded magenta (its liveness checks ran in the step above).
+      # bash runs on every runner (Git Bash on Windows); each matrix job produced
+      # exactly one screenshot-<os>.png. Runs before the upload so a bad frame
+      # still fails the job *and* keeps its artifact for debugging.
+      - name: Assert the screenshot rendered (pixel gate)
+        shell: bash
+        run: |
+          shopt -s nullglob
+          shots=(screenshot-*.png)
+          if [ ${#shots[@]} -eq 0 ]; then
+            echo "screenshot_check: no screenshot was captured — the launch/capture step failed"
+            exit 1
+          fi
+          # Linux: the native surface's magenta is the proof (WebKitGTK aside).
+          expect=()
+          if [ "$RUNNER_OS" = "Linux" ]; then expect=(--expect-magenta); fi
+          cargo run --release -p fcap-sources --example screenshot_check -- "${shots[0]}" "${expect[@]}"
+
+      - name: Upload the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: screenshot-*.png
+          if-no-files-found: warn

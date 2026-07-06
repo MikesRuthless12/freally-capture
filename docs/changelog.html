@@ -20,8 +20,50 @@
     </header>
 
     <main>
-      <!-- 0.55.0 — audio mixer + recording -->
+      <!-- 0.56.0 — native GPU preview + window capture -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.56.0</span>
+            <span class="date">Jul 6, 2026 · Native GPU preview + Window Capture</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.56.0">Download v0.56.0</a>
+        </div>
+
+        <h2>0.56.0 — Native GPU preview ("OBS feel") on all three OSes (done)</h2>
+        <p class="summary">
+          The preview now <strong>feels like OBS</strong>: the compositor's GPU output is painted
+          straight onto the screen — no read-back, no encode round-trip, no lag — on
+          <strong>Windows, macOS, and Linux</strong>. Window Capture grew up alongside it: a
+          live-thumbnail picker, minimized windows listed, sources that re-bind to the same window
+          after a restart, and captures that recover on their own.
+        </p>
+
+        <h3>Native GPU preview</h3>
+        <ul class="features">
+          <li>A <strong>zero-copy native GPU preview surface</strong> replaces the read-back → JPEG → canvas preview with the compositor's own GPU output painted directly on screen — per OS: Windows <strong>DirectComposition</strong> (DX12, verified real-time on hardware), macOS <strong>CAMetalLayer</strong> (Metal), Linux an X11 child window on <strong>Vulkan/GL</strong> (Wayland keeps the JPEG preview for now).</li>
+          <li>The interactive <strong>selection box + transform handles are drawn into the GPU frame itself</strong> — preview-only, never recorded or streamed.</li>
+          <li>All three OSes are <strong>CI-proven to render</strong>: the screenshot smoke asserts the actual pixels on every push. Under the hood the GPU stack was upgraded <strong>wgpu 0.20 → 27</strong>.</li>
+          <li>The JPEG preview stays as the <strong>universal fallback</strong> and returns automatically whenever the native surface isn't viable (a non-DX12 Windows GPU, Wayland, a lost surface).</li>
+        </ul>
+
+        <h3>Window Capture</h3>
+        <ul class="features">
+          <li>The picker shows a <strong>live thumbnail of every open window</strong> — refreshed while it's open, delivered as in-memory images over IPC, <strong>never written to disk</strong>.</li>
+          <li><strong>Minimized windows are listed too</strong> (previously filtered out) — on all three OSes, backed by a dedicated window-enumeration CI job.</li>
+          <li>A saved Window source <strong>re-binds to the same window when you relaunch</strong> — it stores the window's durable identity (app, class, title) and re-resolves the live window on start, the way OBS does; old handle-only scenes still load.</li>
+          <li><strong>Errored captures auto-recover</strong> (display / window / camera, with per-source backoff) the moment the window reopens or the device reconnects — no manual Retry needed.</li>
+          <li>The yellow Windows <strong>capture border is gone</strong> (best-effort on older Windows builds).</li>
+        </ul>
+
+        <p class="note">
+          Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, and the
+          virtual camera.
+        </p>
+      </article>
+
+      <!-- 0.55.0 — audio mixer + recording -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.55.0</span>
@@ -56,7 +98,8 @@
 
         <p class="note">
           Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, and the virtual
-          camera — plus a native GPU preview surface (real-time "OBS feel") as its own milestone.
+          camera. The <strong>native GPU preview</strong> (real-time "OBS feel") landed as its own
+          milestone in <strong>0.56.0</strong>, above.
         </p>
       </article>
 
@@ -193,12 +236,20 @@
             <span class="soon">Done — Jul 2, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.55.0</span>
+            <span class="badge">0.55.0</span>
             <div>
               <strong>Audio mixer + recording</strong>
-              <p>The audio graph (6 tracks, denoise/gate/compressor/EQ, LUFS) and multi-track recording with hardware encoders + the owned lossless codec. <strong>The audio half is in on <code>main</code></strong> — mic + desktop-audio capture, the owned classic-DSP filters (spectral denoise, no ML), monitoring, push-to-talk, and the mixer panel; recording completes the milestone.</p>
+              <p>The audio graph (6 tracks, denoise/gate/compressor/EQ, LUFS) and multi-track recording with hardware encoders + the owned lossless codec.</p>
             </div>
-            <span class="soon">In development — audio done</span>
+            <span class="soon">Done — Jul 3, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.56.0</span>
+            <div>
+              <strong>Native GPU preview ("OBS feel")</strong>
+              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag — on <strong>Windows</strong> (DirectComposition), <strong>macOS</strong> (CAMetalLayer), and <strong>Linux</strong> (X11/Vulkan), with the selection box + transform handles drawn into the GPU frame. The JPEG preview stays as the universal fallback (and covers Wayland).</p>
+            </div>
+            <span class="soon">Done — Jul 6, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">0.70.0</span>

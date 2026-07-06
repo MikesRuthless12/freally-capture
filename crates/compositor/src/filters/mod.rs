@@ -464,10 +464,11 @@ impl FilterEngine {
             .map(|(kind, entry, layout)| {
                 let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("fcap filter pipeline"),
+                    cache: None,
                     layout: Some(layout),
                     vertex: wgpu::VertexState {
                         module: &shader,
-                        entry_point: "vs_fullscreen",
+                        entry_point: Some("vs_fullscreen"),
                         compilation_options: Default::default(),
                         buffers: &[],
                     },
@@ -480,7 +481,7 @@ impl FilterEngine {
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(wgpu::FragmentState {
                         module: &shader,
-                        entry_point: entry,
+                        entry_point: Some(entry),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: target_format,
@@ -612,14 +613,14 @@ impl FilterEngine {
                     view_formats: &[],
                 });
                 queue.write_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
                     rgba,
-                    wgpu::ImageDataLayout {
+                    wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(width * 4),
                         rows_per_image: Some(*height),
@@ -648,14 +649,14 @@ impl FilterEngine {
                     view_formats: &[],
                 });
                 queue.write_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
                     &lut.rgba,
-                    wgpu::ImageDataLayout {
+                    wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(lut.size * 4),
                         rows_per_image: Some(lut.size),

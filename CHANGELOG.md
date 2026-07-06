@@ -5,14 +5,73 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 4 (recording, 0.55.0) is complete. Early
-> development builds are downloadable from each release; the **studio MVP — the first build meant for
-> everyday use — arrives at 0.70.0**. The release ladder below tracks the plan to 1.0.0.
+> **Status: in development.** Phase 4 (recording) is complete, and 0.56.0 adds the **native GPU
+> preview ("OBS feel") on all three OSes**. Early development builds are downloadable from each
+> release; the **studio MVP — the first build meant for everyday use — arrives at 0.70.0**. The
+> release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
 > The next rung is **0.70.0 (studio MVP — first public)**: single-target streaming, Studio Mode +
 > transitions, the virtual camera, and the stats dock.
+
+## [0.56.0] — 2026-07-06 (Native GPU preview + Window Capture upgrades)
+
+> The preview now *feels* like OBS on **Windows, macOS, and Linux**: the compositor's GPU output is
+> painted straight onto the screen with no read-back/encode round-trip — and Window Capture picks
+> with live thumbnails, survives a restart, and recovers on its own.
+
+### Added — native GPU preview ("OBS feel") on Windows, macOS, and Linux
+- **A zero-copy native GPU preview surface** that replaces the read-back → JPEG → canvas preview with
+  the compositor's own GPU output painted directly on screen — no encode round-trip, no lag. Per OS:
+  **Windows** a **DirectComposition** surface (wgpu `SurfaceTargetUnsafe::CompositionVisual` on DX12)
+  composited *above* WebView2, **verified real-time on hardware**; **macOS** a **CAMetalLayer** over
+  the WKWebView (Metal); **Linux** an X11 child window driving a **Vulkan/GL** surface (Wayland keeps
+  the JPEG preview for now). All three are **CI-proven to render** — the screenshot smoke asserts the
+  actual pixels on every push. The interactive **selection box + transform handles are drawn into the
+  GPU frame itself** (preview-only — never recorded or streamed). Under the hood the GPU stack was
+  **upgraded wgpu 0.20 → 27**. The JPEG preview stays as the universal fallback and returns
+  automatically whenever the native surface isn't viable (a non-DX12 Windows GPU, Wayland, a lost
+  surface).
+
+### Added — a live-thumbnail window picker that lists every window
+- **The Window Capture picker now shows a live thumbnail of every open window** — a tile grid of
+  real captured frames, refreshed while the picker is open (staggered so opening it doesn't burst
+  the backend), with a manual refresh button. Thumbnails travel as **in-memory JPEG `data:` URIs
+  over IPC — nothing is ever written to disk**, so they vanish the moment the picker closes.
+- **Minimized windows are listed too** (they were previously filtered out): Windows falls back to
+  the window's restored size when it's iconic, macOS enumerates off-screen windows, and Linux/X11
+  already listed them. A dedicated **window-enumeration CI job** opens two windows, minimizes one,
+  and asserts both appear.
+- **The yellow Windows capture border is gone** — Windows.Graphics.Capture sessions now request no
+  border (best-effort; older Windows builds that don't support it keep the old behavior).
+
+### Added — Window Capture that re-binds on restart + auto-recovery
+- **A Window Capture re-attaches to the *same* window when you relaunch the app** — the way OBS Studio
+  does. An OS window handle (Windows `HWND`, macOS `CGWindowID`, X11 XID) is only valid for one session,
+  so a saved Window source now also stores the window's **durable identity** — its executable / owning
+  app, its window class, and its title — and on start **re-resolves the live window by matching that
+  identity**, anchored on the app so it never binds to an unrelated program (class + title break ties
+  between several windows of the same app). Handle-only ids from older saved scenes still load. *Windows
+  is verified on hardware; macOS (ScreenCaptureKit) and Linux/X11 share the same matcher and are
+  validated in CI; Wayland is unaffected — its system portal re-picks the source and is already durable.*
+- **Errored captures recover on their own.** A Display / Window / Video Capture source that failed
+  because its window, monitor, or camera wasn't there yet is **retried automatically** (per-source
+  exponential backoff, 3 s doubling to 60 s), so it goes live the moment the window reopens or the
+  device reconnects — no manual Retry needed (the Retry button stays for an on-demand nudge).
+  Screen-picker portal and media sources are left alone.
+- **A captured window that closes mid-session is detected reliably.** Windows' capture-closed event
+  never fires for some elevated / tray-hiding apps, which would have left the source frozen "live"
+  on its last frame; the capture now also watches the window handle itself and errors out the moment
+  the window is really gone — which is exactly what arms the auto-recovery above.
+- **The mouse cursor now tracks in Window Capture — focused or not.** Windows only composites the
+  cursor into captures of the *focused* window (an unfocused one gets no cursor, and no frames at all
+  while its content is static), so a captured app you weren't clicking on looked frozen. Freally
+  Capture now **draws the cursor itself**, the way OBS does — real cursor shapes (alpha, classic
+  mask, and inverting cursors), tracked live and composited into the frame, with frames synthesized
+  when only the cursor moved. Measured on hardware: an unfocused window went from ~0 updates to
+  **55 fps under fast movement / 32 fps at hover speed**. **Display capture** got the same treatment:
+  the cursor keeps moving in a recording even when the rest of the desktop is static.
 
 ## [0.55.0] — 2026-07-03 (Audio mixer + recording)
 
@@ -253,6 +312,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Accessibility (keyboard-first, screen-reader-labeled, high-contrast) and UI localization into 18 languages (`ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk vi zh-CN`, English first, RTL Arabic); onboarding + templates.
 
 [Unreleased]: https://github.com/MikesRuthless12/freally-capture/commits/main
+[0.56.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.56.0
 [0.55.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.55.0
 [0.40.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.40.0
 [0.25.0]: https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.25.0

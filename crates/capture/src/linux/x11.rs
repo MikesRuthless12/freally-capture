@@ -14,6 +14,7 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt, ImageFormat, ImageOrder, Window};
 use x11rb::rust_connection::RustConnection;
 
+use crate::window_match::{encode_window_id, resolve_best, same_window, WindowKey};
 use crate::{
     frame_channel, CaptureError, CaptureSession, Frame, FrameSender, PixelFormat, SourceInfo,
     SourceKind,
@@ -23,7 +24,7 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(33); // ~30 fps
 
 pub(crate) enum Target {
     Screen(usize),
-    Window(u32),
+    Window { xid: u32, key: WindowKey },
 }
 
 fn connect() -> Result<(RustConnection, usize), CaptureError> {
@@ -97,8 +98,10 @@ pub(crate) fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
             if geometry.width == 0 || geometry.height == 0 {
                 continue;
             }
+            let (instance, class) = window_class(&conn, window);
+            let key = WindowKey::new(class, instance, title.clone());
             sources.push(SourceInfo {
-                id: format!("x11window:{window}"),
+                id: format!("x11window:{}", encode_window_id(u64::from(window), &key)),
                 kind: SourceKind::Window,
                 label: title,
                 width: geometry.width as u32,
@@ -137,26 +140,135 @@ fn window_title(
     }
 }
 
-pub(crate) fn start(target: Target) -> Result<CaptureSession, CaptureError> {
-    // Validate the target up front so a bad id fails fast.
-    let (conn, _) = connect()?;
-    match &target {
-        Target::Screen(index) => {
-            if conn.setup().roots.get(*index).is_none() {
-                return Err(CaptureError::NotFound(format!("no X screen {index}")));
-            }
+/// `WM_CLASS`: two NUL-separated strings, the instance then the class. Empty
+/// strings on failure (matching then leans on the title).
+fn window_class(conn: &RustConnection, window: Window) -> (String, String) {
+    let Ok(cookie) = conn.get_property(false, window, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 256)
+    else {
+        return (String::new(), String::new());
+    };
+    let Ok(reply) = cookie.reply() else {
+        return (String::new(), String::new());
+    };
+    let mut parts = reply.value.split(|&byte| byte == 0);
+    let instance = parts
+        .next()
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .unwrap_or_default();
+    let class = parts
+        .next()
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .unwrap_or_default();
+    (instance, class)
+}
+
+/// Whether `window` is still a live drawable (its geometry query succeeds).
+fn window_geometry_ok(conn: &RustConnection, window: Window) -> bool {
+    conn.get_geometry(window)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .is_some()
+}
+
+/// The durable identity of a live X11 window — the `WM_CLASS` class as the
+/// anchor, its instance as the secondary field, and the title.
+fn x11_window_key(
+    conn: &RustConnection,
+    window: Window,
+    net_wm_name: u32,
+    utf8_string: u32,
+) -> WindowKey {
+    let (instance, class) = window_class(conn, window);
+    let title = window_title(conn, window, net_wm_name, utf8_string).unwrap_or_default();
+    WindowKey::new(class, instance, title)
+}
+
+/// Every managed window's (XID, identity) across all screens — the candidate
+/// set for re-binding a persisted window whose stored XID went stale.
+fn enumerate_window_keys(
+    conn: &RustConnection,
+    net_wm_name: u32,
+    utf8_string: u32,
+) -> Vec<(u64, WindowKey)> {
+    // Prefer stacking order so a tie among identical windows resolves to the
+    // topmost — matching Windows' EnumWindows Z-order (resolve_best takes the
+    // first candidate). `_NET_CLIENT_LIST_STACKING` is bottom→top, so reverse
+    // it; fall back to `_NET_CLIENT_LIST` (mapping order) when it's absent.
+    let (list_atom, is_stacking) = match intern(conn, "_NET_CLIENT_LIST_STACKING").ok() {
+        Some(atom) => (atom, true),
+        None => match intern(conn, "_NET_CLIENT_LIST").ok() {
+            Some(atom) => (atom, false),
+            None => return Vec::new(),
+        },
+    };
+    let mut out = Vec::new();
+    for screen in conn.setup().roots.iter() {
+        let Ok(cookie) =
+            conn.get_property(false, screen.root, list_atom, AtomEnum::WINDOW, 0, u32::MAX)
+        else {
+            continue;
+        };
+        let Ok(reply) = cookie.reply() else { continue };
+        let Some(windows) = reply.value32() else {
+            continue;
+        };
+        let mut screen_windows: Vec<u32> = windows.collect();
+        if is_stacking {
+            screen_windows.reverse(); // bottom→top ⇒ top→bottom
         }
-        Target::Window(window) => {
-            if conn
-                .get_geometry(*window)
-                .map_err(|err| CaptureError::Backend(format!("get_geometry: {err}")))?
-                .reply()
-                .is_err()
-            {
-                return Err(CaptureError::NotFound("the window no longer exists".into()));
+        for window in screen_windows {
+            if window_geometry_ok(conn, window) {
+                out.push((
+                    u64::from(window),
+                    x11_window_key(conn, window, net_wm_name, utf8_string),
+                ));
             }
         }
     }
+    out
+}
+
+/// Re-bind a persisted X11 window: an XID is only valid within the session it
+/// was picked in, so trust the stored one while it still exists and still
+/// matches, else re-scan `_NET_CLIENT_LIST` for the same window by its
+/// `WM_CLASS` + title identity — the X11 side of OBS-style window recovery.
+fn resolve_x11_window(
+    conn: &RustConnection,
+    xid: u32,
+    key: &WindowKey,
+) -> Result<u32, CaptureError> {
+    let net_wm_name = intern(conn, "_NET_WM_NAME").unwrap_or(0);
+    let utf8_string = intern(conn, "UTF8_STRING").unwrap_or(0);
+    if window_geometry_ok(conn, xid)
+        && (key.is_empty()
+            || same_window(key, &x11_window_key(conn, xid, net_wm_name, utf8_string)))
+    {
+        return Ok(xid);
+    }
+    if key.is_empty() {
+        return Err(CaptureError::NotFound("the window no longer exists".into()));
+    }
+    let candidates = enumerate_window_keys(conn, net_wm_name, utf8_string);
+    resolve_best(key, &candidates)
+        .map(|handle| handle as u32)
+        .ok_or_else(|| CaptureError::NotFound("the window is no longer open".into()))
+}
+
+pub(crate) fn start(target: Target) -> Result<CaptureSession, CaptureError> {
+    // Validate/resolve the target up front so a bad id fails fast.
+    let (conn, _) = connect()?;
+    let target = match target {
+        Target::Screen(index) => {
+            if conn.setup().roots.get(index).is_none() {
+                return Err(CaptureError::NotFound(format!("no X screen {index}")));
+            }
+            Target::Screen(index)
+        }
+        Target::Window { xid, key } => {
+            let xid = resolve_x11_window(&conn, xid, &key)?;
+            Target::Window { xid, key }
+        }
+    };
     drop(conn);
 
     let (sender, receiver) = frame_channel();
@@ -201,16 +313,16 @@ fn run_inner(target: Target, sender: &FrameSender, stop: &AtomicBool) -> Result<
                     .ok_or_else(|| CaptureError::NotFound(format!("no X screen {index}")))?;
                 (screen.root, screen.width_in_pixels, screen.height_in_pixels)
             }
-            Target::Window(window) => {
+            Target::Window { xid, .. } => {
                 // Geometry every frame — windows resize.
                 let Ok(geometry) = conn
-                    .get_geometry(*window)
+                    .get_geometry(*xid)
                     .map_err(|err| CaptureError::Backend(format!("get_geometry: {err}")))?
                     .reply()
                 else {
                     return Err(CaptureError::NotFound("the window was closed".into()));
                 };
-                (*window, geometry.width, geometry.height)
+                (*xid, geometry.width, geometry.height)
             }
         };
         if width == 0 || height == 0 {

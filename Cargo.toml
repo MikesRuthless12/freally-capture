@@ -22,10 +22,11 @@ members = [
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
     "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
+    "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Win/mac/Linux-X11, JPEG fallback)
 ]
 
 [workspace.package]
-version = "0.55.0"
+version = "0.56.0"
 edition = "2021"
 rust-version = "1.80"
 authors = ["Mike Weaver <mythodikalone@gmail.com>"]
@@ -43,6 +44,7 @@ anyhow = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 tracing = "0.1"
+env_logger = "0.11"     # surfaces wgpu's `log` diagnostics when RUST_LOG is set (silent otherwise)
 uuid = { version = "1", features = ["v4", "serde"] }
 parking_lot = "0.12"
 
@@ -50,11 +52,14 @@ parking_lot = "0.12"
 tauri = { version = "2", features = [] }
 tauri-build = "2"
 
-# GPU compositor
-wgpu = "0.20"
+# GPU compositor — wgpu 27 for the native DirectComposition surface
+# (`SurfaceTargetUnsafe::CompositionVisual`) that the "OBS feel" preview needs;
+# migrated up from 0.20 (NP.1). raw-window-handle 0.6 still matches.
+wgpu = "27"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.28"
 pollster = "0.3"        # block_on for wgpu's async adapter/device/readback
+raw-window-handle = "0.6"   # native-preview surface target (matches wgpu 27)
 
 # Capture (per-OS)
 windows = "0.58"        # Windows: DXGI + Windows.Graphics.Capture
@@ -72,6 +77,7 @@ dispatch2 = "0.3"
 ashpd = { version = "0.13", features = ["screencast"] } # Linux: ScreenCast portal (tokio by default)
 pipewire = "0.10"       # Linux: consume the portal's PipeWire video stream
 x11rb = "0.13"          # Linux: the X11 capture path
+x11-dl = "2"            # Linux: the native-preview X11 child window (fcap-preview)
 nokhwa = "0.10"         # webcam / capture card
 jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)
 

@@ -22,10 +22,9 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::{
     IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_ACCESS_LOST,
     DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTDUPL_POINTER_SHAPE_INFO,
-    DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR, DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR,
-    DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME,
 };
 
+use super::pointer::{blend_shape, PointerShape};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
 /// How long one AcquireNextFrame waits before we re-check the stop flag.
@@ -36,16 +35,16 @@ struct PointerState {
     x: i32,
     y: i32,
     shape: Option<PointerShape>,
+    /// Bumped whenever a new shape arrives — part of the "did the drawn
+    /// cursor change" key for pointer-only frame synthesis.
+    generation: u64,
 }
 
-struct PointerShape {
-    kind: u32,
-    width: u32,
-    height: u32,
-    pitch: u32,
-    hotspot_x: i32,
-    hotspot_y: i32,
-    data: Vec<u8>,
+impl PointerState {
+    /// What the drawn cursor depends on; unchanged key ⇒ no synthesized frame.
+    fn key(&self) -> (bool, i32, i32, u64) {
+        (self.visible, self.x, self.y, self.generation)
+    }
 }
 
 pub(crate) fn run(device_name: &str, sender: FrameSender, stop: Arc<AtomicBool>) {
@@ -134,7 +133,13 @@ fn run_inner(
         x: 0,
         y: 0,
         shape: None,
+        generation: 0,
     };
+    // The last desktop image *without* the cursor: pointer-only updates (the
+    // cursor gliding over a static desktop) re-blend onto this and publish,
+    // so the recorded cursor keeps moving even when nothing else repaints.
+    let mut last_base: Option<Frame> = None;
+    let mut last_drawn = pointer.key();
 
     while !stop.load(Ordering::Relaxed) && sender.is_open() {
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
@@ -205,10 +210,24 @@ fn run_inner(
 
         match result {
             Ok(Some(mut frame)) => {
+                last_base = Some(frame.clone());
                 blend_pointer(&mut frame, &pointer);
+                last_drawn = pointer.key();
                 sender.send(frame);
             }
-            Ok(None) => {}
+            Ok(None) => {
+                // Pointer-only update: synthesize a frame from the last
+                // desktop image so the cursor still tracks.
+                if pointer.key() != last_drawn {
+                    if let Some(base) = last_base.as_ref() {
+                        let mut frame = base.clone();
+                        frame.captured_at = Instant::now();
+                        blend_pointer(&mut frame, &pointer);
+                        last_drawn = pointer.key();
+                        sender.send(frame);
+                    }
+                }
+            }
             Err(err) => return Err(err),
         }
     }
@@ -319,6 +338,7 @@ fn update_pointer(
             hotspot_y: shape_info.HotSpot.y,
             data: buffer,
         });
+        pointer.generation += 1;
     }
 }
 
@@ -332,127 +352,5 @@ fn blend_pointer(frame: &mut Frame, pointer: &PointerState) {
     if !pointer.visible {
         return;
     }
-    let origin_x = pointer.x - shape.hotspot_x;
-    let origin_y = pointer.y - shape.hotspot_y;
-
-    match shape.kind {
-        k if k == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR.0 as u32 => {
-            blend_color(frame, shape, origin_x, origin_y, false);
-        }
-        k if k == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR.0 as u32 => {
-            blend_color(frame, shape, origin_x, origin_y, true);
-        }
-        k if k == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME.0 as u32 => {
-            blend_monochrome(frame, shape, origin_x, origin_y);
-        }
-        _ => {}
-    }
-}
-
-/// COLOR: straight-alpha BGRA over-blend. MASKED_COLOR: the alpha byte is a
-/// mask — 0 ⇒ opaque color, 0xFF ⇒ XOR with screen (we invert, the standard
-/// approximation).
-fn blend_color(
-    frame: &mut Frame,
-    shape: &PointerShape,
-    origin_x: i32,
-    origin_y: i32,
-    masked: bool,
-) {
-    for row in 0..shape.height {
-        let dst_y = origin_y + row as i32;
-        if dst_y < 0 || dst_y >= frame.height as i32 {
-            continue;
-        }
-        for col in 0..shape.width {
-            let dst_x = origin_x + col as i32;
-            if dst_x < 0 || dst_x >= frame.width as i32 {
-                continue;
-            }
-            let src_idx = (row * shape.pitch + col * 4) as usize;
-            let Some(px) = shape.data.get(src_idx..src_idx + 4) else {
-                continue;
-            };
-            let dst_idx = dst_y as usize * frame.stride as usize + dst_x as usize * 4;
-            let Some(dst) = frame.data.get_mut(dst_idx..dst_idx + 4) else {
-                continue;
-            };
-            if masked {
-                if px[3] == 0 {
-                    dst[0] = px[0];
-                    dst[1] = px[1];
-                    dst[2] = px[2];
-                } else {
-                    // XOR mask: invert the underlying pixel.
-                    dst[0] = 255 - dst[0];
-                    dst[1] = 255 - dst[1];
-                    dst[2] = 255 - dst[2];
-                }
-            } else {
-                let alpha = px[3] as u32;
-                if alpha == 0 {
-                    continue;
-                }
-                for c in 0..3 {
-                    let src_c = px[c] as u32;
-                    let dst_c = dst[c] as u32;
-                    dst[c] = ((src_c * alpha + dst_c * (255 - alpha)) / 255) as u8;
-                }
-            }
-        }
-    }
-}
-
-/// MONOCHROME: 1-bpp AND mask over 1-bpp XOR mask, stacked vertically
-/// (`shape.height` counts both). result = (screen AND and) XOR xor.
-fn blend_monochrome(frame: &mut Frame, shape: &PointerShape, origin_x: i32, origin_y: i32) {
-    let cursor_height = shape.height / 2;
-    for row in 0..cursor_height {
-        let dst_y = origin_y + row as i32;
-        if dst_y < 0 || dst_y >= frame.height as i32 {
-            continue;
-        }
-        for col in 0..shape.width {
-            let dst_x = origin_x + col as i32;
-            if dst_x < 0 || dst_x >= frame.width as i32 {
-                continue;
-            }
-            let byte_idx = (row * shape.pitch + col / 8) as usize;
-            let xor_byte_idx = ((row + cursor_height) * shape.pitch + col / 8) as usize;
-            let bit = 0x80u8 >> (col % 8);
-            let and_set = shape
-                .data
-                .get(byte_idx)
-                .map(|b| b & bit != 0)
-                .unwrap_or(true);
-            let xor_set = shape
-                .data
-                .get(xor_byte_idx)
-                .map(|b| b & bit != 0)
-                .unwrap_or(false);
-            let dst_idx = dst_y as usize * frame.stride as usize + dst_x as usize * 4;
-            let Some(dst) = frame.data.get_mut(dst_idx..dst_idx + 4) else {
-                continue;
-            };
-            match (and_set, xor_set) {
-                (true, false) => {} // transparent
-                (true, true) => {
-                    // Invert the screen pixel.
-                    dst[0] = 255 - dst[0];
-                    dst[1] = 255 - dst[1];
-                    dst[2] = 255 - dst[2];
-                }
-                (false, false) => {
-                    dst[0] = 0;
-                    dst[1] = 0;
-                    dst[2] = 0;
-                }
-                (false, true) => {
-                    dst[0] = 255;
-                    dst[1] = 255;
-                    dst[2] = 255;
-                }
-            }
-        }
-    }
+    blend_shape(frame, shape, pointer.x, pointer.y);
 }

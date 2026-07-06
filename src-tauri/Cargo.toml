@@ -21,6 +21,9 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
 jpeg-encoder = { workspace = true }
+# Prints wgpu's `log` diagnostics (adapter enumeration, surface errors) when
+# RUST_LOG is set; silent by default, so no effect on normal runs.
+env_logger = { workspace = true }
 
 # The owned engine crates — linked from day one so `health` proves the wiring.
 # (fcap-capture + fcap-sources are live as of Phase 1: capture + preview.)
@@ -31,3 +34,9 @@ fcap-scene = { path = "../crates/scene" }
 fcap-audio = { path = "../crates/audio" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
+fcap-preview = { path = "../crates/preview" }
+
+# Linux only: read the Tauri window's X11 id (RawWindowHandle::Xlib) to parent
+# the native-preview child window. Matches Tauri's raw-window-handle 0.6.
+[target.'cfg(target_os = "linux")'.dependencies]
+raw-window-handle = { workspace = true }

@@ -56,6 +56,15 @@ export function captureListSources(): Promise<CaptureSource[]> {
   return invoke<CaptureSource[]>("capture_list_sources");
 }
 
+/**
+ * A one-shot JPEG thumbnail (`data:` URI) of a window source, or `null` when
+ * none is available (minimized/GPU-composited window, or an unsupported
+ * platform). The picker re-requests this on a timer for a live preview.
+ */
+export function captureWindowThumbnail(id: string, maxDim?: number): Promise<string | null> {
+  return invoke<string | null>("capture_window_thumbnail", { id, maxDim });
+}
+
 /** Enumerate webcams / capture cards. */
 export function videoDevicesList(): Promise<VideoDevice[]> {
   return invoke<VideoDevice[]>("video_devices_list");
@@ -335,6 +344,43 @@ export function ffmpegCancel(): Promise<void> {
 /** Remove the installed component. */
 export function ffmpegRemove(): Promise<void> {
   return invoke("ffmpeg_remove");
+}
+
+// ---------------------------------------------------------------------------
+// Native preview surface (the "OBS feel" path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the native GPU preview surface is active (Windows + created). When
+ * true the preview panel hides its JPEG `<canvas>` — the native child window
+ * paints the region directly.
+ */
+export function nativePreviewActive(): Promise<boolean> {
+  return invoke<boolean>("native_preview_active");
+}
+
+/**
+ * Report the preview region's on-screen rectangle in **physical pixels**
+ * (relative to the window client area) + whether it's currently visible. The
+ * native child window follows it. A no-op off Windows.
+ */
+export function nativePreviewSetRegion(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  visible: boolean,
+): Promise<void> {
+  return invoke("native_preview_set_region", { x, y, width, height, visible });
+}
+
+/**
+ * Report which scene item is selected so the native GPU preview can draw its
+ * selection box + handles into the frame (they'd otherwise be hidden under the
+ * opaque native surface). `null` clears it. A no-op off the native path.
+ */
+export function nativePreviewSetSelection(item: ItemId | null): Promise<void> {
+  return invoke("native_preview_set_selection", { item });
 }
 
 // ---------------------------------------------------------------------------
