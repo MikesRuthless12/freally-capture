@@ -64,6 +64,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   never fires for some elevated / tray-hiding apps, which would have left the source frozen "live"
   on its last frame; the capture now also watches the window handle itself and errors out the moment
   the window is really gone — which is exactly what arms the auto-recovery above.
+- **The mouse cursor now tracks in Window Capture — focused or not.** Windows only composites the
+  cursor into captures of the *focused* window (an unfocused one gets no cursor, and no frames at all
+  while its content is static), so a captured app you weren't clicking on looked frozen. Freally
+  Capture now **draws the cursor itself**, the way OBS does — real cursor shapes (alpha, classic
+  mask, and inverting cursors), tracked live and composited into the frame, with frames synthesized
+  when only the cursor moved. Measured on hardware: an unfocused window went from ~0 updates to
+  **55 fps under fast movement / 32 fps at hover speed**. **Display capture** got the same treatment:
+  the cursor keeps moving in a recording even when the rest of the desktop is static.
 
 ## [0.55.0] — 2026-07-03 (Audio mixer + recording)
 

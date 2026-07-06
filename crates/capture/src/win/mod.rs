@@ -8,6 +8,7 @@
 #![allow(unsafe_code)]
 
 pub(crate) mod dxgi;
+pub(crate) mod pointer;
 pub(crate) mod wgc;
 
 use std::sync::atomic::AtomicBool;
