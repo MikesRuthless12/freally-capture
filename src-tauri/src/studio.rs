@@ -649,6 +649,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut statuses: HashMap<SourceId, SourceRuntime> = HashMap::new();
 
     let mut composed_this_second = 0u32;
+    let mut composed_vertical_this_second = 0u32;
+    let mut vertical_preview_live = false;
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
     // Whether the Studio-Mode preview pane currently has a published frame
@@ -685,7 +687,16 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // -- 1. Snapshot the model (brief lock) --------------------------------
         let mut transition_ended: Option<StudioDto> = None;
-        let (revision, scene, scene_sources, canvas, nonces, preview_scene, transition_pack) = {
+        let (
+            revision,
+            scene,
+            scene_sources,
+            canvas,
+            nonces,
+            preview_scene,
+            transition_pack,
+            vertical_pack,
+        ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
             let transition_pack = match &guard.transition {
@@ -728,6 +739,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some((from_scene, _, _)) = &transition_pack {
                 live_sources.extend(from_scene.items.iter().map(|item| item.source));
             }
+            // The second (vertical) canvas keeps ITS scene's sources live too.
+            let vertical_pack = guard.collection.vertical.and_then(|config| {
+                guard
+                    .collection
+                    .scene(config.scene)
+                    .cloned()
+                    .map(|scene| (scene, config.width, config.height))
+            });
+            if let Some((vertical_scene, _, _)) = &vertical_pack {
+                live_sources.extend(vertical_scene.items.iter().map(|item| item.source));
+            }
             (
                 guard.revision,
                 guard.collection.active_scene().clone(),
@@ -745,6 +767,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 guard.retry_nonces.clone(),
                 preview_scene,
                 transition_pack,
+                vertical_pack,
             )
         };
         if let Some(dto) = transition_ended {
@@ -848,8 +871,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             compositor.retain_sources(&keep_ids);
 
-            // Filter files (LUT lattices, mask images) — the preview pane's
-            // and the outgoing scene's filters render too.
+            // Filter files (LUT lattices, mask images) — the preview pane's,
+            // the outgoing scene's, and the vertical canvas's filters render too.
             let extra_items: Vec<fcap_scene::SceneItem> = preview_scene
                 .iter()
                 .flat_map(|preview| preview.items.iter().cloned())
@@ -857,6 +880,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     transition_pack
                         .iter()
                         .flat_map(|(from_scene, _, _)| from_scene.items.iter().cloned()),
+                )
+                .chain(
+                    vertical_pack
+                        .iter()
+                        .flat_map(|(vertical_scene, _, _)| vertical_scene.items.iter().cloned()),
                 )
                 .collect();
             let mut live_filters: Vec<FilterId> = Vec::new();
@@ -1163,6 +1191,52 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
+        // -- 5c. The second (vertical) canvas (TASK-604) -------------------------
+        // Rendered at full rate while a recorder/stream lane consumes it, at
+        // the preview cadence otherwise (so its dialog preview stays live).
+        compositor.set_vertical_canvas(vertical_pack.as_ref().map(|(_, w, h)| (*w, *h)));
+        match &vertical_pack {
+            Some((vertical_scene, _, _)) => {
+                let vertical_record = recording.wants_vertical_frames();
+                let vertical_stream = streaming.wants_vertical_frames();
+                if vertical_record || vertical_stream || preview_due {
+                    match compositor
+                        .render_vertical(vertical_scene, started_at.elapsed().as_secs_f32())
+                    {
+                        Ok(frame) => {
+                            composed_vertical_this_second += 1;
+                            let (frame_w, frame_h) = (frame.width, frame.height);
+                            let data = Arc::new(frame.data);
+                            if vertical_record {
+                                recording.push_video_vertical(Arc::clone(&data));
+                            }
+                            if vertical_stream {
+                                streaming.push_video_vertical(Arc::clone(&data));
+                            }
+                            if preview_due {
+                                let jpeg = encode_program_jpeg(
+                                    frame_w,
+                                    frame_h,
+                                    &data,
+                                    PREVIEW_MAX_WIDTH,
+                                    PREVIEW_MAX_HEIGHT,
+                                    PREVIEW_JPEG_QUALITY,
+                                );
+                                preview.publish_vertical_preview(jpeg);
+                                vertical_preview_live = true;
+                            }
+                        }
+                        Err(err) => eprintln!("studio: vertical compose failed: {err}"),
+                    }
+                }
+            }
+            None if vertical_preview_live => {
+                preview.publish_vertical_preview(None);
+                vertical_preview_live = false;
+            }
+            None => {}
+        }
+
         // -- 7. The program event (1 Hz, or sooner on a state change) -----------
         if statuses_changed || last_program_event.elapsed() >= PROGRAM_EVENT_INTERVAL {
             let elapsed = last_program_event.elapsed().as_secs_f32().max(0.001);
@@ -1195,6 +1269,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // Hand the render numbers to the stats dock's emitter.
             app.state::<crate::events::RuntimeStats>().publish(
                 status.fps,
+                (composed_vertical_this_second as f32 / elapsed).round() as u32,
                 status.dropped,
                 status.render_micros,
             );
@@ -1202,6 +1277,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 break; // the app is gone — wind down
             }
             composed_this_second = 0;
+            composed_vertical_this_second = 0;
             last_program_event = Instant::now();
             statuses_changed = false;
         }

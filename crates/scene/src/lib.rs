@@ -112,6 +112,23 @@ pub struct Collection {
     pub scenes: Vec<Scene>,
     /// Always a valid scene id after any constructor or mutation.
     pub active_scene: SceneId,
+    /// The optional second output canvas (Phase 6, TASK-604): e.g. a
+    /// vertical 9:16 feed composed from any scene in the collection,
+    /// recordable/streamable independently of the program canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical: Option<VerticalCanvas>,
+}
+
+/// The second canvas: its own size + the scene it composes. Item transforms
+/// are canvas-pixel-based, so an item sits at the same pixel spot on either
+/// canvas — arrange the chosen scene for these dimensions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerticalCanvas {
+    pub width: u32,
+    pub height: u32,
+    /// The scene this canvas composes (independent of the program scene).
+    pub scene: SceneId,
 }
 
 impl Default for Collection {
@@ -132,6 +149,7 @@ impl Collection {
             sources: Vec::new(),
             scenes: vec![scene],
             active_scene: active,
+            vertical: None,
         }
     }
 
@@ -157,6 +175,15 @@ impl Collection {
             .any(|scene| scene.id == self.active_scene)
         {
             self.active_scene = self.scenes[0].id;
+        }
+        // The vertical canvas must point at a real scene with sane bounds.
+        if let Some(vertical) = &mut self.vertical {
+            vertical.width = vertical.width.clamp(1, MAX_CANVAS_DIMENSION);
+            vertical.height = vertical.height.clamp(1, MAX_CANVAS_DIMENSION);
+            let scene = vertical.scene;
+            if !self.scenes.iter().any(|s| s.id == scene) {
+                self.vertical = None;
+            }
         }
         // Drop items pointing at sources that don't exist…
         let source_ids: Vec<SourceId> = self.sources.iter().map(|source| source.id).collect();
@@ -253,8 +280,31 @@ impl Collection {
         if self.active_scene == id {
             self.active_scene = self.scenes[index.min(self.scenes.len() - 1)].id;
         }
+        if self.vertical.is_some_and(|vertical| vertical.scene == id) {
+            self.vertical = None; // its scene is gone — the canvas goes dark honestly
+        }
         self.gc_sources();
         Ok(())
+    }
+
+    /// Configure (or clear, with `None`) the second output canvas
+    /// (Phase 6, TASK-604). The scene must exist; dimensions clamp.
+    pub fn set_vertical(&mut self, vertical: Option<VerticalCanvas>) -> Result<(), SceneError> {
+        match vertical {
+            None => {
+                self.vertical = None;
+                Ok(())
+            }
+            Some(mut config) => {
+                if !self.scenes.iter().any(|scene| scene.id == config.scene) {
+                    return Err(SceneError::SceneNotFound);
+                }
+                config.width = config.width.clamp(1, MAX_CANVAS_DIMENSION);
+                config.height = config.height.clamp(1, MAX_CANVAS_DIMENSION);
+                self.vertical = Some(config);
+                Ok(())
+            }
+        }
     }
 
     /// Move a scene to `to_index` in the rail (clamped).

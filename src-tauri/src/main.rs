@@ -143,6 +143,7 @@ fn main() {
             commands::studio::studio_set_item_slot,
             commands::studio::studio_set_center_view,
             commands::studio::studio_set_focus,
+            commands::studio::studio_set_vertical,
             commands::studio::studio_set_studio_mode,
             commands::studio::studio_set_preview_scene,
             commands::studio::studio_transition,

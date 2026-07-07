@@ -67,6 +67,10 @@ pub enum RecordingDto {
 struct Active {
     recorder: Option<Recorder>,
     handle: RecorderHandle,
+    /// The optional parallel vertical-canvas recorder (Phase 6): its own
+    /// `… (vertical)` file, same settings, paused/stopped with the main one.
+    vertical_recorder: Option<Recorder>,
+    vertical_handle: Option<RecorderHandle>,
     display_path: String,
     container: Container,
     tracks: u32,
@@ -84,6 +88,9 @@ pub struct RecordingState {
     /// The render thread's cheap gate + feed (uncontended lock per tick).
     active: AtomicBool,
     feed: Mutex<Option<RecorderHandle>>,
+    /// The vertical canvas's gate + feed (set only when it records too).
+    vertical_active: AtomicBool,
+    vertical_feed: Mutex<Option<RecorderHandle>>,
     /// The last finished session's result.
     last: Mutex<(Vec<String>, Option<String>)>,
 }
@@ -95,6 +102,8 @@ impl RecordingState {
             starting: AtomicBool::new(false),
             active: AtomicBool::new(false),
             feed: Mutex::new(None),
+            vertical_active: AtomicBool::new(false),
+            vertical_feed: Mutex::new(None),
             last: Mutex::new((Vec::new(), None)),
         }
     }
@@ -110,10 +119,26 @@ impl RecordingState {
         self.active.load(Ordering::Relaxed)
     }
 
+    /// Whether the vertical canvas records too (a relaxed atomic, no lock).
+    pub fn wants_vertical_frames(&self) -> bool {
+        self.vertical_active.load(Ordering::Relaxed)
+    }
+
     /// Push the newest program frame (render thread; latest wins).
     pub fn push_video(&self, pixels: Arc<Vec<u8>>) {
         let feed = self
             .feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(handle) = feed.as_ref() {
+            handle.push_frame(pixels);
+        }
+    }
+
+    /// Push the newest vertical-canvas frame to its recorder.
+    pub fn push_video_vertical(&self, pixels: Arc<Vec<u8>>) {
+        let feed = self
+            .vertical_feed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(handle) = feed.as_ref() {
@@ -296,49 +321,110 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         split.is_some(),
     );
 
-    let sink: Box<dyn RecordSink> = match settings.container {
-        Container::Frec => Box::new(FrecSink::create(spec.clone(), path.clone(), split)?),
-        wire => {
-            let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
-                "recording to this container needs the ffmpeg component — install it from \
-                 Components (the owned lossless .frec format needs nothing)"
-                    .to_string()
-            })?;
-            let encoder_id = resolve_encoder(app, &settings, wire)?;
-            let plan = WirePlan {
-                container: wire,
-                encoder_id,
-                rate_control: settings.rate_control,
-                preset: settings.preset,
-                keyframe_sec: settings.keyframe_sec,
-                audio_bitrate_kbps: settings.audio_bitrate_kbps,
-                split_minutes: split,
-                path: path.clone(),
-            };
-            Box::new(FfmpegSink::spawn(&ready, &spec, &plan)?)
+    // One sink builder serves both canvases — the vertical file is the same
+    // configuration at its own geometry and `… (vertical)` path.
+    let build_sink =
+        |spec: &RecordSpec, path: &std::path::Path| -> Result<Box<dyn RecordSink>, String> {
+            match settings.container {
+                Container::Frec => Ok(Box::new(FrecSink::create(
+                    spec.clone(),
+                    path.to_path_buf(),
+                    split,
+                )?)),
+                wire => {
+                    let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
+                        "recording to this container needs the ffmpeg component — install it from \
+                     Components (the owned lossless .frec format needs nothing)"
+                            .to_string()
+                    })?;
+                    let encoder_id = resolve_encoder(app, &settings, wire)?;
+                    let plan = WirePlan {
+                        container: wire,
+                        encoder_id,
+                        rate_control: settings.rate_control,
+                        preset: settings.preset,
+                        keyframe_sec: settings.keyframe_sec,
+                        audio_bitrate_kbps: settings.audio_bitrate_kbps,
+                        split_minutes: split,
+                        path: path.to_path_buf(),
+                    };
+                    Ok(Box::new(FfmpegSink::spawn(&ready, spec, &plan)?))
+                }
+            }
+        };
+
+    let sink = build_sink(&spec, &path)?;
+
+    // The optional parallel vertical-canvas recording (Phase 6, TASK-604).
+    let vertical = if settings.record_vertical {
+        match snapshot.collection.vertical {
+            Some(config) => {
+                let vertical_spec = RecordSpec {
+                    width: config.width,
+                    height: config.height,
+                    fps: settings.fps,
+                    tracks: spec.tracks.clone(),
+                };
+                let vertical_path = unique_recording_path(
+                    &folder,
+                    &format!("{} (vertical)", settings.filename_prefix),
+                    &timestamp,
+                    settings.container.extension(),
+                    split.is_some(),
+                );
+                let vertical_sink = build_sink(&vertical_spec, &vertical_path)?;
+                Some((vertical_spec, vertical_sink, vertical_path))
+            }
+            None => None, // no vertical canvas configured — record main only
         }
+    } else {
+        None
     };
 
     let recorder = Recorder::start(spec, sink);
     let handle = recorder.handle();
+    let (vertical_recorder, vertical_handle) = match vertical {
+        Some((vertical_spec, vertical_sink, vertical_path)) => {
+            let recorder = Recorder::start(vertical_spec, vertical_sink);
+            let handle = recorder.handle();
+            println!("recording: vertical → {}", vertical_path.display());
+            (Some(recorder), Some(handle))
+        }
+        None => (None, None),
+    };
 
     // Tap the mixer: every 10 ms block of the enabled tracks flows to the
-    // recorder from this moment (pause gating happens in the handle).
+    // recorder(s) from this moment (pause gating happens in the handles).
     let tap_handle = handle.clone();
+    let tap_vertical = vertical_handle.clone();
     app.state::<AudioRuntime>()
         .engine
         .set_record_tap(Some(RecordTap {
             tracks: settings.tracks_mask,
-            sink: Box::new(move |blocks| tap_handle.push_audio_blocks(blocks)),
+            sink: Box::new(move |blocks| {
+                tap_handle.push_audio_blocks(blocks);
+                if let Some(vertical) = &tap_vertical {
+                    vertical.push_audio_blocks(blocks);
+                }
+            }),
         }));
 
     *state
         .feed
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle.clone());
+    *state
+        .vertical_feed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = vertical_handle.clone();
+    state
+        .vertical_active
+        .store(vertical_handle.is_some(), Ordering::Relaxed);
     *state.lock_inner() = Some(Active {
         recorder: Some(recorder),
         handle,
+        vertical_recorder,
+        vertical_handle,
         display_path: path.display().to_string(),
         container: settings.container,
         tracks: track_count,
@@ -416,6 +502,9 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
         return Err("the recording is finalizing".to_string());
     }
     active.handle.set_paused(paused);
+    if let Some(vertical) = &active.vertical_handle {
+        vertical.set_paused(paused);
+    }
     drop(inner);
     emit_status(app);
     Ok(())
@@ -425,49 +514,76 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
 /// thread. Returns the finished file paths.
 pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     let state = app.state::<RecordingState>();
-    let recorder = {
+    let (recorder, vertical_recorder) = {
         let mut inner = state.lock_inner();
         let active = inner.as_mut().ok_or("no recording is running")?;
         if active.finalizing {
             return Err("the recording is already finalizing".to_string());
         }
         active.finalizing = true;
-        active
+        let recorder = active
             .recorder
             .take()
-            .ok_or("the recorder is already stopping")?
+            .ok_or("the recorder is already stopping")?;
+        (recorder, active.vertical_recorder.take())
     };
     // Stop the feeds first: no frame lands after the user pressed Stop.
     state.active.store(false, Ordering::Relaxed);
+    state.vertical_active.store(false, Ordering::Relaxed);
     *state
         .feed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *state
+        .vertical_feed
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     app.state::<AudioRuntime>().engine.set_record_tap(None);
     emit_status(app);
 
     let result = recorder.stop();
-    let (paths, error) = match &result {
+    // The vertical file finalizes too — its failure is reported but never
+    // discards the finished main recording.
+    let vertical_result = vertical_recorder.map(|recorder| recorder.stop());
+    let (mut paths, mut error) = match &result {
         Ok(paths) => (
-            paths.iter().map(|p| p.display().to_string()).collect(),
+            paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
             None,
         ),
         Err(err) => (Vec::new(), Some(err.clone())),
     };
+    match &vertical_result {
+        Some(Ok(vertical_paths)) => {
+            paths.extend(vertical_paths.iter().map(|p| p.display().to_string()));
+        }
+        Some(Err(err)) => {
+            let note = format!("the vertical recording failed: {err}");
+            error = Some(match error {
+                Some(main) => format!("{main}; {note}"),
+                None => note,
+            });
+        }
+        None => {}
+    }
     {
         let mut last = state
             .last
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *last = (paths, error);
+        *last = (paths.clone(), error.clone());
     }
     *state.lock_inner() = None;
     emit_status(app);
     match result {
-        Ok(paths) => {
-            let paths: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        Ok(_) => {
             println!("recording: finished → {}", paths.join(", "));
-            Ok(paths)
+            match error {
+                None => Ok(paths),
+                Some(err) => Err(err), // the vertical file failed — say so
+            }
         }
         Err(err) => Err(err),
     }

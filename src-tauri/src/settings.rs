@@ -189,6 +189,17 @@ impl TransitionSettings {
     }
 }
 
+/// Which canvas a stream target publishes (Phase 6 multi-canvas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StreamCanvas {
+    /// The program canvas.
+    #[default]
+    Main,
+    /// The second (vertical) canvas — needs one configured in the studio.
+    Vertical,
+}
+
 /// One stream target (Settings → Stream). The **stream key is a secret**:
 /// redacted from `Debug`, masked in the UI, never logged.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -197,6 +208,8 @@ pub struct StreamTargetSettings {
     /// Go Live publishes to every enabled target at once.
     pub enabled: bool,
     pub service: fcap_stream::StreamService,
+    /// Which canvas this target publishes.
+    pub canvas: StreamCanvas,
     /// Overrides the service's preset ingest when non-empty (regional or
     /// custom `rtmp://`/`rtmps://`).
     pub ingest_url: String,
@@ -218,6 +231,7 @@ impl Default for StreamTargetSettings {
         Self {
             enabled: true,
             service: fcap_stream::StreamService::Twitch,
+            canvas: StreamCanvas::Main,
             ingest_url: String::new(),
             stream_key: String::new(),
             encoder_id: "auto".to_owned(),
@@ -372,6 +386,7 @@ impl From<StreamSettingsWire> for StreamSettings {
             None => vec![StreamTargetSettings {
                 enabled: true,
                 service: wire.service,
+                canvas: StreamCanvas::Main,
                 ingest_url: wire.ingest_url,
                 stream_key: wire.stream_key,
                 encoder_id: wire.encoder_id,
@@ -484,6 +499,9 @@ pub struct RecordingSettings {
     pub filename_prefix: String,
     /// Split into playable segments every N minutes (0 = off).
     pub split_minutes: u32,
+    /// Also record the second (vertical) canvas when one is configured —
+    /// a parallel `… (vertical)` file with the same settings (Phase 6).
+    pub record_vertical: bool,
 }
 
 impl Default for RecordingSettings {
@@ -504,6 +522,7 @@ impl Default for RecordingSettings {
             folder: String::new(),
             filename_prefix: "Freally Capture".to_owned(),
             split_minutes: 0,
+            record_vertical: false,
         }
     }
 }

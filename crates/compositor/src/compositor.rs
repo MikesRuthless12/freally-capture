@@ -169,7 +169,12 @@ pub struct Compositor {
 
     program: wgpu::Texture,
     program_view: wgpu::TextureView,
-    readback: Option<wgpu::Buffer>,
+    /// The optional second output canvas (Phase 6: e.g. vertical 9:16),
+    /// rendered on demand from its own scene.
+    vertical: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// Readback staging per target size (program / vertical) — keyed so the
+    /// two canvases never thrash one buffer.
+    readback: HashMap<(u32, u32), wgpu::Buffer>,
 
     sampler: wgpu::Sampler,
     repeat_sampler: wgpu::Sampler,
@@ -377,7 +382,8 @@ impl Compositor {
             canvas_height: height,
             program,
             program_view,
-            readback: None,
+            vertical: None,
+            readback: HashMap::new(),
             sampler,
             repeat_sampler,
             uniform_layout,
@@ -562,9 +568,51 @@ impl Compositor {
         let (program, view) = Self::make_program_texture(&self.gpu.device, width, height);
         self.program = program;
         self.program_view = view;
-        self.readback = None;
+        self.readback.clear();
         // The transition scratch textures are canvas-sized — rebuild lazily.
         self.transition = None;
+    }
+
+    /// Enable/resize (or drop, with `None`) the second output canvas. A
+    /// no-op when the size already matches — safe to call every tick.
+    pub fn set_vertical_canvas(&mut self, size: Option<(u32, u32)>) {
+        match size {
+            None => {
+                if self.vertical.take().is_some() {
+                    self.readback.clear();
+                }
+            }
+            Some((width, height)) => {
+                let width = Self::clamp_canvas(&self.gpu.device, width.max(1));
+                let height = Self::clamp_canvas(&self.gpu.device, height.max(1));
+                if self
+                    .vertical
+                    .as_ref()
+                    .is_some_and(|(_, _, w, h)| (*w, *h) == (width, height))
+                {
+                    return;
+                }
+                let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+                self.vertical = Some((texture, view, width, height));
+            }
+        }
+    }
+
+    /// Compose `scene` into the second canvas and read it back — one
+    /// vertical-output frame. Errors when no vertical canvas is set.
+    pub fn render_vertical(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+    ) -> Result<ProgramFrame, CompositorError> {
+        let (texture, view, width, height) = {
+            let (texture, view, width, height) = self.vertical.as_ref().ok_or_else(|| {
+                CompositorError::BadFrame("no vertical canvas is configured".into())
+            })?;
+            (texture.clone(), view.clone(), *width, *height)
+        };
+        self.render_to(scene, time_seconds, view, (width as f32, height as f32))?;
+        self.read_texture(&texture)
     }
 
     /// Build (or rebuild after a resize) the transition pipeline + its two
@@ -688,8 +736,9 @@ impl Compositor {
             let rig = self.transition.as_ref().expect("ensured above");
             (rig.scratch[0].1.clone(), rig.scratch[1].1.clone())
         };
-        self.render_to(from, time_seconds, from_view)?;
-        self.render_to(to, time_seconds, to_view)?;
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(from, time_seconds, from_view, canvas)?;
+        self.render_to(to, time_seconds, to_view, canvas)?;
 
         let rig = self.transition.as_ref().expect("ensured above");
         self.gpu.queue.write_buffer(
@@ -742,7 +791,8 @@ impl Compositor {
             let rig = self.transition.as_ref().expect("ensured above");
             (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
         };
-        self.render_to(scene, time_seconds, view)?;
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, view, canvas)?;
         self.read_texture(&texture)
     }
 
@@ -926,20 +976,21 @@ impl Compositor {
     /// time-based ones (Scroll).
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
         let target = self.program_view.clone();
-        self.render_to(scene, time_seconds, target)
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, target, canvas)
     }
 
-    /// Compose `scene` into an arbitrary canvas-sized target — the program
-    /// texture normally; a transition's scratch textures / the Studio-Mode
-    /// preview pane otherwise.
+    /// Compose `scene` into an arbitrary target at `canvas` dimensions — the
+    /// program texture normally; a transition's scratch textures, the
+    /// Studio-Mode preview pane, or the second (vertical) canvas otherwise.
     fn render_to(
         &mut self,
         scene: &Scene,
         time_seconds: f32,
         target: wgpu::TextureView,
+        canvas: (f32, f32),
     ) -> Result<(), CompositorError> {
         let started = Instant::now();
-        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
 
         // Plan: filter passes + composite uniforms, all staged up front.
         let mut item_staging: Vec<u8> = Vec::new();
@@ -1188,30 +1239,26 @@ impl Compositor {
         self.read_texture(&texture)
     }
 
-    /// Read a canvas-sized texture back to the CPU (tight RGBA rows) —
-    /// the program normally; the Studio-Mode preview scratch otherwise.
+    /// Read a rendered target back to the CPU (tight RGBA rows) — the
+    /// program, the Studio-Mode preview scratch, or the vertical canvas.
+    /// Sizes come from the texture itself; each size keeps its own staging
+    /// buffer so alternating canvases never thrash one.
     fn read_texture(&mut self, texture: &wgpu::Texture) -> Result<ProgramFrame, CompositorError> {
-        let width = self.canvas_width;
-        let height = self.canvas_height;
+        let width = texture.width();
+        let height = texture.height();
         let unpadded = width as u64 * 4;
         let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
         let size = padded * height as u64;
 
-        // (`map_or`, not `is_none_or` — the declared MSRV is 1.80.)
-        if self
-            .readback
-            .as_ref()
-            .map_or(true, |buffer| buffer.size() != size)
-        {
-            self.readback = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = self.readback.entry((width, height)).or_insert_with(|| {
+            self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("fcap readback"),
                 size,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
-            }));
-        }
-        let buffer = self.readback.as_ref().expect("readback buffer ensured");
+            })
+        });
 
         let mut encoder = self
             .gpu

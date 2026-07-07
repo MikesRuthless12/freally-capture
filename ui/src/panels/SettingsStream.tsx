@@ -20,6 +20,7 @@ const MAX_TARGETS = 6;
 const defaultTarget = (): StreamTargetSettings => ({
   enabled: true,
   service: "twitch",
+  canvas: "main",
   ingestUrl: "",
   streamKey: "",
   encoderId: "auto",
@@ -119,22 +120,37 @@ export function SettingsStream({
               )}
             </legend>
 
-            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Service
-              <select
-                value={target.service}
-                onChange={(event) =>
-                  patchTarget(index, { service: event.target.value as StreamService })
-                }
-                className={inputClass}
-              >
-                {STREAM_SERVICES.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                Service
+                <select
+                  value={target.service}
+                  onChange={(event) =>
+                    patchTarget(index, { service: event.target.value as StreamService })
+                  }
+                  className={inputClass}
+                >
+                  {STREAM_SERVICES.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                Canvas
+                <select
+                  value={target.canvas}
+                  onChange={(event) =>
+                    patchTarget(index, { canvas: event.target.value as "main" | "vertical" })
+                  }
+                  className={inputClass}
+                >
+                  <option value="main">Main (program)</option>
+                  <option value="vertical">Vertical (9:16 — enable it in the studio)</option>
+                </select>
+              </label>
+            </div>
 
             {(target.service === "custom" ||
               target.service === "srt" ||

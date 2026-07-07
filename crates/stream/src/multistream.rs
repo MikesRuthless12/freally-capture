@@ -31,6 +31,12 @@ pub struct MemberSpec {
     pub label: String,
     /// The mixer track this target streams (1-based, like the UI dots).
     pub track: u8,
+    /// Which canvas feeds this target (0 = program, 1 = vertical). Encoded
+    /// into the signature by the app, so lanes never mix canvases.
+    pub canvas: u8,
+    /// This target's frame geometry (its canvas's dimensions).
+    pub width: u32,
+    pub height: u32,
     /// This target's frame rate (paces its lane).
     pub fps: u32,
     /// Opaque encode signature: equal signature (and `tee_safe`) = one
@@ -103,6 +109,7 @@ struct Lane {
     handle: StreamHandle,
     cells: LaneCells,
     track: u8,
+    canvas: u8,
     /// Measured bitrate bookkeeping (from `cells.bytes_out` deltas).
     last_bytes: u64,
     last_sample: Instant,
@@ -150,12 +157,22 @@ pub struct MultiHandle {
 }
 
 impl MultiHandle {
-    /// Push the newest program frame to every lane (an `Arc` clone each —
-    /// never a pixel copy, never blocking).
-    pub fn push_frame(&self, pixels: Arc<Vec<u8>>) {
+    /// Push the newest frame of `canvas` (0 = program, 1 = vertical) to the
+    /// lanes streaming that canvas (an `Arc` clone each — never a pixel
+    /// copy, never blocking).
+    pub fn push_frame(&self, canvas: u8, pixels: Arc<Vec<u8>>) {
         for lane in lock(&self.shared.lanes).iter() {
-            lane.handle.push_frame(Arc::clone(&pixels));
+            if lane.canvas == canvas {
+                lane.handle.push_frame(Arc::clone(&pixels));
+            }
         }
+    }
+
+    /// Whether any lane currently streams `canvas`.
+    pub fn wants_canvas(&self, canvas: u8) -> bool {
+        lock(&self.shared.lanes)
+            .iter()
+            .any(|lane| lane.canvas == canvas)
     }
 
     /// Push one 10 ms interleaved-stereo block of mixer track
@@ -234,13 +251,13 @@ pub struct MultiSession {
 }
 
 impl MultiSession {
-    /// Go live to every member. `base` carries the canvas geometry; each
-    /// lane paces at its group's fps.
-    pub fn start(base: StreamSpec, members: Vec<MemberSpec>, maker: LaneMaker) -> MultiSession {
+    /// Go live to every member. Each lane paces at its group's geometry/fps
+    /// (per-member — a vertical-canvas lane records its own dimensions).
+    pub fn start(members: Vec<MemberSpec>, maker: LaneMaker) -> MultiSession {
         let members = Arc::new(members);
         let mut lanes = Vec::new();
         for ids in group_members(&members) {
-            lanes.push(spawn_lane(&base, &members, &maker, &ids));
+            lanes.push(spawn_lane(&members, &maker, &ids));
         }
         let shared = Arc::new(MultiShared {
             lanes: Mutex::new(lanes),
@@ -253,10 +270,7 @@ impl MultiSession {
         };
         let engine = std::thread::Builder::new()
             .name("fcap-multistream-engine".into())
-            .spawn({
-                let base = base.clone();
-                move || engine_loop(base, members, maker, shared)
-            })
+            .spawn(move || engine_loop(members, maker, shared))
             .expect("multistream engine thread spawns");
         MultiSession {
             handle,
@@ -301,7 +315,7 @@ impl Drop for MultiSession {
     }
 }
 
-fn spawn_lane(base: &StreamSpec, members: &[MemberSpec], maker: &LaneMaker, ids: &[usize]) -> Lane {
+fn spawn_lane(members: &[MemberSpec], maker: &LaneMaker, ids: &[usize]) -> Lane {
     let io = maker(ids);
     let first = members
         .iter()
@@ -309,8 +323,8 @@ fn spawn_lane(base: &StreamSpec, members: &[MemberSpec], maker: &LaneMaker, ids:
         .expect("lane ids come from the member list");
     let session = StreamSession::start(
         StreamSpec {
-            width: base.width,
-            height: base.height,
+            width: first.width,
+            height: first.height,
             fps: first.fps,
         },
         io.factory,
@@ -321,6 +335,7 @@ fn spawn_lane(base: &StreamSpec, members: &[MemberSpec], maker: &LaneMaker, ids:
         handle,
         cells: io.cells,
         track: first.track,
+        canvas: first.canvas,
         last_bytes: 0,
         last_sample: Instant::now(),
         kbps: 0,
@@ -329,12 +344,7 @@ fn spawn_lane(base: &StreamSpec, members: &[MemberSpec], maker: &LaneMaker, ids:
 
 /// The engine pass, ~4×/s: drain slave-failure reports into split-outs and
 /// refresh each lane's measured bitrate.
-fn engine_loop(
-    base: StreamSpec,
-    members: Arc<Vec<MemberSpec>>,
-    maker: LaneMaker,
-    shared: Arc<MultiShared>,
-) {
+fn engine_loop(members: Arc<Vec<MemberSpec>>, maker: LaneMaker, shared: Arc<MultiShared>) {
     const POLL: Duration = Duration::from_millis(250);
     while !shared.stopping.load(Ordering::Relaxed) {
         let mut splits: Vec<usize> = Vec::new();
@@ -370,7 +380,7 @@ fn engine_loop(
                 }
             }
             for member in &splits {
-                let lane = spawn_lane(&base, &members, &maker, &[*member]);
+                let lane = spawn_lane(&members, &maker, &[*member]);
                 lanes.push(lane);
             }
         }
@@ -390,6 +400,9 @@ mod tests {
             id,
             label: format!("svc{id}"),
             track: 1,
+            canvas: 0,
+            width: 64,
+            height: 36,
             fps: 30,
             signature: signature.to_string(),
             tee_safe,
@@ -433,14 +446,6 @@ mod tests {
         }
     }
 
-    fn base() -> StreamSpec {
-        StreamSpec {
-            width: 64,
-            height: 36,
-            fps: 30,
-        }
-    }
-
     fn frame() -> Arc<Vec<u8>> {
         Arc::new(vec![0u8; 64 * 36 * 4])
     }
@@ -479,14 +484,13 @@ mod tests {
     fn different_signatures_go_live_on_their_own_lanes() {
         let builds = Arc::new(AtomicU32::new(0));
         let session = MultiSession::start(
-            base(),
             vec![member(0, "a", true), member(1, "b", true)],
             healthy_maker(Arc::clone(&builds)),
         );
         let handle = session.handle();
         assert!(
             wait_until(3_000, || {
-                handle.push_frame(frame());
+                handle.push_frame(0, frame());
                 let statuses = handle.statuses();
                 statuses.len() == 2 && statuses.iter().all(|s| s.state == StreamState::Live)
             }),
@@ -528,14 +532,10 @@ mod tests {
                 cells,
             }
         });
-        let session = MultiSession::start(
-            base(),
-            vec![member(0, "a", true), member(1, "b", true)],
-            maker,
-        );
+        let session = MultiSession::start(vec![member(0, "a", true), member(1, "b", true)], maker);
         let handle = session.handle();
         assert!(wait_until(3_000, || {
-            handle.push_frame(frame());
+            handle.push_frame(0, frame());
             handle
                 .statuses()
                 .iter()
@@ -544,7 +544,7 @@ mod tests {
         fail_b.store(true, Ordering::Relaxed);
         assert!(
             wait_until(5_000, || {
-                handle.push_frame(frame());
+                handle.push_frame(0, frame());
                 let statuses = handle.statuses();
                 statuses[0].state == StreamState::Live
                     && matches!(statuses[1].state, StreamState::Reconnecting { .. })
@@ -559,13 +559,12 @@ mod tests {
     fn a_failed_tee_slave_splits_out_and_the_lane_keeps_publishing() {
         let builds = Arc::new(AtomicU32::new(0));
         let session = MultiSession::start(
-            base(),
             vec![member(0, "a", true), member(1, "a", true)],
             healthy_maker(Arc::clone(&builds)),
         );
         let handle = session.handle();
         assert!(wait_until(3_000, || {
-            handle.push_frame(frame());
+            handle.push_frame(0, frame());
             let statuses = handle.statuses();
             statuses.len() == 2 && statuses.iter().all(|s| s.state == StreamState::Live)
         }));
@@ -579,7 +578,7 @@ mod tests {
         }
         assert!(
             wait_until(3_000, || {
-                handle.push_frame(frame());
+                handle.push_frame(0, frame());
                 let statuses = handle.statuses();
                 statuses.len() == 2
                     && statuses.iter().all(|s| s.shared_with == 0)
@@ -590,7 +589,7 @@ mod tests {
         );
         // Both end up live again — the split-out lane respawns healthy.
         assert!(wait_until(3_000, || {
-            handle.push_frame(frame());
+            handle.push_frame(0, frame());
             handle
                 .statuses()
                 .iter()

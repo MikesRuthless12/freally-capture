@@ -63,6 +63,9 @@ export function StatsDock() {
         <Stat label="Dropped" value={stats ? (stats.dropped ?? 0).toFixed(0) : "—"} />
         <Stat label="Render" value={stats ? `${(stats.renderMs ?? 0).toFixed(1)} ms` : "—"} />
         <Stat label="GPU" value={stats && (stats.fps ?? 0) > 0 ? "compositing" : "idle"} />
+        {(stats?.verticalFps ?? 0) > 0 && (
+          <Stat label="9:16 FPS" value={(stats?.verticalFps ?? 0).toFixed(0)} />
+        )}
       </div>
       {targets.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1" aria-label="Stream targets">

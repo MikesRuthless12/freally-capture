@@ -249,6 +249,17 @@ pub fn studio_set_center_view(
     })
 }
 
+/// Configure (or clear, with `null`) the second output canvas — e.g. a
+/// vertical 9:16 feed composed from any scene (Phase 6, TASK-604).
+#[tauri::command]
+pub fn studio_set_vertical(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    vertical: Option<fcap_scene::VerticalCanvas>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| collection.set_vertical(vertical))
+}
+
 /// Studio Mode (Phase 5): on = a preview pane opens on the program scene;
 /// off = back to single-pane editing.
 #[tauri::command]

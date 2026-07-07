@@ -135,6 +135,8 @@ export type StreamTargetSettings = {
   /** Go Live publishes to every enabled target at once. */
   enabled: boolean;
   service: StreamService;
+  /** Which canvas this target publishes. */
+  canvas: "main" | "vertical";
   /** Overrides the service's preset ingest when non-empty. */
   ingestUrl: string;
   /** SECRET. */
@@ -227,6 +229,8 @@ export type RecordingSettings = {
   filenamePrefix: string;
   /** Split into playable segments every N minutes (0 = off). */
   splitMinutes: number;
+  /** Also record the vertical canvas (a parallel "… (vertical)" file). */
+  recordVertical: boolean;
 };
 
 /** One file in the recordings folder (`recordings_list`). */
@@ -265,6 +269,8 @@ export type RecordingStatus =
 export type StatsPayload = {
   /** Composed frames per second (the program render rate). */
   fps: number;
+  /** The second (vertical) canvas's compose rate (0 = none running). */
+  verticalFps: number;
   /** This process's CPU usage, percent of the whole machine. */
   cpu: number;
   /** This process's resident memory, MiB. */
@@ -578,6 +584,14 @@ export type Scene = {
   focus?: FocusState | null;
 };
 
+/** The second output canvas (Phase 6): its own size + the scene it shows. */
+export type VerticalCanvas = {
+  width: number;
+  height: number;
+  /** The scene this canvas composes (independent of the program scene). */
+  scene: SceneId;
+};
+
 /** The whole model (the on-disk scene-collection format). */
 export type Collection = {
   formatVersion: number;
@@ -586,6 +600,8 @@ export type Collection = {
   sources: Source[];
   scenes: Scene[];
   activeScene: SceneId;
+  /** The optional second (vertical) output canvas (Phase 6). */
+  vertical?: VerticalCanvas | null;
 };
 
 /** The `studio` event / `studio_get` payload. */

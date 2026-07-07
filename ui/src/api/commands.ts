@@ -33,6 +33,7 @@ import type {
   StreamStatus,
   StudioDto,
   Transform,
+  VerticalCanvas,
   VideoDevice,
   VideoFormat,
 } from "./types";
@@ -299,6 +300,11 @@ export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise
 /** Studio Mode on/off (on = a preview pane opens on the program scene). */
 export function studioSetStudioMode(on: boolean): Promise<void> {
   return invoke("studio_set_studio_mode", { on });
+}
+
+/** Configure (or clear, with `null`) the second (vertical) output canvas. */
+export function studioSetVertical(vertical: VerticalCanvas | null): Promise<void> {
+  return invoke("studio_set_vertical", { vertical });
 }
 
 /** Point the Studio-Mode preview pane at a scene. */

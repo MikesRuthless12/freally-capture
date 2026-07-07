@@ -19,6 +19,8 @@ use tauri::{AppHandle, Emitter, Manager};
 #[derive(Default)]
 pub struct RuntimeStats {
     fps: AtomicU32,
+    /// The second (vertical) canvas's compose rate — 0 when none runs.
+    vertical_fps: AtomicU32,
     dropped: AtomicU64,
     render_micros: AtomicU64,
     /// Set once the compose loop is actually running.
@@ -27,8 +29,9 @@ pub struct RuntimeStats {
 
 impl RuntimeStats {
     /// Publish the newest render numbers (called ~1 Hz from the studio loop).
-    pub fn publish(&self, fps: u32, dropped: u64, render_micros: u64) {
+    pub fn publish(&self, fps: u32, vertical_fps: u32, dropped: u64, render_micros: u64) {
         self.fps.store(fps, Ordering::Relaxed);
+        self.vertical_fps.store(vertical_fps, Ordering::Relaxed);
         self.dropped.store(dropped, Ordering::Relaxed);
         self.render_micros.store(render_micros, Ordering::Relaxed);
         self.running.store(true, Ordering::Relaxed);
@@ -41,6 +44,8 @@ impl RuntimeStats {
 pub struct StatsPayload {
     /// Composed frames per second (the program render rate).
     pub fps: f32,
+    /// The second (vertical) canvas's compose rate (0 = none running).
+    pub vertical_fps: f32,
     /// This process's CPU usage, percent of one core-second.
     pub cpu: f32,
     /// This process's resident memory, MiB.
@@ -90,6 +95,7 @@ pub fn spawn_stats_emitter(app: AppHandle) {
             let running = stats.running.load(Ordering::Relaxed);
             let payload = StatsPayload {
                 fps: stats.fps.load(Ordering::Relaxed) as f32,
+                vertical_fps: stats.vertical_fps.load(Ordering::Relaxed) as f32,
                 cpu,
                 memory_mb,
                 dropped: stats.dropped.load(Ordering::Relaxed),

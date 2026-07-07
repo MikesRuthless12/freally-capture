@@ -26,7 +26,7 @@ use fcap_encode::{
 };
 use fcap_stream::{
     LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle, MultiSession,
-    StreamProtocol, StreamSpec, StreamState, StreamTarget,
+    StreamProtocol, StreamState, StreamTarget,
 };
 
 use crate::audio::AudioRuntime;
@@ -47,6 +47,9 @@ pub struct StreamBridgeState {
     starting: AtomicBool,
     /// Lock-free "is a session up" for the render loop's per-frame check.
     active: AtomicBool,
+    /// Which canvases this session's targets consume (set at Go Live).
+    wants_main: AtomicBool,
+    wants_vertical: AtomicBool,
     /// The feed the render loop pushes into (cloned out under one lock).
     feed: Mutex<Option<MultiHandle>>,
     /// The last **failed** DTO, kept after teardown so the UI's failure banner
@@ -60,6 +63,8 @@ impl StreamBridgeState {
             inner: Mutex::new(None),
             starting: AtomicBool::new(false),
             active: AtomicBool::new(false),
+            wants_main: AtomicBool::new(false),
+            wants_vertical: AtomicBool::new(false),
             feed: Mutex::new(None),
             terminal: Mutex::new(None),
         }
@@ -79,7 +84,12 @@ impl StreamBridgeState {
 
     /// Whether the render loop should hand this state program frames.
     pub fn wants_frames(&self) -> bool {
-        self.active.load(Ordering::Relaxed)
+        self.active.load(Ordering::Relaxed) && self.wants_main.load(Ordering::Relaxed)
+    }
+
+    /// Whether the render loop should hand this state vertical-canvas frames.
+    pub fn wants_vertical_frames(&self) -> bool {
+        self.active.load(Ordering::Relaxed) && self.wants_vertical.load(Ordering::Relaxed)
     }
 
     /// Push the newest program frame (never blocks; a lane drops honestly
@@ -90,7 +100,18 @@ impl StreamBridgeState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(handle) = feed.as_ref() {
-            handle.push_frame(pixels);
+            handle.push_frame(0, pixels);
+        }
+    }
+
+    /// Push the newest vertical-canvas frame to its lanes.
+    pub fn push_video_vertical(&self, pixels: Arc<Vec<u8>>) {
+        let feed = self
+            .feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(handle) = feed.as_ref() {
+            handle.push_frame(1, pixels);
         }
     }
 
@@ -284,6 +305,10 @@ struct TargetPlan {
     keyframe_sec: f32,
     fps: u32,
     track: u8,
+    /// 0 = program canvas, 1 = vertical; with that canvas's dimensions.
+    canvas: u8,
+    width: u32,
+    height: u32,
     protocol: StreamProtocol,
     /// The WHIP bearer token (SECRET) — the target's key, header-borne.
     auth: Option<String>,
@@ -341,6 +366,18 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         }
     }
 
+    // Canvas geometry per target: the program canvas, or the second
+    // (vertical) canvas when the target picks it — which must exist.
+    let snapshot = app.state::<StudioState>().snapshot();
+    let main_dims = (
+        snapshot.collection.canvas_width,
+        snapshot.collection.canvas_height,
+    );
+    let vertical_dims = snapshot
+        .collection
+        .vertical
+        .map(|vertical| (vertical.width, vertical.height));
+
     let mut plans: Vec<TargetPlan> = Vec::new();
     for (id, target_settings) in &enabled {
         let target = StreamTarget {
@@ -354,6 +391,18 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         let encoder_id = resolve_stream_encoder(app, &target_settings.encoder_id)
             .map_err(|err| format!("{}: {err}", target_settings.service.label()))?;
         let protocol = target_settings.service.protocol();
+        let (canvas, (width, height)) = match target_settings.canvas {
+            crate::settings::StreamCanvas::Main => (0u8, main_dims),
+            crate::settings::StreamCanvas::Vertical => (
+                1u8,
+                vertical_dims.ok_or_else(|| {
+                    format!(
+                        "{} streams the vertical canvas — enable one in the studio first",
+                        target_settings.service.label()
+                    )
+                })?,
+            ),
+        };
         plans.push(TargetPlan {
             id: *id,
             label: target_settings.service.label().to_string(),
@@ -364,6 +413,9 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             keyframe_sec: target_settings.keyframe_sec,
             fps: target_settings.fps,
             track: target_settings.track,
+            canvas,
+            width,
+            height,
             protocol,
             auth: (protocol == StreamProtocol::Whip
                 && !target_settings.stream_key.trim().is_empty())
@@ -371,24 +423,22 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         });
     }
 
-    let snapshot = app.state::<StudioState>().snapshot();
-    let (width, height) = (
-        snapshot.collection.canvas_width,
-        snapshot.collection.canvas_height,
-    );
-
     // The signature decides encode sharing: everything that shapes the
-    // bitstream, including the audio track and codec feeding it. RTMP and
-    // SRT both carry AAC so they can share; WHIP is Opus and never does.
+    // bitstream, including the canvas and the audio track/codec feeding it.
+    // RTMP and SRT both carry AAC so they can share; WHIP is Opus and never
+    // does; the two canvases are different pictures and never share.
     let members: Vec<MemberSpec> = plans
         .iter()
         .map(|plan| MemberSpec {
             id: plan.id,
             label: plan.label.clone(),
             track: plan.track,
+            canvas: plan.canvas,
+            width: plan.width,
+            height: plan.height,
             fps: plan.fps,
             signature: format!(
-                "{}|{}|{}|{}|{}|{}|{}",
+                "{}|{}|{}|{}|{}|{}|{}|c{}",
                 plan.encoder_id,
                 plan.bitrate_kbps,
                 plan.audio_bitrate_kbps,
@@ -399,7 +449,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                     "opus"
                 } else {
                     "aac"
-                }
+                },
+                plan.canvas
             ),
             tee_safe: plan.protocol != StreamProtocol::Whip && tee_safe(&plan.url),
             nominal_kbps: plan.bitrate_kbps + plan.audio_bitrate_kbps,
@@ -445,8 +496,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                         auth_bearer: first.auth.clone(),
                     };
                     let spec = RecordSpec {
-                        width,
-                        height,
+                        width: first.width,
+                        height: first.height,
                         fps: first.fps,
                         tracks: vec![0], // the sink's single lane
                     };
@@ -481,15 +532,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     }
     let services = services.join(" + ");
 
-    let session = MultiSession::start(
-        StreamSpec {
-            width,
-            height,
-            fps: plans[0].fps,
-        },
-        members,
-        maker,
-    );
+    let session = MultiSession::start(members, maker);
     let handle = session.handle();
 
     // One mixer tap for every streamed track; the handle routes each block
@@ -519,6 +562,12 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         handle,
         services: services.clone(),
     });
+    state
+        .wants_main
+        .store(plans.iter().any(|plan| plan.canvas == 0), Ordering::Relaxed);
+    state
+        .wants_vertical
+        .store(plans.iter().any(|plan| plan.canvas == 1), Ordering::Relaxed);
     state.active.store(true, Ordering::Relaxed);
     emit_status(app);
     println!("stream: live → {services}");
@@ -547,6 +596,8 @@ fn teardown<R: Runtime>(app: &AppHandle<R>, terminal: Option<StreamDto>) {
         .as_mut()
         .and_then(|active| active.session.take());
     state.active.store(false, Ordering::Relaxed);
+    state.wants_main.store(false, Ordering::Relaxed);
+    state.wants_vertical.store(false, Ordering::Relaxed);
     *state
         .feed
         .lock()
