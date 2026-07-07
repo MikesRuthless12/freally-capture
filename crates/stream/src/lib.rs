@@ -19,6 +19,7 @@ pub mod multistream;
 pub mod replay;
 pub mod rtmp;
 pub mod session;
+pub mod vcam;
 
 pub use multistream::{
     group_members, LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle,

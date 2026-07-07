@@ -180,7 +180,7 @@ export function ControlsDock({
         <button
           type="button"
           disabled
-          title="The virtual camera needs its own signed driver component (a DirectShow/MediaFoundation source other apps can open) — it ships as its own milestone right after 0.70.0"
+          title="The virtual camera needs its own signed driver component per OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO extension / Linux v4l2loopback) — it ships as its own milestone. The feed model is ready for it: program, vertical canvas, or a single source, with a paired virtual mic on Windows/Linux (macOS has no virtual-mic API — said honestly)."
           className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text`}
         >
           ⌁ Start Virtual Camera
