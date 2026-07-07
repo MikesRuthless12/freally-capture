@@ -49,17 +49,29 @@ fn main() {
     println!("settings: language={}", settings.get().language);
     println!("init: building the Tauri app (creates the webview, then runs setup)...");
 
-    let app = tauri::Builder::default()
-        // Single instance FIRST (the plugins' documented order): a second
-        // launch — e.g. a clicked freally:// invite link — focuses the
-        // running app, and its deep-link feature routes the link into the
-        // deep-link events registered in setup.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    // Single instance is normally ON: a second launch — e.g. a clicked
+    // freally:// invite link — focuses the running app and forwards the link.
+    // Setting FCAP_ALLOW_MULTI lets several windows coexist on one machine so
+    // a host + guest remote-session drill can run locally (single instance
+    // otherwise collapses the second launch into the first). Test-only escape
+    // hatch; the shipped default is single instance.
+    let allow_multi = std::env::var_os("FCAP_ALLOW_MULTI").is_some();
+    if allow_multi {
+        println!("init: FCAP_ALLOW_MULTI set — single-instance guard DISABLED (local test mode)");
+    }
+
+    let mut builder = tauri::Builder::default();
+    if !allow_multi {
+        // Single instance FIRST (the plugins' documented order).
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+    let app = builder
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
         // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
         .plugin(

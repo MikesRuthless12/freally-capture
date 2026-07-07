@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import qrcode from "qrcode-generator";
 
 import {
@@ -920,16 +921,22 @@ function ImageForm({
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
   const [path, setPath] = useState("");
+  const browse = () =>
+    pickFile([{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }]).then(
+      (picked) => {
+        if (picked) setPath(picked);
+      },
+    );
   return (
     <PickerShell title="Add an Image" onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
           Image file (PNG, JPEG, BMP, GIF, WebP…)
-          <input
+          <PathField
             value={path}
-            onChange={(event) => setPath(event.target.value)}
+            onChange={setPath}
+            onBrowse={browse}
             placeholder="C:\art\overlay.png"
-            className={inputClass}
           />
         </label>
         <button
@@ -945,6 +952,51 @@ function ImageForm({
   );
 }
 
+/** Open the native file dialog and return the chosen path (null if cancelled
+ * or unavailable — the typed path still works as a fallback). */
+async function pickFile(
+  filters: Array<{ name: string; extensions: string[] }>,
+): Promise<string | null> {
+  try {
+    const picked = await open({ multiple: false, directory: false, filters });
+    return typeof picked === "string" ? picked : null;
+  } catch (err) {
+    console.error("file dialog failed:", err);
+    return null;
+  }
+}
+
+/** A path input paired with a native Browse button (the Tauri file dialog). */
+function PathField({
+  value,
+  onChange,
+  onBrowse,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onBrowse: () => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="flex gap-2">
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className={`${inputClass} min-w-0 flex-1`}
+      />
+      <button
+        type="button"
+        onClick={onBrowse}
+        className="shrink-0 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+      >
+        Browse…
+      </button>
+    </div>
+  );
+}
+
 function MediaForm({
   onClose,
   onPick,
@@ -954,16 +1006,22 @@ function MediaForm({
 }) {
   const [path, setPath] = useState("");
   const [loop, setLoop] = useState(false);
+  const browse = () =>
+    pickFile([
+      { name: "Media", extensions: ["mp4", "mkv", "webm", "mov", "frec", "png", "jpg", "jpeg"] },
+    ]).then((picked) => {
+      if (picked) setPath(picked);
+    });
   return (
     <PickerShell title="Add Media" onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
           Media file (mp4, mkv, webm, mov, .frec, or an image)
-          <input
+          <PathField
             value={path}
-            onChange={(event) => setPath(event.target.value)}
+            onChange={setPath}
+            onBrowse={browse}
             placeholder="C:\clips\intro.mp4"
-            className={inputClass}
           />
         </label>
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">

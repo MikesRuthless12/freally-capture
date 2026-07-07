@@ -35,10 +35,32 @@ export function micConstraints(deviceId: string | null): MediaTrackConstraints {
   return deviceId ? { ...base, deviceId: { ideal: deviceId } } : base;
 }
 
-/** List the selectable mics + outputs (empty in environments without media). */
+/**
+ * List the selectable mics + outputs with their REAL device names.
+ *
+ * The browser hides device labels until a media permission is granted (a
+ * privacy rule), so a fresh enumeration returns blank labels and we'd fall
+ * back to "Microphone 2". When labels are hidden this does a one-shot mic
+ * probe (a stream requested then immediately released) to unlock them for the
+ * session, then re-enumerates. If the probe is denied, the honest generated
+ * names remain. Empty in environments without media.
+ */
 export async function listRemoteAudioDevices(): Promise<RemoteAudioDevices> {
   if (!navigator.mediaDevices?.enumerateDevices) return { inputs: [], outputs: [] };
-  const all = await navigator.mediaDevices.enumerateDevices();
+  let all = await navigator.mediaDevices.enumerateDevices();
+  const audio = all.filter(
+    (device) => device.kind === "audioinput" || device.kind === "audiooutput",
+  );
+  const labelsHidden = audio.length > 0 && audio.some((device) => !device.label);
+  if (labelsHidden && navigator.mediaDevices.getUserMedia) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      all = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      // Denied / unavailable — keep the generated fallback names.
+    }
+  }
   return {
     inputs: all
       .filter((device) => device.kind === "audioinput")

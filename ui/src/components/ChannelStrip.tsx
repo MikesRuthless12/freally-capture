@@ -52,6 +52,10 @@ function VuMeter({
   const rmsPercent = dbToPercent(linToDb(rms));
   const peakPercent = dbToPercent(linToDb(peak));
   const vertical = orientation === "vertical";
+  // The inner gradient always spans the FULL meter, so a colour maps to its dB
+  // position (one green→yellow→red sweep). A clipping window sized to the level
+  // reveals just the reached part — no tiling/repeat as the meter grows.
+  const innerExtent = rmsPercent > 0 ? (10000 / rmsPercent).toFixed(2) : "0";
   return (
     <div
       role="meter"
@@ -64,14 +68,20 @@ function VuMeter({
       } ${dimmed ? "opacity-40" : ""}`}
     >
       <div
-        className={vertical ? "absolute bottom-0 w-full" : "h-full"}
+        className={`absolute overflow-hidden ${vertical ? "bottom-0 left-0 w-full" : "inset-y-0 left-0"}`}
         style={{
           [vertical ? "height" : "width"]: `${rmsPercent}%`,
-          background: vertical ? METER_GRADIENT_V : METER_GRADIENT_H,
-          backgroundSize: vertical ? "100% 12rem" : "10rem 100%",
           transition: `${vertical ? "height" : "width"} 75ms linear`,
         }}
-      />
+      >
+        <div
+          className={`absolute ${vertical ? "bottom-0 left-0 w-full" : "inset-y-0 left-0"}`}
+          style={{
+            [vertical ? "height" : "width"]: `${innerExtent}%`,
+            background: vertical ? METER_GRADIENT_V : METER_GRADIENT_H,
+          }}
+        />
+      </div>
       {peakPercent > 0 && (
         <div
           className={`absolute bg-white/80 ${vertical ? "left-0 h-px w-full" : "top-0 h-full w-px"}`}

@@ -365,19 +365,56 @@ impl Collection {
     }
 
     /// Place an existing pool source on top of `scene_id` (source sharing).
+    ///
+    /// A newly added *video* item seats into the first free corner instead of
+    /// filling the canvas dead-center on top of what's already there — so
+    /// adding sources never dumps them overlapping (Mike's rule). The very
+    /// first video item still fills the canvas; audio-only items render
+    /// nothing and are never seated.
     pub fn add_item_with_existing_source(
         &mut self,
         scene_id: SceneId,
         source_id: SourceId,
     ) -> Result<ItemId, SceneError> {
-        if self.source(source_id).is_none() {
+        let Some(source) = self.source(source_id) else {
             return Err(SceneError::SourceNotFound);
-        }
+        };
+        let seat = if source.settings.is_audio_only() {
+            None
+        } else {
+            self.free_corner_for_new_item(scene_id)
+        };
         let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
-        let item = SceneItem::new(source_id);
+        let mut item = SceneItem::new(source_id);
+        if let Some(slot) = seat {
+            item.pending_slot = Some(slot); // pending_fit is already set
+        }
         let id = item.id;
         scene.items.push(item);
         Ok(id)
+    }
+
+    /// The first preset seat not already taken by a visible video item — where
+    /// a newly added source lands so it doesn't overlap. `None` when the scene
+    /// has no other video item yet (the first item fills the canvas) or every
+    /// seat is taken (fall back to a centered fit).
+    fn free_corner_for_new_item(&self, scene_id: SceneId) -> Option<NormRect> {
+        let scene = self.scene(scene_id)?;
+        let is_video = |item: &SceneItem| {
+            self.source(item.source)
+                .is_some_and(|source| !source.settings.is_audio_only())
+        };
+        let existing: Vec<&SceneItem> = scene.items.iter().filter(|item| is_video(item)).collect();
+        if existing.is_empty() {
+            return None;
+        }
+        let occupied: Vec<NormRect> = existing
+            .iter()
+            .filter_map(|item| item.pending_slot)
+            .collect();
+        scene::preset_seats()
+            .into_iter()
+            .find(|seat| !occupied.iter().any(|taken| same_seat(*taken, *seat)))
     }
 
     /// Remove an item; its source leaves the pool too if nothing else shows it.
@@ -2621,6 +2658,106 @@ mod tests {
                 .iter()
                 .any(|rail| same_seat(*rail, seat)),
             "the redirect lands on a rail seat"
+        );
+    }
+
+    #[test]
+    fn added_video_items_seat_into_free_corners_not_on_top() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let mk_cam = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::VideoDevice {
+                    device_id: String::new(),
+                    format: None,
+                },
+            )
+        };
+
+        // First video item fills the canvas (no seat).
+        let (_, first) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 1"))
+            .expect("add cam 1");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(first)
+                .expect("first")
+                .pending_slot,
+            None,
+            "the first item fills the canvas"
+        );
+
+        // Second + third get distinct free corners — never dumped on top.
+        let (_, second) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 2"))
+            .expect("add cam 2");
+        let (_, third) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 3"))
+            .expect("add cam 3");
+        let scene_ref = collection.scene(scene).expect("scene");
+        let s2 = scene_ref
+            .item(second)
+            .expect("second")
+            .pending_slot
+            .expect("seated");
+        let s3 = scene_ref
+            .item(third)
+            .expect("third")
+            .pending_slot
+            .expect("seated");
+        assert!(
+            !same_seat(s2, s3),
+            "each added source takes a distinct corner"
+        );
+        assert!(scene::preset_seats()
+            .iter()
+            .any(|seat| same_seat(*seat, s2)));
+        assert!(scene::preset_seats()
+            .iter()
+            .any(|seat| same_seat(*seat, s3)));
+    }
+
+    #[test]
+    fn added_audio_only_items_are_never_seated() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // A camera then a mic: the mic renders nothing, so it gets no seat and
+        // does not count toward corner placement.
+        collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam");
+        let (_, mic) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(mic)
+                .expect("mic")
+                .pending_slot,
+            None,
+            "an audio-only source is never seated"
         );
     }
 

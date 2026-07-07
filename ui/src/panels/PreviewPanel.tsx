@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+
+import { isModalOpen, modalSubscribe } from "../lib/modal";
 
 import {
   nativePreviewActive,
@@ -99,6 +101,9 @@ export function PreviewPanel({
   const programH = collection?.canvasHeight ?? 1080;
   const running = program?.state === "running";
   const emptyScene = (scene?.items.length ?? 0) === 0;
+  // A modal dialog is a webview element; the native preview child window would
+  // paint over it, so suppress the overlay while any modal is open.
+  const modalOpen = useSyncExternalStore(modalSubscribe, isModalOpen);
 
   // The displayed box: the program frame letterboxed inside the container.
   useEffect(() => {
@@ -154,7 +159,7 @@ export function PreviewPanel({
       const y = Math.round((rect.top + box.top) * dpr);
       const w = Math.round(box.width * dpr);
       const h = Math.round(box.height * dpr);
-      const visible = running && !emptyScene;
+      const visible = running && !emptyScene && !modalOpen;
       const key = `${x},${y},${w},${h},${visible}`;
       if (key !== lastRegion.current) {
         lastRegion.current = key;
@@ -168,7 +173,7 @@ export function PreviewPanel({
     // hiding on each re-run flashes the native preview blank. The hide lives in
     // the deactivate/unmount effect below, which only fires when nativeActive flips.
     return () => clearInterval(timer);
-  }, [nativeActive, box, running, emptyScene]);
+  }, [nativeActive, box, running, emptyScene, modalOpen]);
 
   // Hide the native overlay when it stops being viable or the panel unmounts,
   // decoupled from per-layout reporting so an ordinary resize never flashes it.
