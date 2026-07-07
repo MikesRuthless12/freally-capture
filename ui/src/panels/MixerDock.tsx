@@ -5,6 +5,7 @@ import type {
   AudioDevice,
   AudioLevelsPayload,
   Collection,
+  MixerLayout,
   Scene,
   Settings,
   Source,
@@ -58,6 +59,25 @@ export function MixerDock({
   const advancedSource =
     advancedFor === null ? null : (strips.find((source) => source.id === advancedFor) ?? null);
 
+  const layout: MixerLayout = settings?.mixerLayout ?? "horizontal";
+  const vertical = layout === "vertical";
+  const defaultStrip = {
+    volumeDb: 0,
+    muted: false,
+    monitor: "off" as const,
+    tracks: 1,
+    syncOffsetMs: 0,
+    filters: [],
+  };
+
+  const toggleLayout = () => {
+    if (!settings) return;
+    const next: Settings = { ...settings, mixerLayout: vertical ? "horizontal" : "vertical" };
+    settingsSet(next)
+      .then(() => onSettingsSaved(next))
+      .catch(fail("mixer layout save"));
+  };
+
   return (
     <Panel
       title="Audio Mixer"
@@ -72,6 +92,19 @@ export function MixerDock({
               monitor: {audio.monitorError}
             </span>
           )}
+          {settings && (
+            <button
+              type="button"
+              onClick={toggleLayout}
+              title={`Switch to ${vertical ? "horizontal" : "vertical"} strips`}
+              aria-label={`Mixer layout: ${layout} — switch to ${
+                vertical ? "horizontal" : "vertical"
+              }`}
+              className="rounded-md border border-white/10 px-1.5 py-0.5 text-xs text-havoc-muted transition-colors hover:border-havoc-accent/50 hover:text-havoc-text"
+            >
+              {vertical ? "▭" : "▯"}
+            </button>
+          )}
           {strips.length > 0 && settings && (
             <MonitorDevicePicker settings={settings} onSaved={onSettingsSaved} />
           )}
@@ -84,6 +117,24 @@ export function MixerDock({
           <b>Audio Output Capture</b> (desktop audio) with “+” in Sources. Strips get a VU meter,
           fader, mute, monitoring, filters, and track assignment.
         </EmptyHint>
+      ) : vertical ? (
+        <div className="flex h-full min-h-0 gap-2">
+          <ul className="m-0 flex min-h-0 min-w-0 flex-1 list-none flex-row gap-1.5 overflow-x-auto p-0">
+            {strips.map((source) => (
+              <li key={source.id} className="h-full">
+                <ChannelStrip
+                  source={source}
+                  audio={source.audio ?? defaultStrip}
+                  levels={audio?.sources[source.id]}
+                  orientation="vertical"
+                  onOpenFilters={() => onOpenAudioFilters(source.id)}
+                  onOpenAdvanced={() => setAdvancedFor(source.id)}
+                />
+              </li>
+            ))}
+          </ul>
+          <LufsStrip audio={audio} />
+        </div>
       ) : (
         <div className="flex h-full min-h-0 gap-2">
           <ul className="m-0 flex min-h-0 min-w-0 flex-1 list-none flex-col gap-1.5 overflow-auto p-0">
@@ -91,16 +142,7 @@ export function MixerDock({
               <li key={source.id}>
                 <ChannelStrip
                   source={source}
-                  audio={
-                    source.audio ?? {
-                      volumeDb: 0,
-                      muted: false,
-                      monitor: "off",
-                      tracks: 1,
-                      syncOffsetMs: 0,
-                      filters: [],
-                    }
-                  }
+                  audio={source.audio ?? defaultStrip}
                   levels={audio?.sources[source.id]}
                   onOpenFilters={() => onOpenAudioFilters(source.id)}
                   onOpenAdvanced={() => setAdvancedFor(source.id)}
@@ -116,16 +158,7 @@ export function MixerDock({
         <PickerShell title={`Audio — ${advancedSource.name}`} onClose={() => setAdvancedFor(null)}>
           <AdvancedAudioFields
             source={advancedSource}
-            audio={
-              advancedSource.audio ?? {
-                volumeDb: 0,
-                muted: false,
-                monitor: "off",
-                tracks: 1,
-                syncOffsetMs: 0,
-                filters: [],
-              }
-            }
+            audio={advancedSource.audio ?? defaultStrip}
             onSetHotkeys={(pushToTalk, pushToMute) => {
               studioSetAudioHotkeys(advancedSource.id, pushToTalk, pushToMute)
                 .then(() => setAdvancedFor(null))

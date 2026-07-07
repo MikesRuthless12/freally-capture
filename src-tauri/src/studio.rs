@@ -748,11 +748,24 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             .filter(|item| item.pending_fit)
             .filter_map(|item| {
                 compositor.source_size(item.source).map(|(w, h)| {
-                    (
-                        scene.id,
-                        item.id,
-                        fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1),
-                    )
+                    // A layout corner fits the source into its normalized slot;
+                    // otherwise the ordinary whole-canvas fit-and-center.
+                    let transform = match item.pending_slot {
+                        Some(slot) => {
+                            let cw = canvas.0 as f32;
+                            let ch = canvas.1 as f32;
+                            fcap_compositor::transform::fit_into_slot(
+                                w,
+                                h,
+                                slot.x * cw,
+                                slot.y * ch,
+                                slot.w * cw,
+                                slot.h * ch,
+                            )
+                        }
+                        None => fcap_compositor::transform::fit_to_canvas(w, h, canvas.0, canvas.1),
+                    };
+                    (scene.id, item.id, transform)
                 })
             })
             .collect();
@@ -760,9 +773,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let dto = {
                 let mut guard = lock_core(&core);
                 for (scene_id, item_id, transform) in fits {
+                    // resolve_pending (not set_item_transform): the item's
+                    // seat survives placement, so seat-swap can read it.
                     let _ = guard
                         .collection
-                        .set_item_transform(scene_id, item_id, transform);
+                        .resolve_pending(scene_id, item_id, transform);
                 }
                 guard.revision += 1;
                 guard.dirty_since.get_or_insert_with(Instant::now);
@@ -1004,6 +1019,7 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
+            | SourceSettings::RemoteGuest { .. }
     )
 }
 
@@ -1124,6 +1140,9 @@ fn start_session(
                     // The source id keys the mixer-side audio ring.
                     fcap_sources::media::start_media(&id.0.to_string(), path, *looping, *hw_decode)
                 }
+                // Frames are pushed from the webview's WebRTC session over
+                // IPC — the session just opens the push channel.
+                SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),
                 other => Err(CaptureError::Unsupported(format!(
                     "{} is not capture-backed",
                     other.kind_name()

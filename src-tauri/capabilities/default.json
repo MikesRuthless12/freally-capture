@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core capability for the main studio window: the default Tauri core permissions (events, window state, app metadata) — nothing more. Broader permissions are added per feature, never wholesale.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

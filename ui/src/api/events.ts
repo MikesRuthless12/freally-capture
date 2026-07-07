@@ -20,6 +20,12 @@ export function onStats(handler: (stats: StatsPayload) => void): Promise<Unliste
   return listen<StatsPayload>("stats", (event) => handler(event.payload));
 }
 
+/** Subscribe to opened freally:// invite links (the OS deep link). The URL
+ * is untrusted — parse it with the invite validator; never auto-join. */
+export function onRemoteInvite(handler: (url: string) => void): Promise<UnlistenFn> {
+  return listen<string>("remote-invite", (event) => handler(event.payload));
+}
+
 /** Subscribe to model changes — the full collection on every mutation. */
 export function onStudio(handler: (studio: StudioDto) => void): Promise<UnlistenFn> {
   return listen<StudioDto>("studio", (event) => handler(event.payload));

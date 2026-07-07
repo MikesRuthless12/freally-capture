@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import qrcode from "qrcode-generator";
 
 import {
   audioInputDevices,
@@ -6,8 +8,13 @@ import {
   captureListSources,
   captureWindowThumbnail,
   openPrivacySettings,
+  settingsGet,
+  settingsSet,
+  studioApplyLayout,
   studioRenameSource,
   studioRetrySource,
+  studioSetCenterView,
+  studioSetFocus,
   videoDeviceFormats,
   videoDevicesList,
 } from "../api/commands";
@@ -16,18 +23,40 @@ import type {
   AudioLevelsPayload,
   CaptureSource,
   Collection,
+  Corner,
+  CornerSlot,
   ItemId,
   ProgramStatus,
   Scene,
+  SceneId,
+  Settings,
   SourceId,
   SourceSettings,
   VideoDevice,
   VideoFormat,
 } from "../api/types";
+import { CORNERS } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
+import {
+  spikeGetState,
+  spikeHost,
+  spikeJoin,
+  spikeSetInviteTtl,
+  spikeSetMic,
+  spikeSetSpeaker,
+  spikeStop,
+  spikeSubscribe,
+} from "../remote/spike";
+import {
+  listRemoteAudioDevices,
+  onDeviceChange,
+  type RemoteAudioDevices,
+  startMicTest,
+} from "../remote/devices";
+import { joinTargetFromInput } from "../remote/invite";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -53,6 +82,7 @@ type PickerMode =
   | "webcam"
   | "image"
   | "media"
+  | "remoteGuest"
   | "color"
   | "text"
   | "audioInput"
@@ -66,6 +96,7 @@ const KIND_BADGE: Record<string, string> = {
   videoDevice: "Camera",
   image: "Image",
   media: "Media",
+  remoteGuest: "Guest",
   color: "Color",
   text: "Text",
   audioInput: "Audio In",
@@ -78,6 +109,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["webcam", "Video Capture Device"],
   ["image", "Image"],
   ["media", "Media (video/image file)"],
+  ["remoteGuest", "Remote Guest (P2P spike)"],
   ["color", "Color"],
   ["text", "Text"],
   ["audioInput", "Audio Input Capture"],
@@ -108,6 +140,7 @@ export function SourcesRail({
 }: SourcesRailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [picker, setPicker] = useState<PickerMode | null>(null);
+  const [showLayout, setShowLayout] = useState(false);
   const [renaming, setRenaming] = useState<{ source: SourceId; draft: string } | null>(null);
 
   const items = scene?.items ?? [];
@@ -139,41 +172,53 @@ export function SourcesRail({
     <Panel
       title="Sources"
       actions={
-        <div className="relative">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             disabled={!scene}
-            onClick={() => setMenuOpen((open) => !open)}
-            title="Add a source"
-            aria-label="Add a source"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
+            onClick={() => setShowLayout(true)}
+            title="Arrange: screen + corners"
+            aria-label="Arrange: screen + corners"
             className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
           >
-            +
+            ▦
           </button>
-          {menuOpen && (
-            <div
-              role="menu"
+          <div className="relative">
+            <button
+              type="button"
+              disabled={!scene}
+              onClick={() => setMenuOpen((open) => !open)}
+              title="Add a source"
               aria-label="Add a source"
-              className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
             >
-              {ADD_MENU.map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => openPicker(mode)}
-                  className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                >
-                  {label}
-                </button>
-              ))}
-              <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                Browser Source arrives later — it needs its own offscreen-webview work.
-              </p>
-            </div>
-          )}
+              +
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                aria-label="Add a source"
+                className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+              >
+                {ADD_MENU.map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openPicker(mode)}
+                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                  >
+                    {label}
+                  </button>
+                ))}
+                <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
+                  Browser Source arrives later — it needs its own offscreen-webview work.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       }
     >
@@ -196,6 +241,7 @@ export function SourcesRail({
             const status = audioOnly ? audio?.sources[item.source] : program?.sources[item.source];
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
+            const isFocused = scene?.focus?.item === item.id;
             return (
               <li key={item.id}>
                 <div
@@ -217,6 +263,45 @@ export function SourcesRail({
                   >
                     {item.visible ? "👁" : "–"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!scene) return;
+                      studioSetFocus(scene.id, isFocused ? null : item.id).catch((err) =>
+                        console.error("focus toggle failed:", err),
+                      );
+                    }}
+                    title={
+                      isFocused
+                        ? "Unfocus — restore the layout"
+                        : "Focus — fill the canvas (Highlight Speaker)"
+                    }
+                    aria-label={`${isFocused ? "Unfocus" : "Focus"} ${source?.name ?? "source"}`}
+                    aria-pressed={isFocused}
+                    className={`shrink-0 rounded px-1 text-xs ${
+                      isFocused
+                        ? "text-havoc-accent"
+                        : "text-havoc-muted opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    ⛶
+                  </button>
+                  {!audioOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!scene) return;
+                        studioSetCenterView(scene.id, item.id).catch((err) =>
+                          console.error("center view failed:", err),
+                        );
+                      }}
+                      title="Center — make this the shared center view (cams move to the rail)"
+                      aria-label={`Center ${source?.name ?? "source"}`}
+                      className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
+                    >
+                      ◉
+                    </button>
+                  )}
                   {isRenaming ? (
                     <input
                       autoFocus
@@ -376,6 +461,8 @@ export function SourcesRail({
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "media" ? (
         <MediaForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "remoteGuest" && scene ? (
+        <RemoteGuestForm sceneId={scene.id} onClose={() => setPicker(null)} />
       ) : picker === "color" ? (
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
@@ -390,6 +477,9 @@ export function SourcesRail({
           }}
         />
       ) : null}
+      {showLayout && (
+        <LayoutPicker collection={collection} scene={scene} onClose={() => setShowLayout(false)} />
+      )}
     </Panel>
   );
 }
@@ -831,16 +921,22 @@ function ImageForm({
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
   const [path, setPath] = useState("");
+  const browse = () =>
+    pickFile([{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }]).then(
+      (picked) => {
+        if (picked) setPath(picked);
+      },
+    );
   return (
     <PickerShell title="Add an Image" onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
           Image file (PNG, JPEG, BMP, GIF, WebP…)
-          <input
+          <PathField
             value={path}
-            onChange={(event) => setPath(event.target.value)}
+            onChange={setPath}
+            onBrowse={browse}
             placeholder="C:\art\overlay.png"
-            className={inputClass}
           />
         </label>
         <button
@@ -856,6 +952,51 @@ function ImageForm({
   );
 }
 
+/** Open the native file dialog and return the chosen path (null if cancelled
+ * or unavailable — the typed path still works as a fallback). */
+async function pickFile(
+  filters: Array<{ name: string; extensions: string[] }>,
+): Promise<string | null> {
+  try {
+    const picked = await open({ multiple: false, directory: false, filters });
+    return typeof picked === "string" ? picked : null;
+  } catch (err) {
+    console.error("file dialog failed:", err);
+    return null;
+  }
+}
+
+/** A path input paired with a native Browse button (the Tauri file dialog). */
+function PathField({
+  value,
+  onChange,
+  onBrowse,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onBrowse: () => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="flex gap-2">
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className={`${inputClass} min-w-0 flex-1`}
+      />
+      <button
+        type="button"
+        onClick={onBrowse}
+        className="shrink-0 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+      >
+        Browse…
+      </button>
+    </div>
+  );
+}
+
 function MediaForm({
   onClose,
   onPick,
@@ -865,16 +1006,22 @@ function MediaForm({
 }) {
   const [path, setPath] = useState("");
   const [loop, setLoop] = useState(false);
+  const browse = () =>
+    pickFile([
+      { name: "Media", extensions: ["mp4", "mkv", "webm", "mov", "frec", "png", "jpg", "jpeg"] },
+    ]).then((picked) => {
+      if (picked) setPath(picked);
+    });
   return (
     <PickerShell title="Add Media" onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
           Media file (mp4, mkv, webm, mov, .frec, or an image)
-          <input
+          <PathField
             value={path}
-            onChange={(event) => setPath(event.target.value)}
+            onChange={setPath}
+            onBrowse={browse}
             placeholder="C:\clips\intro.mp4"
-            className={inputClass}
           />
         </label>
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
@@ -900,6 +1047,442 @@ function MediaForm({
         </button>
       </div>
     </PickerShell>
+  );
+}
+
+const INVITE_TTLS: Array<[number, string]> = [
+  [15, "15 min"],
+  [30, "30 min"],
+  [60, "1 hour"],
+  [1440, "1 day"],
+];
+
+/**
+ * Remote Guest setup (TASK-R1 + R2/R3 invites). HOST: start a session and
+ * share an expiring invite link; the guest's webcam lands in the scene when
+ * they join. GUEST: paste the invite link (or a raw session id) and share this
+ * machine's webcam. Media flows P2P (WebRTC); only signaling touches the
+ * PeerJS broker — nothing runs until a session is started here. Session state
+ * lives in the spike store, so closing this dialog changes nothing; the live
+ * controls (mute, stop) sit on the main-UI session bar.
+ */
+function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () => void }) {
+  const session = useSyncExternalStore(spikeSubscribe, spikeGetState);
+  const [hostId, setHostId] = useState("");
+  const [ttl, setTtl] = useState(30);
+  const [copied, setCopied] = useState(false);
+  // Local-only errors (bad invite / copy failure) — the session status itself
+  // comes from the store.
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const link = session.role === "host" ? session.invite : null;
+  const startHosting = () => {
+    setFormError(null);
+    void spikeHost(sceneId, ttl);
+  };
+  const changeTtl = (minutes: number) => {
+    setTtl(minutes);
+    spikeSetInviteTtl(minutes); // no-op unless hosting
+  };
+
+  const copyLink = () => {
+    if (!link) return;
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => setFormError("couldn't copy — select the link and copy manually"));
+  };
+  const join = () => {
+    const target = joinTargetFromInput(hostId, Date.now());
+    if ("error" in target) {
+      setFormError(target.error);
+      return;
+    }
+    setFormError(null);
+    spikeJoin(target.peerId).catch((err) => setFormError(`join failed: ${err}`));
+  };
+
+  return (
+    <PickerShell title="Remote Guest (P2P spike)" onClose={onClose}>
+      <div className="flex flex-col gap-3 text-xs text-havoc-text">
+        <div className="flex flex-col gap-1.5">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+            Host — invite a guest
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={startHosting}
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+            >
+              Start hosting
+            </button>
+            <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
+              Expires
+              <select
+                value={ttl}
+                onChange={(event) => changeTtl(Number(event.target.value))}
+                aria-label="Invite expiry"
+                className="rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+              >
+                {INVITE_TTLS.map(([minutes, label]) => (
+                  <option key={minutes} value={minutes}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {link && (
+            <>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={link}
+                  onFocus={(event) => event.target.select()}
+                  aria-label="Invite link"
+                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+                />
+                <button
+                  type="button"
+                  onClick={copyLink}
+                  className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+                >
+                  {copied ? "Copied ✓" : "Copy"}
+                </button>
+              </div>
+              <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                Share this link (Discord / text / email). It carries your session and expires as
+                set. The guest opens it and joins with their webcam.
+              </p>
+              <div className="flex items-center gap-2">
+                <InviteQr link={link} />
+                <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                  Scan to carry the invite over. The freally:// link opens on a machine with Freally
+                  Capture installed; phone guests need the web join page (a later milestone).
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+        <RemoteDevicePickers micId={session.micId} speakerId={session.speakerId} />
+        <TurnRelaySection />
+        <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+            Guest — join with an invite
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={hostId}
+              onChange={(event) => {
+                setHostId(event.target.value);
+                setFormError(null);
+              }}
+              placeholder="paste the invite link"
+              aria-label="Invite link or session id"
+              className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
+            />
+            <button
+              type="button"
+              disabled={!hostId.trim()}
+              onClick={join}
+              className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-60"
+            >
+              Join with webcam
+            </button>
+          </div>
+        </div>
+        {session.active && (
+          <p className="m-0 border-t border-white/5 pt-2 text-[10px] leading-snug text-havoc-muted">
+            The live session controls (mute, end) stay on the bar at the top of the main window —
+            you can close this dialog.
+          </p>
+        )}
+        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2">
+          <p
+            className={`m-0 flex-1 text-[11px] leading-snug ${
+              formError ? "text-amber-300" : "text-havoc-muted"
+            }`}
+          >
+            {formError ?? session.status}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              spikeStop();
+              setFormError(null);
+            }}
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          >
+            Stop session
+          </button>
+        </div>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** The invite link as a QR code (TASK-R3) — vendored zero-dep encoder, drawn
+ * as a plain SVG path (no innerHTML, CSP-safe). */
+function InviteQr({ link }: { link: string }) {
+  const rendered = useMemo(() => {
+    try {
+      const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
+      qr.addData(link);
+      qr.make();
+      const count = qr.getModuleCount();
+      let path = "";
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (qr.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`;
+        }
+      }
+      return { count, path };
+    } catch {
+      return null; // an over-long payload — the copyable link still works
+    }
+  }, [link]);
+  if (!rendered) return null;
+  return (
+    <svg
+      viewBox={`0 0 ${rendered.count} ${rendered.count}`}
+      role="img"
+      aria-label="Invite link QR code"
+      className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
+    >
+      <path d={rendered.path} fill="#000" />
+    </svg>
+  );
+}
+
+/**
+ * The session's audio devices — which microphone THIS machine sends (host
+ * talkback / guest mic) and which output device the other side's audio plays
+ * through — plus a self-test loop: talk and hear yourself before going live.
+ * Selection applies live mid-session (replaceTrack / setSinkId) and persists.
+ */
+function RemoteDevicePickers({
+  micId,
+  speakerId,
+}: {
+  micId: string | null;
+  speakerId: string | null;
+}) {
+  const [devices, setDevices] = useState<RemoteAudioDevices>({ inputs: [], outputs: [] });
+  const [testNote, setTestNote] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const testStopRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      listRemoteAudioDevices()
+        .then((found) => {
+          if (!cancelled) setDevices(found);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const unlisten = onDeviceChange(refresh);
+    return () => {
+      cancelled = true;
+      unlisten();
+    };
+  }, []);
+
+  const stopTest = useCallback(() => {
+    testStopRef.current?.();
+    testStopRef.current = null;
+    setTesting(false);
+  }, []);
+  // Closing the dialog releases the test mic.
+  useEffect(() => stopTest, [stopTest]);
+
+  const startTest = (mic: string | null, speaker: string | null) => {
+    setTestNote(null);
+    startMicTest(mic, speaker)
+      .then(({ stop, sink }) => {
+        testStopRef.current?.(); // a switch mid-test replaces the loop
+        testStopRef.current = stop;
+        setTesting(true);
+        if (sink !== "ok")
+          setTestNote("output routing unavailable — playing on the default device");
+        // The permission grant unlocks real device labels — refresh.
+        listRemoteAudioDevices()
+          .then(setDevices)
+          .catch(() => {});
+      })
+      .catch((err) => {
+        setTesting(false);
+        setTestNote(`mic test failed: ${err}`);
+      });
+  };
+
+  const pickMic = (next: string | null) => {
+    void spikeSetMic(next);
+    if (testStopRef.current) startTest(next, speakerId);
+  };
+  const pickSpeaker = (next: string | null) => {
+    void spikeSetSpeaker(next);
+    if (testStopRef.current) startTest(micId, next);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
+      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+        Session audio devices
+      </p>
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <span className="w-20 shrink-0">Microphone</span>
+        <select
+          value={micId ?? ""}
+          onChange={(event) => pickMic(event.target.value || null)}
+          aria-label="Session microphone"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+        >
+          <option value="">System default</option>
+          {devices.inputs.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <span className="w-20 shrink-0">Output</span>
+        <select
+          value={speakerId ?? ""}
+          onChange={(event) => pickSpeaker(event.target.value || null)}
+          aria-label="Session audio output"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
+        >
+          <option value="">System default</option>
+          {devices.outputs.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => (testing ? stopTest() : startTest(micId, speakerId))}
+          aria-pressed={testing}
+          className={`shrink-0 rounded-md border px-3 py-1 text-[11px] font-semibold ${
+            testing
+              ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-300"
+              : "border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          }`}
+        >
+          {testing ? "Stop test" : "Test — hear yourself"}
+        </button>
+        <span className="text-[10px] leading-snug text-havoc-muted">
+          {testing
+            ? "talk into the mic — you're hearing the selected devices live"
+            : "loops your mic to the output (headphones avoid feedback)"}
+        </span>
+      </div>
+      {testNote && <p className="m-0 text-[10px] leading-snug text-amber-300">{testNote}</p>}
+    </div>
+  );
+}
+
+/**
+ * TASK-R5: the opt-in TURN relay — the user's OWN relay (e.g. Oracle Cloud
+ * Always Free coturn), never author-run infrastructure. Direct P2P (STUN) is
+ * the free default and most sessions never need this; it exists for the
+ * both-sides-behind-strict-NAT case. The credential is a secret: stored in
+ * the local settings file only, never logged, redacted from diagnostics.
+ */
+function TurnRelaySection() {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    settingsGet()
+      .then((loaded) => {
+        if (!cancelled) setSettings(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = (patch: Partial<Settings["remote"]>) => {
+    if (!settings) return;
+    const next = { ...settings, remote: { ...settings.remote, ...patch } };
+    setSettings(next);
+    setNote(null);
+    settingsSet(next).catch((err) => setNote(`couldn't save: ${err}`));
+  };
+
+  return (
+    <details className="border-t border-white/5 pt-2">
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
+        Network — optional TURN relay (advanced)
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5">
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          Sessions connect directly (P2P) — free, no relay needed. If BOTH sides sit behind strict
+          NATs the direct path can fail; a TURN relay you run yourself carries the media then.
+          Skipping this is fine — most connections work direct-only.
+        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          Free option: Oracle Cloud "Always Free" runs coturn at no cost (note: Oracle asks for a
+          credit card at signup, but the Always-Free shape stays free). Steps: 1) create the free
+          VM, 2) install coturn, 3) open UDP 3478, 4) set a user/password, 5) enter{" "}
+          <span className="font-mono">turn:your-vm-ip:3478</span> + the credentials here. Your
+          credential stays in your local settings file and is never logged.
+        </p>
+        {settings ? (
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">TURN URL</span>
+              <input
+                value={settings.remote.turnUrl}
+                onChange={(event) => save({ turnUrl: event.target.value })}
+                placeholder="turn:host:3478 (empty = direct only)"
+                aria-label="TURN URL"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">Username</span>
+              <input
+                value={settings.remote.turnUsername}
+                onChange={(event) => save({ turnUsername: event.target.value })}
+                aria-label="TURN username"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <span className="w-20 shrink-0">Credential</span>
+              <input
+                type="password"
+                value={settings.remote.turnCredential}
+                onChange={(event) => save({ turnCredential: event.target.value })}
+                aria-label="TURN credential"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
+              />
+            </label>
+            <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+              The relay engages once all three fields are set (a TURN server requires the
+              credentials) and applies to the next session you start or join. Verify it with a
+              relay-only test call between your own two machines.
+            </p>
+          </>
+        ) : (
+          <p className="m-0 text-[10px] text-havoc-muted">settings unavailable (browser mode)</p>
+        )}
+        {note && <p className="m-0 text-[10px] text-amber-300">{note}</p>}
+      </div>
+    </details>
   );
 }
 
@@ -1065,6 +1648,138 @@ function ExistingPicker({
             </li>
           ))}
         </ul>
+      )}
+    </PickerShell>
+  );
+}
+
+/** A source's assigned slot in the screen-plus-corners layout. */
+type LayoutChoice = "off" | "center" | Corner;
+
+const SLOT_OPTIONS: Array<[LayoutChoice, string]> = [
+  ["off", "Off"],
+  ["center", "Center (screen)"],
+  ["topLeft", "Top-Left"],
+  ["topRight", "Top-Right"],
+  ["bottomLeft", "Bottom-Left"],
+  ["bottomRight", "Bottom-Right"],
+];
+
+/**
+ * Arrange the scene as a centered screen with up to four corner cameras — the
+ * explainer / podcast layout. Screen-kind sources auto-seat to the center,
+ * cameras fill the corners; the user can reassign any of them (and drag on the
+ * canvas afterward). Audio-only sources are skipped — they don't compose.
+ */
+function LayoutPicker({
+  collection,
+  scene,
+  onClose,
+}: {
+  collection: Collection | null;
+  scene: Scene | null;
+  onClose: () => void;
+}) {
+  const sourceOf = (id: SourceId) => collection?.sources.find((source) => source.id === id);
+  const visual = (scene?.items ?? []).filter((item) => {
+    const kind = sourceOf(item.source)?.kind;
+    return kind !== "audioInput" && kind !== "audioOutput";
+  });
+
+  const [choice, setChoice] = useState<Record<string, LayoutChoice>>(() => {
+    const map: Record<string, LayoutChoice> = {};
+    let centerTaken = false;
+    let cornerIdx = 0;
+    for (const item of visual) {
+      const kind = sourceOf(item.source)?.kind;
+      if (!centerTaken && (kind === "display" || kind === "window" || kind === "portal")) {
+        map[item.id] = "center";
+        centerTaken = true;
+      } else if ((kind === "videoDevice" || kind === "media") && cornerIdx < CORNERS.length) {
+        map[item.id] = CORNERS[cornerIdx];
+        cornerIdx += 1;
+      } else {
+        map[item.id] = "off";
+      }
+    }
+    return map;
+  });
+
+  const apply = () => {
+    if (!scene) return;
+    // Dedupe by slot — the first source assigned to a slot wins it.
+    let center: ItemId | null = null;
+    const taken = new Set<Corner>();
+    const corners: CornerSlot[] = [];
+    for (const item of visual) {
+      const slot = choice[item.id] ?? "off";
+      if (slot === "off") continue;
+      if (slot === "center") {
+        center ??= item.id;
+      } else if (!taken.has(slot)) {
+        taken.add(slot);
+        corners.push({ itemId: item.id, corner: slot });
+      }
+    }
+    studioApplyLayout(scene.id, center, corners).catch((err) =>
+      console.error("apply layout failed:", err),
+    );
+    onClose();
+  };
+
+  return (
+    <PickerShell title="Arrange: Screen + corners" onClose={onClose}>
+      {visual.length === 0 ? (
+        <p className="m-0 text-xs text-havoc-muted">
+          Add a screen capture and one or more cameras to this scene first, then arrange them here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="m-0 text-[11px] leading-relaxed text-havoc-muted">
+            Put a screen in the center and up to four cameras in the corners — your explainer /
+            podcast layout. Each corner holds a webcam, a captured call window, or a media clip. You
+            can drag any of them on the canvas afterward.
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {visual.map((item) => {
+              const source = sourceOf(item.source);
+              return (
+                <li key={item.id} className="flex items-center gap-2">
+                  <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
+                    {KIND_BADGE[source?.kind ?? ""] ?? "?"}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-havoc-text">
+                    {source?.name ?? "(missing source)"}
+                  </span>
+                  <select
+                    value={choice[item.id] ?? "off"}
+                    onChange={(event) =>
+                      setChoice((prev) => ({
+                        ...prev,
+                        [item.id]: event.target.value as LayoutChoice,
+                      }))
+                    }
+                    aria-label={`Slot for ${source?.name ?? "source"}`}
+                    className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+                  >
+                    {SLOT_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </li>
+              );
+            })}
+          </ul>
+          <button
+            type="button"
+            onClick={apply}
+            className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+          >
+            Apply layout
+          </button>
+        </div>
       )}
     </PickerShell>
   );

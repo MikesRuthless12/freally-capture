@@ -21,13 +21,28 @@ export type Health = {
 };
 
 /** The persisted user settings (`settings.json` in the OS config dir). */
+/** Audio Mixer strip orientation. */
+export type MixerLayout = "horizontal" | "vertical";
+
 export type Settings = {
   language: string;
   showStatsDock: boolean;
   /** The audio monitor output device name (null/"" = the OS default). */
   monitorDevice: string | null;
+  /** Audio Mixer strip orientation. */
+  mixerLayout: MixerLayout;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
+  /** Remote Guests networking (Phase R). */
+  remote: RemoteSettings;
+};
+
+/** Remote Guests networking — the user's own **opt-in** TURN relay (never
+ * author-served). Empty URL = direct P2P only. The credential is a secret. */
+export type RemoteSettings = {
+  turnUrl: string;
+  turnUsername: string;
+  turnCredential: string;
 };
 
 /** Recording containers; `frec` is the owned lossless default. */
@@ -181,6 +196,18 @@ export const BLEND_MODES: BlendMode[] = [
   "darken",
 ];
 
+/** One of the four corners the screen-plus-corners layout can seat a camera in. */
+export type Corner = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+
+/** The corners in host-first fill order (top-right, then the rest). */
+export const CORNERS: Corner[] = ["topRight", "topLeft", "bottomRight", "bottomLeft"];
+
+/** A rectangle in normalized canvas coordinates (0..1, origin top-left). */
+export type NormRect = { x: number; y: number; w: number; h: number };
+
+/** One corner assignment for the screen-plus-corners layout. */
+export type CornerSlot = { itemId: ItemId; corner: Corner };
+
 export type TextAlign = "left" | "center" | "right";
 
 export type VideoDeviceFormat = {
@@ -198,6 +225,7 @@ export type SourceSettings =
   | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
   | { kind: "image"; path: string }
   | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
+  | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
@@ -218,7 +246,9 @@ export type SourceKindName = SourceSettings["kind"];
 
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
-  return kind === "audioInput" || kind === "audioOutput" || kind === "media";
+  return (
+    kind === "audioInput" || kind === "audioOutput" || kind === "media" || kind === "remoteGuest"
+  );
 }
 
 /** One shared source: identity + name + flattened settings (+ audio strip). */
@@ -364,14 +394,30 @@ export type SceneItem = {
   transform: Transform;
   /** True until the first frame auto-fits the item (engine-managed). */
   pendingFit: boolean;
+  /** When set, the first-frame fit targets this normalized slot (a layout corner). */
+  pendingSlot?: NormRect;
   filters: Filter[];
 };
 
 /** One scene: ordered items, index = z-order, `items[0]` bottom-most. */
+/** One item's pre-focus placement (Highlight Speaker restore buffer). */
+export type FocusRestore = {
+  item: ItemId;
+  transform: Transform;
+  visible: boolean;
+};
+
+/** Highlight Speaker: `item` fills the canvas; `prior` restores on toggle-off. */
+export type FocusState = {
+  item: ItemId;
+  prior: FocusRestore[];
+};
+
 export type Scene = {
   id: SceneId;
   name: string;
   items: SceneItem[];
+  focus?: FocusState | null;
 };
 
 /** The whole model (the on-disk scene-collection format). */

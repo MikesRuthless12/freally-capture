@@ -150,6 +150,15 @@ pub enum SourceSettings {
         #[serde(default = "default_true")]
         hw_decode: bool,
     },
+    /// A remote guest's live feed (Remote Guests, P2P/WebRTC) — video frames
+    /// *and* mic audio are pushed from the webview's WebRTC session over IPC;
+    /// there is no OS device behind this kind. Video composites onto the
+    /// canvas; audio joins the mixer as its own strip (like Media).
+    RemoteGuest {
+        /// The guest's display label (from the session).
+        #[serde(default)]
+        label: String,
+    },
     /// A solid color block.
     Color {
         #[serde(default = "Rgba::default_color")]
@@ -224,6 +233,7 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "videoDevice",
             SourceSettings::Image { .. } => "image",
             SourceSettings::Media { .. } => "media",
+            SourceSettings::RemoteGuest { .. } => "remoteGuest",
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
@@ -240,6 +250,7 @@ impl SourceSettings {
             SourceSettings::VideoDevice { .. } => "Video Capture Device",
             SourceSettings::Image { .. } => "Image",
             SourceSettings::Media { .. } => "Media",
+            SourceSettings::RemoteGuest { .. } => "Remote Guest",
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
@@ -255,6 +266,7 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. }
                 | SourceSettings::AudioOutput { .. }
                 | SourceSettings::Media { .. }
+                | SourceSettings::RemoteGuest { .. }
         )
     }
 
@@ -264,6 +276,18 @@ impl SourceSettings {
         matches!(
             self,
             SourceSettings::AudioInput { .. } | SourceSettings::AudioOutput { .. }
+        )
+    }
+
+    /// Whether this kind shows a shared screen (the Desktop/Window view).
+    /// The center-view rules treat these specially: one screen view at a
+    /// time — centering one hides the other visible ones.
+    pub fn is_screen_view(&self) -> bool {
+        matches!(
+            self,
+            SourceSettings::Display { .. }
+                | SourceSettings::Window { .. }
+                | SourceSettings::Portal {}
         )
     }
 }

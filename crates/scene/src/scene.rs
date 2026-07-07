@@ -124,6 +124,143 @@ impl Default for Transform {
     }
 }
 
+/// Corner-slot geometry as fractions of the canvas. A slot spans [`SLOT_SIZE`]
+/// of *each* axis (so on a 16:9 canvas it is itself 16:9 — a 16:9 camera fills
+/// it edge to edge), inset from the edges by [`SLOT_MARGIN`]. Four such slots
+/// never overlap each other or crowd the centered screen.
+pub const SLOT_MARGIN: f32 = 0.02;
+/// See [`SLOT_MARGIN`].
+pub const SLOT_SIZE: f32 = 0.30;
+
+/// A rectangle in normalized canvas coordinates — `0.0..=1.0` on each axis,
+/// origin top-left. A layout stores one on a corner item as its
+/// [`SceneItem::pending_slot`]; the engine turns it into pixels against the
+/// live canvas size when the source's first frame arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NormRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// One of the four corners the screen-plus-corners layout can drop a camera
+/// into — the host and up to three guests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    /// The corners in a natural host-first fill order (top-right, then the
+    /// others) — how auto-assignment seats people.
+    pub const FILL_ORDER: [Corner; 4] = [
+        Corner::TopRight,
+        Corner::TopLeft,
+        Corner::BottomRight,
+        Corner::BottomLeft,
+    ];
+
+    /// The normalized slot this corner fills (see [`SLOT_SIZE`]/[`SLOT_MARGIN`]).
+    pub fn slot(self) -> NormRect {
+        let far = 1.0 - SLOT_MARGIN - SLOT_SIZE;
+        let (x, y) = match self {
+            Corner::TopLeft => (SLOT_MARGIN, SLOT_MARGIN),
+            Corner::TopRight => (far, SLOT_MARGIN),
+            Corner::BottomLeft => (SLOT_MARGIN, far),
+            Corner::BottomRight => (far, far),
+        };
+        NormRect {
+            x,
+            y,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        }
+    }
+}
+
+/// The six one-click seats — the four corners plus vertically centered
+/// left/right. Same size and margins as the corner slots, so no two seats
+/// ever overlap. Order = the bump-to-free fill order.
+pub fn preset_seats() -> [NormRect; 6] {
+    let far = 1.0 - SLOT_MARGIN - SLOT_SIZE;
+    let mid = 0.5 - SLOT_SIZE / 2.0;
+    [
+        Corner::TopLeft.slot(),
+        Corner::TopRight.slot(),
+        NormRect {
+            x: SLOT_MARGIN,
+            y: mid,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        },
+        NormRect {
+            x: far,
+            y: mid,
+            w: SLOT_SIZE,
+            h: SLOT_SIZE,
+        },
+        Corner::BottomLeft.slot(),
+        Corner::BottomRight.slot(),
+    ]
+}
+
+/// The centered shared view (a Desktop/Window capture or a promoted cam).
+/// Sized so it never overlaps the right-hand cam rail: cams sit beside the
+/// shared view, never on top of it.
+pub fn center_slot() -> NormRect {
+    NormRect {
+        x: 0.02,
+        y: 0.02,
+        w: 0.74,
+        h: 0.96,
+    }
+}
+
+/// The right-hand cam rail — four 16:9 seats (host + up to three guests)
+/// stacked beside the centered view. None overlap the center or each other.
+pub fn rail_seats() -> [NormRect; 4] {
+    let seat = |y: f32| NormRect {
+        x: 0.78,
+        y,
+        w: 0.20,
+        h: 0.20,
+    };
+    [seat(0.02), seat(0.27), seat(0.52), seat(0.77)]
+}
+
+/// Whether two normalized rects overlap (strictly — touching edges do not).
+pub fn rects_overlap(a: NormRect, b: NormRect) -> bool {
+    a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y
+}
+
+/// One item's pre-focus placement, restored exactly when focus toggles off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusRestore {
+    pub item: ItemId,
+    pub transform: Transform,
+    pub visible: bool,
+    /// The item's remembered seat, restored with it (seat-swap reads seats).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_slot: Option<NormRect>,
+}
+
+/// Highlight Speaker (Focus/Spotlight): `item` is promoted to fill the whole
+/// canvas while the other video items hide; `prior` holds the exact layout to
+/// restore when focus toggles off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FocusState {
+    pub item: ItemId,
+    pub prior: Vec<FocusRestore>,
+}
+
 fn default_visible() -> bool {
     true
 }
@@ -148,6 +285,11 @@ pub struct SceneItem {
     /// added items so a 4K display lands fitted instead of overflowing.
     #[serde(default)]
     pub pending_fit: bool,
+    /// When set (and `pending_fit` is still true), the first-frame placement
+    /// fits the source into this normalized canvas slot instead of the whole
+    /// canvas — the corner-cam slots of a screen-plus-corners layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_slot: Option<NormRect>,
     #[serde(default)]
     pub filters: Vec<Filter>,
 }
@@ -163,6 +305,7 @@ impl SceneItem {
             blend: BlendMode::Normal,
             transform: Transform::default(),
             pending_fit: true,
+            pending_slot: None,
             filters: Vec::new(),
         }
     }
@@ -177,6 +320,10 @@ pub struct Scene {
     pub name: String,
     #[serde(default)]
     pub items: Vec<SceneItem>,
+    /// Highlight Speaker: present while one item is promoted to fill the
+    /// canvas (Focus/Spotlight); absent in a normal layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<FocusState>,
 }
 
 impl Scene {
@@ -185,6 +332,7 @@ impl Scene {
             id: SceneId::new(),
             name: name.into(),
             items: Vec::new(),
+            focus: None,
         }
     }
 

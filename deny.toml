@@ -34,13 +34,6 @@ ignore = [
   "RUSTSEC-2026-0192", # ttf-parser — unmaintained (author archived it); pinned by the rustybuzz +
                        # fontdb text-shaping stack (Phase 2 Text source). No vulnerability. Revisit
                        # if/when the shaping stack moves (e.g. to skrifa).
-  # quick-xml 0.39 DoS advisories (quadratic duplicate-attribute check / unbounded namespace
-  # allocation) — reachable only through `plist` inside the Tauri tree, which parses *trusted local
-  # files* (tauri's own build config; the app's Info.plist on macOS), never attacker-controlled
-  # XML. No compatible upgrade exists yet: plist 1.9 pins quick-xml 0.39; the fix lands via a
-  # plist/tauri bump — re-check on every Tauri upgrade.
-  "RUSTSEC-2026-0194",
-  "RUSTSEC-2026-0195",
 ]
 
 [licenses]
@@ -75,6 +68,10 @@ allow = ["CC0-1.0"]
 [[licenses.exceptions]]
 name = "libfuzzer-sys"  # feature-gated fuzzing shim (all-features graph only — never shipped)
 allow = ["NCSA"]
+
+[[licenses.exceptions]]
+name = "tiny-keccak"    # CC0 keccak hash inside tauri-plugin-deep-link's chain (TASK-R2)
+allow = ["CC0-1.0"]
 
 [bans]
 multiple-versions = "warn"

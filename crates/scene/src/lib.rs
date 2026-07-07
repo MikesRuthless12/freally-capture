@@ -29,7 +29,10 @@ pub use audio::{
     MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
-pub use scene::{BlendMode, Crop, ItemId, Scene, SceneId, SceneItem, Transform};
+pub use scene::{
+    BlendMode, Corner, Crop, FocusRestore, FocusState, ItemId, NormRect, Scene, SceneId, SceneItem,
+    Transform,
+};
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 
 use serde::{Deserialize, Serialize};
@@ -41,6 +44,17 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The current on-disk format version (bumped only on breaking shape changes;
 /// additive fields ride on serde defaults instead).
 pub const FORMAT_VERSION: u32 = 1;
+
+/// Two seats match approximately: the webview sends f64 JSON that rounds to
+/// f32 a ULP differently than Rust-side arithmetic, so exact equality would
+/// miss an occupied seat.
+fn same_seat(a: NormRect, b: NormRect) -> bool {
+    const EPS: f32 = 1e-4;
+    (a.x - b.x).abs() < EPS
+        && (a.y - b.y).abs() < EPS
+        && (a.w - b.w).abs() < EPS
+        && (a.h - b.h).abs() < EPS
+}
 
 /// Why a mutation was refused. Every variant names the missing target — the
 /// collection is never left half-mutated on error.
@@ -58,6 +72,8 @@ pub enum SceneError {
     LastScene,
     #[error("this source has no audio")]
     SourceNotAudio,
+    #[error("slot outside the canvas (normalized 0..=1)")]
+    InvalidSlot,
 }
 
 fn default_format_version() -> u32 {
@@ -149,6 +165,22 @@ impl Collection {
         }
         // …then sources nothing references.
         self.gc_sources();
+        // A focus pointing at a vanished item could never be toggled off from
+        // the UI — restore its snapshot and drop it.
+        let dangling_focus: Vec<SceneId> = self
+            .scenes
+            .iter()
+            .filter(|scene| {
+                scene
+                    .focus
+                    .as_ref()
+                    .is_some_and(|focus| !scene.items.iter().any(|item| item.id == focus.item))
+            })
+            .map(|scene| scene.id)
+            .collect();
+        for scene_id in dangling_focus {
+            let _ = self.clear_focus(scene_id);
+        }
         // Audio state exists exactly on audio-capable sources, inside range.
         for source in &mut self.sources {
             if source.settings.has_audio() {
@@ -333,23 +365,71 @@ impl Collection {
     }
 
     /// Place an existing pool source on top of `scene_id` (source sharing).
+    ///
+    /// A newly added *video* item seats into the first free corner instead of
+    /// filling the canvas dead-center on top of what's already there — so
+    /// adding sources never dumps them overlapping (Mike's rule). The very
+    /// first video item still fills the canvas; audio-only items render
+    /// nothing and are never seated.
     pub fn add_item_with_existing_source(
         &mut self,
         scene_id: SceneId,
         source_id: SourceId,
     ) -> Result<ItemId, SceneError> {
-        if self.source(source_id).is_none() {
+        let Some(source) = self.source(source_id) else {
             return Err(SceneError::SourceNotFound);
-        }
+        };
+        let seat = if source.settings.is_audio_only() {
+            None
+        } else {
+            self.free_corner_for_new_item(scene_id)
+        };
         let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
-        let item = SceneItem::new(source_id);
+        let mut item = SceneItem::new(source_id);
+        if let Some(slot) = seat {
+            item.pending_slot = Some(slot); // pending_fit is already set
+        }
         let id = item.id;
         scene.items.push(item);
         Ok(id)
     }
 
+    /// The first preset seat not already taken by a visible video item — where
+    /// a newly added source lands so it doesn't overlap. `None` when the scene
+    /// has no other video item yet (the first item fills the canvas) or every
+    /// seat is taken (fall back to a centered fit).
+    fn free_corner_for_new_item(&self, scene_id: SceneId) -> Option<NormRect> {
+        let scene = self.scene(scene_id)?;
+        let is_video = |item: &SceneItem| {
+            self.source(item.source)
+                .is_some_and(|source| !source.settings.is_audio_only())
+        };
+        let existing: Vec<&SceneItem> = scene.items.iter().filter(|item| is_video(item)).collect();
+        if existing.is_empty() {
+            return None;
+        }
+        let occupied: Vec<NormRect> = existing
+            .iter()
+            .filter_map(|item| item.pending_slot)
+            .collect();
+        scene::preset_seats()
+            .into_iter()
+            .find(|seat| !occupied.iter().any(|taken| same_seat(*taken, *seat)))
+    }
+
     /// Remove an item; its source leaves the pool too if nothing else shows it.
     pub fn remove_item(&mut self, scene_id: SceneId, item_id: ItemId) -> Result<(), SceneError> {
+        // Removing the focused item first restores the pre-focus layout —
+        // otherwise the scene would be left with everything hidden and no
+        // focus toggle to undo it.
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if scene
+            .focus
+            .as_ref()
+            .is_some_and(|focus| focus.item == item_id)
+        {
+            self.clear_focus(scene_id)?;
+        }
         let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
         let index = scene
             .items
@@ -397,8 +477,383 @@ impl Collection {
     ) -> Result<(), SceneError> {
         let item = self.item_mut(scene_id, item_id)?;
         item.transform = transform;
-        // A user-driven transform supersedes the first-frame auto-fit.
+        // A user-driven transform supersedes any pending first-frame placement.
         item.pending_fit = false;
+        item.pending_slot = None;
+        Ok(())
+    }
+
+    /// Arrange a scene as a centered screen with up to four corner cameras —
+    /// the screen-plus-corners layout (host + up to three guests). `center`
+    /// fills the canvas as the backdrop (bottom of the z-order); each
+    /// `(item, corner)` fits into its corner on top. Placement resolves on
+    /// each source's next sized frame — the same first-frame mechanism as a
+    /// freshly added item — so any camera resolution lands correctly. Every
+    /// referenced item must already live in the scene; a bad id is a no-op.
+    pub fn apply_layout(
+        &mut self,
+        scene_id: SceneId,
+        center: Option<ItemId>,
+        corners: &[(ItemId, Corner)],
+    ) -> Result<(), SceneError> {
+        // Validate every id first so a bad reference changes nothing.
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let present = |id: ItemId| scene.items.iter().any(|item| item.id == id);
+        let unknown =
+            center.is_some_and(|c| !present(c)) || corners.iter().any(|(id, _)| !present(*id));
+        if unknown {
+            return Err(SceneError::ItemNotFound);
+        }
+
+        // Stage placement intents (resolved on each source's next sized frame).
+        if let Some(center) = center {
+            let item = self.item_mut(scene_id, center)?;
+            item.pending_fit = true;
+            item.pending_slot = None; // whole-canvas fit (never upscales)
+        }
+        for (id, corner) in corners {
+            let item = self.item_mut(scene_id, *id)?;
+            item.pending_fit = true;
+            item.pending_slot = Some(corner.slot());
+        }
+
+        // Z-order: screen at the bottom, corners above it in order; any other
+        // items (overlays) stay on top.
+        let mut index = 0;
+        if let Some(center) = center {
+            self.reorder_item(scene_id, center, index)?;
+            index += 1;
+        }
+        for (id, _) in corners {
+            self.reorder_item(scene_id, *id, index)?;
+            index += 1;
+        }
+        Ok(())
+    }
+
+    /// Seat one item into a normalized canvas slot — the one-click position
+    /// presets (a guest to a corner or a mid-edge seat). Placement resolves
+    /// on the source's next sized frame, exactly like a corner of
+    /// [`Self::apply_layout`]. The slot is untrusted input (the webview sends
+    /// it): it must be finite, non-empty, and lie fully inside the canvas.
+    ///
+    /// **Seat swap:** two items never share a seat. If the target seat is
+    /// occupied, the occupant moves to the mover's old seat — guest 1 onto
+    /// guest 2's corner puts guest 2 on guest 1's corner. A mover with no
+    /// seat bumps the occupant to the first free [`scene::preset_seats`]
+    /// seat instead.
+    pub fn set_item_slot(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        slot: NormRect,
+    ) -> Result<(), SceneError> {
+        let finite =
+            slot.x.is_finite() && slot.y.is_finite() && slot.w.is_finite() && slot.h.is_finite();
+        let inside = finite
+            && slot.w > 0.0
+            && slot.h > 0.0
+            && slot.x >= 0.0
+            && slot.y >= 0.0
+            && slot.x + slot.w <= 1.0
+            && slot.y + slot.h <= 1.0;
+        if !inside {
+            return Err(SceneError::InvalidSlot);
+        }
+
+        let scene_ref = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let mover = scene_ref.item(item_id).ok_or(SceneError::ItemNotFound)?;
+        let old_seat = mover.pending_slot;
+
+        // "Nothing overlaps the shared view": while another item holds the
+        // center seat, a request for a seat that intersects it lands on the
+        // first free rail seat instead.
+        let center = scene::center_slot();
+        let center_taken = scene_ref.items.iter().any(|other| {
+            other.id != item_id && other.pending_slot.is_some_and(|s| same_seat(s, center))
+        });
+        let slot = if center_taken && !same_seat(slot, center) && scene::rects_overlap(slot, center)
+        {
+            scene::rail_seats()
+                .into_iter()
+                .find(|candidate| {
+                    !scene_ref.items.iter().any(|other| {
+                        other.id != item_id
+                            && other.pending_slot.is_some_and(|s| same_seat(s, *candidate))
+                    })
+                })
+                .ok_or(SceneError::InvalidSlot)?
+        } else {
+            slot
+        };
+
+        let occupant = scene_ref
+            .items
+            .iter()
+            .find(|other| {
+                other.id != item_id && other.pending_slot.is_some_and(|s| same_seat(s, slot))
+            })
+            .map(|other| other.id);
+        // Where the occupant goes: the mover's old seat, else the first free
+        // preset seat (a seat always exists — six seats, and the mover only
+        // takes one).
+        let bumped_to = occupant.and_then(|_| {
+            old_seat.or_else(|| {
+                scene::preset_seats().into_iter().find(|candidate| {
+                    !same_seat(*candidate, slot)
+                        && !scene_ref.items.iter().any(|other| {
+                            other.id != item_id
+                                && other.pending_slot.is_some_and(|s| same_seat(s, *candidate))
+                        })
+                })
+            })
+        });
+
+        if let (Some(occupant_id), Some(seat)) = (occupant, bumped_to) {
+            let bumped = self.item_mut(scene_id, occupant_id)?;
+            bumped.pending_fit = true;
+            bumped.pending_slot = Some(seat);
+        }
+        let item = self.item_mut(scene_id, item_id)?;
+        item.pending_fit = true;
+        item.pending_slot = Some(slot);
+        Ok(())
+    }
+
+    /// The engine applies a resolved first-frame placement: set the computed
+    /// transform and clear the one-shot flag — **keeping** `pending_slot` as
+    /// the item's remembered seat (inert for the engine once `pending_fit`
+    /// is false, but seat-swap reads it). A *user-driven* transform goes
+    /// through [`Self::set_item_transform`] instead, which vacates the seat.
+    pub fn resolve_pending(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        transform: Transform,
+    ) -> Result<(), SceneError> {
+        let item = self.item_mut(scene_id, item_id)?;
+        item.transform = transform;
+        item.pending_fit = false;
+        Ok(())
+    }
+
+    /// Center-view routing (host-controlled; Mike's spec): promote any
+    /// capture — a cam, a Display/Window capture, or a remote guest's share —
+    /// into the CENTER seat beside the cam rail. The rules:
+    ///
+    /// - the current center occupant takes the promoted item's old seat (the
+    ///   "display capture takes the camera's top-left spot" swap), or the
+    ///   first free rail seat when the mover was unseated;
+    /// - **nothing overlaps the shared view**: every other seated item whose
+    ///   seat intersects the center region is bumped onto the rail;
+    /// - **one screen view at a time**: centering a Display/Window hides the
+    ///   other visible Display/Window items (cams are untouched);
+    /// - `None` retires the center — the occupant moves to a free rail seat.
+    pub fn set_center_view(
+        &mut self,
+        scene_id: SceneId,
+        item_id: Option<ItemId>,
+    ) -> Result<(), SceneError> {
+        let center = scene::center_slot();
+        let scene_ref = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let occupant = scene_ref
+            .items
+            .iter()
+            .find(|item| item.pending_slot.is_some_and(|s| same_seat(s, center)))
+            .map(|item| item.id);
+
+        // Rail-seat allocator over the seats already taken in this scene.
+        let mut taken: Vec<NormRect> = scene_ref
+            .items
+            .iter()
+            .filter_map(|item| item.pending_slot)
+            .collect();
+        let take_free_rail = |taken: &mut Vec<NormRect>| -> Option<NormRect> {
+            let free = scene::rail_seats()
+                .into_iter()
+                .find(|candidate| !taken.iter().any(|t| same_seat(*t, *candidate)));
+            if let Some(seat) = free {
+                taken.push(seat);
+            }
+            free
+        };
+
+        let mut reseat: Vec<(ItemId, NormRect)> = Vec::new();
+
+        let Some(target) = item_id else {
+            // Retire the center: its occupant joins the rail.
+            if let Some(occ) = occupant {
+                if let Some(seat) = take_free_rail(&mut taken) {
+                    reseat.push((occ, seat));
+                }
+            }
+            for (id, seat) in reseat {
+                let item = self.item_mut(scene_id, id)?;
+                item.pending_fit = true;
+                item.pending_slot = Some(seat);
+            }
+            return Ok(());
+        };
+
+        let mover_old = scene_ref
+            .item(target)
+            .ok_or(SceneError::ItemNotFound)?
+            .pending_slot;
+
+        // The displaced center takes the mover's old seat, else a rail seat.
+        if let Some(occ) = occupant.filter(|occ| *occ != target) {
+            let next = mover_old
+                .filter(|seat| !same_seat(*seat, center))
+                .or_else(|| take_free_rail(&mut taken));
+            if let Some(seat) = next {
+                reseat.push((occ, seat));
+            }
+        }
+
+        // Nothing overlaps the shared view: bump intersecting seats to the rail.
+        let overlapping: Vec<ItemId> = scene_ref
+            .items
+            .iter()
+            .filter(|item| {
+                item.id != target
+                    && Some(item.id) != occupant
+                    && item
+                        .pending_slot
+                        .is_some_and(|s| scene::rects_overlap(s, center) && !same_seat(s, center))
+            })
+            .map(|item| item.id)
+            .collect();
+        for id in overlapping {
+            if let Some(seat) = take_free_rail(&mut taken) {
+                reseat.push((id, seat));
+            }
+        }
+
+        // One screen view at a time.
+        let target_source = scene_ref
+            .item(target)
+            .ok_or(SceneError::ItemNotFound)?
+            .source;
+        let target_is_screen = self
+            .sources
+            .iter()
+            .find(|source| source.id == target_source)
+            .is_some_and(|source| source.settings.is_screen_view());
+        let hide: Vec<ItemId> = if target_is_screen {
+            scene_ref
+                .items
+                .iter()
+                .filter(|item| {
+                    item.id != target
+                        && item.visible
+                        && self
+                            .sources
+                            .iter()
+                            .find(|source| source.id == item.source)
+                            .is_some_and(|source| source.settings.is_screen_view())
+                })
+                .map(|item| item.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for (id, seat) in reseat {
+            let item = self.item_mut(scene_id, id)?;
+            item.pending_fit = true;
+            item.pending_slot = Some(seat);
+        }
+        for id in hide {
+            self.item_mut(scene_id, id)?.visible = false;
+        }
+        let item = self.item_mut(scene_id, target)?;
+        item.visible = true;
+        item.pending_fit = true;
+        item.pending_slot = Some(center);
+        Ok(())
+    }
+
+    /// Highlight Speaker (Focus/Spotlight): promote one item to fill the
+    /// whole canvas and hide the other video items, snapshotting every item's
+    /// placement + visibility so [`Self::clear_focus`] restores the layout
+    /// exactly. Audio-only items are untouched — they render nothing, and
+    /// hiding them would silence their audio mid-show. Focusing while already
+    /// focused re-targets: the original snapshot is restored first, so
+    /// stepping through several speakers always returns to the true
+    /// pre-focus layout. The promoted item resolves to a whole-canvas fit on
+    /// its next sized frame (the same mechanism as a freshly added item).
+    pub fn set_focus(&mut self, scene_id: SceneId, item_id: ItemId) -> Result<(), SceneError> {
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if scene.focus.is_some() {
+            self.clear_focus(scene_id)?;
+        }
+        let audio_only: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|source| source.settings.is_audio_only())
+            .map(|source| source.id)
+            .collect();
+
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if !scene.items.iter().any(|item| item.id == item_id) {
+            return Err(SceneError::ItemNotFound);
+        }
+        let prior = scene
+            .items
+            .iter()
+            .map(|item| FocusRestore {
+                item: item.id,
+                transform: item.transform,
+                visible: item.visible,
+                pending_slot: item.pending_slot,
+            })
+            .collect();
+        for item in scene.items.iter_mut() {
+            if item.id == item_id {
+                item.visible = true;
+                item.pending_fit = true;
+                item.pending_slot = None; // whole-canvas fit
+            } else if !audio_only.contains(&item.source) {
+                item.visible = false;
+            }
+        }
+        scene.focus = Some(FocusState {
+            item: item_id,
+            prior,
+        });
+        Ok(())
+    }
+
+    /// Toggle Focus off: restore every snapshotted item's placement +
+    /// visibility exactly. Items added while focused keep their current
+    /// state; snapshot entries whose item was removed are skipped. A scene
+    /// with no focus is a no-op.
+    pub fn clear_focus(&mut self, scene_id: SceneId) -> Result<(), SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let Some(focus) = scene.focus.take() else {
+            return Ok(());
+        };
+        // Seats claimed while focused (by items OUTSIDE the snapshot — e.g. a
+        // guest who joined mid-spotlight) win: restoring a remembered seat on
+        // top of one would double-book it and break the no-overlap rule.
+        let snapshot: Vec<ItemId> = focus.prior.iter().map(|saved| saved.item).collect();
+        let claimed: Vec<NormRect> = scene
+            .items
+            .iter()
+            .filter(|item| !snapshot.contains(&item.id))
+            .filter_map(|item| item.pending_slot)
+            .collect();
+        for saved in focus.prior {
+            if let Some(item) = scene.item_mut(saved.item) {
+                item.transform = saved.transform;
+                item.visible = saved.visible;
+                item.pending_fit = false;
+                // The remembered seat comes back unless someone claimed it.
+                item.pending_slot = saved
+                    .pending_slot
+                    .filter(|seat| !claimed.iter().any(|taken| same_seat(*taken, *seat)));
+            }
+        }
         Ok(())
     }
 
@@ -1457,6 +1912,908 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn focus_promotes_hides_and_restores_exactly() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, cam) = collection
+            .add_item_with_new_source(scene, color("Cam"))
+            .expect("add cam");
+        let (_, screen) = collection
+            .add_item_with_new_source(scene, color("Screen"))
+            .expect("add screen");
+        let placed = Transform {
+            x: 111.0,
+            y: 222.0,
+            ..Transform::default()
+        };
+        collection
+            .set_item_transform(scene, cam, placed)
+            .expect("place the cam");
+
+        collection.set_focus(scene, cam).expect("focus the cam");
+        let s = collection.scene(scene).expect("scene");
+        let focused = s.item(cam).expect("cam item");
+        assert!(focused.visible && focused.pending_fit && focused.pending_slot.is_none());
+        assert!(!s.item(screen).expect("screen item").visible, "others hide");
+        assert_eq!(s.focus.as_ref().expect("focus set").item, cam);
+
+        collection.clear_focus(scene).expect("unfocus");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.focus.is_none());
+        let cam_item = s.item(cam).expect("cam item");
+        assert_eq!(cam_item.transform, placed, "transform restored exactly");
+        assert!(!cam_item.pending_fit, "no stray refit after restore");
+        assert!(
+            s.item(screen).expect("screen item").visible,
+            "visibility restored"
+        );
+    }
+
+    #[test]
+    fn focus_leaves_audio_only_items_audible() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, mic) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        let (_, cam) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::Color {
+                        color: Rgba::new(1, 2, 3, 255),
+                        width: 100,
+                        height: 50,
+                    },
+                ),
+            )
+            .expect("add cam");
+
+        collection.set_focus(scene, cam).expect("focus the cam");
+        let s = collection.scene(scene).expect("scene");
+        assert!(
+            s.item(mic).expect("mic item").visible,
+            "hiding an audio-only item would mute it mid-show"
+        );
+    }
+
+    #[test]
+    fn refocus_retargets_from_the_original_layout() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, a) = collection
+            .add_item_with_new_source(scene, color("A"))
+            .expect("add a");
+        let (_, b) = collection
+            .add_item_with_new_source(scene, color("B"))
+            .expect("add b");
+
+        collection.set_focus(scene, a).expect("focus a");
+        collection.set_focus(scene, b).expect("re-focus b");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.item(b).expect("b").visible && s.item(b).expect("b").pending_fit);
+        assert!(!s.item(a).expect("a").visible, "a returns to non-focused");
+
+        collection.clear_focus(scene).expect("unfocus");
+        let s = collection.scene(scene).expect("scene");
+        assert!(
+            s.item(a).expect("a").visible && s.item(b).expect("b").visible,
+            "the ORIGINAL layout returns, not the intermediate focus"
+        );
+    }
+
+    #[test]
+    fn removing_the_focused_item_restores_the_layout() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::new(1, 2, 3, 255),
+                    width: 100,
+                    height: 50,
+                },
+            )
+        };
+        let (_, a) = collection
+            .add_item_with_new_source(scene, color("A"))
+            .expect("add a");
+        let (_, b) = collection
+            .add_item_with_new_source(scene, color("B"))
+            .expect("add b");
+
+        collection.set_focus(scene, a).expect("focus a");
+        collection
+            .remove_item(scene, a)
+            .expect("remove the focused item");
+        let s = collection.scene(scene).expect("scene");
+        assert!(s.focus.is_none(), "focus cleared with its item");
+        assert!(
+            s.item(b).expect("b").visible,
+            "the hidden others come back instead of staying stranded"
+        );
+    }
+
+    #[test]
+    fn apply_layout_seats_the_screen_and_corners() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, screen) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add screen");
+        let (_, cam1) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam 1",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam1");
+        let (_, cam2) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam 2",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam2");
+
+        collection
+            .apply_layout(
+                scene,
+                Some(screen),
+                &[(cam2, Corner::TopRight), (cam1, Corner::TopLeft)],
+            )
+            .expect("apply layout");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        // Screen sits at the bottom; corners follow in the given order.
+        assert_eq!(scene_ref.items[0].id, screen);
+        assert_eq!(scene_ref.items[1].id, cam2);
+        assert_eq!(scene_ref.items[2].id, cam1);
+        // The screen fills the canvas (no slot); each camera takes its corner.
+        let screen_item = scene_ref.item(screen).expect("screen item");
+        assert!(screen_item.pending_fit);
+        assert_eq!(screen_item.pending_slot, None);
+        assert_eq!(
+            scene_ref.item(cam2).expect("cam2").pending_slot,
+            Some(Corner::TopRight.slot())
+        );
+        assert_eq!(
+            scene_ref.item(cam1).expect("cam1").pending_slot,
+            Some(Corner::TopLeft.slot())
+        );
+    }
+
+    #[test]
+    fn set_item_slot_seats_one_item() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, cam) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Guest",
+                    SourceSettings::RemoteGuest {
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add guest");
+
+        let slot = NormRect {
+            x: 0.02,
+            y: 0.35,
+            w: 0.30,
+            h: 0.30,
+        };
+        collection
+            .set_item_slot(scene, cam, slot)
+            .expect("seat the guest");
+
+        let item = collection
+            .scene(scene)
+            .expect("scene")
+            .item(cam)
+            .expect("item");
+        assert!(
+            item.pending_fit,
+            "placement resolves on the next sized frame"
+        );
+        assert_eq!(item.pending_slot, Some(slot));
+    }
+
+    #[test]
+    fn set_item_slot_rejects_a_slot_outside_the_canvas() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, cam) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Guest",
+                    SourceSettings::RemoteGuest {
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add guest");
+        let before = collection.scene(scene).expect("scene").items.clone();
+
+        let bad = [
+            // Overflows the right edge.
+            NormRect {
+                x: 0.8,
+                y: 0.0,
+                w: 0.3,
+                h: 0.3,
+            },
+            // Negative origin.
+            NormRect {
+                x: -0.1,
+                y: 0.0,
+                w: 0.3,
+                h: 0.3,
+            },
+            // Empty.
+            NormRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.3,
+            },
+            // Non-finite.
+            NormRect {
+                x: f32::NAN,
+                y: 0.0,
+                w: 0.3,
+                h: 0.3,
+            },
+        ];
+        for slot in bad {
+            let result = collection.set_item_slot(scene, cam, slot);
+            assert!(matches!(result, Err(SceneError::InvalidSlot)), "{slot:?}");
+        }
+        assert_eq!(
+            collection.scene(scene).expect("scene").items,
+            before,
+            "a rejected slot leaves the scene untouched"
+        );
+    }
+
+    /// Two remote guests in a fresh collection — the seat-swap fixtures.
+    fn two_guests(collection: &mut Collection) -> (SceneId, ItemId, ItemId) {
+        let scene = collection.active_scene;
+        let (_, guest1) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Guest 1",
+                    SourceSettings::RemoteGuest {
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add guest 1");
+        let (_, guest2) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Guest 2",
+                    SourceSettings::RemoteGuest {
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add guest 2");
+        (scene, guest1, guest2)
+    }
+
+    #[test]
+    fn set_item_slot_swaps_with_the_occupant() {
+        // Mike's example: guest 1 top-left, guest 2 top-right; moving guest 1
+        // to the top-right puts guest 2 on the top-left — never stacked.
+        let mut collection = Collection::new();
+        let (scene, guest1, guest2) = two_guests(&mut collection);
+        let top_left = Corner::TopLeft.slot();
+        let top_right = Corner::TopRight.slot();
+        collection
+            .set_item_slot(scene, guest1, top_left)
+            .expect("seat 1");
+        collection
+            .set_item_slot(scene, guest2, top_right)
+            .expect("seat 2");
+
+        collection
+            .set_item_slot(scene, guest1, top_right)
+            .expect("swap");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        let seat_of = |id| {
+            scene_ref
+                .item(id)
+                .expect("item")
+                .pending_slot
+                .expect("seated")
+        };
+        assert!(same_seat(seat_of(guest1), top_right));
+        assert!(
+            same_seat(seat_of(guest2), top_left),
+            "the occupant took the vacated seat"
+        );
+        assert!(
+            scene_ref.item(guest2).expect("g2").pending_fit,
+            "the bumped guest re-places"
+        );
+    }
+
+    #[test]
+    fn set_item_slot_bumps_the_occupant_to_a_free_seat_when_the_mover_was_unseated() {
+        let mut collection = Collection::new();
+        let (scene, guest1, guest2) = two_guests(&mut collection);
+        let top_right = Corner::TopRight.slot();
+        collection
+            .set_item_slot(scene, guest2, top_right)
+            .expect("seat 2");
+
+        // Guest 1 was never seated — the occupant still has to move away.
+        collection
+            .set_item_slot(scene, guest1, top_right)
+            .expect("take the seat");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        let g1 = scene_ref
+            .item(guest1)
+            .expect("g1")
+            .pending_slot
+            .expect("g1 seated");
+        let g2 = scene_ref
+            .item(guest2)
+            .expect("g2")
+            .pending_slot
+            .expect("g2 reseated");
+        assert!(same_seat(g1, top_right));
+        assert!(!same_seat(g2, top_right), "no two guests share a seat");
+        assert!(
+            scene::preset_seats()
+                .iter()
+                .any(|seat| same_seat(*seat, g2)),
+            "the bump lands on a preset seat"
+        );
+    }
+
+    #[test]
+    fn resolve_pending_keeps_the_seat_but_a_user_transform_vacates_it() {
+        let mut collection = Collection::new();
+        let (scene, guest1, _) = two_guests(&mut collection);
+        let seat = Corner::TopLeft.slot();
+        collection.set_item_slot(scene, guest1, seat).expect("seat");
+
+        // The engine resolves the placement — the seat is remembered.
+        collection
+            .resolve_pending(scene, guest1, Transform::default())
+            .expect("resolve");
+        let item = collection
+            .scene(scene)
+            .expect("scene")
+            .item(guest1)
+            .expect("item");
+        assert!(!item.pending_fit);
+        assert_eq!(item.pending_slot, Some(seat));
+
+        // A user drag vacates the seat.
+        collection
+            .set_item_transform(scene, guest1, Transform::default())
+            .expect("drag");
+        let item = collection
+            .scene(scene)
+            .expect("scene")
+            .item(guest1)
+            .expect("item");
+        assert_eq!(item.pending_slot, None);
+    }
+
+    #[test]
+    fn focus_restore_keeps_the_seats() {
+        let mut collection = Collection::new();
+        let (scene, guest1, guest2) = two_guests(&mut collection);
+        let seat = Corner::BottomRight.slot();
+        collection.set_item_slot(scene, guest2, seat).expect("seat");
+        collection
+            .resolve_pending(scene, guest2, Transform::default())
+            .expect("resolve");
+
+        collection.set_focus(scene, guest1).expect("focus");
+        collection.clear_focus(scene).expect("restore");
+
+        let item = collection
+            .scene(scene)
+            .expect("scene")
+            .item(guest2)
+            .expect("item");
+        assert_eq!(
+            item.pending_slot,
+            Some(seat),
+            "the seat survives a spotlight round-trip"
+        );
+    }
+
+    #[test]
+    fn center_view_swaps_with_the_displaced_center() {
+        // Mike's example, under the no-overlap rule: the cam starts top-left;
+        // centering the display bumps it to the rail (nothing may overlap the
+        // shared view); promoting the cam then trades seats — the display
+        // takes the cam's actual seat.
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, display) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add display");
+        let (_, cam) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam");
+        collection
+            .set_item_slot(scene, cam, Corner::TopLeft.slot())
+            .expect("seat the cam");
+        collection
+            .set_center_view(scene, Some(display))
+            .expect("center the display");
+        let cam_seat_before = collection
+            .scene(scene)
+            .expect("scene")
+            .item(cam)
+            .expect("cam")
+            .pending_slot
+            .expect("cam seated");
+
+        collection
+            .set_center_view(scene, Some(cam))
+            .expect("center the cam");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        let seat = |id| {
+            scene_ref
+                .item(id)
+                .expect("item")
+                .pending_slot
+                .expect("seated")
+        };
+        assert!(same_seat(seat(cam), scene::center_slot()));
+        assert!(
+            same_seat(seat(display), cam_seat_before),
+            "the displaced center takes the promoted cam's old seat"
+        );
+        assert!(
+            !scene::rects_overlap(seat(display), scene::center_slot()),
+            "the displaced screen never overlaps the new center view"
+        );
+    }
+
+    #[test]
+    fn center_view_bumps_overlapping_seats_to_the_rail() {
+        let mut collection = Collection::new();
+        let (scene, guest1, guest2) = two_guests(&mut collection);
+        // Both guests sit in left/middle seats that intersect the center region.
+        collection
+            .set_item_slot(scene, guest2, Corner::TopLeft.slot())
+            .expect("seat 2");
+        let (_, display) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add display");
+
+        collection
+            .set_center_view(scene, Some(display))
+            .expect("center the display");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        let center = scene::center_slot();
+        for id in [guest1, guest2] {
+            let item = scene_ref.item(id).expect("guest");
+            if let Some(seat) = item.pending_slot {
+                assert!(
+                    !scene::rects_overlap(seat, center),
+                    "no cam may overlap the shared view: {seat:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn center_view_shows_one_screen_at_a_time() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let mk_display = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Display {
+                    capture_id: String::new(),
+                    label: String::new(),
+                },
+            )
+        };
+        let (_, display1) = collection
+            .add_item_with_new_source(scene, mk_display("Screen 1"))
+            .expect("add 1");
+        let (_, display2) = collection
+            .add_item_with_new_source(scene, mk_display("Screen 2"))
+            .expect("add 2");
+
+        collection
+            .set_center_view(scene, Some(display1))
+            .expect("center screen 1");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        assert!(scene_ref.item(display1).expect("d1").visible);
+        assert!(
+            !scene_ref.item(display2).expect("d2").visible,
+            "only one screen view is visible at a time"
+        );
+    }
+
+    #[test]
+    fn center_view_retires_to_the_rail() {
+        let mut collection = Collection::new();
+        let (scene, guest1, _) = two_guests(&mut collection);
+        collection
+            .set_center_view(scene, Some(guest1))
+            .expect("center the guest");
+
+        collection
+            .set_center_view(scene, None)
+            .expect("retire the center");
+
+        let seat = collection
+            .scene(scene)
+            .expect("scene")
+            .item(guest1)
+            .expect("guest")
+            .pending_slot
+            .expect("still seated");
+        assert!(
+            scene::rail_seats()
+                .iter()
+                .any(|rail| same_seat(*rail, seat)),
+            "the retired center joins the rail"
+        );
+    }
+
+    #[test]
+    fn center_and_rail_geometry_do_not_overlap() {
+        let center = scene::center_slot();
+        let rail = scene::rail_seats();
+        for seat in rail {
+            assert!(
+                !scene::rects_overlap(center, seat),
+                "{seat:?} overlaps the center"
+            );
+        }
+        for (i, a) in rail.iter().enumerate() {
+            for b in rail.iter().skip(i + 1) {
+                assert!(!scene::rects_overlap(*a, *b), "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn focus_restore_never_double_books_a_seat_claimed_while_focused() {
+        let mut collection = Collection::new();
+        let (scene, guest1, guest2) = two_guests(&mut collection);
+        let seat = Corner::TopLeft.slot();
+        collection
+            .set_item_slot(scene, guest1, seat)
+            .expect("seat guest 1");
+        collection
+            .resolve_pending(scene, guest1, Transform::default())
+            .expect("resolve");
+
+        // Spotlight guest 2; while focused, guest 1 looks parked, and the
+        // host seats ANOTHER item on the same top-left seat.
+        collection.set_focus(scene, guest2).expect("focus");
+        let (_, late) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Late guest",
+                    SourceSettings::RemoteGuest {
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add late guest");
+        collection
+            .set_item_slot(scene, late, seat)
+            .expect("seat the late guest");
+
+        collection.clear_focus(scene).expect("restore");
+
+        let scene_ref = collection.scene(scene).expect("scene");
+        let holders = scene_ref
+            .items
+            .iter()
+            .filter(|item| item.pending_slot.is_some_and(|s| same_seat(s, seat)))
+            .count();
+        assert_eq!(
+            holders, 1,
+            "exactly one item may hold a seat after a focus round-trip"
+        );
+    }
+
+    #[test]
+    fn set_item_slot_redirects_center_overlapping_seats_to_the_rail() {
+        let mut collection = Collection::new();
+        let (scene, guest1, _) = two_guests(&mut collection);
+        let (_, display) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add display");
+        collection
+            .set_center_view(scene, Some(display))
+            .expect("center the display");
+
+        // Middle-left intersects the center region — the guest must land on
+        // the rail instead of on top of the shared view.
+        let middle_left = scene::preset_seats()[2];
+        collection
+            .set_item_slot(scene, guest1, middle_left)
+            .expect("seat while a center view is up");
+
+        let seat = collection
+            .scene(scene)
+            .expect("scene")
+            .item(guest1)
+            .expect("guest")
+            .pending_slot
+            .expect("seated");
+        assert!(
+            !scene::rects_overlap(seat, scene::center_slot()),
+            "no cam may overlap the shared view: {seat:?}"
+        );
+        assert!(
+            scene::rail_seats()
+                .iter()
+                .any(|rail| same_seat(*rail, seat)),
+            "the redirect lands on a rail seat"
+        );
+    }
+
+    #[test]
+    fn added_video_items_seat_into_free_corners_not_on_top() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let mk_cam = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::VideoDevice {
+                    device_id: String::new(),
+                    format: None,
+                },
+            )
+        };
+
+        // First video item fills the canvas (no seat).
+        let (_, first) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 1"))
+            .expect("add cam 1");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(first)
+                .expect("first")
+                .pending_slot,
+            None,
+            "the first item fills the canvas"
+        );
+
+        // Second + third get distinct free corners — never dumped on top.
+        let (_, second) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 2"))
+            .expect("add cam 2");
+        let (_, third) = collection
+            .add_item_with_new_source(scene, mk_cam("Cam 3"))
+            .expect("add cam 3");
+        let scene_ref = collection.scene(scene).expect("scene");
+        let s2 = scene_ref
+            .item(second)
+            .expect("second")
+            .pending_slot
+            .expect("seated");
+        let s3 = scene_ref
+            .item(third)
+            .expect("third")
+            .pending_slot
+            .expect("seated");
+        assert!(
+            !same_seat(s2, s3),
+            "each added source takes a distinct corner"
+        );
+        assert!(scene::preset_seats()
+            .iter()
+            .any(|seat| same_seat(*seat, s2)));
+        assert!(scene::preset_seats()
+            .iter()
+            .any(|seat| same_seat(*seat, s3)));
+    }
+
+    #[test]
+    fn added_audio_only_items_are_never_seated() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // A camera then a mic: the mic renders nothing, so it gets no seat and
+        // does not count toward corner placement.
+        collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::VideoDevice {
+                        device_id: String::new(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add cam");
+        let (_, mic) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("add mic");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(mic)
+                .expect("mic")
+                .pending_slot,
+            None,
+            "an audio-only source is never seated"
+        );
+    }
+
+    #[test]
+    fn preset_seats_do_not_overlap() {
+        let seats = scene::preset_seats();
+        for (i, a) in seats.iter().enumerate() {
+            for b in seats.iter().skip(i + 1) {
+                let apart =
+                    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                assert!(apart, "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn set_item_slot_rejects_an_unknown_item() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let slot = NormRect {
+            x: 0.02,
+            y: 0.02,
+            w: 0.30,
+            h: 0.30,
+        };
+        let result = collection.set_item_slot(scene, ItemId::new(), slot);
+        assert!(matches!(result, Err(SceneError::ItemNotFound)));
+    }
+
+    #[test]
+    fn apply_layout_rejects_an_unknown_item_without_mutating() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, screen) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: String::new(),
+                        label: String::new(),
+                    },
+                ),
+            )
+            .expect("add screen");
+        let before = collection.scene(scene).expect("scene").items.clone();
+
+        let result =
+            collection.apply_layout(scene, Some(screen), &[(ItemId::new(), Corner::TopLeft)]);
+
+        assert!(matches!(result, Err(SceneError::ItemNotFound)));
+        assert_eq!(
+            collection.scene(scene).expect("scene").items,
+            before,
+            "a bad id leaves the scene untouched"
+        );
     }
 
     #[test]

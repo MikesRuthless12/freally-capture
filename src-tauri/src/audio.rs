@@ -286,6 +286,11 @@ fn specs_to_configs(
                 SourceSettings::Media { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
+                // Remote-guest mic: the webview pushes the guest's WebRTC
+                // audio into the same hub ring (keyed by the source id).
+                SourceSettings::RemoteGuest { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
                 _ => return None,
             };
             let mut settings = spec.audio.clone();

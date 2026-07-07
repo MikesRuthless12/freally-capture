@@ -13,6 +13,7 @@ import type {
   AudioFilterKind,
   BlendMode,
   CaptureSource,
+  CornerSlot,
   EncoderCatalog,
   FfmpegStatus,
   FilterId,
@@ -21,6 +22,7 @@ import type {
   ItemId,
   LoopbackDevices,
   MonitorMode,
+  NormRect,
   RecordingFile,
   RecordingStatus,
   SceneId,
@@ -41,6 +43,12 @@ export function health(): Promise<Health> {
 /** Read the current settings. */
 export function settingsGet(): Promise<Settings> {
   return invoke<Settings>("settings_get");
+}
+
+/** One-shot pickup of a freally:// invite that launched the app (cold-start
+ * deep link — it fired before the webview's event listener existed). */
+export function remotePendingInvite(): Promise<string | null> {
+  return invoke<string | null>("remote_pending_invite");
 }
 
 /** Replace and persist the settings. */
@@ -165,6 +173,47 @@ export function studioSetItemBlend(
   blend: BlendMode,
 ): Promise<void> {
   return invoke("studio_set_item_blend", { sceneId, itemId, blend });
+}
+
+/**
+ * Arrange the scene as a centered screen with up to four corner cameras.
+ * `center` becomes the backdrop (bottom of z-order); each corner item fits
+ * into its slot on top. Placement resolves on each source's next sized frame.
+ */
+export function studioApplyLayout(
+  sceneId: SceneId,
+  center: ItemId | null,
+  corners: CornerSlot[],
+): Promise<void> {
+  return invoke("studio_apply_layout", { sceneId, center, corners });
+}
+
+/**
+ * Seat one item into a normalized canvas slot — the one-click position
+ * presets. Placement resolves on the source's next sized frame (the same
+ * mechanism as `studioApplyLayout`'s corners).
+ */
+export function studioSetItemSlot(sceneId: SceneId, itemId: ItemId, slot: NormRect): Promise<void> {
+  return invoke("studio_set_item_slot", { sceneId, itemId, slot });
+}
+
+/**
+ * Center-view routing (host-only in a remote session): pass an item to seat
+ * that capture in the center (the displaced center swaps onto its old seat;
+ * cams never overlap the shared view; one screen view at a time). Pass
+ * `null` to retire the center onto the cam rail.
+ */
+export function studioSetCenterView(sceneId: SceneId, itemId: ItemId | null): Promise<void> {
+  return invoke("studio_set_center_view", { sceneId, itemId });
+}
+
+/**
+ * Highlight Speaker (Focus/Spotlight): pass an item to promote it to fill the
+ * canvas (the other video items hide); pass `null` to restore the exact
+ * pre-focus layout.
+ */
+export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise<void> {
+  return invoke("studio_set_focus", { sceneId, itemId });
 }
 
 export function studioRenameSource(sourceId: SourceId, name: string): Promise<void> {

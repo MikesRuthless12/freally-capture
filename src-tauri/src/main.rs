@@ -16,6 +16,7 @@ mod events;
 mod native_preview;
 mod preview;
 mod recording;
+mod remote;
 mod settings;
 mod studio;
 
@@ -48,7 +49,30 @@ fn main() {
     println!("settings: language={}", settings.get().language);
     println!("init: building the Tauri app (creates the webview, then runs setup)...");
 
-    let app = tauri::Builder::default()
+    // Single instance is normally ON: a second launch — e.g. a clicked
+    // freally:// invite link — focuses the running app and forwards the link.
+    // Setting FCAP_ALLOW_MULTI lets several windows coexist on one machine so
+    // a host + guest remote-session drill can run locally (single instance
+    // otherwise collapses the second launch into the first). Test-only escape
+    // hatch; the shipped default is single instance.
+    let allow_multi = std::env::var_os("FCAP_ALLOW_MULTI").is_some();
+    if allow_multi {
+        println!("init: FCAP_ALLOW_MULTI set — single-instance guard DISABLED (local test mode)");
+    }
+
+    let mut builder = tauri::Builder::default();
+    if !allow_multi {
+        // Single instance FIRST (the plugins' documented order).
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }));
+    }
+    let app = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -100,6 +124,10 @@ fn main() {
             commands::studio::studio_set_item_visible,
             commands::studio::studio_set_item_locked,
             commands::studio::studio_set_item_blend,
+            commands::studio::studio_apply_layout,
+            commands::studio::studio_set_item_slot,
+            commands::studio::studio_set_center_view,
+            commands::studio::studio_set_focus,
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,
@@ -108,6 +136,9 @@ fn main() {
             commands::studio::studio_reorder_filter,
             commands::studio::studio_update_filter,
             commands::studio::studio_set_filter_enabled,
+            remote::remote_guest_push_frame,
+            remote::remote_guest_push_audio,
+            remote::remote_pending_invite,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
             commands::audio::audio_loopback_devices,
@@ -140,6 +171,39 @@ fn main() {
         ])
         .setup(|app| {
             println!("init: setup entered");
+            // TASK-R2: freally://join?token=… — forward opened links to the
+            // webview, which shows a JOIN PROMPT (nothing auto-connects; the
+            // URL is untrusted input parsed by the invite validator there).
+            {
+                use tauri::Emitter;
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        // Running app: the webview listener handles it live.
+                        // Also stash it — a cold-start URL fires this before
+                        // the webview exists, and the UI takes the stash via
+                        // `remote_pending_invite` once it loads.
+                        remote::store_pending_invite(url.to_string());
+                        let _ = handle.emit("remote-invite", url.to_string());
+                    }
+                });
+                // The launch-args URL (app opened BY a link click) was
+                // consumed by the plugin during init — before the handler
+                // above existed. Pick it up explicitly.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    if let Some(url) = urls.first() {
+                        remote::store_pending_invite(url.to_string());
+                    }
+                }
+                // Installers register the scheme; dev/portable runs register
+                // best-effort at launch (Windows/Linux support runtime
+                // registration; macOS registers via the bundle only).
+                #[cfg(any(windows, target_os = "linux"))]
+                {
+                    let _ = app.deep_link().register_all();
+                }
+            }
             events::spawn_stats_emitter(app.handle().clone());
             // The compose loop: capture sessions + static sources → the
             // compositor → the program frame behind `preview://`.

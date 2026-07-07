@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { pushModal } from "../lib/modal";
+
 /** A centered modal shell shared by the add-source pickers and dialogs. */
 export function PickerShell({
   title,
@@ -22,6 +24,11 @@ export function PickerShell({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Hide the native GPU preview overlay while open — it's a native child
+  // window layered over the webview and would otherwise paint over this
+  // centered dialog (dark backdrop shows, dialog invisible behind it).
+  useEffect(() => pushModal(), []);
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-6">
