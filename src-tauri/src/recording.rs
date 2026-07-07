@@ -346,6 +346,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                         keyframe_sec: settings.keyframe_sec,
                         audio_bitrate_kbps: settings.audio_bitrate_kbps,
                         split_minutes: split,
+                        // TASK-609: optional output downscale (wire only —
+                        // the lossless .frec always records the canvas).
+                        scale: (settings.output_width > 0 && settings.output_height > 0)
+                            .then_some((settings.output_width, settings.output_height)),
                         path: path.to_path_buf(),
                     };
                     Ok(Box::new(FfmpegSink::spawn(&ready, spec, &plan)?))

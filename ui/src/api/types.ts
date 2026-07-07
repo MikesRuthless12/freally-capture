@@ -166,6 +166,9 @@ export type StreamTargetSettings = {
   fps: number;
   /** The mixer track that goes to this target (1-based). */
   track: number;
+  /** Publish at this size instead of the canvas size (0 = canvas). */
+  outputWidth: number;
+  outputHeight: number;
 };
 
 /** Live-stream configuration (mirrors `StreamSettings` in settings.rs):
@@ -247,6 +250,9 @@ export type RecordingSettings = {
   splitMinutes: number;
   /** Also record the vertical canvas (a parallel "… (vertical)" file). */
   recordVertical: boolean;
+  /** Encode at this size instead of the canvas (0 = canvas; wire only). */
+  outputWidth: number;
+  outputHeight: number;
 };
 
 /** One file in the recordings folder (`recordings_list`). */

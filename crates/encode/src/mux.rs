@@ -287,10 +287,42 @@ pub fn video_args(
         // themselves.
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
-    if encoder_id.ends_with("_vaapi") {
-        args.extend(["-vf".into(), "format=nv12,hwupload".into()]);
-    }
+    // VAAPI's upload chain rides `color_and_scale_args` (one -vf per encode).
     args
+}
+
+/// The `-vf` chain + color metadata every wire encode gets (TASK-609):
+/// the RGB→YUV conversion pinned to **Rec.709** (swscale silently defaults
+/// to BT.601, which shifts HD colors), an optional output **downscale**
+/// (record/stream at a different resolution than the canvas), and VAAPI's
+/// nv12 upload. Dimensions floor to even (yuv420 needs it). HDR is out of
+/// scope honestly: the canvas is 8-bit SDR — these tags say exactly that.
+pub fn color_and_scale_args(encoder_id: &str, scale: Option<(u32, u32)>) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    match scale {
+        Some((width, height)) => chain.push(format!(
+            "scale={}:{}:flags=bicubic:out_color_matrix=bt709",
+            (width.max(2) / 2) * 2,
+            (height.max(2) / 2) * 2
+        )),
+        None => chain.push("scale=out_color_matrix=bt709".to_string()),
+    }
+    if encoder_id.ends_with("_vaapi") {
+        chain.push("format=nv12".into());
+        chain.push("hwupload".into());
+    }
+    vec![
+        "-vf".into(),
+        chain.join(","),
+        "-color_primaries".into(),
+        "bt709".into(),
+        "-color_trc".into(),
+        "bt709".into(),
+        "-colorspace".into(),
+        "bt709".into(),
+        "-color_range".into(),
+        "tv".into(),
+    ]
 }
 
 /// The audio-encoder args for a container (`aac` everywhere it is legal;
@@ -450,6 +482,8 @@ pub struct WirePlan {
     pub audio_bitrate_kbps: u32,
     /// Split into playable segments every N minutes (`None` = one file).
     pub split_minutes: Option<u32>,
+    /// Encode at this size instead of the canvas size (TASK-609 downscale).
+    pub scale: Option<(u32, u32)>,
     /// The output path (used as a `part%03d` template when splitting).
     pub path: PathBuf,
 }
@@ -542,6 +576,7 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
+        cmd.args(color_and_scale_args(&plan.encoder_id, plan.scale));
         if !spec.tracks.is_empty() {
             cmd.args(audio_args(plan.container, plan.audio_bitrate_kbps));
         }
@@ -633,6 +668,8 @@ pub struct RtmpPlan {
     /// The full publish URLs, keys included.
     /// One = plain publish; several = one shared encode fanned out via `tee`.
     pub urls: Vec<String>,
+    /// Publish at this size instead of the canvas size (TASK-609 downscale).
+    pub scale: Option<(u32, u32)>,
     /// The WHIP bearer token (SECRET — rides the `Authorization` header,
     /// never the URL). Only meaningful for a single `http(s)://` URL.
     pub auth_bearer: Option<String>,
@@ -784,6 +821,7 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
+        cmd.args(color_and_scale_args(&plan.encoder_id, None));
         cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps)); // AAC in TS
         cmd.args([
             "-f",
@@ -937,6 +975,7 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
+        cmd.args(color_and_scale_args(&plan.encoder_id, plan.scale));
         if whip {
             // WebRTC: no B-frames (RTP H.264 reordering breaks receivers).
             cmd.args(["-bf", "0"]);
@@ -1503,6 +1542,7 @@ mod tests {
                 "rtmp://live.twitch.tv/app/hunter2".into(),
                 "rtmp://a.rtmp.youtube.com/live2/hunter3".into(),
             ],
+            scale: None,
             auth_bearer: Some("hunter4-bearer".into()),
         };
         let printed = format!("{plan:?}");
@@ -1569,11 +1609,29 @@ mod tests {
             .windows(2)
             .any(|w| w == ["-init_hw_device", "vaapi=va"]));
         assert!(!global.iter().any(|arg| arg.contains("renderD")));
-        let video = video_args("h264_vaapi", &rc(RcMode::Cbr), EncPreset::Balanced, 60);
+        let video = color_and_scale_args("h264_vaapi", None);
         assert!(video
             .windows(2)
-            .any(|w| w == ["-vf", "format=nv12,hwupload"]));
+            .any(|w| w == ["-vf", "scale=out_color_matrix=bt709,format=nv12,hwupload"]));
         assert!(global_args("h264_nvenc").is_empty());
+    }
+
+    #[test]
+    fn every_wire_encode_pins_rec709_and_scales_even() {
+        let plain = color_and_scale_args("libx264", None);
+        assert!(plain
+            .windows(2)
+            .any(|w| w == ["-vf", "scale=out_color_matrix=bt709"]));
+        assert!(plain.windows(2).any(|w| w == ["-colorspace", "bt709"]));
+        assert!(plain.windows(2).any(|w| w == ["-color_range", "tv"]));
+
+        let scaled = color_and_scale_args("libx264", Some((1281, 719)));
+        assert!(
+            scaled
+                .windows(2)
+                .any(|w| w == ["-vf", "scale=1280:718:flags=bicubic:out_color_matrix=bt709"]),
+            "odd downscale dims floor to even: {scaled:?}"
+        );
     }
 
     #[test]

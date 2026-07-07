@@ -29,6 +29,8 @@ const defaultTarget = (): StreamTargetSettings => ({
   keyframeSec: 2,
   fps: 60,
   track: 1,
+  outputWidth: 0,
+  outputHeight: 0,
 });
 
 /**
@@ -264,6 +266,22 @@ export function SettingsStream({
                 min={1}
                 max={6}
                 onCommit={(value) => patchTarget(index, { track: Math.round(value) })}
+              />
+              <NumberField
+                label="Output width (0 = canvas)"
+                value={target.outputWidth}
+                min={0}
+                max={16384}
+                step={2}
+                onCommit={(value) => patchTarget(index, { outputWidth: Math.round(value) })}
+              />
+              <NumberField
+                label="Output height (0 = canvas)"
+                value={target.outputHeight}
+                min={0}
+                max={16384}
+                step={2}
+                onCommit={(value) => patchTarget(index, { outputHeight: Math.round(value) })}
               />
             </div>
           </fieldset>

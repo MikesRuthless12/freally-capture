@@ -309,6 +309,8 @@ struct TargetPlan {
     canvas: u8,
     width: u32,
     height: u32,
+    /// Publish at this size instead of the canvas size (TASK-609).
+    scale: Option<(u32, u32)>,
     protocol: StreamProtocol,
     /// The WHIP bearer token (SECRET) — the target's key, header-borne.
     auth: Option<String>,
@@ -416,6 +418,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             canvas,
             width,
             height,
+            scale: (target_settings.output_width > 0 && target_settings.output_height > 0)
+                .then_some((target_settings.output_width, target_settings.output_height)),
             protocol,
             auth: (protocol == StreamProtocol::Whip
                 && !target_settings.stream_key.trim().is_empty())
@@ -438,7 +442,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             height: plan.height,
             fps: plan.fps,
             signature: format!(
-                "{}|{}|{}|{}|{}|{}|{}|c{}",
+                "{}|{}|{}|{}|{}|{}|{}|c{}|s{:?}",
                 plan.encoder_id,
                 plan.bitrate_kbps,
                 plan.audio_bitrate_kbps,
@@ -450,7 +454,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                 } else {
                     "aac"
                 },
-                plan.canvas
+                plan.canvas,
+                plan.scale
             ),
             tee_safe: plan.protocol != StreamProtocol::Whip && tee_safe(&plan.url),
             nominal_kbps: plan.bitrate_kbps + plan.audio_bitrate_kbps,
@@ -493,6 +498,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                         keyframe_sec: first.keyframe_sec,
                         audio_bitrate_kbps: first.audio_bitrate_kbps,
                         urls: lane_plans.iter().map(|plan| plan.url.clone()).collect(),
+                        scale: first.scale,
                         auth_bearer: first.auth.clone(),
                     };
                     let spec = RecordSpec {

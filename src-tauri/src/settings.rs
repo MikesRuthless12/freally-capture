@@ -242,6 +242,9 @@ pub struct StreamTargetSettings {
     pub fps: u32,
     /// The mixer track that goes to this target (1-based, like the UI dots).
     pub track: u8,
+    /// Publish at this size instead of the canvas size (0 = canvas).
+    pub output_width: u32,
+    pub output_height: u32,
 }
 
 impl Default for StreamTargetSettings {
@@ -258,6 +261,8 @@ impl Default for StreamTargetSettings {
             keyframe_sec: 2.0,
             fps: 60,
             track: 1,
+            output_width: 0,
+            output_height: 0,
         }
     }
 }
@@ -333,6 +338,11 @@ impl StreamTargetSettings {
         }
         if !(1..=6).contains(&self.track) {
             return Err("the stream track must be 1–6".to_owned());
+        }
+        for size in [self.output_width, self.output_height] {
+            if size != 0 && !(16..=16_384).contains(&size) {
+                return Err("output size out of range (16–16384, 0 = canvas)".to_owned());
+            }
         }
         Ok(())
     }
@@ -413,6 +423,8 @@ impl From<StreamSettingsWire> for StreamSettings {
                 keyframe_sec: wire.keyframe_sec,
                 fps: wire.fps,
                 track: wire.track,
+                output_width: 0,
+                output_height: 0,
             }],
         };
         StreamSettings {
@@ -520,6 +532,10 @@ pub struct RecordingSettings {
     /// Also record the second (vertical) canvas when one is configured —
     /// a parallel `… (vertical)` file with the same settings (Phase 6).
     pub record_vertical: bool,
+    /// Encode at this size instead of the canvas size (0 = canvas). Wire
+    /// containers only — the lossless .frec always records the canvas.
+    pub output_width: u32,
+    pub output_height: u32,
 }
 
 impl Default for RecordingSettings {
@@ -541,6 +557,8 @@ impl Default for RecordingSettings {
             filename_prefix: "Freally Capture".to_owned(),
             split_minutes: 0,
             record_vertical: false,
+            output_width: 0,
+            output_height: 0,
         }
     }
 }
@@ -575,6 +593,11 @@ impl RecordingSettings {
         }
         if self.split_minutes > 24 * 60 {
             return Err("split interval over 24 h".to_owned());
+        }
+        for size in [self.output_width, self.output_height] {
+            if size != 0 && !(16..=16_384).contains(&size) {
+                return Err("output size out of range (16–16384, 0 = canvas)".to_owned());
+            }
         }
         if self.folder.len() > 1024 || self.folder.chars().any(char::is_control) {
             return Err("invalid recording folder".to_owned());
