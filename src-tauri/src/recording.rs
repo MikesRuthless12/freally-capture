@@ -677,12 +677,16 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     *state.lock_inner() = None;
     emit_status(app);
     match result {
+        // The MAIN recording finalized — always hand its paths back, even if
+        // the optional vertical file failed. A vertical-only failure is kept
+        // in the sticky idle DTO's `error` (a visible note) instead of being
+        // reported as a stop failure that hides the good main recording.
         Ok(_) => {
             println!("recording: finished → {}", paths.join(", "));
-            match error {
-                None => Ok(paths),
-                Some(err) => Err(err), // the vertical file failed — say so
+            if let Some(err) = &error {
+                eprintln!("recording: {err} (the main recording finished)");
             }
+            Ok(paths)
         }
         Err(err) => Err(err),
     }

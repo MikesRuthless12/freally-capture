@@ -766,6 +766,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
     let started_at = Instant::now();
     let mut seen_revision = 0u64;
+    // The nested-scene pool the compositor resolves against, deep-cloned only
+    // when the model revision changes (not per frame) — see the snapshot.
+    let mut cached_scene_pool: Vec<fcap_scene::Scene> = Vec::new();
+    let mut pool_revision = u64::MAX;
     let mut sessions: HashMap<SourceId, SessionSlot> = HashMap::new();
     let mut starting: HashMap<SourceId, mpsc::Receiver<Result<CaptureSession, CaptureError>>> =
         HashMap::new();
@@ -832,7 +836,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             preview_scene,
             transition_pack,
             vertical_pack,
-            scene_pool,
+            scene_pool_rebuild,
             scene_refs,
         ) = {
             let mut guard = lock_core(&core);
@@ -909,9 +913,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     _ => None,
                 })
                 .collect();
-            let scene_pool: Vec<fcap_scene::Scene> = if scene_refs.is_empty() {
-                Vec::new()
-            } else {
+            // The reachability walk runs every tick (cheap — it reads items,
+            // no deep copy) so nested scenes' sources always join the live
+            // set; the expensive full-scene deep clone into the pool happens
+            // only when the model actually changed (revision), reused from
+            // the cache otherwise.
+            if !scene_refs.is_empty() {
                 let mut reachable: Vec<SceneId> = live_sources
                     .iter()
                     .filter_map(|source| scene_refs.get(source).copied())
@@ -931,8 +938,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         }
                     }
                 }
-                guard.collection.scenes.clone()
-            };
+            }
+            let scene_pool_rebuild: Option<Vec<fcap_scene::Scene>> =
+                (guard.revision != pool_revision).then(|| {
+                    if scene_refs.is_empty() {
+                        Vec::new()
+                    } else {
+                        guard.collection.scenes.clone()
+                    }
+                });
             (
                 guard.revision,
                 guard.collection.active_scene().clone(),
@@ -951,7 +965,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 preview_scene,
                 transition_pack,
                 vertical_pack,
-                scene_pool,
+                scene_pool_rebuild,
                 scene_refs,
             )
         };
@@ -959,7 +973,14 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let _ = app.emit("studio", &dto);
         }
         compositor.set_canvas_size(canvas.0, canvas.1);
-        compositor.set_scene_pool(scene_pool.clone(), scene_refs);
+        // Hand the compositor a fresh nested-scene pool only when the model
+        // changed — never a per-frame deep clone.
+        if let Some(pool) = scene_pool_rebuild {
+            cached_scene_pool = pool;
+            pool_revision = revision;
+            compositor.set_scene_pool(cached_scene_pool.clone(), scene_refs);
+        }
+        let scene_pool = &cached_scene_pool;
 
         // -- 2. Reconcile sources against the active scene ---------------------
         if revision != seen_revision {
@@ -1192,7 +1213,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some((vertical_scene, _, _)) = &vertical_pack {
                 scan(&vertical_scene.items);
             }
-            for nested in &scene_pool {
+            for nested in scene_pool {
                 scan(&nested.items);
             }
         }

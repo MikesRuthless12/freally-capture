@@ -51,30 +51,38 @@ fn session(channel: &str, sink: &ChatSink, stop: &AtomicBool) -> Result<(), Stri
 
     let mut writer = stream.try_clone().map_err(|err| err.to_string())?;
     let mut reader = BufReader::new(stream);
-    let mut line = String::new();
+    // Read RAW BYTES into a persistent buffer: a read timeout mid-line must
+    // keep the partial bytes (read_line into a fresh String would drop them
+    // — and a timeout that split a multi-byte char would tear the session
+    // down on invalid UTF-8). We only consume up to a real `\n`; incomplete
+    // bytes ride to the next read, and each complete line is UTF-8-lossy'd.
+    let mut buffer: Vec<u8> = Vec::with_capacity(4096);
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(());
         }
-        line.clear();
-        match reader.read_line(&mut line) {
+        match reader.read_until(b'\n', &mut buffer) {
             Ok(0) => return Err("the IRC server closed the connection".to_string()),
-            Ok(_) => {
-                if line.starts_with("PING") {
-                    let _ = writer.write_all(b"PONG :tmi.twitch.tv\r\n");
-                    continue;
-                }
-                if let Some((user, text)) = parse_privmsg(&line) {
-                    sink.push("twitch", user, text);
-                }
-            }
+            Ok(_) => {}
             Err(err)
                 if err.kind() == std::io::ErrorKind::WouldBlock
                     || err.kind() == std::io::ErrorKind::TimedOut =>
             {
-                continue; // read timeout — loop to honor stop
+                continue; // read timeout — the partial line stays in `buffer`
             }
             Err(err) => return Err(format!("IRC read failed: {err}")),
+        }
+        // Drain every complete `\n`-terminated line the buffer now holds.
+        while let Some(at) = buffer.iter().position(|byte| *byte == b'\n') {
+            let raw: Vec<u8> = buffer.drain(..=at).collect();
+            let line = String::from_utf8_lossy(&raw);
+            if line.starts_with("PING") {
+                let _ = writer.write_all(b"PONG :tmi.twitch.tv\r\n");
+                continue;
+            }
+            if let Some((user, text)) = parse_privmsg(&line) {
+                sink.push("twitch", user, text);
+            }
         }
     }
 }

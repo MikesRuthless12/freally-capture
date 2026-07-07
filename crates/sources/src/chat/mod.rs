@@ -163,6 +163,12 @@ pub fn start_chat_overlay(
     let stop = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = frame_channel();
 
+    // The ingest threads run detached (only the render thread is joined by
+    // CaptureSession::stop, keeping stop non-blocking on the studio render
+    // loop). They watch `stop` between polls, and each platform's HTTP/IRC
+    // timeout is bounded (8 s / 2 s), so a removed overlay's threads
+    // self-terminate within that window — no unbounded lingering, no
+    // stacking of long-lived pollers across a rapid restart.
     if !youtube.is_empty() {
         let sink = sink.clone();
         let stop = Arc::clone(&stop);

@@ -670,8 +670,15 @@ pub struct RtmpPlan {
     pub urls: Vec<String>,
     /// Publish at this size instead of the canvas size (TASK-609 downscale).
     pub scale: Option<(u32, u32)>,
-    /// The WHIP bearer token (SECRET — rides the `Authorization` header,
-    /// never the URL). Only meaningful for a single `http(s)://` URL.
+    /// The WHIP bearer token (SECRET). It rides ffmpeg's `-authorization`
+    /// option (the WebRTC `Authorization` header) and stays out of the
+    /// publish URL, out of every log, and out of any error string (Debug is
+    /// redacted; the stderr scrubber masks it). The one place it is visible
+    /// is the ffmpeg child's argv — same-user-readable, the *same* exposure
+    /// as the on-disk key and the RTMP/SRT keys that ride the publish URL;
+    /// this is a single-user local app, so a same-user process reading argv
+    /// already has the settings file. Only meaningful for one `http(s)://`
+    /// URL.
     pub auth_bearer: Option<String>,
 }
 
@@ -1005,6 +1012,13 @@ impl FfmpegSink {
             }
             cmd.arg(&plan.urls[0]);
         } else {
+            // The tee muxer does NOT propagate its slave formats'
+            // global-header requirement to the encoder (a documented tee
+            // caveat), so without this the FLV/AAC slaves carry no
+            // AVCDecoderConfigurationRecord / AudioSpecificConfig and the
+            // ingest rejects the publish. A single-target `-f flv` sets the
+            // flag itself; the shared-encode path must set it explicitly.
+            cmd.args(["-flags", "+global_header"]);
             cmd.args(["-f", "tee"]);
             cmd.arg(tee_output(&plan.urls));
         }

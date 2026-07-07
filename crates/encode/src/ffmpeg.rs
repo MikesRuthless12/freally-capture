@@ -476,13 +476,33 @@ pub struct StreamSupport {
     pub whip: bool,
 }
 
-/// Probe the installed binary's SRT/WHIP support. Cheap (two immediate
-/// listing runs, hard-bounded); called only when a Go Live involves them.
+/// Probe the installed binary's SRT/WHIP support, **memoized per binary
+/// path + version**: the answer cannot change without a component
+/// reinstall, so repeat Go Lives are instant instead of re-spawning two
+/// hard-bounded listing children (which could stall ~30 s where child
+/// spawns are slow, e.g. AV interception).
 pub fn stream_support(ffmpeg: &Ffmpeg) -> StreamSupport {
-    StreamSupport {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<(PathBuf, String), StreamSupport>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let key = (ffmpeg.path.clone(), ffmpeg.version.clone());
+    if let Some(support) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&key)
+    {
+        return *support;
+    }
+    let support = StreamSupport {
         srt: protocol_listed(&capability_listing(ffmpeg, "-protocols"), "srt"),
         whip: muxer_listed(&capability_listing(ffmpeg, "-muxers"), "whip"),
-    }
+    };
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key, support);
+    support
 }
 
 fn capability_listing(ffmpeg: &Ffmpeg, flag: &str) -> String {

@@ -17,8 +17,10 @@ use super::{interruptible_sleep, ChatSink};
 const POLL: Duration = Duration::from_secs(3);
 
 pub(crate) fn run(slug: &str, sink: &ChatSink, stop: &AtomicBool) {
+    // Bounded (see innertube::agent) so a removed overlay's in-flight poll
+    // self-terminates fast instead of lingering behind a new session.
     let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(8))
         .user_agent(super::innertube::USER_AGENT)
         .build();
     let url = format!(

@@ -32,6 +32,9 @@ struct ActiveReplay {
     dir: PathBuf,
     seconds: u32,
     janitor_stop: Arc<AtomicBool>,
+    /// Held true while a Save picks + concats the tail, so the janitor
+    /// never unlinks a segment ffmpeg is about to open.
+    save_lock: Arc<AtomicBool>,
     janitor: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -164,6 +167,30 @@ fn ring_dir() -> PathBuf {
     std::env::temp_dir().join(format!("fcap-replay-{}", std::process::id()))
 }
 
+/// Reclaim `fcap-replay-*` ring directories left by earlier runs that
+/// crashed or were force-killed while armed (a clean disarm removes its
+/// own). Best-effort; keeps our own current directory. Called at arm so a
+/// stale buffer's gigabytes can never silently accumulate across crashes.
+fn sweep_stale_rings() {
+    let ours = ring_dir();
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == ours {
+            continue;
+        }
+        let is_ring = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("fcap-replay-"));
+        if is_ring && path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
 /// Arm the buffer: start the background segment encode + the ring janitor.
 pub fn arm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let state = app.state::<ReplayState>();
@@ -187,6 +214,9 @@ pub fn arm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         snapshot.collection.canvas_width,
         snapshot.collection.canvas_height,
     );
+
+    // Reclaim any ring dirs orphaned by an earlier crash/kill-while-armed.
+    sweep_stale_rings();
 
     let dir = ring_dir();
     std::fs::create_dir_all(&dir)
@@ -248,17 +278,23 @@ pub fn arm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             }),
         }));
 
-    // The janitor prunes the ring a little slower than segments appear.
+    // The janitor prunes the ring a little slower than segments appear —
+    // but never while a Save is stitching the tail (it would unlink a
+    // segment ffmpeg is about to open).
     let janitor_stop = Arc::new(AtomicBool::new(false));
+    let save_lock = Arc::new(AtomicBool::new(false));
     let janitor = {
         let stop = Arc::clone(&janitor_stop);
+        let saving = Arc::clone(&save_lock);
         let dir = dir.clone();
         let keep = ring::keep_count(settings.seconds, ring::SEGMENT_SEC);
         std::thread::Builder::new()
             .name("fcap-replay-janitor".into())
             .spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
-                    ring::prune(&dir, keep);
+                    if !saving.load(Ordering::Relaxed) {
+                        ring::prune(&dir, keep);
+                    }
                     std::thread::sleep(Duration::from_secs(2));
                 }
             })
@@ -275,6 +311,7 @@ pub fn arm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         dir,
         seconds: settings.seconds,
         janitor_stop,
+        save_lock,
         janitor: Some(janitor),
     });
     state.active.store(true, Ordering::Relaxed);
@@ -312,17 +349,25 @@ pub fn disarm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// interrupts the buffer, the stream, or the recording.
 pub fn save<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let state = app.state::<ReplayState>();
-    let (dir, seconds) = {
+    let (dir, seconds, save_lock) = {
         let inner = state.lock_inner();
         let Some(active) = inner.as_ref() else {
             return Err("arm the replay buffer first".to_string());
         };
-        (active.dir.clone(), active.seconds)
+        (
+            active.dir.clone(),
+            active.seconds,
+            Arc::clone(&active.save_lock),
+        )
     };
     if state.saving.swap(true, Ordering::SeqCst) {
         return Err("a replay save is already running".to_string());
     }
     let _reset = ResetOnDrop(&state.saving);
+    // Pause the janitor for the whole pick + concat so it can never unlink a
+    // segment ffmpeg is about to open.
+    save_lock.store(true, Ordering::SeqCst);
+    let _release = ResetOnDrop(&save_lock);
 
     let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
         "the replay buffer needs the ffmpeg component — install it from Components".to_string()

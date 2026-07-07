@@ -28,7 +28,11 @@ const CLIENT_VERSION_FALLBACK: &str = "2.20240701.00.00";
 
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
+        // Bounded so a detached ingest thread whose overlay was just removed
+        // (its `stop` is set but a poll is mid-flight) self-terminates within
+        // this window rather than lingering — keeps stop() on the render
+        // thread non-blocking while never stacking long-lived pollers.
+        .timeout(Duration::from_secs(8))
         .user_agent(USER_AGENT)
         .build()
 }

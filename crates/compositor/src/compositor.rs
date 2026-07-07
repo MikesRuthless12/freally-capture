@@ -671,6 +671,11 @@ impl Compositor {
                 }
                 let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
                 self.vertical = Some((texture, view, width, height));
+                // The readback map is keyed by target size; a resized vertical
+                // canvas orphans its old-size staging buffer. Drop the whole
+                // map (the program buffer re-creates on its next readback) so
+                // stepping through sizes can't leak GPU staging memory.
+                self.readback.clear();
             }
         }
     }
