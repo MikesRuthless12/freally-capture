@@ -695,6 +695,10 @@ struct SessionSlot {
     session: CaptureSession,
     frames_this_second: u32,
     live_size: Option<(u32, u32)>,
+    /// Render Delay (TASK-608): frames held back by the filter, bounded —
+    /// raw frames are memory, so both the delay (500 ms) and the queue
+    /// length are capped.
+    delayed: std::collections::VecDeque<(Instant, fcap_capture::Frame)>,
 }
 
 fn lock_core(core: &Arc<Mutex<StudioCore>>) -> std::sync::MutexGuard<'_, StudioCore> {
@@ -1134,6 +1138,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             session,
                             frames_this_second: 0,
                             live_size: None,
+                            delayed: std::collections::VecDeque::new(),
                         },
                     );
                 }
@@ -1147,10 +1152,78 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         }
 
         // -- 4. Drain the newest frame from every live session ------------------
+        // Render Delay (TASK-608): a source whose visible items carry the
+        // filter shows frames from `delay_ms` ago — held in a bounded queue
+        // (the 500 ms cap is honest: raw frames are memory).
+        let mut delay_by_source: HashMap<SourceId, u32> = HashMap::new();
+        {
+            let mut scan = |items: &[fcap_scene::SceneItem]| {
+                for item in items {
+                    for filter in item.filters.iter().filter(|filter| filter.enabled) {
+                        if let fcap_scene::FilterKind::RenderDelay { delay_ms } = &filter.kind {
+                            let entry = delay_by_source.entry(item.source).or_insert(0);
+                            *entry = (*entry).max((*delay_ms).min(500));
+                        }
+                    }
+                }
+            };
+            scan(&scene.items);
+            if let Some(preview) = &preview_scene {
+                scan(&preview.items);
+            }
+            if let Some(pack) = &transition_pack {
+                scan(&pack.from_scene.items);
+            }
+            if let Some((vertical_scene, _, _)) = &vertical_pack {
+                scan(&vertical_scene.items);
+            }
+            for nested in &scene_pool {
+                scan(&nested.items);
+            }
+        }
         let mut ended: Vec<(SourceId, CaptureError)> = Vec::new();
         for (id, slot) in sessions.iter_mut() {
+            let delay_ms = delay_by_source.get(id).copied().unwrap_or(0);
             match slot.session.frames().recv_timeout(Duration::ZERO) {
                 Ok(Some(frame)) => {
+                    if delay_ms == 0 && slot.delayed.is_empty() {
+                        let size = (frame.width, frame.height);
+                        match compositor.upload_frame(*id, &frame) {
+                            Ok(()) => {
+                                slot.frames_this_second += 1;
+                                if slot.live_size != Some(size) {
+                                    slot.live_size = Some(size);
+                                    statuses.insert(*id, SourceRuntime::live(size.0, size.1));
+                                    statuses_changed = true;
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("studio: dropped a broken frame: {err}");
+                            }
+                        }
+                    } else {
+                        slot.delayed.push_back((Instant::now(), frame));
+                        if slot.delayed.len() > 64 {
+                            slot.delayed.pop_front(); // bounded, oldest goes
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => ended.push((*id, err)),
+            }
+            // Release the newest delayed frame that has come due (all of
+            // them at once when the filter was just removed).
+            if !slot.delayed.is_empty() {
+                let due = Duration::from_millis(u64::from(delay_ms));
+                let mut release: Option<fcap_capture::Frame> = None;
+                while slot
+                    .delayed
+                    .front()
+                    .is_some_and(|(arrived, _)| arrived.elapsed() >= due)
+                {
+                    release = slot.delayed.pop_front().map(|(_, frame)| frame);
+                }
+                if let Some(frame) = release {
                     let size = (frame.width, frame.height);
                     match compositor.upload_frame(*id, &frame) {
                         Ok(()) => {
@@ -1166,8 +1239,6 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         }
                     }
                 }
-                Ok(None) => {}
-                Err(err) => ended.push((*id, err)),
             }
         }
         for (id, err) in ended {

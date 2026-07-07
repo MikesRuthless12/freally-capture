@@ -133,6 +133,37 @@ pub enum FilterKind {
         #[serde(default)]
         invert: bool,
     },
+    /// Key out an arbitrary color by RGB distance (a non-green backdrop).
+    ColorKey {
+        #[serde(default = "Rgba::default_key")]
+        key: Rgba,
+        /// RGB distance that counts as "the key color", 0..=1.
+        #[serde(default = "default_similarity")]
+        similarity: f32,
+        /// Width of the soft edge past `similarity`, 0..=1.
+        #[serde(default = "default_smoothness")]
+        smoothness: f32,
+    },
+    /// Key on brightness: pixels outside `luma_min..=luma_max` go
+    /// transparent (soft edges via `smoothness`).
+    LumaKey {
+        /// 0..=1; pixels darker than this key out.
+        #[serde(default)]
+        luma_min: f32,
+        /// 0..=1; pixels brighter than this key out.
+        #[serde(default = "default_one")]
+        luma_max: f32,
+        /// Soft edge width, 0..=1.
+        #[serde(default = "default_smoothness")]
+        smoothness: f32,
+    },
+    /// Delay this source's video by N ms (sync a source to audio). Applied
+    /// at the source-frame stage behind a bounded buffer — capped at 500 ms
+    /// because raw frames are memory (the same cap OBS uses, honestly).
+    RenderDelay {
+        #[serde(default)]
+        delay_ms: u32,
+    },
     /// Unsharp-mask sharpening.
     Sharpen {
         /// 0..=2; 0 = off.
@@ -177,6 +208,9 @@ impl FilterKind {
             FilterKind::Lut { .. } => "lut",
             FilterKind::Blur { .. } => "blur",
             FilterKind::Mask { .. } => "mask",
+            FilterKind::ColorKey { .. } => "colorKey",
+            FilterKind::LumaKey { .. } => "lumaKey",
+            FilterKind::RenderDelay { .. } => "renderDelay",
             FilterKind::Sharpen { .. } => "sharpen",
             FilterKind::Scroll { .. } => "scroll",
             FilterKind::Crop { .. } => "crop",
@@ -191,6 +225,9 @@ impl FilterKind {
             FilterKind::Lut { .. } => "Apply LUT",
             FilterKind::Blur { .. } => "Blur",
             FilterKind::Mask { .. } => "Image Mask",
+            FilterKind::ColorKey { .. } => "Color Key",
+            FilterKind::LumaKey { .. } => "Luma Key",
+            FilterKind::RenderDelay { .. } => "Render Delay",
             FilterKind::Sharpen { .. } => "Sharpen",
             FilterKind::Scroll { .. } => "Scroll",
             FilterKind::Crop { .. } => "Crop",

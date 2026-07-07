@@ -23,6 +23,9 @@ import { PickerShell } from "./PickerShell";
 
 const FILTER_NAMES: Record<FilterTypeName, string> = {
   chromaKey: "Chroma Key",
+  colorKey: "Color Key",
+  lumaKey: "Luma Key",
+  renderDelay: "Render Delay",
   colorCorrection: "Color Correction",
   lut: "Apply LUT",
   blur: "Blur",
@@ -49,6 +52,14 @@ const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
     hueShift: 0,
     opacity: 1,
   },
+  colorKey: {
+    type: "colorKey",
+    key: { r: 0, g: 255, b: 0, a: 255 },
+    similarity: 0.4,
+    smoothness: 0.08,
+  },
+  lumaKey: { type: "lumaKey", lumaMin: 0, lumaMax: 1, smoothness: 0.08 },
+  renderDelay: { type: "renderDelay", delayMs: 100 },
   lut: { type: "lut", path: "", amount: 1 },
   blur: { type: "blur", radius: 8 },
   mask: { type: "mask", path: "", mode: "alpha", invert: false },
@@ -339,6 +350,74 @@ function FilterParams({
   onChange: (kind: FilterKind) => void;
 }) {
   switch (filter.type) {
+    case "colorKey":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <ColorRow
+            label="Key color (any color, RGB distance)"
+            value={filter.key}
+            onChange={(key) => onChange({ ...filter, key })}
+          />
+          <Slider
+            label="Similarity"
+            value={filter.similarity}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(similarity) => onChange({ ...filter, similarity })}
+          />
+          <Slider
+            label="Smoothness"
+            value={filter.smoothness}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(smoothness) => onChange({ ...filter, smoothness })}
+          />
+        </div>
+      );
+    case "lumaKey":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label="Luma min (darker keys out)"
+            value={filter.lumaMin}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(lumaMin) => onChange({ ...filter, lumaMin })}
+          />
+          <Slider
+            label="Luma max (brighter keys out)"
+            value={filter.lumaMax}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(lumaMax) => onChange({ ...filter, lumaMax })}
+          />
+          <Slider
+            label="Smoothness"
+            value={filter.smoothness}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(smoothness) => onChange({ ...filter, smoothness })}
+          />
+        </div>
+      );
+    case "renderDelay":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label="Delay (ms — video only, e.g. to sync with audio; capped at 500)"
+            value={filter.delayMs}
+            min={0}
+            max={500}
+            step={10}
+            onChange={(delayMs) => onChange({ ...filter, delayMs: Math.round(delayMs) })}
+          />
+        </div>
+      );
     case "chromaKey":
       return (
         <div className="mt-2 flex flex-col gap-1.5">

@@ -564,6 +564,9 @@ export type FilterKind =
   | { type: "lut"; path: string; amount: number }
   | { type: "blur"; radius: number }
   | { type: "mask"; path: string; mode: "alpha" | "luma"; invert: boolean }
+  | { type: "colorKey"; key: Rgba; similarity: number; smoothness: number }
+  | { type: "lumaKey"; lumaMin: number; lumaMax: number; smoothness: number }
+  | { type: "renderDelay"; delayMs: number }
   | { type: "sharpen"; amount: number }
   | { type: "scroll"; speedX: number; speedY: number }
   | { type: "crop"; left: number; top: number; right: number; bottom: number };

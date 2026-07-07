@@ -43,6 +43,8 @@ pub(crate) struct FilterResource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PassKind {
     ChromaKey,
+    ColorKey,
+    LumaKey,
     ColorCorrection,
     Lut,
     Blur,
@@ -206,6 +208,48 @@ pub(crate) fn plan_filter(
                 out: in_size,
             }])
         }
+        FilterKind::ColorKey {
+            key,
+            similarity,
+            smoothness,
+        } => {
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [
+                key.r as f32 / 255.0,
+                key.g as f32 / 255.0,
+                key.b as f32 / 255.0,
+                similarity.clamp(0.0, 1.0),
+            ];
+            uniform.p1 = [smoothness.clamp(0.0, 1.0).max(1e-3), 0.0, 0.0, 0.0];
+            Some(vec![PassPlan {
+                kind: PassKind::ColorKey,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::LumaKey {
+            luma_min,
+            luma_max,
+            smoothness,
+        } => {
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [
+                luma_min.clamp(0.0, 1.0),
+                luma_max.clamp(0.0, 1.0),
+                smoothness.clamp(0.0, 1.0).max(1e-3),
+                0.0,
+            ];
+            Some(vec![PassPlan {
+                kind: PassKind::LumaKey,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        // Render delay is a frame-timing effect, not a GPU pass — the
+        // studio's source-upload stage applies it (bounded buffer).
+        FilterKind::RenderDelay { .. } => None,
         FilterKind::ColorCorrection {
             gamma,
             brightness,
@@ -445,8 +489,10 @@ impl FilterEngine {
             push_constant_ranges: &[],
         });
 
-        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 8] = [
+        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 10] = [
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
+            (PassKind::ColorKey, "fs_color_key", &basic_layout),
+            (PassKind::LumaKey, "fs_luma_key", &basic_layout),
             (
                 PassKind::ColorCorrection,
                 "fs_color_correction",
