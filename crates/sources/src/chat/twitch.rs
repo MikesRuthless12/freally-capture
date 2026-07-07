@@ -14,7 +14,15 @@ use super::{interruptible_sleep, ChatSink};
 const HOST: &str = "irc.chat.twitch.tv:6667";
 
 pub(crate) fn run(channel: &str, sink: &ChatSink, stop: &AtomicBool) {
-    let channel = channel.to_ascii_lowercase();
+    // A Twitch login is `[a-z0-9_]{1,25}` — pin the channel to that charset
+    // before it enters the IRC handshake so a hand-edited/imported scene
+    // collection can never inject `\r\n`-separated extra IRC commands onto
+    // the anonymous session.
+    let channel = sanitize_channel(channel);
+    if channel.is_empty() {
+        eprintln!("chat overlay (twitch): invalid channel name — ingest disabled");
+        return;
+    }
     let mut backoff = Duration::from_secs(1);
     while !stop.load(Ordering::Relaxed) {
         match session(&channel, sink, stop) {
@@ -71,6 +79,19 @@ fn session(channel: &str, sink: &ChatSink, stop: &AtomicBool) -> Result<(), Stri
     }
 }
 
+/// Keep only a valid Twitch login's characters (`[a-z0-9_]`, ≤25) so the
+/// channel can never carry IRC control bytes into the handshake.
+fn sanitize_channel(channel: &str) -> String {
+    channel
+        .trim()
+        .trim_start_matches('#')
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(25)
+        .collect()
+}
+
 /// `:nick!nick@nick.tmi.twitch.tv PRIVMSG #chan :message` → (nick, message).
 fn parse_privmsg(line: &str) -> Option<(&str, &str)> {
     let line = line.trim_end();
@@ -86,6 +107,16 @@ fn parse_privmsg(line: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_names_pin_to_the_login_charset() {
+        assert_eq!(sanitize_channel("#MikeCam_1"), "mikecam_1");
+        // CRLF-injection attempt: everything but the login charset drops, so
+        // the `\r\nJOIN` payload can never reach the handshake.
+        assert_eq!(sanitize_channel("foo\r\nJOIN #victim"), "foojoinvictim");
+        assert_eq!(sanitize_channel("  \r\n  "), "");
+        assert!(!sanitize_channel("anychannel").contains(['\r', '\n', ' ']));
+    }
 
     #[test]
     fn privmsg_lines_parse_and_noise_skips() {

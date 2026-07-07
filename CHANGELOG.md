@@ -5,15 +5,93 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** Phase 4 (recording) is complete, and 0.56.0 adds the **native GPU
-> preview ("OBS feel") on all three OSes**. Early development builds are downloadable from each
-> release; the **studio MVP — the first build meant for everyday use — arrives at 0.70.0**. The
+> **Status: in development.** The studio MVP shipped at **0.70.0** (single-target streaming +
+> Studio Mode); **0.85.0** adds the streaming depth — simultaneous multistream, SRT/WHIP,
+> vertical/multi-canvas, the replay buffer, and the scene/source/filter/encoder depth. The
 > release ladder below tracks the plan to 1.0.0.
 
 ## [Unreleased]
 
-> The next rung is **0.70.0 (studio MVP — first public)**: single-target streaming, Studio Mode +
-> transitions, the virtual camera, and the stats dock.
+> The next rung is **1.0.0** (Phases 7–9): the WebSocket remote-control API + scripting/plugins,
+> game capture + signed installers, and the accessibility/i18n/onboarding launch polish.
+
+## [0.85.0] — 2026-07-07 (Streaming depth: multistream / SRT / WHIP + scene/source/encoder depth)
+
+> **The magic moment** — go live to Twitch **and** YouTube at once while recording a separate
+> local copy and saving a 30-second replay, with a vertical 9:16 output, nested scenes, and a
+> live chat overlay that needs **no API key or sign-in, ever**.
+
+### Added — streaming depth
+- **Simultaneous multistream** (TASK-601) — go live to several targets at once, **direct to each
+  platform** (no restream server). Targets whose encode settings match **share a single hardware
+  encode** (fanned out through ffmpeg's `tee`); different settings encode separately. A failed
+  target is split out to its own reconnecting lane so it can never drag a healthy one down; the
+  stats dock shows independent per-target health + bitrate.
+- **SRT and WHIP** (TASK-602) — stream to a self-hosted SRT ingest or a WebRTC WHIP endpoint
+  alongside RTMP/RTMPS, with reconnect + health. The installed ffmpeg's SRT/WHIP support is
+  probed honestly at Go Live. WHIP stream keys ride the `Authorization` header, never the URL.
+- **Rolling replay buffer** (TASK-603) — while armed, a background encode keeps the last N seconds
+  as small on-disk segments (bounded memory + disk); a global hotkey saves them to a playable file
+  **without interrupting the stream or the recording**, with length + quality presets.
+- **Vertical / multi-canvas** (TASK-604) — a second canvas (e.g. 9:16) composed from any scene at
+  its own size, **recordable and streamable independently** of the main canvas; a live preview and
+  its own fps stat.
+
+### Added — scene / source / filter / encoder depth
+- **Nested scenes, source groups, and per-scene audio** (TASK-605) — a scene composed as a source
+  inside another (cycle-safe); groups that move/show/hide together; a per-scene mixer override so a
+  scene can sound different from the global mix.
+- **Transition packs** (TASK-606) — a **stinger** (a video over the cut), a **custom luma-wipe
+  image**, and more built-in wipe patterns (horizontal / diamond / clock).
+- **Image Slideshow source + capture-card presets** (TASK-607) — an ordered image set cycling on a
+  timer with an optional crossfade, loop/hold-last and shuffle; common Elgato/AVerMedia format
+  presets in the video-device picker (only modes the card actually advertises).
+- **Color-key / luma-key + render-delay filters** (TASK-608) — key out any color by RGB distance
+  (non-green backdrops), key on brightness, and delay a source's video by N ms to line it up with
+  audio.
+- **Encoder depth** (TASK-609) — **Rec.709** color pinned on every wire encode (no more washed/
+  shifted HD colors), an optional **output downscale** (record/stream at a different resolution
+  than the canvas — per stream target), and high-FPS (120/144/240) + 4K paths. HDR is documented
+  honestly as out of scope (the canvas is 8-bit SDR).
+- **Recording chapter markers** (TASK-610) — a marker hotkey drops a chapter into the active
+  recording (mkv chapters, or a readable sidecar for other containers). Platform-side stream
+  markers need account APIs — out by charter, said honestly in-product.
+- **Live chat overlay** (TASK-613) — a transparent, time-stamped on-canvas record of the incoming
+  livestream chat (username + message + a 12-hour timestamp). **The end user never needs an API
+  key, a developer account, or a sign-in for YouTube or Twitch:** YouTube reads through an owned
+  InnerTube client exactly like the web player, Twitch reads anonymous IRC, Kick polls its public
+  endpoint. A chat flood only ages old lines out — it can never stall the stream, the recording,
+  or the overlay.
+- **Floating reactions overlay** (TASK-614) — viewer reaction emoji rise and fade **baked into the
+  program** (recorded and streamed), from the in-app reaction bar or spotted in the same no-key
+  chat ingest; a bounded particle pool means a reaction flood only caps what's on screen.
+
+### Deferred (honest)
+- **Virtual-camera depth** (TASK-611) — a real virtual camera is a signed OS driver component (its
+  own milestone). The feed model (program / vertical / single source) and the per-OS transport seam
+  ship now; the button stays disabled with the whole story in its tooltip.
+- **Browser source** (TASK-612) — a design spike (`design/browser-source-spike.md`) recommends a
+  CEF-class embed shipped as an on-demand component (like ffmpeg); the decision is Mike's.
+
+## [0.70.0] — 2026-07-06 (Streaming + Studio MVP — first public)
+
+> The studio you can go live with: single-target RTMP/RTMPS streaming, Studio Mode + GPU
+> transitions, global hotkeys, profiles + scene collections, a real stats dock — and the full
+> P2P **Remote Guests** collaboration merged in from Phase R.
+
+### Added
+- **Single-target streaming** (RTMP/RTMPS to Twitch/YouTube/Kick/Facebook/Trovo/Custom) with a
+  secret, redacted stream key, reconnect backoff, and auto-record-on-Go-Live; the local recording
+  is never touched by stream state.
+- **Studio Mode + GPU transitions** — a live preview pane and a commit transition (cut/fade/slide/
+  swipe/luma) the audience sees.
+- **Global hotkeys** (record / Go Live / transition) and a **real stats dock** (fps / dropped /
+  render-ms + this process's CPU% / memory).
+- **Profiles + scene collections** — switchable settings + scene snapshots, remembered across
+  restarts.
+- **Remote Guests (Phase R)** — opt-in P2P/WebRTC remote collaboration: expiring invite links,
+  guest mic into the mixer, two-gate mute, Highlight Speaker, the screen-plus-corners layout, and
+  a user's own opt-in TURN relay (no author-run infrastructure).
 
 ## [0.56.0] — 2026-07-06 (Native GPU preview + Window Capture upgrades)
 

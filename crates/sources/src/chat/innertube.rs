@@ -176,8 +176,14 @@ fn resolve_video_id(agent: &ureq::Agent, input: &str) -> Result<String, String> 
             return Ok(id);
         }
     }
-    // A channel URL (or bare @handle): its /live page names the video.
+    // A channel URL (or bare @handle): its /live page names the video. A
+    // pasted URL is only fetched after its host is confirmed to be YouTube
+    // and its scheme https — so a hand-edited/imported scene collection can
+    // never point this client at an arbitrary internal host (SSRF).
     let channel_live = if input.starts_with("http") {
+        if !is_youtube_https(input) {
+            return Err("the chat URL must be an https youtube.com / youtu.be link".to_string());
+        }
         format!("{}/live", input.trim_end_matches('/'))
     } else if let Some(handle) = input.strip_prefix('@') {
         format!("https://www.youtube.com/@{handle}/live")
@@ -187,6 +193,28 @@ fn resolve_video_id(agent: &ureq::Agent, input: &str) -> Result<String, String> 
     let page = fetch_text(agent, &channel_live)?;
     extract_str(&page, "\"videoId\":\"")
         .ok_or_else(|| format!("no live video found at {channel_live} — is the channel live?"))
+}
+
+/// Whether `url` is an `https://` link whose host is YouTube's — the gate
+/// on the only branch that fetches a user-pasted URL verbatim.
+fn is_youtube_https(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    // The authority ends at the first '/', '?' or '#'; drop any userinfo.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    host == "youtube.com"
+        || host == "youtu.be"
+        || host.ends_with(".youtube.com")
+        || host.ends_with(".youtu.be")
 }
 
 fn query_param(url: &str, key: &str) -> Option<String> {
@@ -239,6 +267,29 @@ mod tests {
             resolve_video_id(&agent, "https://www.youtube.com/live_chat?v=xyz789").unwrap(),
             "xyz789"
         );
+    }
+
+    #[test]
+    fn only_youtube_https_urls_are_fetchable() {
+        assert!(is_youtube_https("https://www.youtube.com/@chan/live"));
+        assert!(is_youtube_https("https://youtu.be/abc"));
+        assert!(is_youtube_https("https://m.youtube.com/watch?v=x"));
+        // SSRF attempts: internal hosts, other hosts, http, and userinfo
+        // tricks all reject before any request is made.
+        assert!(!is_youtube_https("http://169.254.169.254/latest/meta-data"));
+        assert!(!is_youtube_https("https://169.254.169.254/live"));
+        assert!(!is_youtube_https("https://evil.example/live"));
+        assert!(!is_youtube_https("https://youtube.com.evil.example/live"));
+        assert!(!is_youtube_https("https://youtube.com@evil.example/live"));
+        assert!(!is_youtube_https("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn a_non_youtube_pasted_url_is_refused_before_any_fetch() {
+        let agent = agent();
+        let err = resolve_video_id(&agent, "http://169.254.169.254/latest/meta-data")
+            .expect_err("internal host rejected");
+        assert!(err.contains("youtube.com"));
     }
 
     #[test]
