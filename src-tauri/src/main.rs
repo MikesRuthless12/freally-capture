@@ -13,11 +13,14 @@
 mod audio;
 mod commands;
 mod events;
+mod hotkeys;
 mod native_preview;
 mod preview;
+mod profiles;
 mod recording;
 mod remote;
 mod settings;
+mod stream;
 mod studio;
 
 use audio::{AudioRuntime, HotkeyRegistry};
@@ -77,7 +80,12 @@ fn main() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    audio::on_hotkey(app, shortcut, event.state());
+                    // Global action hotkeys (record / go live / transition)
+                    // claim their shortcut first; the mixer's PTT/PTM handles
+                    // the rest.
+                    if !hotkeys::dispatch(app, shortcut, event.state()) {
+                        audio::on_hotkey(app, shortcut, event.state());
+                    }
                 })
                 .build(),
         )
@@ -88,6 +96,10 @@ fn main() {
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
         .manage(recording::RecordingState::new())
+        .manage(stream::StreamBridgeState::new())
+        .manage(events::RuntimeStats::default())
+        .manage(hotkeys::ActionHotkeys::default())
+        .manage(profiles::WorkspaceState::load_default())
         .manage(native_preview::NativePreviewState::new())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
@@ -97,9 +109,10 @@ fn main() {
                 .headers()
                 .get("origin")
                 .and_then(|value| value.to_str().ok());
+            let path = request.uri().path().to_string();
             ctx.app_handle()
                 .state::<PreviewState>()
-                .protocol_response(origin)
+                .protocol_response(origin, &path)
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
@@ -128,6 +141,9 @@ fn main() {
             commands::studio::studio_set_item_slot,
             commands::studio::studio_set_center_view,
             commands::studio::studio_set_focus,
+            commands::studio::studio_set_studio_mode,
+            commands::studio::studio_set_preview_scene,
+            commands::studio::studio_transition,
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,
@@ -139,6 +155,15 @@ fn main() {
             remote::remote_guest_push_frame,
             remote::remote_guest_push_audio,
             remote::remote_pending_invite,
+            stream::stream_start,
+            stream::stream_stop,
+            stream::stream_status,
+            profiles::profiles_list,
+            profiles::profile_create,
+            profiles::profile_switch,
+            profiles::collections_list,
+            profiles::collection_create,
+            profiles::collection_switch,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
             commands::audio::audio_loopback_devices,
@@ -218,6 +243,10 @@ fn main() {
             // The recording status emitter (~2 Hz while a session runs) +
             // the dead-sink watchdog.
             recording::spawn_status_thread(app.handle().clone());
+            // The stream's ~1 Hz status/elapsed events (Phase 5).
+            stream::spawn_status_thread(app.handle().clone());
+            // Global action hotkeys: record / go live / transition (Phase 5).
+            hotkeys::spawn_reconcile_thread(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");
             // The native preview child window (Windows). Created here on the
             // main thread; the studio thread presents the GPU surface onto it.

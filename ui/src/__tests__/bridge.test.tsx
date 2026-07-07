@@ -69,14 +69,28 @@ describe("UI ↔ core bridge", () => {
     await waitFor(() => expect(listeners.has("stats")).toBe(true));
 
     act(() => {
-      listeners.get("stats")!({ payload: { fps: 60.4, cpu: 5.23, placeholder: true } });
+      listeners.get("stats")!({
+        payload: {
+          fps: 60.4,
+          cpu: 5.23,
+          memoryMb: 412.7,
+          dropped: 3,
+          renderMs: 1.84,
+          placeholder: false,
+        },
+      });
     });
 
     await waitFor(() => {
       expect(screen.getByText("60")).toBeInTheDocument();
       expect(screen.getByText("5.2%")).toBeInTheDocument();
+      expect(screen.getByText("413 MB")).toBeInTheDocument();
+      expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.getByText("1.8 ms")).toBeInTheDocument();
     });
-    expect(screen.getByText(/placeholder data/i)).toBeInTheDocument();
+    // Real data (placeholder: false) → no startup hint inside the dock.
+    const dock = screen.getByRole("region", { name: "Stats" });
+    expect(dock).not.toHaveTextContent(/starting the compositor/i);
   });
 
   it("persists the stats-dock toggle through settings_set", async () => {

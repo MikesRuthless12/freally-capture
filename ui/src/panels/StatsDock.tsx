@@ -43,19 +43,18 @@ export function StatsDock() {
   return (
     <Panel title="Stats">
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="FPS" value={stats ? stats.fps.toFixed(0) : "—"} />
-        <Stat label="CPU" value={stats ? `${stats.cpu.toFixed(1)}%` : "—"} />
-        <Stat label="Dropped" value="—" />
+        <Stat label="FPS" value={stats ? (stats.fps ?? 0).toFixed(0) : "—"} />
+        <Stat label="CPU" value={stats ? `${(stats.cpu ?? 0).toFixed(1)}%` : "—"} />
+        <Stat label="Memory" value={stats ? `${(stats.memoryMb ?? 0).toFixed(0)} MB` : "—"} />
+        <Stat label="Dropped" value={stats ? (stats.dropped ?? 0).toFixed(0) : "—"} />
+        <Stat label="Render" value={stats ? `${(stats.renderMs ?? 0).toFixed(1)} ms` : "—"} />
+        <Stat label="GPU" value={stats && (stats.fps ?? 0) > 0 ? "compositing" : "idle"} />
       </div>
-      <div className="mt-2">
-        <EmptyHint>
-          {stats
-            ? stats.placeholder
-              ? "Placeholder data — real fps/CPU/encoder sampling lands with the studio MVP (0.70.0)."
-              : "Live."
-            : "Waiting for the core stats event…"}
-        </EmptyHint>
-      </div>
+      {stats?.placeholder && (
+        <div className="mt-2">
+          <EmptyHint>Starting the compositor…</EmptyHint>
+        </div>
+      )}
     </Panel>
   );
 }

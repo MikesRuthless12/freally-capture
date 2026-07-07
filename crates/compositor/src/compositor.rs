@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use fcap_capture::{Frame, PixelFormat};
-use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SourceId};
+use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SourceId, TransitionKind};
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
 use crate::gpu::Gpu;
@@ -188,8 +188,40 @@ pub struct Compositor {
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
     chain_cache: HashMap<ItemId, Vec<ChainTex>>,
 
+    /// Studio Mode's transition machinery, built on first use and rebuilt on
+    /// a canvas resize (its scratch textures are canvas-sized).
+    transition: Option<TransitionRig>,
+
     /// CPU time spent encoding + submitting the last render.
     last_render_cpu_micros: u64,
+}
+
+/// Everything one blended transition frame needs: the fullscreen pipeline,
+/// its 16-byte uniform, and two canvas-sized scratch scenes (A = outgoing,
+/// B = incoming) with bind groups the pass samples.
+struct TransitionRig {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind: wgpu::BindGroup,
+    scratch: [(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup); 2],
+    width: u32,
+    height: u32,
+}
+
+/// `[progress, mode, dir.x, dir.y]` for the transition shader. `dir` is the
+/// direction the incoming scene enters from (uv space, y down).
+fn transition_params(kind: TransitionKind, progress: f32) -> [f32; 4] {
+    match kind {
+        TransitionKind::Cut | TransitionKind::Fade => [progress, 0.0, 0.0, 0.0],
+        TransitionKind::SlideLeft => [progress, 1.0, 1.0, 0.0],
+        TransitionKind::SlideRight => [progress, 1.0, -1.0, 0.0],
+        TransitionKind::SlideUp => [progress, 1.0, 0.0, 1.0],
+        TransitionKind::SlideDown => [progress, 1.0, 0.0, -1.0],
+        TransitionKind::SwipeLeft => [progress, 2.0, 1.0, 0.0],
+        TransitionKind::SwipeRight => [progress, 2.0, -1.0, 0.0],
+        TransitionKind::LumaLinear => [progress, 3.0, 0.0, 0.0],
+        TransitionKind::LumaRadial => [progress, 4.0, 0.0, 0.0],
+    }
 }
 
 impl Compositor {
@@ -358,6 +390,7 @@ impl Compositor {
             sources: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
+            transition: None,
             last_render_cpu_micros: 0,
         })
     }
@@ -530,6 +563,187 @@ impl Compositor {
         self.program = program;
         self.program_view = view;
         self.readback = None;
+        // The transition scratch textures are canvas-sized — rebuild lazily.
+        self.transition = None;
+    }
+
+    /// Build (or rebuild after a resize) the transition pipeline + its two
+    /// canvas-sized scratch scenes.
+    fn ensure_transition_rig(&mut self) {
+        let (width, height) = (self.canvas_width, self.canvas_height);
+        if self
+            .transition
+            .as_ref()
+            .is_some_and(|rig| rig.width == width && rig.height == height)
+        {
+            return;
+        }
+        let device = &self.gpu.device;
+
+        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fcap transition uniform"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(16),
+                },
+                count: None,
+            }],
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap transition params"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fcap transition params"),
+            layout: &uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap transition shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/transition.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap transition layout"),
+            bind_group_layouts: &[&uniform_layout, &self.texture_layout, &self.texture_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap transition pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let scratch = [0, 1].map(|_| {
+            let (texture, view) = Self::make_program_texture(device, width, height);
+            let bind = Self::make_texture_bind(
+                device,
+                &self.texture_layout,
+                &self.sampler,
+                &self.repeat_sampler,
+                &view,
+            );
+            (texture, view, bind)
+        });
+
+        self.transition = Some(TransitionRig {
+            pipeline,
+            uniform_buffer,
+            uniform_bind,
+            scratch,
+            width,
+            height,
+        });
+    }
+
+    /// Compose BOTH scenes and blend them into the program texture — one
+    /// Studio-Mode transition frame at `progress` (0→1). `Cut` (or a finished
+    /// progress) renders the incoming scene directly.
+    pub fn render_transition(
+        &mut self,
+        from: &Scene,
+        to: &Scene,
+        kind: TransitionKind,
+        progress: f32,
+        time_seconds: f32,
+    ) -> Result<(), CompositorError> {
+        if matches!(kind, TransitionKind::Cut) || progress >= 1.0 {
+            return self.render(to, time_seconds);
+        }
+        self.ensure_transition_rig();
+
+        let (from_view, to_view) = {
+            let rig = self.transition.as_ref().expect("ensured above");
+            (rig.scratch[0].1.clone(), rig.scratch[1].1.clone())
+        };
+        self.render_to(from, time_seconds, from_view)?;
+        self.render_to(to, time_seconds, to_view)?;
+
+        let rig = self.transition.as_ref().expect("ensured above");
+        self.gpu.queue.write_buffer(
+            &rig.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&transition_params(kind, progress.clamp(0.0, 1.0))),
+        );
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap transition"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap transition pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            pass.set_bind_group(0, &rig.uniform_bind, &[]);
+            pass.set_bind_group(1, &rig.scratch[0].2, &[]);
+            pass.set_bind_group(2, &rig.scratch[1].2, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Compose `scene` into the Studio-Mode preview scratch (the second
+    /// transition scratch texture) and read it back — the preview pane's
+    /// frame. Reuses the transition machinery so no third texture exists.
+    pub fn render_preview_scene(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+    ) -> Result<ProgramFrame, CompositorError> {
+        self.ensure_transition_rig();
+        let (texture, view) = {
+            let rig = self.transition.as_ref().expect("ensured above");
+            (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
+        };
+        self.render_to(scene, time_seconds, view)?;
+        self.read_texture(&texture)
     }
 
     /// The last uploaded size of a source, if any frame arrived yet.
@@ -711,6 +925,19 @@ impl Compositor {
     /// first, each item through its own GPU chain; `time_seconds` drives the
     /// time-based ones (Scroll).
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
+        let target = self.program_view.clone();
+        self.render_to(scene, time_seconds, target)
+    }
+
+    /// Compose `scene` into an arbitrary canvas-sized target — the program
+    /// texture normally; a transition's scratch textures / the Studio-Mode
+    /// preview pane otherwise.
+    fn render_to(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        target: wgpu::TextureView,
+    ) -> Result<(), CompositorError> {
         let started = Instant::now();
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
 
@@ -867,7 +1094,7 @@ impl Compositor {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("fcap program pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.program_view,
+                    view: &target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -957,6 +1184,13 @@ impl Compositor {
     /// Read the current program texture back to the CPU (tight RGBA rows).
     /// Blocking — call from the render thread, at the consumer's pace.
     pub fn read_program(&mut self) -> Result<ProgramFrame, CompositorError> {
+        let texture = self.program.clone();
+        self.read_texture(&texture)
+    }
+
+    /// Read a canvas-sized texture back to the CPU (tight RGBA rows) —
+    /// the program normally; the Studio-Mode preview scratch otherwise.
+    fn read_texture(&mut self, texture: &wgpu::Texture) -> Result<ProgramFrame, CompositorError> {
         let width = self.canvas_width;
         let height = self.canvas_height;
         let unpadded = width as u64 * 4;
@@ -987,7 +1221,7 @@ impl Compositor {
             });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.program,
+                texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,

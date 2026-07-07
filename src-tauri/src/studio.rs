@@ -66,6 +66,26 @@ const PREVIEW_JPEG_QUALITY: u8 = 75;
 pub struct StudioDto {
     pub revision: u64,
     pub collection: Collection,
+    /// Studio Mode (Phase 5): present while enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_mode: Option<StudioModeDto>,
+}
+
+/// The Studio-Mode slice of the model (session state, never persisted).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioModeDto {
+    pub preview_scene: SceneId,
+    /// A Preview→Program blend is running right now.
+    pub transitioning: bool,
+}
+
+/// A running Preview→Program commit blend.
+struct ActiveTransition {
+    from: SceneId,
+    kind: fcap_scene::TransitionKind,
+    duration: Duration,
+    started: Instant,
 }
 
 struct StudioCore {
@@ -78,6 +98,22 @@ struct StudioCore {
     /// the recovery path for errored captures (unplugged camera, permission
     /// granted after a denial, closed window reopened).
     retry_nonces: HashMap<SourceId, u64>,
+    /// Studio Mode (Phase 5): the preview-side scene while enabled.
+    preview_scene: Option<SceneId>,
+    /// The blend a commit is currently rendering, if any.
+    transition: Option<ActiveTransition>,
+}
+
+/// The DTO for the current core state (one shape for every emit site).
+fn dto_of(core: &StudioCore) -> StudioDto {
+    StudioDto {
+        revision: core.revision,
+        collection: core.collection.clone(),
+        studio_mode: core.preview_scene.map(|preview_scene| StudioModeDto {
+            preview_scene,
+            transitioning: core.transition.is_some(),
+        }),
+    }
 }
 
 /// Tauri-managed handle to the studio model.
@@ -86,10 +122,14 @@ pub struct StudioState {
 }
 
 impl StudioState {
-    /// Load the persisted collection (or start fresh) from the OS config dir.
+    /// Load the *active* collection (per `workspace.json`) — so a scene-
+    /// collection switch survives a restart — or start fresh.
     pub fn load_default() -> Self {
-        let path = directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-            .map(|dirs| dirs.config_dir().join("scene-collection.json"));
+        let config_dir = directories::ProjectDirs::from("com", "Freally", "Freally Capture")
+            .map(|dirs| dirs.config_dir().to_path_buf());
+        let path = config_dir
+            .as_ref()
+            .map(|dir| collection_file(dir, &active_collection_name(dir)));
         let collection = match &path {
             Some(path) => read_collection(path),
             None => {
@@ -104,6 +144,8 @@ impl StudioState {
                 path,
                 dirty_since: None,
                 retry_nonces: HashMap::new(),
+                preview_scene: None,
+                transition: None,
             })),
         }
     }
@@ -129,11 +171,79 @@ impl StudioState {
 
     /// A snapshot for `studio_get` / event payloads.
     pub fn snapshot(&self) -> StudioDto {
-        let core = self.lock();
-        StudioDto {
-            revision: core.revision,
-            collection: core.collection.clone(),
-        }
+        dto_of(&self.lock())
+    }
+
+    /// Toggle Studio Mode: on = the preview side starts on the program scene;
+    /// off = any running blend finishes as a cut.
+    pub fn set_studio_mode<R: Runtime>(&self, app: &AppHandle<R>, on: bool) {
+        let dto = {
+            let mut core = self.lock();
+            core.preview_scene = on.then(|| core.collection.active_scene);
+            if !on {
+                core.transition = None;
+            }
+            core.revision += 1;
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
+    }
+
+    /// Point the preview pane at a scene (Studio Mode only).
+    pub fn set_preview_scene<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        scene: SceneId,
+    ) -> Result<(), String> {
+        let dto = {
+            let mut core = self.lock();
+            if core.preview_scene.is_none() {
+                return Err("studio mode is off".to_string());
+            }
+            if core.collection.scene(scene).is_none() {
+                return Err("scene not found".to_string());
+            }
+            core.preview_scene = Some(scene);
+            core.revision += 1;
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
+        Ok(())
+    }
+
+    /// Commit Preview → Program through `kind` over `duration` (the audience
+    /// sees the blend; the panes swap, OBS-style).
+    pub fn begin_transition<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        kind: fcap_scene::TransitionKind,
+        duration: Duration,
+    ) -> Result<(), String> {
+        let dto = {
+            let mut core = self.lock();
+            let preview = core.preview_scene.ok_or("studio mode is off")?;
+            let from = core.collection.active_scene;
+            if preview == from {
+                return Ok(()); // both panes show the same scene — nothing to do
+            }
+            core.collection
+                .set_active_scene(preview)
+                .map_err(|err| err.to_string())?;
+            core.preview_scene = Some(from); // the panes swap
+            if !matches!(kind, fcap_scene::TransitionKind::Cut) {
+                core.transition = Some(ActiveTransition {
+                    from,
+                    kind,
+                    duration: duration.max(Duration::from_millis(50)),
+                    started: Instant::now(),
+                });
+            }
+            core.revision += 1;
+            core.dirty_since.get_or_insert_with(Instant::now);
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
+        Ok(())
     }
 
     /// The current model revision — a cheap read the audio bridge polls to
@@ -183,10 +293,7 @@ impl StudioState {
             let value = apply(&mut core.collection).map_err(|err| err.to_string())?;
             core.revision += 1;
             core.dirty_since.get_or_insert_with(Instant::now);
-            let dto = StudioDto {
-                revision: core.revision,
-                collection: core.collection.clone(),
-            };
+            let dto = dto_of(&core);
             (value, dto)
         };
         let _ = app.emit("studio", &dto.1);
@@ -199,6 +306,40 @@ impl StudioState {
         if core.dirty_since.is_some() {
             persist(&mut core);
         }
+    }
+
+    /// Scene-collection switching (TASK-506): save the current scenes to
+    /// `save_as` (migrating them into the collections dir on first use),
+    /// then either keep them as a duplicate under `load` (create) or load
+    /// `load` from disk (switch). The autosave writes to the new file from
+    /// here on. Studio Mode state resets — it referenced the old scenes.
+    pub fn switch_collection_file<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        save_as: PathBuf,
+        load: PathBuf,
+        duplicate: bool,
+    ) -> Result<(), String> {
+        let dto = {
+            let mut core = self.lock();
+            let json = serde_json::to_string_pretty(&core.collection)
+                .expect("the scene collection always serializes");
+            write_atomic(&save_as, &json).map_err(|err| err.to_string())?;
+            if duplicate {
+                write_atomic(&load, &json).map_err(|err| err.to_string())?;
+            } else {
+                core.collection = read_collection(&load);
+            }
+            core.path = Some(load);
+            core.dirty_since = None;
+            core.preview_scene = None;
+            core.transition = None;
+            core.retry_nonces.clear();
+            core.revision += 1;
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
+        Ok(())
     }
 }
 
@@ -272,6 +413,31 @@ pub struct AudioSourceSpec {
     pub audio: AudioSettings,
     /// The retry nonce — bumping it forces a device reopen.
     pub nonce: u64,
+}
+
+/// The on-disk file for a named scene collection: the live
+/// `scene-collection.json` for `"Default"`, else `collections/<name>.json`.
+/// The single source of truth for this mapping (used by load + the switcher).
+pub fn collection_file(config_dir: &std::path::Path, name: &str) -> PathBuf {
+    if name == crate::profiles::DEFAULT_NAME {
+        config_dir.join("scene-collection.json")
+    } else {
+        config_dir.join("collections").join(format!("{name}.json"))
+    }
+}
+
+/// The active collection name from `workspace.json` (or `"Default"`).
+fn active_collection_name(config_dir: &std::path::Path) -> String {
+    std::fs::read_to_string(config_dir.join("workspace.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| {
+            value
+                .get("collection")
+                .and_then(|name| name.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| crate::profiles::DEFAULT_NAME.to_string())
 }
 
 fn read_collection(path: &std::path::Path) -> Collection {
@@ -485,6 +651,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut composed_this_second = 0u32;
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
+    // Whether the Studio-Mode preview pane currently has a published frame
+    // (so turning the mode off clears the slot exactly once).
+    let mut studio_preview_live = false;
     // Per-source auto-recover backoff: source id → (next attempt time, last wait).
     let mut retry_schedule: HashMap<SourceId, (Instant, Duration)> = HashMap::new();
     let mut statuses_changed = true;
@@ -515,8 +684,50 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let tick_started = Instant::now();
 
         // -- 1. Snapshot the model (brief lock) --------------------------------
-        let (revision, scene, scene_sources, canvas, nonces) = {
-            let guard = lock_core(&core);
+        let mut transition_ended: Option<StudioDto> = None;
+        let (revision, scene, scene_sources, canvas, nonces, preview_scene, transition_pack) = {
+            let mut guard = lock_core(&core);
+            // A finished blend clears here, under the command lock.
+            let transition_pack = match &guard.transition {
+                Some(tr) => {
+                    let progress =
+                        tr.started.elapsed().as_secs_f32() / tr.duration.as_secs_f32().max(1e-3);
+                    if progress >= 1.0 {
+                        guard.transition = None;
+                        guard.revision += 1;
+                        // Emit so the UI's `transitioning` flag flips off (the
+                        // loop's own studio emit is gated on first-frame fits).
+                        transition_ended = Some(dto_of(&guard));
+                        None
+                    } else {
+                        guard
+                            .collection
+                            .scene(tr.from)
+                            .cloned()
+                            .map(|from_scene| (from_scene, tr.kind, progress))
+                    }
+                }
+                None => None,
+            };
+            let preview_scene = guard
+                .preview_scene
+                .filter(|id| *id != guard.collection.active_scene)
+                .and_then(|id| guard.collection.scene(id).cloned());
+            // The sources that must run: the program scene's, plus (Studio
+            // Mode) the preview pane's, plus the outgoing scene's mid-blend.
+            let mut live_sources: Vec<SourceId> = guard
+                .collection
+                .active_scene()
+                .items
+                .iter()
+                .map(|item| item.source)
+                .collect();
+            if let Some(preview) = &preview_scene {
+                live_sources.extend(preview.items.iter().map(|item| item.source));
+            }
+            if let Some((from_scene, _, _)) = &transition_pack {
+                live_sources.extend(from_scene.items.iter().map(|item| item.source));
+            }
             (
                 guard.revision,
                 guard.collection.active_scene().clone(),
@@ -524,14 +735,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     .collection
                     .sources
                     .iter()
-                    .filter(|source| {
-                        guard
-                            .collection
-                            .active_scene()
-                            .items
-                            .iter()
-                            .any(|item| item.source == source.id)
-                    })
+                    .filter(|source| live_sources.contains(&source.id))
                     .cloned()
                     .collect::<Vec<_>>(),
                 (
@@ -539,8 +743,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     guard.collection.canvas_height,
                 ),
                 guard.retry_nonces.clone(),
+                preview_scene,
+                transition_pack,
             )
         };
+        if let Some(dto) = transition_ended {
+            let _ = app.emit("studio", &dto);
+        }
         compositor.set_canvas_size(canvas.0, canvas.1);
 
         // -- 2. Reconcile sources against the active scene ---------------------
@@ -639,9 +848,19 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             compositor.retain_sources(&keep_ids);
 
-            // Filter files (LUT lattices, mask images).
+            // Filter files (LUT lattices, mask images) — the preview pane's
+            // and the outgoing scene's filters render too.
+            let extra_items: Vec<fcap_scene::SceneItem> = preview_scene
+                .iter()
+                .flat_map(|preview| preview.items.iter().cloned())
+                .chain(
+                    transition_pack
+                        .iter()
+                        .flat_map(|(from_scene, _, _)| from_scene.items.iter().cloned()),
+                )
+                .collect();
             let mut live_filters: Vec<FilterId> = Vec::new();
-            for item in &scene.items {
+            for item in scene.items.iter().chain(extra_items.iter()) {
                 for filter in &item.filters {
                     if let Some(path) = filter_file_path(&filter.kind) {
                         live_filters.push(filter.id);
@@ -781,10 +1000,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
                 guard.revision += 1;
                 guard.dirty_since.get_or_insert_with(Instant::now);
-                StudioDto {
-                    revision: guard.revision,
-                    collection: guard.collection.clone(),
-                }
+                dto_of(&guard)
             };
             if app.emit("studio", &dto).is_err() {
                 break;
@@ -793,7 +1009,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // -- 6. Compose + preview ------------------------------------------------
         let time = started_at.elapsed().as_secs_f32();
-        if let Err(err) = compositor.render(&scene, time) {
+        // A running Studio-Mode commit renders BOTH scenes and blends them;
+        // otherwise the program scene composes directly.
+        let compose_result = match &transition_pack {
+            Some((from_scene, kind, progress)) => {
+                compositor.render_transition(from_scene, &scene, *kind, *progress, time)
+            }
+            None => compositor.render(&scene, time),
+        };
+        if let Err(err) = compose_result {
             eprintln!("studio: compose failed: {err}");
         }
         composed_this_second += 1;
@@ -866,19 +1090,24 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
-        // The recorder wants the full-res program frame every tick while a
-        // session runs; the preview JPEG keeps its ~30 fps cadence. One
-        // readback serves both.
+        // The recorder + the live stream want the full-res program frame
+        // every tick while their sessions run; the preview JPEG keeps its
+        // ~30 fps cadence. One readback serves all three.
         let recording = app.state::<crate::recording::RecordingState>();
+        let streaming = app.state::<crate::stream::StreamBridgeState>();
         let record_due = recording.wants_frames();
+        let stream_due = streaming.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if record_due || preview_due {
+        if record_due || stream_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
                     let data = Arc::new(frame.data);
                     if record_due {
                         recording.push_video(Arc::clone(&data));
+                    }
+                    if stream_due {
+                        streaming.push_video(Arc::clone(&data));
                     }
                     if preview_due {
                         if let Some(jpeg) = encode_program_jpeg(
@@ -895,6 +1124,37 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                 }
                 Err(err) => eprintln!("studio: program readback failed: {err}"),
+            }
+        }
+
+        // -- 5b. The Studio-Mode preview pane (its own JPEG slot) ----------------
+        if preview_due {
+            match &preview_scene {
+                Some(pane_scene) => {
+                    match compositor
+                        .render_preview_scene(pane_scene, started_at.elapsed().as_secs_f32())
+                    {
+                        Ok(frame) => {
+                            let jpeg = encode_program_jpeg(
+                                frame.width,
+                                frame.height,
+                                &frame.data,
+                                PREVIEW_MAX_WIDTH,
+                                PREVIEW_MAX_HEIGHT,
+                                PREVIEW_JPEG_QUALITY,
+                            );
+                            preview.publish_studio_preview(jpeg);
+                        }
+                        Err(err) => eprintln!("studio: preview pane compose failed: {err}"),
+                    }
+                    studio_preview_live = true;
+                }
+                None if studio_preview_live => {
+                    // Mode off (or the panes show one scene): clear the slot.
+                    preview.publish_studio_preview(None);
+                    studio_preview_live = false;
+                }
+                None => {}
             }
         }
 
@@ -927,6 +1187,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 dropped,
                 sources,
             };
+            // Hand the render numbers to the stats dock's emitter.
+            app.state::<crate::events::RuntimeStats>().publish(
+                status.fps,
+                status.dropped,
+                status.render_micros,
+            );
             if app.emit("program", &status).is_err() {
                 break; // the app is gone — wind down
             }

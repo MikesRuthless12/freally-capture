@@ -7,10 +7,22 @@
 //! **virtual camera**; the rolling **replay buffer**; and the off-by-default,
 //! password-protected **WebSocket remote-control API** bound to `127.0.0.1`.
 //!
-//! **Phase 0 stub** — the crate boundary exists; streaming lands in Phase 5
-//! (→ 0.70.0, first public), depth in Phases 6–7.
+//! **Phase 5:** single-target RTMP/RTMPS is here — [`rtmp`] (service ingest
+//! presets + the secret-safe publish URL) and [`session`] (the supervised
+//! stream engine: reconnect with backoff, optional broadcast delay, honest
+//! status). Multistream/SRT/WHIP, the virtual camera, the replay buffer, and
+//! the remote API land in Phases 6–7.
 
 #![forbid(unsafe_code)]
+
+pub mod rtmp;
+pub mod session;
+
+pub use rtmp::{StreamService, StreamTarget, TargetError};
+pub use session::{
+    backoff, SinkFactory, StreamHandle, StreamSession, StreamSpec, StreamState, StreamStatus,
+    MAX_RECONNECT_ATTEMPTS,
+};
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

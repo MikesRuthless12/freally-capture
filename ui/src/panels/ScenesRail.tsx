@@ -6,16 +6,20 @@ import {
   studioRenameScene,
   studioReorderScene,
   studioSelectScene,
+  studioSetPreviewScene,
 } from "../api/commands";
-import type { Collection } from "../api/types";
+import type { Collection, SceneId } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 
 type ScenesRailProps = {
   collection: Collection | null;
+  /** Studio Mode: clicks target the preview pane; this scene shows green. */
+  previewScene?: SceneId | null;
 };
 
-/** The Scenes rail: create/rename/remove/reorder scenes; click = program. */
-export function ScenesRail({ collection }: ScenesRailProps) {
+/** The Scenes rail: create/rename/remove/reorder scenes; click = program
+ * (or, in Studio Mode, the preview pane). */
+export function ScenesRail({ collection, previewScene }: ScenesRailProps) {
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const scenes = collection?.scenes ?? [];
 
@@ -52,6 +56,7 @@ export function ScenesRail({ collection }: ScenesRailProps) {
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {scenes.map((scene, index) => {
             const isActive = scene.id === collection?.activeScene;
+            const isPreview = previewScene != null && scene.id === previewScene;
             const isRenaming = renaming?.id === scene.id;
             return (
               <li key={scene.id}>
@@ -59,7 +64,9 @@ export function ScenesRail({ collection }: ScenesRailProps) {
                   className={`group flex items-center gap-1 rounded-lg border px-2 py-1.5 ${
                     isActive
                       ? "border-havoc-accent/50 bg-havoc-accent/10"
-                      : "border-white/10 bg-white/[0.02]"
+                      : isPreview
+                        ? "border-emerald-400/50 bg-emerald-500/10"
+                        : "border-white/10 bg-white/[0.02]"
                   }`}
                 >
                   {isRenaming ? (
@@ -78,9 +85,20 @@ export function ScenesRail({ collection }: ScenesRailProps) {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => studioSelectScene(scene.id).catch(fail("scene select"))}
+                      onClick={() =>
+                        (previewScene != null
+                          ? studioSetPreviewScene(scene.id)
+                          : studioSelectScene(scene.id)
+                        ).catch(fail("scene select"))
+                      }
                       onDoubleClick={() => setRenaming({ id: scene.id, draft: scene.name })}
-                      title={isActive ? "On program" : `Switch to ${scene.name}`}
+                      title={
+                        isActive
+                          ? "On program"
+                          : previewScene != null
+                            ? `Preview ${scene.name}`
+                            : `Switch to ${scene.name}`
+                      }
                       className="min-w-0 flex-1 truncate text-left text-xs text-havoc-text"
                     >
                       {scene.name}

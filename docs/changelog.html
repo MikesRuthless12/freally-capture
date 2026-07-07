@@ -20,8 +20,49 @@
     </header>
 
     <main>
-      <!-- 0.56.0 — native GPU preview + window capture -->
+      <!-- 0.70.0 — streaming + Studio MVP (first public) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.70.0</span>
+            <span class="date">Jul 6, 2026 · Streaming + Studio MVP</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases">Releases</a>
+        </div>
+
+        <h2>0.70.0 — Streaming + Studio MVP (first public)</h2>
+        <p class="summary">
+          The one that makes it a studio you can <strong>go live</strong> with. Single-target
+          streaming over RTMP/RTMPS to Twitch, YouTube, Kick, Facebook, and Trovo with
+          auto-reconnect; <strong>Studio Mode</strong> (preview/program) with GPU transitions; global
+          hotkeys; switchable profiles + scene collections; a real fps/CPU/GPU stats dock — and
+          <strong>opt-in P2P remote guests</strong>. The local recording keeps running no matter what
+          the stream does.
+        </p>
+
+        <h3>Live streaming</h3>
+        <ul class="features">
+          <li><strong>Go Live</strong> single-target over RTMP/RTMPS to Twitch / YouTube / Kick / Facebook / Trovo / custom ingest — direct to the platform, no restream server, no account. Auto-reconnect with backoff rides out a hiccup.</li>
+          <li>The <strong>stream key is treated as a secret</strong> — masked in the UI, never logged, and scrubbed out of any error message.</li>
+          <li>A pulsing <strong>LIVE</strong> button with an HH:MM:SS elapsed clock and honest reconnecting/failed states; an optional <strong>auto-record on Go Live</strong>. The <strong>local recording is sacred</strong> — a stream dying can never touch it.</li>
+        </ul>
+
+        <h3>Studio Mode + control</h3>
+        <ul class="features">
+          <li><strong>Studio Mode</strong>: edit a preview scene, then commit it to the program through a GPU transition — cut, fade, slide, swipe, or a luma wipe — so the audience sees only the finished blend.</li>
+          <li><strong>Global hotkeys</strong> for record, Go Live, and transition; switchable <strong>profiles</strong> (settings) + <strong>scene collections</strong>; and a stats dock now showing real fps, dropped frames, GPU render time, and CPU/memory.</li>
+          <li><strong>Remote guests (opt-in P2P):</strong> host up to three guests over WebRTC — their camera + mic land in your scene, positionable into corners with one click, with a two-gate mute and screen-share hand-off. Free by default; media stays peer-to-peer.</li>
+        </ul>
+
+        <p class="note">
+          The <strong>virtual camera</strong> follows as its own milestone right after 0.70.0 — a real
+          virtual camera is a signed OS driver component, built and signed on its own. Multistream to
+          several platforms, SRT/WHIP, and the replay buffer arrive in 0.85.0.
+        </p>
+      </article>
+
+      <!-- 0.56.0 — native GPU preview + window capture -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.56.0</span>
@@ -57,8 +98,8 @@
         </ul>
 
         <p class="note">
-          Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, and the
-          virtual camera.
+          Next: 0.70.0 (studio MVP) — single-target streaming, Studio Mode + transitions, hotkeys,
+          profiles, and remote guests (above).
         </p>
       </article>
 

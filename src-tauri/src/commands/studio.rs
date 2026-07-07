@@ -249,6 +249,45 @@ pub fn studio_set_center_view(
     })
 }
 
+/// Studio Mode (Phase 5): on = a preview pane opens on the program scene;
+/// off = back to single-pane editing.
+#[tauri::command]
+pub fn studio_set_studio_mode(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    on: bool,
+) -> Result<(), String> {
+    state.set_studio_mode(&app, on);
+    Ok(())
+}
+
+/// Point the Studio-Mode preview pane at a scene.
+#[tauri::command]
+pub fn studio_set_preview_scene(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+) -> Result<(), String> {
+    state.set_preview_scene(&app, scene_id)
+}
+
+/// Commit Preview → Program through the configured transition — the audience
+/// sees the blend; the panes swap (OBS semantics).
+#[tauri::command]
+pub fn studio_transition(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    settings: State<'_, crate::settings::SettingsStore>,
+) -> Result<(), String> {
+    let transition = settings.get().transition;
+    transition.validate()?;
+    state.begin_transition(
+        &app,
+        transition.kind,
+        std::time::Duration::from_millis(u64::from(transition.duration_ms)),
+    )
+}
+
 /// Highlight Speaker (Focus/Spotlight): `Some(item)` promotes that item to
 /// fill the canvas (hiding the other video items); `None` restores the exact
 /// pre-focus layout.

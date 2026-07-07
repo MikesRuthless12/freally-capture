@@ -9,11 +9,15 @@ import {
 } from "../api/commands";
 import { onRecording } from "../api/events";
 import type { RecordingStatus, Settings } from "../api/types";
+import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
+import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsOutput } from "./SettingsOutput";
+import { SettingsStream } from "./SettingsStream";
+import { WorkspaceDialog } from "./WorkspaceDialog";
 
 const buttonBase =
   "w-full rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
@@ -29,7 +33,9 @@ export function ControlsDock({
   const [rec, setRec] = useState<RecordingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"components" | "output" | "recordings" | null>(null);
+  const [dialog, setDialog] = useState<
+    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | null
+  >(null);
 
   useEffect(() => {
     let alive = true;
@@ -148,18 +154,15 @@ export function ControlsDock({
             {rec?.state === "paused" ? "▶ Resume Recording" : "⏸ Pause Recording"}
           </button>
         )}
+        <LiveButton
+          disabled={!settings}
+          onNeedsComponents={() => setDialog("components")}
+          onNeedsSettings={() => setDialog("stream")}
+        />
         <button
           type="button"
           disabled
-          title="Streaming arrives with the studio MVP (0.70.0)"
-          className={`${buttonBase} border-havoc-accent/40 bg-gradient-to-r from-havoc-accent/20 to-havoc-accent-2/20 text-havoc-text`}
-        >
-          ⦿ Go Live
-        </button>
-        <button
-          type="button"
-          disabled
-          title="The virtual camera arrives with the studio MVP (0.70.0)"
+          title="The virtual camera needs its own signed driver component (a DirectShow/MediaFoundation source other apps can open) — it ships as its own milestone right after 0.70.0"
           className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text`}
         >
           ⌁ Start Virtual Camera
@@ -183,11 +186,35 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("stream")}
+            title="Go Live target: service, stream key, encoder, bitrate"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⦿ Stream…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("components")}
             title="The on-demand ffmpeg wire-codec component (clearly labeled, never bundled)"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
             ⬡ Codecs…
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("hotkeys")}
+            title="Global hotkeys: record, Go Live, transition"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⌨ Keys…
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("workspace")}
+            title="Profiles (settings) + scene collections — switchable snapshots"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ▣ Profiles…
           </button>
         </div>
         {shownError && (
@@ -210,6 +237,24 @@ export function ControlsDock({
           onClose={() => setDialog(null)}
           onOpenComponents={() => setDialog("components")}
         />
+      )}
+      {dialog === "stream" && (
+        <SettingsStream
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+          onOpenComponents={() => setDialog("components")}
+        />
+      )}
+      {dialog === "hotkeys" && (
+        <SettingsHotkeys
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "workspace" && (
+        <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />
       )}
     </Panel>
   );

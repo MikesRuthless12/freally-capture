@@ -31,7 +31,7 @@ pub use audio::{
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
 pub use scene::{
     BlendMode, Corner, Crop, FocusRestore, FocusState, ItemId, NormRect, Scene, SceneId, SceneItem,
-    Transform,
+    Transform, TransitionKind,
 };
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 

@@ -615,6 +615,157 @@ impl FfmpegSink {
     }
 }
 
+/// What a live stream pushes and how (Phase 5): H.264 + AAC in FLV to an
+/// RTMP/RTMPS publish URL. One audio lane — the program mix. The URL embeds
+/// the stream key, so this struct redacts it from `Debug` (never logged).
+#[derive(Clone)]
+pub struct RtmpPlan {
+    pub encoder_id: String,
+    pub rate_control: RateControl,
+    pub preset: EncPreset,
+    pub keyframe_sec: f32,
+    pub audio_bitrate_kbps: u32,
+    /// The full publish URL (`rtmp://…` or `rtmps://…`), key included.
+    pub url: String,
+}
+
+impl std::fmt::Debug for RtmpPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RtmpPlan")
+            .field("encoder_id", &self.encoder_id)
+            .field("rate_control", &self.rate_control)
+            .field("preset", &self.preset)
+            .field("keyframe_sec", &self.keyframe_sec)
+            .field("audio_bitrate_kbps", &self.audio_bitrate_kbps)
+            .field("url", &"[redacted publish url]")
+            .finish()
+    }
+}
+
+impl FfmpegSink {
+    /// Spawn the labeled ffmpeg component publishing FLV to an RTMP(S)
+    /// ingest. The streaming twin of [`FfmpegSink::spawn`]: the same
+    /// rawvideo-stdin and loopback-audio plumbing and backpressure rules,
+    /// with the muxer output aimed at the network instead of a file.
+    /// `spec.tracks` must name exactly one mixer track (the stream's
+    /// program audio).
+    pub fn spawn_rtmp(ffmpeg: &Ffmpeg, spec: &RecordSpec, plan: &RtmpPlan) -> Result<Self, String> {
+        if spec.tracks.len() != 1 {
+            return Err("a stream carries exactly one audio track".to_string());
+        }
+        if !(plan.url.starts_with("rtmp://") || plan.url.starts_with("rtmps://")) {
+            return Err("the publish URL must start with rtmp:// or rtmps://".to_string());
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
+        let port = listener.local_addr().map_err(|err| err.to_string())?.port();
+
+        let keyint = (plan.keyframe_sec.max(0.25) * spec.fps as f32).round() as u32;
+        let mut cmd = crate::ffmpeg::command(ffmpeg);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        cmd.args(["-hide_banner", "-v", "error", "-y"]);
+        cmd.args(global_args(&plan.encoder_id));
+        cmd.args([
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            &format!("{}x{}", spec.width, spec.height),
+            "-r",
+            &spec.fps.to_string(),
+            "-i",
+            "pipe:0",
+        ]);
+        cmd.args([
+            "-f",
+            "f32le",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-i",
+            &format!("tcp://127.0.0.1:{port}"),
+        ]);
+        cmd.args(["-map", "0:v", "-map", "1:a"]);
+        cmd.args(video_args(
+            &plan.encoder_id,
+            &plan.rate_control,
+            plan.preset,
+            keyint,
+        ));
+        // FLV requires AAC on this path (the Webm/Opus branch never applies).
+        cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps));
+        cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
+        cmd.arg(&plan.url);
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
+        let stdin = child.stdin.take().expect("stdin piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+        // ffmpeg echoes the full output URL — **key included** — into stderr
+        // when the ingest rejects the connection (a wrong/expired key, the
+        // single most common failure). That tail flows into the user-visible
+        // error, so scrub the secret out at the source: the publish URL never
+        // survives into any string this sink hands back.
+        let secret = plan.url.clone();
+        let stderr_thread = std::thread::Builder::new()
+            .name("fcap-stream-ffmpeg-err".into())
+            .spawn(move || {
+                use std::io::Read;
+                let mut tail = Vec::new();
+                let mut reader = std::io::BufReader::new(stderr);
+                let _ = reader.read_to_end(&mut tail);
+                if tail.len() > 4096 {
+                    tail.drain(..tail.len() - 4096);
+                }
+                scrub_secret(&tail, secret.as_bytes())
+            })
+            .map_err(|err| err.to_string())?;
+
+        let connect_cancel = Arc::new(AtomicBool::new(false));
+        let (video_tx, video_thread) = spawn_video_writer(stdin)?;
+        let lanes = vec![spawn_audio_writer(listener, Arc::clone(&connect_cancel))?];
+
+        Ok(FfmpegSink {
+            child,
+            video_tx: Some(video_tx),
+            video_thread: Some(video_thread),
+            lanes,
+            stderr_thread: Some(stderr_thread),
+            connect_cancel,
+            paths: Vec::new(), // a stream produces no files
+            split: false,
+        })
+    }
+}
+
+/// Replace every occurrence of `secret` in `haystack` with `[redacted]` — the
+/// stream key must never survive an ffmpeg stderr tail into a visible error.
+/// A byte-level replace (stderr is arbitrary bytes; the URL is ASCII).
+fn scrub_secret(haystack: &[u8], secret: &[u8]) -> Vec<u8> {
+    if secret.is_empty() || haystack.len() < secret.len() {
+        return haystack.to_vec();
+    }
+    const MASK: &[u8] = b"[redacted]";
+    let mut out = Vec::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < haystack.len() {
+        if haystack[i..].starts_with(secret) {
+            out.extend_from_slice(MASK);
+            i += secret.len();
+        } else {
+            out.push(haystack[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// `name.mkv` → `name part%03d.mkv` for the segment muxer.
 fn segment_template(base: &Path) -> PathBuf {
     part_sibling(base, "%03d", "mkv")
@@ -901,6 +1052,9 @@ impl RecordSink for FfmpegSink {
                 String::from_utf8_lossy(&stderr_tail).trim()
             ));
         }
+        if self.paths.is_empty() {
+            return Ok(Vec::new()); // a stream sink produces no files
+        }
         let template = self.paths.remove(0);
         Ok(if self.split {
             expand_segments(&template)
@@ -929,6 +1083,23 @@ impl Drop for FfmpegSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scrub_secret_removes_the_publish_url_from_stderr() {
+        let url = b"rtmp://live.twitch.tv/app/live_abc123_secretkey";
+        let stderr = b"[flv @ 0x1] Error opening output rtmp://live.twitch.tv/app/live_abc123_secretkey: I/O error\n";
+        let scrubbed = scrub_secret(stderr, url);
+        let text = String::from_utf8_lossy(&scrubbed);
+        assert!(!text.contains("secretkey"), "key leaked: {text}");
+        assert!(text.contains("[redacted]"));
+        assert!(text.contains("Error opening output"), "the rest survives");
+    }
+
+    #[test]
+    fn scrub_secret_is_a_noop_without_the_secret() {
+        assert_eq!(scrub_secret(b"clean line", b"nope"), b"clean line");
+        assert_eq!(scrub_secret(b"anything", b""), b"anything");
+    }
 
     fn rc(mode: RcMode) -> RateControl {
         RateControl {
