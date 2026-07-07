@@ -24,6 +24,7 @@ pub enum HotkeyAction {
     GoLiveToggle,
     Transition,
     SaveReplay,
+    AddMarker,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -109,6 +110,11 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
                 eprintln!("hotkey: replay save failed: {err}");
             }
         }
+        HotkeyAction::AddMarker => {
+            if let Err(err) = crate::recording::add_marker(app) {
+                eprintln!("hotkey: marker failed: {err}");
+            }
+        }
     }
 }
 
@@ -127,6 +133,7 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
         (&settings.go_live, HotkeyAction::GoLiveToggle),
         (&settings.transition, HotkeyAction::Transition),
         (&settings.save_replay, HotkeyAction::SaveReplay),
+        (&settings.add_marker, HotkeyAction::AddMarker),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

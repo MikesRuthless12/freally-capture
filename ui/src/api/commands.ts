@@ -92,6 +92,11 @@ export function replaySave(): Promise<string> {
   return invoke<string>("replay_save");
 }
 
+/** Drop a chapter marker at the current recording position (TASK-610). */
+export function recordingAddMarker(): Promise<number> {
+  return invoke<number>("recording_add_marker");
+}
+
 /** The current replay-buffer status (the `replay` event pushes the same). */
 export function replayStatus(): Promise<ReplayStatus> {
   return invoke<ReplayStatus>("replay_status");

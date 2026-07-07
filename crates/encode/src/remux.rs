@@ -143,9 +143,83 @@ pub fn concat_copy(ffmpeg: &Ffmpeg, segments: &[PathBuf], out: &Path) -> Result<
     Ok(())
 }
 
+/// The FFMETADATA chapter block for marker timestamps (ms). Each chapter
+/// runs to the next marker (the last to `total_ms`, or +1 s past itself).
+fn ffmetadata_chapters(markers_ms: &[u64], total_ms: Option<u64>) -> String {
+    let mut text = String::from(";FFMETADATA1\n");
+    for (index, &start) in markers_ms.iter().enumerate() {
+        let end = markers_ms
+            .get(index + 1)
+            .copied()
+            .or(total_ms.filter(|total| *total > start))
+            .unwrap_or(start + 1_000);
+        text.push_str(&format!(
+            "[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle=Marker {}\n",
+            index + 1
+        ));
+    }
+    text
+}
+
+/// Embed `markers_ms` as chapters into an **mkv** recording (TASK-610): a
+/// stream-copy remux with the chapter metadata attached, replacing the
+/// original file. Non-mkv containers get a sidecar (the app writes it) —
+/// mp4 chapter atoms are not worth a full rewrite of a fresh recording.
+pub fn write_mkv_chapters(
+    ffmpeg: &Ffmpeg,
+    input: &Path,
+    markers_ms: &[u64],
+    total_ms: Option<u64>,
+) -> Result<(), String> {
+    if markers_ms.is_empty() {
+        return Ok(());
+    }
+    if input.extension().and_then(|ext| ext.to_str()) != Some("mkv") {
+        return Err("chapters embed into mkv recordings".to_string());
+    }
+    let meta_path = input.with_extension("ffmeta.txt");
+    std::fs::write(&meta_path, ffmetadata_chapters(markers_ms, total_ms))
+        .map_err(|err| format!("could not write the chapter metadata: {err}"))?;
+    let tmp_path = input.with_extension("chapters.tmp.mkv");
+
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+        .arg(input);
+    cmd.args(["-f", "ffmetadata", "-i"]).arg(&meta_path);
+    cmd.args(["-map", "0", "-map_chapters", "1", "-c", "copy"])
+        .arg(&tmp_path);
+    let result = run_with_timeout(cmd, Duration::from_secs(10 * 60));
+    let _ = std::fs::remove_file(&meta_path);
+    let result = result?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&tmp_path);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "chapter embed failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    std::fs::rename(&tmp_path, input).map_err(|err| {
+        let _ = std::fs::remove_file(&tmp_path);
+        format!("could not replace the recording with its chaptered copy: {err}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_metadata_runs_each_marker_to_the_next() {
+        let text = ffmetadata_chapters(&[5_000, 12_000], Some(30_000));
+        assert!(text.starts_with(";FFMETADATA1"));
+        assert!(text.contains("START=5000\nEND=12000\ntitle=Marker 1"));
+        assert!(text.contains("START=12000\nEND=30000\ntitle=Marker 2"));
+        // Without a known total, the last chapter gets a nominal second.
+        let open_ended = ffmetadata_chapters(&[7_000], None);
+        assert!(open_ended.contains("START=7000\nEND=8000"));
+    }
 
     #[test]
     fn concat_list_lines_escape_quotes() {

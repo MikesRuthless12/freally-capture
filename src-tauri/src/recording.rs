@@ -52,6 +52,8 @@ pub enum RecordingDto {
         frames_duplicated: u64,
         frames_behind: u64,
         audio_blocks_dropped: u64,
+        /// Chapter markers dropped so far (TASK-610).
+        markers: u32,
     },
     Paused {
         duration_sec: f64,
@@ -93,6 +95,9 @@ pub struct RecordingState {
     vertical_feed: Mutex<Option<RecorderHandle>>,
     /// The last finished session's result.
     last: Mutex<(Vec<String>, Option<String>)>,
+    /// Stream markers (TASK-610): timestamps (ms) dropped by the hotkey,
+    /// written as mkv chapters / a sidecar file at stop.
+    markers: Mutex<Vec<u64>>,
 }
 
 impl RecordingState {
@@ -105,6 +110,7 @@ impl RecordingState {
             vertical_active: AtomicBool::new(false),
             vertical_feed: Mutex::new(None),
             last: Mutex::new((Vec::new(), None)),
+            markers: Mutex::new(Vec::new()),
         }
     }
 
@@ -172,6 +178,11 @@ impl RecordingState {
                         frames_duplicated: stats.frames_duplicated,
                         frames_behind: stats.frames_behind,
                         audio_blocks_dropped: stats.audio_blocks_dropped,
+                        markers: self
+                            .markers
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .len() as u32,
                     }
                 }
             }
@@ -435,9 +446,57 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         finalizing: false,
     });
     state.active.store(true, Ordering::Relaxed);
+    state
+        .markers
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
     emit_status(app);
     println!("recording: started → {}", path.display());
     Ok(())
+}
+
+/// Drop a chapter marker at the current recording position (TASK-610) —
+/// the marker hotkey's action. Platform-side stream markers need account
+/// APIs, which the charter excludes; these land in the RECORDING (mkv
+/// chapters, or a sidecar for other containers).
+pub fn add_marker<R: Runtime>(app: &AppHandle<R>) -> Result<u32, String> {
+    let state = app.state::<RecordingState>();
+    let position_ms = {
+        let inner = state.lock_inner();
+        let active = inner.as_ref().ok_or("no recording is running")?;
+        if active.finalizing {
+            return Err("the recording is finalizing".to_string());
+        }
+        active.handle.duration().as_millis() as u64
+    };
+    let count = {
+        let mut markers = state
+            .markers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        markers.push(position_ms);
+        markers.len() as u32
+    };
+    emit_status(app);
+    println!("recording: marker {count} at {position_ms} ms");
+    Ok(count)
+}
+
+/// `HH:MM:SS Marker N` lines — the sidecar shape (YouTube-chapter-like).
+fn markers_sidecar_text(markers_ms: &[u64]) -> String {
+    let mut text = String::new();
+    for (index, &ms) in markers_ms.iter().enumerate() {
+        let secs = ms / 1000;
+        text.push_str(&format!(
+            "{:02}:{:02}:{:02} Marker {}\n",
+            secs / 3600,
+            (secs % 3600) / 60,
+            secs % 60,
+            index + 1
+        ));
+    }
+    text
 }
 
 /// Resolve "auto" (or validate an explicit encoder) against the verified
@@ -518,7 +577,7 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
 /// thread. Returns the finished file paths.
 pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     let state = app.state::<RecordingState>();
-    let (recorder, vertical_recorder) = {
+    let (recorder, vertical_recorder, total_ms) = {
         let mut inner = state.lock_inner();
         let active = inner.as_mut().ok_or("no recording is running")?;
         if active.finalizing {
@@ -529,7 +588,8 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
             .recorder
             .take()
             .ok_or("the recorder is already stopping")?;
-        (recorder, active.vertical_recorder.take())
+        let total_ms = active.handle.duration().as_millis() as u64;
+        (recorder, active.vertical_recorder.take(), total_ms)
     };
     // Stop the feeds first: no frame lands after the user pressed Stop.
     state.active.store(false, Ordering::Relaxed);
@@ -571,6 +631,41 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
             });
         }
         None => {}
+    }
+    // TASK-610: attach the dropped markers — embedded chapters for a single
+    // mkv, a readable sidecar otherwise. Best-effort: a chapter failure
+    // never invalidates the finished recording.
+    let markers: Vec<u64> = std::mem::take(
+        &mut *state
+            .markers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    if !markers.is_empty() && !paths.is_empty() {
+        let first = std::path::PathBuf::from(&paths[0]);
+        let embedded = paths.len() == 1
+            && first.extension().and_then(|ext| ext.to_str()) == Some("mkv")
+            && match app.state::<EncodeState>().ready_ffmpeg() {
+                Some(ready) => {
+                    match fcap_encode::write_mkv_chapters(&ready, &first, &markers, Some(total_ms))
+                    {
+                        Ok(()) => true,
+                        Err(err) => {
+                            eprintln!("recording: chapter embed failed ({err}) — sidecar instead");
+                            false
+                        }
+                    }
+                }
+                None => false,
+            };
+        if !embedded {
+            let sidecar = first.with_extension("chapters.txt");
+            if let Err(err) = std::fs::write(&sidecar, markers_sidecar_text(&markers)) {
+                eprintln!("recording: could not write the chapter sidecar: {err}");
+            } else {
+                println!("recording: chapters → {}", sidecar.display());
+            }
+        }
     }
     {
         let mut last = state

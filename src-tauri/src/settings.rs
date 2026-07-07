@@ -139,6 +139,8 @@ pub struct HotkeySettings {
     pub transition: Option<String>,
     /// Save the replay buffer's last N seconds (Phase 6).
     pub save_replay: Option<String>,
+    /// Drop a chapter marker into the active recording (Phase 6).
+    pub add_marker: Option<String>,
 }
 
 impl HotkeySettings {
@@ -148,6 +150,7 @@ impl HotkeySettings {
             &self.go_live,
             &self.transition,
             &self.save_replay,
+            &self.add_marker,
         ]
         .into_iter()
         .flatten()
@@ -864,6 +867,7 @@ mod tests {
                 go_live: None,
                 transition: Some("F13".to_owned()),
                 save_replay: Some("Ctrl+Shift+S".to_owned()),
+                add_marker: None,
             },
         };
         store.set(next.clone()).expect("save settings");

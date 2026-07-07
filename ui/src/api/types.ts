@@ -79,6 +79,8 @@ export type HotkeySettings = {
   transition: string | null;
   /** Save the replay buffer's last N seconds (Phase 6). */
   saveReplay: string | null;
+  /** Drop a chapter marker into the active recording (Phase 6). */
+  addMarker: string | null;
 };
 
 /** Studio Mode's commit transition (Phase 5). Stinger lands with the Phase 6
@@ -277,6 +279,8 @@ export type RecordingStatus =
       framesDuplicated: number;
       framesBehind: number;
       audioBlocksDropped: number;
+      /** Chapter markers dropped so far. */
+      markers: number;
     }
   | {
       state: "paused";

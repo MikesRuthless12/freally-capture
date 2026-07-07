@@ -38,7 +38,7 @@ pub use mux::{
     RtmpMonitor, RtmpPlan, WirePlan,
 };
 pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
-pub use remux::concat_copy;
+pub use remux::{concat_copy, write_mkv_chapters};
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

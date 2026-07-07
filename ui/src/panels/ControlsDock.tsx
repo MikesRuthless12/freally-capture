@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  recordingAddMarker,
   recordingPause,
   recordingResume,
   recordingStart,
@@ -137,6 +138,20 @@ export function ControlsDock({
             "● Start Recording"
           )}
         </button>
+        {active && (
+          <button
+            type="button"
+            disabled={busy || rec?.state !== "recording"}
+            onClick={() => {
+              recordingAddMarker().catch((err) => setActionError(String(err)));
+            }}
+            title="Drop a chapter marker at this moment — it lands in the RECORDING (mkv chapters, or a sidecar file). Platform-side stream markers need platform accounts, which this app never asks for."
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text hover:border-havoc-accent/50`}
+          >
+            ◈ Marker
+            {rec?.state === "recording" && rec.markers > 0 ? ` (${rec.markers})` : ""}
+          </button>
+        )}
         {active && (
           <button
             type="button"

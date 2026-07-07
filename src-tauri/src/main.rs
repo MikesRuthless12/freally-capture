@@ -196,6 +196,7 @@ fn main() {
             commands::recording::ffmpeg_remove,
             commands::recording::recording_start,
             commands::recording::recording_stop,
+            commands::recording::recording_add_marker,
             commands::recording::recording_pause,
             commands::recording::recording_resume,
             commands::recording::recording_status,
