@@ -98,9 +98,11 @@ export const STREAM_SERVICES: Array<[StreamService, string]> = [
   ["custom", "Custom (RTMP/RTMPS)"],
 ];
 
-/** Live-stream configuration (mirrors `StreamSettings` in settings.rs).
+/** One stream target (mirrors `StreamTargetSettings` in settings.rs).
  * The stream key is a SECRET — masked in the UI, never logged. */
-export type StreamSettings = {
+export type StreamTargetSettings = {
+  /** Go Live publishes to every enabled target at once. */
+  enabled: boolean;
   service: StreamService;
   /** Overrides the service's preset ingest when non-empty. */
   ingestUrl: string;
@@ -113,10 +115,31 @@ export type StreamSettings = {
   audioBitrateKbps: number;
   keyframeSec: number;
   fps: number;
-  /** The mixer track that goes to the stream (1-based). */
+  /** The mixer track that goes to this target (1-based). */
   track: number;
+};
+
+/** Live-stream configuration (mirrors `StreamSettings` in settings.rs):
+ * the target list — targets with equal encode settings share one encode. */
+export type StreamSettings = {
+  targets: StreamTargetSettings[];
   /** Start a local recording automatically on Go Live. */
   autoRecord: boolean;
+};
+
+/** One target's slice of the `stream` event payload. */
+export type StreamTargetStatus = {
+  /** The settings row this target came from. */
+  id: number;
+  label: string;
+  state: "live" | "reconnecting" | "failed" | "ended";
+  error?: string;
+  reconnects: number;
+  framesDropped: number;
+  /** Publish bitrate (measured, or the configured rate on a shared lane). */
+  kbps: number;
+  /** How many other targets share this target's encode. */
+  shared: number;
 };
 
 /** The `stream` event payload / `stream_status` result. */
@@ -127,7 +150,10 @@ export type StreamStatus = {
   elapsedSec: number;
   reconnects: number;
   framesDropped: number;
+  /** The enabled services, joined (e.g. "Twitch + YouTube"). */
   service: string;
+  /** Per-target health + bitrate (empty when idle). */
+  targets: StreamTargetStatus[];
 };
 
 /** Remote Guests networking — the user's own **opt-in** TURN relay (never

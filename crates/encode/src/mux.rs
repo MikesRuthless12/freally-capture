@@ -23,8 +23,8 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -615,9 +615,11 @@ impl FfmpegSink {
     }
 }
 
-/// What a live stream pushes and how (Phase 5): H.264 + AAC in FLV to an
-/// RTMP/RTMPS publish URL. One audio lane — the program mix. The URL embeds
-/// the stream key, so this struct redacts it from `Debug` (never logged).
+/// What a live stream pushes and how: H.264 + AAC in FLV to one or more
+/// RTMP/RTMPS publish URLs. One audio lane — the program mix. One URL is a
+/// plain FLV publish; several URLs share this single encode through ffmpeg's
+/// `tee` muxer (Phase 6 multistream). The URLs embed the stream keys, so
+/// this struct redacts them from `Debug` (never logged).
 #[derive(Clone)]
 pub struct RtmpPlan {
     pub encoder_id: String,
@@ -625,8 +627,9 @@ pub struct RtmpPlan {
     pub preset: EncPreset,
     pub keyframe_sec: f32,
     pub audio_bitrate_kbps: u32,
-    /// The full publish URL (`rtmp://…` or `rtmps://…`), key included.
-    pub url: String,
+    /// The full publish URLs (`rtmp://…` or `rtmps://…`), keys included.
+    /// One = plain FLV; several = one shared encode fanned out via `tee`.
+    pub urls: Vec<String>,
 }
 
 impl std::fmt::Debug for RtmpPlan {
@@ -637,24 +640,88 @@ impl std::fmt::Debug for RtmpPlan {
             .field("preset", &self.preset)
             .field("keyframe_sec", &self.keyframe_sec)
             .field("audio_bitrate_kbps", &self.audio_bitrate_kbps)
-            .field("url", &"[redacted publish url]")
+            .field(
+                "urls",
+                &format!("[{} redacted publish urls]", self.urls.len()),
+            )
             .finish()
     }
 }
 
+/// Live telemetry a running RTMP sink reports back (Phase 6 multistream):
+/// per-slave tee failures and the muxer's bytes-out counter. The stream
+/// engine polls these; the channels outlive any single (re)spawn.
+#[derive(Clone, Default)]
+pub struct RtmpMonitor {
+    /// Tee slave indexes (the order of [`RtmpPlan::urls`]) ffmpeg reported
+    /// failed while the process kept publishing the rest (`onfail=ignore`).
+    pub slave_failures: Arc<Mutex<Vec<usize>>>,
+    /// Total bytes the muxer wrote (from `-progress`). Stays 0 when the
+    /// muxer can't tell (tee reports no aggregate size) — the caller falls
+    /// back to the configured bitrate, honestly.
+    pub bytes_out: Arc<AtomicU64>,
+}
+
+/// Whether a publish URL can ride inside a tee output spec without any
+/// escaping ambiguity. Tee splits slaves on `|`, reads `[options]` prefixes,
+/// and honors backslash/quote escapes — rather than escape, a URL using any
+/// of those characters simply gets its own ffmpeg process.
+pub fn tee_safe(url: &str) -> bool {
+    !url.contains(['|', '[', ']', '\'', '\\'])
+}
+
+/// The `tee` muxer output spec: every slave publishes FLV, keeps publishing
+/// when a sibling fails (`onfail=ignore` — the engine splits the failed one
+/// out to its own reconnecting session), and skips the duration/filesize
+/// header fields a live ingest can't know.
+fn tee_output(urls: &[String]) -> String {
+    urls.iter()
+        .map(|url| format!("[f=flv:flvflags=no_duration_filesize:onfail=ignore]{url}"))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// Parse ffmpeg's tee slave-failure report — `Slave muxer #N failed…` (the
+/// same shape for a failed open and a failed write) — to the slave index.
+fn parse_slave_failure(line: &str) -> Option<usize> {
+    let rest = &line[line.find("Slave muxer #")? + "Slave muxer #".len()..];
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Parse a `-progress` key=value line's `total_size` (absent/`N/A` → None).
+fn parse_progress_size(line: &str) -> Option<u64> {
+    line.strip_prefix("total_size=")?.trim().parse().ok()
+}
+
 impl FfmpegSink {
-    /// Spawn the labeled ffmpeg component publishing FLV to an RTMP(S)
-    /// ingest. The streaming twin of [`FfmpegSink::spawn`]: the same
-    /// rawvideo-stdin and loopback-audio plumbing and backpressure rules,
-    /// with the muxer output aimed at the network instead of a file.
-    /// `spec.tracks` must name exactly one mixer track (the stream's
-    /// program audio).
-    pub fn spawn_rtmp(ffmpeg: &Ffmpeg, spec: &RecordSpec, plan: &RtmpPlan) -> Result<Self, String> {
+    /// Spawn the labeled ffmpeg component publishing FLV to one or more
+    /// RTMP(S) ingests. The streaming twin of [`FfmpegSink::spawn`]: the
+    /// same rawvideo-stdin and loopback-audio plumbing and backpressure
+    /// rules, with the muxer output aimed at the network instead of a file.
+    /// Several URLs share this single encode through the `tee` muxer — a
+    /// failed slave is reported into `monitor` while the rest keep
+    /// publishing. `spec.tracks` must name exactly one mixer track (the
+    /// stream's program audio).
+    pub fn spawn_rtmp(
+        ffmpeg: &Ffmpeg,
+        spec: &RecordSpec,
+        plan: &RtmpPlan,
+        monitor: &RtmpMonitor,
+    ) -> Result<Self, String> {
         if spec.tracks.len() != 1 {
             return Err("a stream carries exactly one audio track".to_string());
         }
-        if !(plan.url.starts_with("rtmp://") || plan.url.starts_with("rtmps://")) {
-            return Err("the publish URL must start with rtmp:// or rtmps://".to_string());
+        if plan.urls.is_empty() {
+            return Err("a stream needs at least one publish URL".to_string());
+        }
+        for url in &plan.urls {
+            if !(url.starts_with("rtmp://") || url.starts_with("rtmps://")) {
+                return Err("the publish URL must start with rtmp:// or rtmps://".to_string());
+            }
+            if plan.urls.len() > 1 && !tee_safe(url) {
+                return Err("this publish URL cannot share an encode — give it its own".to_string());
+            }
         }
 
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -664,9 +731,10 @@ impl FfmpegSink {
         let keyint = (plan.keyframe_sec.max(0.25) * spec.fps as f32).round() as u32;
         let mut cmd = crate::ffmpeg::command(ffmpeg);
         cmd.stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped()) // `-progress` rides stdout (input is stdin)
             .stderr(Stdio::piped());
         cmd.args(["-hide_banner", "-v", "error", "-y"]);
+        cmd.args(["-progress", "pipe:1", "-stats_period", "1"]);
         cmd.args(global_args(&plan.encoder_id));
         cmd.args([
             "-f",
@@ -699,31 +767,83 @@ impl FfmpegSink {
         ));
         // FLV requires AAC on this path (the Webm/Opus branch never applies).
         cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps));
-        cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
-        cmd.arg(&plan.url);
+        if plan.urls.len() == 1 {
+            cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
+            cmd.arg(&plan.urls[0]);
+        } else {
+            cmd.args(["-f", "tee"]);
+            cmd.arg(tee_output(&plan.urls));
+        }
 
         let mut child = cmd
             .spawn()
             .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
         let stdin = child.stdin.take().expect("stdin piped");
+        let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
-        // ffmpeg echoes the full output URL — **key included** — into stderr
-        // when the ingest rejects the connection (a wrong/expired key, the
-        // single most common failure). That tail flows into the user-visible
-        // error, so scrub the secret out at the source: the publish URL never
-        // survives into any string this sink hands back.
-        let secret = plan.url.clone();
+
+        // ffmpeg echoes output URLs — **keys included** — into stderr when an
+        // ingest rejects the connection (a wrong/expired key, the single most
+        // common failure). That tail flows into the user-visible error, so
+        // scrub every publish URL out at the source, line by line: no secret
+        // survives into any string this sink hands back. The same reader
+        // watches for tee slave-failure reports so the stream engine can
+        // split a dead target out while the healthy ones keep publishing.
+        let secrets: Vec<Vec<u8>> = plan
+            .urls
+            .iter()
+            .map(|url| url.clone().into_bytes())
+            .collect();
+        let failures = Arc::clone(&monitor.slave_failures);
         let stderr_thread = std::thread::Builder::new()
             .name("fcap-stream-ffmpeg-err".into())
             .spawn(move || {
-                use std::io::Read;
-                let mut tail = Vec::new();
+                use std::io::BufRead;
+                let mut tail: Vec<u8> = Vec::new();
                 let mut reader = std::io::BufReader::new(stderr);
-                let _ = reader.read_to_end(&mut tail);
-                if tail.len() > 4096 {
-                    tail.drain(..tail.len() - 4096);
+                let mut line = Vec::new();
+                loop {
+                    line.clear();
+                    match reader.read_until(b'\n', &mut line) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    let mut scrubbed = line.clone();
+                    for secret in &secrets {
+                        scrubbed = scrub_secret(&scrubbed, secret);
+                    }
+                    if let Some(slave) = parse_slave_failure(&String::from_utf8_lossy(&scrubbed)) {
+                        let mut failed = failures
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if failed.len() < 64 {
+                            failed.push(slave);
+                        }
+                    }
+                    tail.extend_from_slice(&scrubbed);
+                    if tail.len() > 4096 {
+                        tail.drain(..tail.len() - 4096);
+                    }
                 }
-                scrub_secret(&tail, secret.as_bytes())
+                tail
+            })
+            .map_err(|err| err.to_string())?;
+
+        // `-progress` reports the muxer's bytes-out ~1 Hz — the honest
+        // measured bitrate for the stats dock (tee reports no aggregate
+        // size; the counter simply stays 0 there and the engine falls back
+        // to the configured bitrate).
+        let bytes_out = Arc::clone(&monitor.bytes_out);
+        std::thread::Builder::new()
+            .name("fcap-stream-ffmpeg-progress".into())
+            .spawn(move || {
+                use std::io::BufRead;
+                for line in std::io::BufReader::new(stdout).lines() {
+                    let Ok(line) = line else { break };
+                    if let Some(size) = parse_progress_size(&line) {
+                        bytes_out.store(size, Ordering::Relaxed);
+                    }
+                }
             })
             .map_err(|err| err.to_string())?;
 
@@ -1099,6 +1219,74 @@ mod tests {
     fn scrub_secret_is_a_noop_without_the_secret() {
         assert_eq!(scrub_secret(b"clean line", b"nope"), b"clean line");
         assert_eq!(scrub_secret(b"anything", b""), b"anything");
+    }
+
+    #[test]
+    fn tee_output_publishes_flv_per_slave_and_survives_a_sibling() {
+        let urls = vec![
+            "rtmp://live.twitch.tv/app/key1".to_string(),
+            "rtmps://a.rtmp.youtube.com/live2/key2".to_string(),
+        ];
+        let spec = tee_output(&urls);
+        assert_eq!(
+            spec,
+            "[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmp://live.twitch.tv/app/key1\
+             |[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmps://a.rtmp.youtube.com/live2/key2"
+        );
+    }
+
+    #[test]
+    fn tee_safety_rejects_the_muxers_own_syntax() {
+        assert!(tee_safe("rtmp://live.twitch.tv/app/live_123"));
+        for bad in [
+            "rtmp://host/app/key|extra",
+            "rtmp://host/app/[key]",
+            "rtmp://host/app/k'ey",
+            "rtmp://host/app/k\\ey",
+        ] {
+            assert!(!tee_safe(bad), "{bad} should not ride a tee");
+        }
+    }
+
+    #[test]
+    fn slave_failures_parse_from_the_tee_report() {
+        assert_eq!(
+            parse_slave_failure(
+                "[tee @ 0x55] Slave muxer #1 failed: Broken pipe, continuing with 1/2 slaves."
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            parse_slave_failure("[tee @ 0x55] Slave muxer #0 failed to open"),
+            Some(0)
+        );
+        assert_eq!(parse_slave_failure("frame=  100 fps= 60"), None);
+        assert_eq!(parse_slave_failure("Slave muxer #x failed"), None);
+    }
+
+    #[test]
+    fn progress_size_parses_and_tolerates_na() {
+        assert_eq!(parse_progress_size("total_size=123456"), Some(123_456));
+        assert_eq!(parse_progress_size("total_size=N/A"), None);
+        assert_eq!(parse_progress_size("out_time_ms=1000"), None);
+    }
+
+    #[test]
+    fn rtmp_plan_debug_redacts_every_url() {
+        let plan = RtmpPlan {
+            encoder_id: "libx264".into(),
+            rate_control: rc(RcMode::Cbr),
+            preset: EncPreset::Performance,
+            keyframe_sec: 2.0,
+            audio_bitrate_kbps: 160,
+            urls: vec![
+                "rtmp://live.twitch.tv/app/hunter2".into(),
+                "rtmp://a.rtmp.youtube.com/live2/hunter3".into(),
+            ],
+        };
+        let printed = format!("{plan:?}");
+        assert!(!printed.contains("hunter"), "keys leaked: {printed}");
+        assert!(printed.contains("2 redacted publish urls"));
     }
 
     fn rc(mode: RcMode) -> RateControl {

@@ -32,7 +32,8 @@ pub use freally_video::{
 };
 pub use hardware::{GpuInfo, GpuVendor};
 pub use mux::{
-    Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, RtmpPlan, WirePlan,
+    tee_safe, Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, RtmpMonitor,
+    RtmpPlan, WirePlan,
 };
 pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
 
