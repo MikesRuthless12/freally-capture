@@ -25,8 +25,8 @@ use fcap_encode::{
     RtmpPlan, VideoCodec,
 };
 use fcap_stream::{
-    LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle, MultiSession, StreamSpec,
-    StreamState, StreamTarget,
+    LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle, MultiSession,
+    StreamProtocol, StreamSpec, StreamState, StreamTarget,
 };
 
 use crate::audio::AudioRuntime;
@@ -261,13 +261,15 @@ fn resolve_stream_encoder<R: Runtime>(app: &AppHandle<R>, wanted: &str) -> Resul
         ));
     }
     if desc.codec != VideoCodec::H264 {
-        return Err("RTMP streaming needs an H.264 encoder".to_string());
+        return Err(
+            "streaming needs an H.264 encoder (RTMP, SRT and WHIP all carry it)".to_string(),
+        );
     }
     Ok(desc.id.clone())
 }
 
 /// Everything one target needs at spawn time. Holds the publish URL (key
-/// included) — no `Debug`, never logged.
+/// included) and the WHIP bearer — no `Debug`, never logged.
 #[derive(Clone)]
 struct TargetPlan {
     id: usize,
@@ -279,6 +281,9 @@ struct TargetPlan {
     keyframe_sec: f32,
     fps: u32,
     track: u8,
+    protocol: StreamProtocol,
+    /// The WHIP bearer token (SECRET) — the target's key, header-borne.
+    auth: Option<String>,
 }
 
 /// Go Live: validate every enabled target, build the multistream engine
@@ -310,6 +315,29 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         "streaming needs the ffmpeg component — install it from Components".to_string()
     })?;
 
+    // SRT/WHIP ride the installed ffmpeg's own capabilities — probe them
+    // honestly instead of failing with a cryptic spawn error.
+    let needs = |protocol: StreamProtocol| {
+        enabled
+            .iter()
+            .any(|(_, target)| target.service.protocol() == protocol)
+    };
+    if needs(StreamProtocol::Srt) || needs(StreamProtocol::Whip) {
+        let support = fcap_encode::stream_support(&ready);
+        if needs(StreamProtocol::Srt) && !support.srt {
+            return Err(
+                "the installed ffmpeg component has no SRT support — reinstall it from Components"
+                    .to_string(),
+            );
+        }
+        if needs(StreamProtocol::Whip) && !support.whip {
+            return Err(
+                "the installed ffmpeg component has no WHIP muxer (needs ffmpeg 7.1+) — reinstall it from Components"
+                    .to_string(),
+            );
+        }
+    }
+
     let mut plans: Vec<TargetPlan> = Vec::new();
     for (id, target_settings) in &enabled {
         let target = StreamTarget {
@@ -322,6 +350,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             .map_err(|err| format!("{}: {err}", target_settings.service.label()))?;
         let encoder_id = resolve_stream_encoder(app, &target_settings.encoder_id)
             .map_err(|err| format!("{}: {err}", target_settings.service.label()))?;
+        let protocol = target_settings.service.protocol();
         plans.push(TargetPlan {
             id: *id,
             label: target_settings.service.label().to_string(),
@@ -332,6 +361,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             keyframe_sec: target_settings.keyframe_sec,
             fps: target_settings.fps,
             track: target_settings.track,
+            protocol,
+            auth: (protocol == StreamProtocol::Whip
+                && !target_settings.stream_key.trim().is_empty())
+            .then(|| target_settings.stream_key.trim().to_string()),
         });
     }
 
@@ -342,7 +375,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     );
 
     // The signature decides encode sharing: everything that shapes the
-    // bitstream, including the audio track feeding it.
+    // bitstream, including the audio track and codec feeding it. RTMP and
+    // SRT both carry AAC so they can share; WHIP is Opus and never does.
     let members: Vec<MemberSpec> = plans
         .iter()
         .map(|plan| MemberSpec {
@@ -351,15 +385,20 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             track: plan.track,
             fps: plan.fps,
             signature: format!(
-                "{}|{}|{}|{}|{}|{}",
+                "{}|{}|{}|{}|{}|{}|{}",
                 plan.encoder_id,
                 plan.bitrate_kbps,
                 plan.audio_bitrate_kbps,
                 plan.keyframe_sec.to_bits(),
                 plan.fps,
-                plan.track
+                plan.track,
+                if plan.protocol == StreamProtocol::Whip {
+                    "opus"
+                } else {
+                    "aac"
+                }
             ),
-            tee_safe: tee_safe(&plan.url),
+            tee_safe: plan.protocol != StreamProtocol::Whip && tee_safe(&plan.url),
             nominal_kbps: plan.bitrate_kbps + plan.audio_bitrate_kbps,
         })
         .collect();
@@ -400,6 +439,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                         keyframe_sec: first.keyframe_sec,
                         audio_bitrate_kbps: first.audio_bitrate_kbps,
                         urls: lane_plans.iter().map(|plan| plan.url.clone()).collect(),
+                        auth_bearer: first.auth.clone(),
                     };
                     let spec = RecordSpec {
                         width,

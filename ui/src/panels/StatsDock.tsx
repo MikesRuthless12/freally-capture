@@ -79,9 +79,7 @@ export function StatsDock() {
               />
               <span className="min-w-0 flex-1 truncate">
                 {target.label}
-                {target.shared > 0 && (
-                  <span className="text-havoc-muted"> · shared encode</span>
-                )}
+                {target.shared > 0 && <span className="text-havoc-muted"> · shared encode</span>}
               </span>
               <span className="text-havoc-muted">{target.state}</span>
               <span className="font-semibold tabular-nums">

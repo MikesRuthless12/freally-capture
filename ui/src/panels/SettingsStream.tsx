@@ -73,13 +73,10 @@ export function SettingsStream({
   const patchTarget = (index: number, part: Partial<StreamTargetSettings>) =>
     setDraft({
       ...draft,
-      targets: draft.targets.map((target, at) =>
-        at === index ? { ...target, ...part } : target,
-      ),
+      targets: draft.targets.map((target, at) => (at === index ? { ...target, ...part } : target)),
     });
 
-  const addTarget = () =>
-    setDraft({ ...draft, targets: [...draft.targets, defaultTarget()] });
+  const addTarget = () => setDraft({ ...draft, targets: [...draft.targets, defaultTarget()] });
 
   const removeTarget = (index: number) =>
     setDraft({ ...draft, targets: draft.targets.filter((_, at) => at !== index) });
@@ -139,23 +136,43 @@ export function SettingsStream({
               </select>
             </label>
 
-            {(target.service === "custom" || target.ingestUrl) && (
+            {(target.service === "custom" ||
+              target.service === "srt" ||
+              target.service === "whip" ||
+              target.ingestUrl) && (
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Ingest URL{" "}
-                {target.service !== "custom" && "(override — empty = the service preset)"}
+                {target.service === "srt"
+                  ? "SRT ingest URL"
+                  : target.service === "whip"
+                    ? "WHIP endpoint URL"
+                    : "Ingest URL"}{" "}
+                {target.service !== "custom" &&
+                  target.service !== "srt" &&
+                  target.service !== "whip" &&
+                  "(override — empty = the service preset)"}
                 <input
                   value={target.ingestUrl}
                   onChange={(event) => patchTarget(index, { ingestUrl: event.target.value })}
-                  placeholder="rtmps://ingest.example.com/live"
+                  placeholder={
+                    target.service === "srt"
+                      ? "srt://relay.example.net:8890"
+                      : target.service === "whip"
+                        ? "https://sfu.example.net/whip/room"
+                        : "rtmps://ingest.example.com/live"
+                  }
                   className={`${inputClass} font-mono`}
                 />
               </label>
             )}
 
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Stream key (from your{" "}
-              {target.service === "custom" ? "server" : "creator dashboard"} — treated as a
-              secret)
+              {target.service === "srt"
+                ? "streamid (optional — appended as ?streamid=…; treated as a secret)"
+                : target.service === "whip"
+                  ? "Bearer token (optional — sent as the Authorization header; a secret)"
+                  : `Stream key (from your ${
+                      target.service === "custom" ? "server" : "creator dashboard"
+                    } — treated as a secret)`}
               <div className="flex gap-2">
                 <input
                   type={shownKeys[index] ? "text" : "password"}
@@ -167,9 +184,7 @@ export function SettingsStream({
                 />
                 <button
                   type="button"
-                  onClick={() =>
-                    setShownKeys((shown) => ({ ...shown, [index]: !shown[index] }))
-                  }
+                  onClick={() => setShownKeys((shown) => ({ ...shown, [index]: !shown[index] }))}
                   aria-pressed={Boolean(shownKeys[index])}
                   className="shrink-0 rounded-md border border-white/10 px-2.5 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
                 >
@@ -179,7 +194,7 @@ export function SettingsStream({
             </label>
 
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Encoder (H.264 — what RTMP carries)
+              Encoder (H.264 — what RTMP, SRT and WHIP all carry)
               <select
                 value={target.encoderId}
                 onChange={(event) => patchTarget(index, { encoderId: event.target.value })}
@@ -210,9 +225,7 @@ export function SettingsStream({
                 min={32}
                 max={512}
                 step={32}
-                onCommit={(value) =>
-                  patchTarget(index, { audioBitrateKbps: Math.round(value) })
-                }
+                onCommit={(value) => patchTarget(index, { audioBitrateKbps: Math.round(value) })}
               />
               <NumberField
                 label="FPS"
@@ -251,8 +264,8 @@ export function SettingsStream({
         )}
 
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Go Live publishes to every enabled target at once, direct to each platform. Targets
-          with identical encoder settings share a single encode.
+          Go Live publishes to every enabled target at once, direct to each platform. Targets with
+          identical encoder settings share a single encode.
         </p>
 
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">

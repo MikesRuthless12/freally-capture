@@ -615,11 +615,14 @@ impl FfmpegSink {
     }
 }
 
-/// What a live stream pushes and how: H.264 + AAC in FLV to one or more
-/// RTMP/RTMPS publish URLs. One audio lane — the program mix. One URL is a
-/// plain FLV publish; several URLs share this single encode through ffmpeg's
-/// `tee` muxer (Phase 6 multistream). The URLs embed the stream keys, so
-/// this struct redacts them from `Debug` (never logged).
+/// What a live stream pushes and how: one H.264 encode published to one or
+/// more URLs. One audio lane — the program mix. The container/protocol
+/// follows each URL's scheme: `rtmp(s)://` = FLV+AAC, `srt://` =
+/// MPEG-TS+AAC, `http(s)://` = the WHIP muxer (WebRTC, H.264+**Opus**).
+/// One URL is a plain publish; several share this single encode through
+/// ffmpeg's `tee` muxer (Phase 6 multistream — WHIP never shares: its audio
+/// codec differs). The URLs embed the stream keys, so this struct redacts
+/// them from `Debug` (never logged).
 #[derive(Clone)]
 pub struct RtmpPlan {
     pub encoder_id: String,
@@ -627,9 +630,12 @@ pub struct RtmpPlan {
     pub preset: EncPreset,
     pub keyframe_sec: f32,
     pub audio_bitrate_kbps: u32,
-    /// The full publish URLs (`rtmp://…` or `rtmps://…`), keys included.
-    /// One = plain FLV; several = one shared encode fanned out via `tee`.
+    /// The full publish URLs, keys included.
+    /// One = plain publish; several = one shared encode fanned out via `tee`.
     pub urls: Vec<String>,
+    /// The WHIP bearer token (SECRET — rides the `Authorization` header,
+    /// never the URL). Only meaningful for a single `http(s)://` URL.
+    pub auth_bearer: Option<String>,
 }
 
 impl std::fmt::Debug for RtmpPlan {
@@ -643,6 +649,10 @@ impl std::fmt::Debug for RtmpPlan {
             .field(
                 "urls",
                 &format!("[{} redacted publish urls]", self.urls.len()),
+            )
+            .field(
+                "auth_bearer",
+                &self.auth_bearer.as_ref().map(|_| "[redacted]"),
             )
             .finish()
     }
@@ -670,13 +680,28 @@ pub fn tee_safe(url: &str) -> bool {
     !url.contains(['|', '[', ']', '\'', '\\'])
 }
 
-/// The `tee` muxer output spec: every slave publishes FLV, keeps publishing
-/// when a sibling fails (`onfail=ignore` — the engine splits the failed one
-/// out to its own reconnecting session), and skips the duration/filesize
-/// header fields a live ingest can't know.
+/// The output format a publish URL's scheme implies.
+fn url_format(url: &str) -> &'static str {
+    if url.starts_with("srt://") {
+        "mpegts"
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        "whip"
+    } else {
+        "flv"
+    }
+}
+
+/// The `tee` muxer output spec: each slave publishes its scheme's container
+/// (FLV for RTMP, MPEG-TS for SRT), keeps publishing when a sibling fails
+/// (`onfail=ignore` — the engine splits the failed one out to its own
+/// reconnecting session), and FLV slaves skip the duration/filesize header
+/// fields a live ingest can't know.
 fn tee_output(urls: &[String]) -> String {
     urls.iter()
-        .map(|url| format!("[f=flv:flvflags=no_duration_filesize:onfail=ignore]{url}"))
+        .map(|url| match url_format(url) {
+            "flv" => format!("[f=flv:flvflags=no_duration_filesize:onfail=ignore]{url}"),
+            format => format!("[f={format}:onfail=ignore]{url}"),
+        })
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -716,13 +741,28 @@ impl FfmpegSink {
             return Err("a stream needs at least one publish URL".to_string());
         }
         for url in &plan.urls {
-            if !(url.starts_with("rtmp://") || url.starts_with("rtmps://")) {
-                return Err("the publish URL must start with rtmp:// or rtmps://".to_string());
+            if !(url.starts_with("rtmp://")
+                || url.starts_with("rtmps://")
+                || url.starts_with("srt://")
+                || url.starts_with("http://")
+                || url.starts_with("https://"))
+            {
+                return Err(
+                    "the publish URL must be rtmp(s)://, srt://, or http(s):// (WHIP)".to_string(),
+                );
             }
-            if plan.urls.len() > 1 && !tee_safe(url) {
-                return Err("this publish URL cannot share an encode — give it its own".to_string());
+            if plan.urls.len() > 1 {
+                if url_format(url) == "whip" {
+                    return Err("a WHIP target cannot share an encode".to_string());
+                }
+                if !tee_safe(url) {
+                    return Err(
+                        "this publish URL cannot share an encode — give it its own".to_string()
+                    );
+                }
             }
         }
+        let whip = plan.urls.len() == 1 && url_format(&plan.urls[0]) == "whip";
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
@@ -765,10 +805,33 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
-        // FLV requires AAC on this path (the Webm/Opus branch never applies).
-        cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps));
+        if whip {
+            // WebRTC: no B-frames (RTP H.264 reordering breaks receivers).
+            cmd.args(["-bf", "0"]);
+        }
+        // FLV/MPEG-TS carry AAC; WHIP (WebRTC) requires Opus — the Webm
+        // audio branch maps exactly onto that.
+        let audio_container = if whip {
+            Container::Webm
+        } else {
+            Container::Mp4
+        };
+        cmd.args(audio_args(audio_container, plan.audio_bitrate_kbps));
         if plan.urls.len() == 1 {
-            cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
+            match url_format(&plan.urls[0]) {
+                "mpegts" => {
+                    cmd.args(["-f", "mpegts"]);
+                }
+                "whip" => {
+                    cmd.args(["-f", "whip"]);
+                    if let Some(token) = plan.auth_bearer.as_deref().filter(|t| !t.is_empty()) {
+                        cmd.args(["-authorization", token]);
+                    }
+                }
+                _ => {
+                    cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
+                }
+            }
             cmd.arg(&plan.urls[0]);
         } else {
             cmd.args(["-f", "tee"]);
@@ -789,11 +852,14 @@ impl FfmpegSink {
         // survives into any string this sink hands back. The same reader
         // watches for tee slave-failure reports so the stream engine can
         // split a dead target out while the healthy ones keep publishing.
-        let secrets: Vec<Vec<u8>> = plan
+        let mut secrets: Vec<Vec<u8>> = plan
             .urls
             .iter()
             .map(|url| url.clone().into_bytes())
             .collect();
+        if let Some(token) = plan.auth_bearer.as_deref().filter(|t| !t.is_empty()) {
+            secrets.push(token.as_bytes().to_vec());
+        }
         let failures = Arc::clone(&monitor.slave_failures);
         let stderr_thread = std::thread::Builder::new()
             .name("fcap-stream-ffmpeg-err".into())
@@ -1236,6 +1302,28 @@ mod tests {
     }
 
     #[test]
+    fn tee_output_muxes_each_slave_by_its_scheme() {
+        let urls = vec![
+            "rtmp://live.twitch.tv/app/key1".to_string(),
+            "srt://relay.lan:8890?streamid=publish:cam".to_string(),
+        ];
+        assert_eq!(
+            tee_output(&urls),
+            "[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmp://live.twitch.tv/app/key1\
+             |[f=mpegts:onfail=ignore]srt://relay.lan:8890?streamid=publish:cam"
+        );
+    }
+
+    #[test]
+    fn url_formats_follow_the_scheme() {
+        assert_eq!(url_format("rtmp://a/b"), "flv");
+        assert_eq!(url_format("rtmps://a/b"), "flv");
+        assert_eq!(url_format("srt://host:9000"), "mpegts");
+        assert_eq!(url_format("https://sfu/whip/x"), "whip");
+        assert_eq!(url_format("http://sfu/whip/x"), "whip");
+    }
+
+    #[test]
     fn tee_safety_rejects_the_muxers_own_syntax() {
         assert!(tee_safe("rtmp://live.twitch.tv/app/live_123"));
         for bad in [
@@ -1283,6 +1371,7 @@ mod tests {
                 "rtmp://live.twitch.tv/app/hunter2".into(),
                 "rtmp://a.rtmp.youtube.com/live2/hunter3".into(),
             ],
+            auth_bearer: Some("hunter4-bearer".into()),
         };
         let printed = format!("{plan:?}");
         assert!(!printed.contains("hunter"), "keys leaked: {printed}");

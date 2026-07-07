@@ -86,8 +86,10 @@ export type TransitionSettings = {
   durationMs: number;
 };
 
-/** The services the stream target picker offers. */
-export type StreamService = "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom";
+/** The services the stream target picker offers (`srt`/`whip` are the
+ * Phase 6 protocol targets — self-hosted SRT ingest / WebRTC WHIP endpoint). */
+export type StreamService =
+  "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom" | "srt" | "whip";
 
 export const STREAM_SERVICES: Array<[StreamService, string]> = [
   ["twitch", "Twitch"],
@@ -96,6 +98,8 @@ export const STREAM_SERVICES: Array<[StreamService, string]> = [
   ["facebook", "Facebook"],
   ["trovo", "Trovo"],
   ["custom", "Custom (RTMP/RTMPS)"],
+  ["srt", "SRT (self-hosted)"],
+  ["whip", "WHIP (WebRTC)"],
 ];
 
 /** One stream target (mirrors `StreamTargetSettings` in settings.rs).

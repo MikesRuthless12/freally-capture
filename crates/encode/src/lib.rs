@@ -26,7 +26,9 @@ pub mod recorder;
 pub mod remux;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
-pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};
+pub use ffmpeg::{
+    stream_support, FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild, StreamSupport,
+};
 pub use freally_video::{
     FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
 };

@@ -194,11 +194,24 @@ impl std::fmt::Debug for StreamTargetSettings {
 
 impl StreamTargetSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if !self.ingest_url.is_empty()
-            && !self.ingest_url.starts_with("rtmp://")
-            && !self.ingest_url.starts_with("rtmps://")
-        {
-            return Err("the ingest URL must start with rtmp:// or rtmps://".to_owned());
+        if !self.ingest_url.is_empty() {
+            let scheme_ok = match self.service.protocol() {
+                fcap_stream::StreamProtocol::Rtmp => {
+                    self.ingest_url.starts_with("rtmp://")
+                        || self.ingest_url.starts_with("rtmps://")
+                }
+                fcap_stream::StreamProtocol::Srt => self.ingest_url.starts_with("srt://"),
+                fcap_stream::StreamProtocol::Whip => {
+                    self.ingest_url.starts_with("https://")
+                        || self.ingest_url.starts_with("http://")
+                }
+            };
+            if !scheme_ok {
+                return Err(
+                    "the ingest URL scheme doesn't match the service (rtmp(s):// / srt:// / https:// for WHIP)"
+                        .to_owned(),
+                );
+            }
         }
         for field in [&self.ingest_url, &self.stream_key] {
             if field.len() > 512 || field.chars().any(char::is_control) {
