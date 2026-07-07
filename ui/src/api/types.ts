@@ -391,6 +391,7 @@ export type SourceSettings =
   | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
   | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
+  | { kind: "nestedScene"; scene: SceneId }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
   | {
@@ -577,11 +578,31 @@ export type FocusState = {
   prior: FocusRestore[];
 };
 
+/** A named set of items that move / show / hide together (Phase 6). */
+export type SourceGroup = {
+  id: string;
+  name: string;
+  items: ItemId[];
+  /** ANDs with each member's own eye toggle. */
+  visible: boolean;
+};
+
+/** One source's per-scene mixer override (Phase 6). */
+export type SceneAudioOverride = {
+  source: SourceId;
+  volumeDb: number;
+  muted: boolean;
+};
+
 export type Scene = {
   id: SceneId;
   name: string;
   items: SceneItem[];
   focus?: FocusState | null;
+  /** Source groups (Phase 6). */
+  groups?: SourceGroup[];
+  /** Per-scene mixer overrides (Phase 6). */
+  audioOverrides?: SceneAudioOverride[];
 };
 
 /** The second output canvas (Phase 6): its own size + the scene it shows. */

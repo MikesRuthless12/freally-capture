@@ -285,6 +285,51 @@ fn default_visible() -> bool {
     true
 }
 
+/// Stable identity of a [`SourceGroup`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GroupId(pub Uuid);
+
+impl GroupId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for GroupId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A named set of a scene's items that move / show / hide **together**
+/// (Phase 6, TASK-605). Grouping is metadata over ordinary items — z-order
+/// and per-item settings stay untouched; an item belongs to at most one
+/// group.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceGroup {
+    #[serde(default)]
+    pub id: GroupId,
+    pub name: String,
+    #[serde(default)]
+    pub items: Vec<ItemId>,
+    /// Group visibility ANDs with each member's own eye toggle.
+    #[serde(default = "default_visible")]
+    pub visible: bool,
+}
+
+/// One source's per-scene mixer override (Phase 6, TASK-605): while this
+/// scene is the program, these replace the source's global fader/mute — a
+/// scene can sound different from the global mix.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneAudioOverride {
+    pub source: SourceId,
+    pub volume_db: f32,
+    pub muted: bool,
+}
+
 /// One placement of a source in a scene.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -344,6 +389,13 @@ pub struct Scene {
     /// canvas (Focus/Spotlight); absent in a normal layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus: Option<FocusState>,
+    /// Source groups (Phase 6): items that move/show/hide together.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<SourceGroup>,
+    /// Per-scene mixer overrides (Phase 6): applied while this scene is the
+    /// program.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_overrides: Vec<SceneAudioOverride>,
 }
 
 impl Scene {
@@ -353,6 +405,8 @@ impl Scene {
             name: name.into(),
             items: Vec::new(),
             focus: None,
+            groups: Vec::new(),
+            audio_overrides: Vec::new(),
         }
     }
 
@@ -362,5 +416,28 @@ impl Scene {
 
     pub fn item_mut(&mut self, id: ItemId) -> Option<&mut SceneItem> {
         self.items.iter_mut().find(|item| item.id == id)
+    }
+
+    pub fn group(&self, id: GroupId) -> Option<&SourceGroup> {
+        self.groups.iter().find(|group| group.id == id)
+    }
+
+    /// The group `item` belongs to, if any (an item is in at most one).
+    pub fn group_of(&self, item: ItemId) -> Option<&SourceGroup> {
+        self.groups.iter().find(|group| group.items.contains(&item))
+    }
+
+    /// Whether a group's eye toggle hides `item` (ANDs with the item's own).
+    pub fn group_hides(&self, item: ItemId) -> bool {
+        self.group_of(item).is_some_and(|group| !group.visible)
+    }
+
+    /// Drop dangling member ids and empty groups (after item removals).
+    pub fn prune_groups(&mut self) {
+        let live: Vec<ItemId> = self.items.iter().map(|item| item.id).collect();
+        for group in &mut self.groups {
+            group.items.retain(|id| live.contains(id));
+        }
+        self.groups.retain(|group| !group.items.is_empty());
     }
 }

@@ -11,10 +11,13 @@ import {
   settingsGet,
   settingsSet,
   studioApplyLayout,
+  studioCreateGroup,
   studioRenameSource,
   studioRetrySource,
   studioSetCenterView,
   studioSetFocus,
+  studioSetGroupVisible,
+  studioUngroup,
   videoDeviceFormats,
   videoDevicesList,
 } from "../api/commands";
@@ -85,6 +88,7 @@ type PickerMode =
   | "remoteGuest"
   | "color"
   | "text"
+  | "nestedScene"
   | "audioInput"
   | "audioOutput"
   | "existing";
@@ -99,6 +103,7 @@ const KIND_BADGE: Record<string, string> = {
   remoteGuest: "Guest",
   color: "Color",
   text: "Text",
+  nestedScene: "Scene",
   audioInput: "Audio In",
   audioOutput: "Audio Out",
 };
@@ -112,6 +117,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["remoteGuest", "Remote Guest (P2P spike)"],
   ["color", "Color"],
   ["text", "Text"],
+  ["nestedScene", "Nested Scene"],
   ["audioInput", "Audio Input Capture"],
   ["audioOutput", "Audio Output Capture"],
   ["existing", "Existing source…"],
@@ -140,12 +146,25 @@ export function SourcesRail({
 }: SourcesRailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [picker, setPicker] = useState<PickerMode | null>(null);
+  // Grouping (TASK-605): while non-null, rows show pick-boxes; "Create
+  // group" bundles the picked items so they move/show/hide together.
+  const [groupPick, setGroupPick] = useState<ItemId[] | null>(null);
   const [showLayout, setShowLayout] = useState(false);
   const [renaming, setRenaming] = useState<{ source: SourceId; draft: string } | null>(null);
 
   const items = scene?.items ?? [];
   const topFirst = [...items].reverse();
   const sourceOf = (id: SourceId) => collection?.sources.find((source) => source.id === id);
+  const groups = scene?.groups ?? [];
+  const groupOf = (id: ItemId) => groups.find((group) => group.items.includes(id));
+
+  const createGroup = () => {
+    if (!scene || !groupPick || groupPick.length < 2) return;
+    studioCreateGroup(scene.id, "", groupPick).catch((err) =>
+      console.error("group create failed:", err),
+    );
+    setGroupPick(null);
+  };
 
   const commitRename = () => {
     if (!renaming) return;
@@ -173,6 +192,21 @@ export function SourcesRail({
       title="Sources"
       actions={
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={!scene}
+            onClick={() => setGroupPick((picking) => (picking === null ? [] : null))}
+            title="Group sources — pick two or more items, then Create group; grouped items move and show/hide together"
+            aria-label="Group sources"
+            aria-pressed={groupPick !== null}
+            className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-60 ${
+              groupPick !== null
+                ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text"
+                : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
+            }`}
+          >
+            ⊞
+          </button>
           <button
             type="button"
             disabled={!scene}
@@ -242,6 +276,7 @@ export function SourcesRail({
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
             const isFocused = scene?.focus?.item === item.id;
+            const itemGroup = groupOf(item.id);
             return (
               <li key={item.id}>
                 <div
@@ -251,6 +286,24 @@ export function SourcesRail({
                       : "border-white/10 bg-white/[0.02]"
                   }`}
                 >
+                  {groupPick !== null && (
+                    <input
+                      type="checkbox"
+                      checked={groupPick.includes(item.id)}
+                      disabled={Boolean(itemGroup)}
+                      title={itemGroup ? `Already in ${itemGroup.name}` : "Pick for the new group"}
+                      aria-label={`Pick ${source?.name ?? "source"} for the new group`}
+                      onChange={(event) =>
+                        setGroupPick((picked) =>
+                          picked === null
+                            ? picked
+                            : event.target.checked
+                              ? [...picked, item.id]
+                              : picked.filter((id) => id !== item.id),
+                        )
+                      }
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => onSetVisible(item.id, !item.visible)}
@@ -330,6 +383,14 @@ export function SourcesRail({
                       <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
                         {KIND_BADGE[source?.kind ?? ""] ?? "?"}
                       </span>
+                      {itemGroup && (
+                        <span
+                          title={`In group ${itemGroup.name}`}
+                          className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
+                        >
+                          ⊞
+                        </span>
+                      )}
                       <span className="truncate">{source?.name ?? "(missing source)"}</span>
                     </button>
                   )}
@@ -467,6 +528,13 @@ export function SourcesRail({
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
         <TextForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "nestedScene" ? (
+        <NestedSceneForm
+          collection={collection}
+          currentScene={scene?.id ?? null}
+          onClose={() => setPicker(null)}
+          onPick={pick}
+        />
       ) : picker === "existing" ? (
         <ExistingPicker
           collection={collection}
@@ -477,6 +545,70 @@ export function SourcesRail({
           }}
         />
       ) : null}
+      {groupPick !== null && (
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={groupPick.length < 2}
+            onClick={createGroup}
+            className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2 py-1 text-[11px] font-semibold text-havoc-text disabled:opacity-50"
+          >
+            Create group ({groupPick.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setGroupPick(null)}
+            className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {groups.length > 0 && (
+        <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" aria-label="Source groups">
+          {groups.map((group) => (
+            <li
+              key={group.id}
+              className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.02] px-1.5 py-1 text-[11px]"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (!scene) return;
+                  studioSetGroupVisible(scene.id, group.id, !group.visible).catch((err) =>
+                    console.error("group visibility failed:", err),
+                  );
+                }}
+                title={group.visible ? "Hide the group" : "Show the group"}
+                aria-pressed={group.visible}
+                className={`shrink-0 rounded px-1 ${
+                  group.visible ? "text-havoc-text" : "text-havoc-muted opacity-50"
+                }`}
+              >
+                {group.visible ? "👁" : "–"}
+              </button>
+              <span className="min-w-0 flex-1 truncate text-havoc-text">
+                ⊞ {group.name}
+                <span className="text-havoc-muted"> · {group.items.length} items</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!scene) return;
+                  studioUngroup(scene.id, group.id).catch((err) =>
+                    console.error("ungroup failed:", err),
+                  );
+                }}
+                title="Ungroup — the items stay where they are"
+                aria-label={`Ungroup ${group.name}`}
+                className="shrink-0 rounded px-1 text-havoc-muted hover:text-red-300"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {showLayout && (
         <LayoutPicker collection={collection} scene={scene} onClose={() => setShowLayout(false)} />
       )}
@@ -487,6 +619,52 @@ export function SourcesRail({
 // ---------------------------------------------------------------------------
 // Pickers
 // ---------------------------------------------------------------------------
+
+/** Nested Scene (TASK-605): compose another scene as a source — cycle-safe
+ * (a scene that already contains this one is rejected by the model with an
+ * honest error). */
+function NestedSceneForm({
+  collection,
+  currentScene,
+  onClose,
+  onPick,
+}: {
+  collection: Collection | null;
+  currentScene: SceneId | null;
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const candidates = (collection?.scenes ?? []).filter((entry) => entry.id !== currentScene);
+  return (
+    <PickerShell title="Add a Nested Scene" onClose={onClose}>
+      {candidates.length === 0 ? (
+        <EmptyHint>No other scene to nest — add a second scene first.</EmptyHint>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          {candidates.map((entry) => (
+            <li key={entry.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  onPick({ kind: "nestedScene", scene: entry.id }, `Scene: ${entry.name}`)
+                }
+                className="w-full rounded-lg border border-white/10 bg-white/[0.02] px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
+              >
+                {entry.name}
+                <span className="text-havoc-muted"> · {entry.items.length} items</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="m-0 mt-2 text-[10px] leading-snug text-havoc-muted">
+        The nested scene renders live at the program canvas size and follows its own edits;
+        transforms, filters, and blend apply to it like any source. Its audio sources join the mix
+        while a scene showing it is the program.
+      </p>
+    </PickerShell>
+  );
+}
 
 function CapturePicker({
   mode,

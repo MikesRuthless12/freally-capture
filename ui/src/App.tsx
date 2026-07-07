@@ -428,7 +428,11 @@ export default function App() {
         />
       )}
       {dialog?.kind === "properties" && dialogSource && (
-        <PropertiesDialog source={dialogSource} onClose={() => setDialog(null)} />
+        <PropertiesDialog
+          source={dialogSource}
+          scenes={collection?.scenes.map((entry) => ({ id: entry.id, name: entry.name })) ?? []}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "audioFilters" && dialogAudioSource && (
         <AudioFiltersDialog

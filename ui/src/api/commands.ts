@@ -302,6 +302,38 @@ export function studioSetStudioMode(on: boolean): Promise<void> {
   return invoke("studio_set_studio_mode", { on });
 }
 
+/** Group items so they move / show / hide together (Phase 6). */
+export function studioCreateGroup(
+  sceneId: SceneId,
+  name: string,
+  itemIds: ItemId[],
+): Promise<string> {
+  return invoke<string>("studio_create_group", { sceneId, name, itemIds });
+}
+
+/** Dissolve a group — its items stay exactly where they are. */
+export function studioUngroup(sceneId: SceneId, groupId: string): Promise<void> {
+  return invoke("studio_ungroup", { sceneId, groupId });
+}
+
+/** A group's eye toggle — hides/shows every member together. */
+export function studioSetGroupVisible(
+  sceneId: SceneId,
+  groupId: string,
+  visible: boolean,
+): Promise<void> {
+  return invoke("studio_set_group_visible", { sceneId, groupId, visible });
+}
+
+/** Set (or clear, with `null`) a source's per-scene mixer override. */
+export function studioSetSceneAudioOverride(
+  sceneId: SceneId,
+  sourceId: SourceId,
+  over: { volumeDb: number; muted: boolean } | null,
+): Promise<void> {
+  return invoke("studio_set_scene_audio_override", { sceneId, sourceId, over });
+}
+
 /** Configure (or clear, with `null`) the second (vertical) output canvas. */
 export function studioSetVertical(vertical: VerticalCanvas | null): Promise<void> {
   return invoke("studio_set_vertical", { vertical });

@@ -252,29 +252,64 @@ impl StudioState {
         self.lock().revision
     }
 
-    /// What the audio engine reconciles against: the revision plus the active
-    /// scene's audio-capable sources (visible items only — the eye toggle
-    /// silences audio exactly like it hides video), with their strips and
-    /// retry nonces.
+    /// What the audio engine reconciles against: the revision plus the
+    /// audible sources of the program scene **and every scene nested into
+    /// it** (their audio plays exactly like their video composes). Visible
+    /// items only — the eye toggle (and a group's eye, Phase 6) silences
+    /// audio exactly like it hides video — with the program scene's
+    /// per-scene mixer overrides applied (TASK-605).
     pub fn audio_specs(&self) -> (u64, Vec<AudioSourceSpec>) {
         let core = self.lock();
-        let scene = core.collection.active_scene();
-        let specs = core
-            .collection
+        let collection = &core.collection;
+        // The program scene + its transitively nested scenes.
+        let mut scene_ids = vec![collection.active_scene];
+        let mut index = 0;
+        while index < scene_ids.len() {
+            let current = scene_ids[index];
+            index += 1;
+            if let Some(scene) = collection.scene(current) {
+                for item in &scene.items {
+                    if let Some(source) = collection.source(item.source) {
+                        if let SourceSettings::NestedScene { scene: target } = &source.settings {
+                            if !scene_ids.contains(target) {
+                                scene_ids.push(*target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let audible = |source_id: SourceId| -> bool {
+            scene_ids.iter().any(|id| {
+                collection.scene(*id).is_some_and(|scene| {
+                    scene.items.iter().any(|item| {
+                        item.source == source_id && item.visible && !scene.group_hides(item.id)
+                    })
+                })
+            })
+        };
+        let active = collection.active_scene();
+        let specs = collection
             .sources
             .iter()
             .filter(|source| source.settings.has_audio())
-            .filter(|source| {
-                scene
-                    .items
+            .filter(|source| audible(source.id))
+            .map(|source| {
+                let mut audio = source.audio.clone().unwrap_or_default();
+                if let Some(entry) = active
+                    .audio_overrides
                     .iter()
-                    .any(|item| item.source == source.id && item.visible)
-            })
-            .map(|source| AudioSourceSpec {
-                id: source.id,
-                settings: source.settings.clone(),
-                audio: source.audio.clone().unwrap_or_default(),
-                nonce: core.retry_nonces.get(&source.id).copied().unwrap_or(0),
+                    .find(|entry| entry.source == source.id)
+                {
+                    audio.volume_db = entry.volume_db;
+                    audio.muted = entry.muted;
+                }
+                AudioSourceSpec {
+                    id: source.id,
+                    settings: source.settings.clone(),
+                    audio,
+                    nonce: core.retry_nonces.get(&source.id).copied().unwrap_or(0),
+                }
             })
             .collect();
         (core.revision, specs)
@@ -696,6 +731,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             preview_scene,
             transition_pack,
             vertical_pack,
+            scene_pool,
+            scene_refs,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -750,6 +787,42 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some((vertical_scene, _, _)) = &vertical_pack {
                 live_sources.extend(vertical_scene.items.iter().map(|item| item.source));
             }
+            // Nested scenes (Phase 6): the source→scene map, the pool the
+            // compositor resolves against, and every transitively nested
+            // scene's sources joining the live set.
+            let scene_refs: HashMap<SourceId, SceneId> = guard
+                .collection
+                .sources
+                .iter()
+                .filter_map(|source| match &source.settings {
+                    SourceSettings::NestedScene { scene } => Some((source.id, *scene)),
+                    _ => None,
+                })
+                .collect();
+            let scene_pool: Vec<fcap_scene::Scene> = if scene_refs.is_empty() {
+                Vec::new()
+            } else {
+                let mut reachable: Vec<SceneId> = live_sources
+                    .iter()
+                    .filter_map(|source| scene_refs.get(source).copied())
+                    .collect();
+                let mut index = 0;
+                while index < reachable.len() {
+                    let current = reachable[index];
+                    index += 1;
+                    if let Some(nested) = guard.collection.scene(current) {
+                        for item in &nested.items {
+                            live_sources.push(item.source);
+                            if let Some(target) = scene_refs.get(&item.source) {
+                                if !reachable.contains(target) {
+                                    reachable.push(*target);
+                                }
+                            }
+                        }
+                    }
+                }
+                guard.collection.scenes.clone()
+            };
             (
                 guard.revision,
                 guard.collection.active_scene().clone(),
@@ -768,12 +841,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 preview_scene,
                 transition_pack,
                 vertical_pack,
+                scene_pool,
+                scene_refs,
             )
         };
         if let Some(dto) = transition_ended {
             let _ = app.emit("studio", &dto);
         }
         compositor.set_canvas_size(canvas.0, canvas.1);
+        compositor.set_scene_pool(scene_pool.clone(), scene_refs);
 
         // -- 2. Reconcile sources against the active scene ---------------------
         if revision != seen_revision {
@@ -797,6 +873,24 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         statuses_changed = true;
                     }
                     compositor.remove_source(source.id);
+                    continue;
+                }
+                // Nested scenes need no OS pipeline: the compositor composes
+                // them straight into their slot every frame.
+                if matches!(source.settings, SourceSettings::NestedScene { .. }) {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        statuses.entry(source.id)
+                    {
+                        slot.insert(SourceRuntime::live(canvas.0, canvas.1));
+                        statuses_changed = true;
+                    }
+                    keep_ids.push(source.id);
                     continue;
                 }
                 // The retry nonce is part of the fingerprint: bumping it is
@@ -885,6 +979,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     vertical_pack
                         .iter()
                         .flat_map(|(vertical_scene, _, _)| vertical_scene.items.iter().cloned()),
+                )
+                .chain(
+                    // Nested scenes' filters render too (pool is empty
+                    // unless nesting is in use).
+                    scene_pool
+                        .iter()
+                        .flat_map(|nested| nested.items.iter().cloned()),
                 )
                 .collect();
             let mut live_filters: Vec<FilterId> = Vec::new();

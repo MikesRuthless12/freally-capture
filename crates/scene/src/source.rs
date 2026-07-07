@@ -184,6 +184,14 @@ pub enum SourceSettings {
         #[serde(default)]
         device_id: String,
     },
+    /// Another scene composed as a source — nested scenes (Phase 6). The
+    /// referenced scene renders at program-canvas size and follows its own
+    /// edits live. Cycle-safe: the model rejects references that would make
+    /// a scene contain itself, directly or through other scenes.
+    NestedScene {
+        #[serde(default)]
+        scene: crate::scene::SceneId,
+    },
     /// Shaped, rasterized text (rustybuzz shaping, RTL-aware).
     Text {
         #[serde(default)]
@@ -237,6 +245,7 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
+            SourceSettings::NestedScene { .. } => "nestedScene",
             SourceSettings::Text { .. } => "text",
         }
     }
@@ -254,6 +263,7 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
+            SourceSettings::NestedScene { .. } => "Nested Scene",
             SourceSettings::Text { .. } => "Text",
         }
     }

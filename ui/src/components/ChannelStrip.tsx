@@ -6,8 +6,16 @@ import {
   studioSetAudioSyncOffset,
   studioSetAudioTracks,
   studioSetAudioVolume,
+  studioSetSceneAudioOverride,
 } from "../api/commands";
-import type { AudioSettings, AudioSourceLevels, MonitorMode, Source } from "../api/types";
+import type {
+  AudioSettings,
+  AudioSourceLevels,
+  MonitorMode,
+  SceneAudioOverride,
+  SceneId,
+  Source,
+} from "../api/types";
 import { MAX_SYNC_OFFSET_MS, MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT } from "../api/types";
 import { NumberField } from "./NumberField";
 
@@ -129,21 +137,62 @@ function StatusDot({ levels }: { levels?: AudioSourceLevels }) {
   );
 }
 
-function MuteButton({ source, audio }: { source: Source; audio: AudioSettings }) {
+function MuteButton({
+  source,
+  muted,
+  onToggle,
+}: {
+  source: Source;
+  muted: boolean;
+  onToggle: () => void;
+}) {
   return (
     <button
       type="button"
-      onClick={() => studioSetAudioMuted(source.id, !audio.muted).catch(fail("mute"))}
-      title={audio.muted ? "Unmute" : "Mute"}
-      aria-label={`${audio.muted ? "Unmute" : "Mute"} ${source.name}`}
-      aria-pressed={audio.muted}
+      onClick={onToggle}
+      title={muted ? "Unmute" : "Mute"}
+      aria-label={`${muted ? "Unmute" : "Mute"} ${source.name}`}
+      aria-pressed={muted}
       className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${
-        audio.muted
+        muted
           ? "border-red-400/60 bg-red-500/20 text-red-300"
           : "border-white/10 text-havoc-muted hover:text-havoc-text"
       }`}
     >
       M
+    </button>
+  );
+}
+
+/** The per-scene mix toggle (TASK-605): while on, this strip's fader/mute
+ * override the global mix for the CURRENT scene only. */
+function SceneMixButton({
+  source,
+  active,
+  onToggle,
+}: {
+  source: Source;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={
+        active
+          ? "Per-scene mix ON — this strip overrides the global mix for this scene (click to follow the global mix again)"
+          : "Per-scene mix — give this strip its own fader/mute for the current scene"
+      }
+      aria-label={`Per-scene mix for ${source.name}`}
+      aria-pressed={active}
+      className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${
+        active
+          ? "border-havoc-accent/70 bg-havoc-accent/20 text-havoc-text"
+          : "border-white/10 text-havoc-muted hover:text-havoc-text"
+      }`}
+    >
+      S
     </button>
   );
 }
@@ -252,6 +301,10 @@ type ChannelStripProps = {
   audio: AudioSettings;
   levels?: AudioSourceLevels;
   orientation?: "horizontal" | "vertical";
+  /** The program scene, for the per-scene mix toggle (TASK-605). */
+  sceneId?: SceneId | null;
+  /** This source's override in that scene, when one exists. */
+  sceneOverride?: SceneAudioOverride | null;
   onOpenFilters: () => void;
   onOpenAdvanced: () => void;
 };
@@ -267,25 +320,60 @@ export function ChannelStrip({
   audio,
   levels,
   orientation = "horizontal",
+  sceneId = null,
+  sceneOverride = null,
   onOpenFilters,
   onOpenAdvanced,
 }: ChannelStripProps) {
   // Fader drags stream; keep a local draft for instant feedback.
   const [draftDb, setDraftDb] = useState<number | null>(null);
-  const volumeDb = draftDb ?? audio.volumeDb;
-  const gated = levels?.gated ?? (audio.muted || Boolean(audio.pushToTalk));
+  // Per-scene mix (TASK-605): when this scene overrides the strip, the
+  // fader/mute SHOW and EDIT the override; everything else stays global.
+  const overriding = sceneOverride !== null && sceneId !== null;
+  const shownDb = overriding ? sceneOverride.volumeDb : audio.volumeDb;
+  const shownMuted = overriding ? sceneOverride.muted : audio.muted;
+  const volumeDb = draftDb ?? shownDb;
+  const gated = levels?.gated ?? (shownMuted || Boolean(audio.pushToTalk));
   const hasError = levels?.state === "error";
 
+  const setVolume = (value: number) => {
+    if (overriding && sceneId) {
+      studioSetSceneAudioOverride(sceneId, source.id, {
+        volumeDb: value,
+        muted: sceneOverride.muted,
+      }).catch(fail("scene volume"));
+    } else {
+      studioSetAudioVolume(source.id, value).catch(fail("volume"));
+    }
+  };
+  const toggleMute = () => {
+    if (overriding && sceneId) {
+      studioSetSceneAudioOverride(sceneId, source.id, {
+        volumeDb: sceneOverride.volumeDb,
+        muted: !sceneOverride.muted,
+      }).catch(fail("scene mute"));
+    } else {
+      studioSetAudioMuted(source.id, !audio.muted).catch(fail("mute"));
+    }
+  };
+  const toggleSceneMix = () => {
+    if (!sceneId) return;
+    studioSetSceneAudioOverride(
+      sceneId,
+      source.id,
+      overriding ? null : { volumeDb: audio.volumeDb, muted: audio.muted },
+    ).catch(fail("per-scene mix"));
+  };
   const onFaderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(event.target.value);
     setDraftDb(value);
-    studioSetAudioVolume(source.id, value).catch(fail("volume"));
+    setVolume(value);
   };
   const commitVolume = () => {
     if (draftDb === null) return;
     const value = draftDb;
     setDraftDb(null);
-    studioSetAudioVolume(source.id, value).catch(fail("volume"));
+    setVolume(value);
   };
 
   if (orientation === "vertical") {
@@ -340,7 +428,10 @@ export function ChannelStrip({
           </span>
         )}
         <div className="flex w-full items-center justify-center gap-0.5">
-          <MuteButton source={source} audio={audio} />
+          <MuteButton source={source} muted={shownMuted} onToggle={toggleMute} />
+          {sceneId && (
+            <SceneMixButton source={source} active={overriding} onToggle={toggleSceneMix} />
+          )}
           <MonitorButton source={source} audio={audio} />
           <FiltersButton source={source} audio={audio} onOpenFilters={onOpenFilters} />
           <AdvancedButton source={source} onOpenAdvanced={onOpenAdvanced} />
@@ -370,7 +461,10 @@ export function ChannelStrip({
         <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-havoc-muted">
           {dbLabel(volumeDb)} dB
         </span>
-        <MuteButton source={source} audio={audio} />
+        <MuteButton source={source} muted={shownMuted} onToggle={toggleMute} />
+        {sceneId && (
+          <SceneMixButton source={source} active={overriding} onToggle={toggleSceneMix} />
+        )}
         <MonitorButton source={source} audio={audio} />
         <FiltersButton source={source} audio={audio} onOpenFilters={onOpenFilters} />
         <AdvancedButton source={source} onOpenAdvanced={onOpenAdvanced} />

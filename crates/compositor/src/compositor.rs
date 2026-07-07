@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use fcap_capture::{Frame, PixelFormat};
-use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SourceId, TransitionKind};
+use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SceneId, SourceId, TransitionKind};
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
 use crate::gpu::Gpu;
@@ -188,6 +188,13 @@ pub struct Compositor {
     uniform_stride: u64,
 
     sources: HashMap<SourceId, SourceSlot>,
+
+    /// Nested scenes (Phase 6): the scenes a scene-source can reference and
+    /// the source→scene mapping, refreshed by the studio each tick. A
+    /// nested source's composed frame lives in `sources` under its id, so
+    /// transforms/filters/blends apply to it like any capture.
+    scene_pool: Vec<Scene>,
+    scene_refs: HashMap<SourceId, SceneId>,
 
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
@@ -394,6 +401,8 @@ impl Compositor {
             uniform_capacity: INITIAL_ITEM_CAPACITY,
             uniform_stride,
             sources: HashMap::new(),
+            scene_pool: Vec::new(),
+            scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
             transition: None,
@@ -980,10 +989,103 @@ impl Compositor {
         self.render_to(scene, time_seconds, target, canvas)
     }
 
+    /// The scenes a nested-scene source can reference + the source→scene
+    /// mapping (refreshed by the studio each tick; empty = no nesting).
+    pub fn set_scene_pool(&mut self, scenes: Vec<Scene>, refs: HashMap<SourceId, SceneId>) {
+        self.scene_pool = scenes;
+        self.scene_refs = refs;
+    }
+
+    /// Compose every nested-scene source `scene` shows into its slot texture
+    /// (children first — a nested scene inside a nested scene renders before
+    /// its parent samples it). Depth-capped so a pathological file can never
+    /// recurse away; the model already rejects true cycles. Nested frames
+    /// render at the **program** canvas size regardless of the target canvas,
+    /// so one slot serves the program and vertical canvases without thrash.
+    fn ensure_nested(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        depth: u8,
+    ) -> Result<(), CompositorError> {
+        if depth >= 4 || self.scene_refs.is_empty() {
+            return Ok(());
+        }
+        let jobs: Vec<(SourceId, SceneId)> = scene
+            .items
+            .iter()
+            .filter(|item| item.visible && !scene.group_hides(item.id))
+            .filter_map(|item| {
+                self.scene_refs
+                    .get(&item.source)
+                    .map(|target| (item.source, *target))
+            })
+            .collect();
+        for (source, target) in jobs {
+            let Some(inner) = self
+                .scene_pool
+                .iter()
+                .find(|candidate| candidate.id == target)
+                .cloned()
+            else {
+                continue; // the target vanished — keep the last frame
+            };
+            self.ensure_nested(&inner, time_seconds, depth + 1)?;
+
+            let (width, height) = (self.canvas_width, self.canvas_height);
+            let needs_new = match self.sources.get(&source) {
+                Some(slot) => slot.width != width || slot.height != height,
+                None => true,
+            };
+            if needs_new {
+                let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+                let bind_group = Self::make_texture_bind(
+                    &self.gpu.device,
+                    &self.texture_layout,
+                    &self.sampler,
+                    &self.repeat_sampler,
+                    &view,
+                );
+                self.sources.insert(
+                    source,
+                    SourceSlot {
+                        texture,
+                        bind_group,
+                        width,
+                        height,
+                        format: PixelFormat::Rgba8,
+                    },
+                );
+            }
+            let view = self
+                .sources
+                .get(&source)
+                .expect("ensured above")
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            self.compose_scene(&inner, time_seconds, view, (width as f32, height as f32))?;
+        }
+        Ok(())
+    }
+
     /// Compose `scene` into an arbitrary target at `canvas` dimensions — the
     /// program texture normally; a transition's scratch textures, the
     /// Studio-Mode preview pane, or the second (vertical) canvas otherwise.
+    /// Nested-scene sources compose first (into their slot textures), then
+    /// the scene itself.
     fn render_to(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        target: wgpu::TextureView,
+        canvas: (f32, f32),
+    ) -> Result<(), CompositorError> {
+        self.ensure_nested(scene, time_seconds, 0)?;
+        self.compose_scene(scene, time_seconds, target, canvas)
+    }
+
+    /// One scene → one target, no nested pre-pass (callers ensure it).
+    fn compose_scene(
         &mut self,
         scene: &Scene,
         time_seconds: f32,
@@ -999,7 +1101,11 @@ impl Compositor {
         let mut chain_passes: Vec<ChainPass> = Vec::new();
         let mut live_chains: Vec<ItemId> = Vec::new();
 
-        for item in scene.items.iter().filter(|item| item.visible) {
+        for item in scene
+            .items
+            .iter()
+            .filter(|item| item.visible && !scene.group_hides(item.id))
+        {
             let Some(slot) = self.sources.get(&item.source) else {
                 continue; // no frame yet
             };

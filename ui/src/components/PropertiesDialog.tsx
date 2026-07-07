@@ -27,11 +27,13 @@ const inputClass =
 
 type PropertiesDialogProps = {
   source: Source;
+  /** The scenes a Nested Scene source can point at (cycle-checked on Apply). */
+  scenes?: Array<{ id: string; name: string }>;
   onClose: () => void;
 };
 
 /** Per-kind source settings + rename. Apply pushes to the engine live. */
-export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
+export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDialogProps) {
   const [name, setName] = useState(source.name);
   const [draft, setDraft] = useState<SourceSettings>(() => {
     // A Source is its settings plus identity (+ the audio strip) — peel
@@ -67,7 +69,7 @@ export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
           />
         </label>
 
-        <SettingsEditor draft={draft} onChange={setDraft} />
+        <SettingsEditor draft={draft} scenes={scenes} onChange={setDraft} />
 
         {error && (
           <p role="alert" className="m-0 text-xs text-red-400">
@@ -97,12 +99,31 @@ export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
 
 function SettingsEditor({
   draft,
+  scenes,
   onChange,
 }: {
   draft: SourceSettings;
+  scenes: Array<{ id: string; name: string }>;
   onChange: (settings: SourceSettings) => void;
 }) {
   switch (draft.kind) {
+    case "nestedScene":
+      return (
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          Scene this source composes (a scene that already contains this one is rejected)
+          <select
+            value={draft.scene}
+            onChange={(event) => onChange({ ...draft, scene: event.target.value })}
+            className={inputClass}
+          >
+            {scenes.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
     case "display":
     case "window":
       return <CaptureRepick draft={draft} onChange={onChange} />;
