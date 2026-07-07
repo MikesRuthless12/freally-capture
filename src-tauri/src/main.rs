@@ -17,6 +17,7 @@ mod hotkeys;
 mod native_preview;
 mod preview;
 mod profiles;
+mod reactions;
 mod recording;
 mod remote;
 mod replay;
@@ -99,6 +100,7 @@ fn main() {
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
         .manage(replay::ReplayState::new())
+        .manage(reactions::ReactionState::new())
         .manage(events::RuntimeStats::default())
         .manage(hotkeys::ActionHotkeys::default())
         .manage(profiles::WorkspaceState::load_default())
@@ -169,6 +171,7 @@ fn main() {
             replay::replay_disarm,
             replay::replay_save,
             replay::replay_status,
+            reactions::studio_send_reaction,
             profiles::profiles_list,
             profiles::profile_create,
             profiles::profile_switch,

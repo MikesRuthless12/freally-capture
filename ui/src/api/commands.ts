@@ -92,6 +92,12 @@ export function replaySave(): Promise<string> {
   return invoke<string>("replay_save");
 }
 
+/** Float a reaction emoji over the program (TASK-614 — baked into what
+ * records and streams). */
+export function studioSendReaction(emoji: string): Promise<void> {
+  return invoke("studio_send_reaction", { emoji });
+}
+
 /** Drop a chapter marker at the current recording position (TASK-610). */
 export function recordingAddMarker(): Promise<number> {
   return invoke<number>("recording_add_marker");

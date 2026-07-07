@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   recordingAddMarker,
+  studioSendReaction,
   recordingPause,
   recordingResume,
   recordingStart,
@@ -177,6 +178,26 @@ export function ControlsDock({
           onNeedsSettings={() => setDialog("stream")}
         />
         <ReplayControls disabled={!settings} onNeedsComponents={() => setDialog("components")} />
+        <div
+          className="flex items-center gap-1"
+          role="group"
+          aria-label="Reactions (baked into the program)"
+          title="Float a reaction over the program — recorded AND streamed, so the replay shows the exact moment. Viewers in chat trigger these too (their reaction emoji float automatically); a flood only caps what's on screen."
+        >
+          {["❤", "🔥", "💯", "👏", "😂", "🎉"].map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => {
+                studioSendReaction(emoji).catch((err) => console.error("reaction failed:", err));
+              }}
+              aria-label={`React ${emoji}`}
+              className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-1 py-1 text-sm hover:border-havoc-accent/50"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           disabled

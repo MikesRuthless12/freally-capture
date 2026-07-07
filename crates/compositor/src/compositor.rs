@@ -210,6 +210,9 @@ pub struct Compositor {
     /// The stinger overlay: a fullscreen alpha-over pipeline + the frame
     /// texture, built on first use.
     stinger: Option<StingerRig>,
+    /// Floating reactions (TASK-614): the sprite pass + its uploaded emoji
+    /// sprites, built on first use.
+    reactions: Option<ReactionRig>,
 
     /// CPU time spent encoding + submitting the last render.
     last_render_cpu_micros: u64,
@@ -238,6 +241,39 @@ struct StingerRig {
     pipeline: wgpu::RenderPipeline,
     /// The uploaded stinger frame, recreated on size/format change.
     texture: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32, PixelFormat)>,
+}
+
+/// One reaction particle to draw this frame (canvas pixels; alpha 0..1).
+#[derive(Debug, Clone)]
+pub struct ReactionDraw {
+    /// Which uploaded sprite (see [`Compositor::set_reaction_sprite`]).
+    pub sprite: String,
+    pub x: f32,
+    pub y: f32,
+    /// Sprite size on the canvas, px (square-ish; the sprite's aspect holds).
+    pub size: f32,
+    pub alpha: f32,
+}
+
+/// The floating-reactions pass (TASK-614): a bounded pool of textured
+/// quads drawn alpha-over the composed program.
+struct ReactionRig {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind: wgpu::BindGroup,
+    uniform_stride: u64,
+    sprites: HashMap<String, SourceSlot>,
+}
+
+/// Reactions never draw more than this many sprites per frame — the pool
+/// bound that keeps a reaction flood from ever touching the encoder.
+pub const REACTION_POOL: usize = 64;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ReactionUniform {
+    rect: [f32; 4],
+    tint: [f32; 4],
 }
 
 /// `[progress, mode, dir.x, dir.y]` for the transition shader. `dir` is the
@@ -437,6 +473,7 @@ impl Compositor {
             transition_luma: None,
             transition_luma_epoch: 0,
             stinger: None,
+            reactions: None,
             last_render_cpu_micros: 0,
         })
     }
@@ -963,6 +1000,247 @@ impl Compositor {
         if let Some(rig) = self.stinger.as_mut() {
             rig.texture = None;
         }
+    }
+
+    /// Upload (or replace) one emoji sprite the reaction pass samples —
+    /// rasterized app-side (tight or padded rows, like any source frame).
+    pub fn set_reaction_sprite(&mut self, key: &str, frame: &Frame) -> Result<(), CompositorError> {
+        self.ensure_reaction_rig();
+        if frame.width == 0 || frame.height == 0 || frame.stride < frame.width * 4 {
+            return Err(CompositorError::BadFrame("bad reaction sprite".into()));
+        }
+        let needed = frame.stride as usize * frame.height as usize;
+        if frame.data.len() < needed {
+            return Err(CompositorError::BadFrame(
+                "reaction sprite shorter than its geometry".into(),
+            ));
+        }
+        let device = &self.gpu.device;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fcap reaction sprite"),
+            size: wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: texture_format(frame.format),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &frame.data[..needed],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(frame.stride),
+                rows_per_image: Some(frame.height),
+            },
+            wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = Self::make_texture_bind(
+            device,
+            &self.texture_layout,
+            &self.sampler,
+            &self.repeat_sampler,
+            &view,
+        );
+        let slot = SourceSlot {
+            texture,
+            bind_group,
+            width: frame.width,
+            height: frame.height,
+            format: frame.format,
+        };
+        if let Some(rig) = self.reactions.as_mut() {
+            rig.sprites.insert(key.to_string(), slot);
+        }
+        Ok(())
+    }
+
+    /// Whether a sprite is already uploaded (the app rasterizes lazily).
+    pub fn has_reaction_sprite(&self, key: &str) -> bool {
+        self.reactions
+            .as_ref()
+            .is_some_and(|rig| rig.sprites.contains_key(key))
+    }
+
+    /// Draw this frame's reaction particles alpha-over the composed
+    /// program — the pass that bakes them into what records and streams.
+    /// Hard-capped at [`REACTION_POOL`] draws; unknown sprites skip.
+    pub fn render_reactions(&mut self, draws: &[ReactionDraw]) -> Result<(), CompositorError> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.ensure_reaction_rig();
+        let (canvas_w, canvas_h) = (self.canvas_width as f32, self.canvas_height as f32);
+
+        // Stage the uniforms for every drawable particle.
+        let mut staging: Vec<u8> = Vec::new();
+        let mut jobs: Vec<(String, u32)> = Vec::new();
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            for draw in draws.iter().take(REACTION_POOL) {
+                let Some(sprite) = rig.sprites.get(&draw.sprite) else {
+                    continue;
+                };
+                let aspect = sprite.height.max(1) as f32 / sprite.width.max(1) as f32;
+                let w_clip = (draw.size / canvas_w) * 2.0;
+                let h_clip = (draw.size * aspect / canvas_h) * 2.0;
+                let x_clip = (draw.x / canvas_w) * 2.0 - 1.0;
+                let y_clip = 1.0 - (draw.y / canvas_h) * 2.0;
+                let uniform = ReactionUniform {
+                    rect: [x_clip, y_clip, w_clip, h_clip],
+                    tint: [draw.alpha.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+                };
+                let offset = jobs.len() as u64 * rig.uniform_stride;
+                staging.resize(offset as usize, 0);
+                staging.extend_from_slice(bytemuck::bytes_of(&uniform));
+                jobs.push((draw.sprite.clone(), offset as u32));
+            }
+        }
+        if jobs.is_empty() {
+            return Ok(());
+        }
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            self.gpu
+                .queue
+                .write_buffer(&rig.uniform_buffer, 0, &staging);
+        }
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap reactions"),
+            });
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap reactions pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the composed program
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            for (sprite, offset) in &jobs {
+                let slot = rig.sprites.get(sprite).expect("staged above");
+                pass.set_bind_group(0, &rig.uniform_bind, &[*offset]);
+                pass.set_bind_group(1, &slot.bind_group, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    fn ensure_reaction_rig(&mut self) {
+        if self.reactions.is_some() {
+            return;
+        }
+        let device = &self.gpu.device;
+        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let stride = (std::mem::size_of::<ReactionUniform>() as u64).div_ceil(align) * align;
+        let uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("fcap reaction uniform"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(
+                            std::mem::size_of::<ReactionUniform>() as u64
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap reaction uniforms"),
+            size: stride * REACTION_POOL as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fcap reaction uniforms"),
+            layout: &uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<ReactionUniform>() as u64),
+                }),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap reaction shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reaction.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap reaction layout"),
+            bind_group_layouts: &[&uniform_layout, &self.texture_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap reaction pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        self.reactions = Some(ReactionRig {
+            pipeline,
+            uniform_buffer,
+            uniform_bind,
+            uniform_stride: stride,
+            sprites: HashMap::new(),
+        });
     }
 
     fn ensure_stinger_rig(&mut self) {

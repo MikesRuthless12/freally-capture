@@ -30,6 +30,9 @@ use std::time::Duration;
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession};
 
+/// The optional per-message tap (TASK-614's reaction watcher).
+pub type MessageTap = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// One chat line, platform-tagged, timestamped at arrival (local wall
 /// time — the overlay shows `h:mm:ss A.M./P.M.` per the spec).
 #[derive(Debug, Clone)]
@@ -47,6 +50,10 @@ pub struct ChatMessage {
 pub(crate) struct ChatSink {
     pub(crate) ring: Arc<Mutex<VecDeque<ChatMessage>>>,
     pub(crate) revision: Arc<AtomicU64>,
+    /// An optional message tap (TASK-614: the reactions overlay watches
+    /// chat for reaction emoji). Called AFTER sanitizing, off the render
+    /// path — a slow tap can only slow its own ingest thread.
+    pub(crate) on_message: Option<MessageTap>,
 }
 
 /// How many lines the ring retains (display shows fewer).
@@ -56,10 +63,11 @@ const RING_CAP: usize = 200;
 const RENDER_TICK: Duration = Duration::from_millis(250);
 
 impl ChatSink {
-    fn new() -> Self {
+    fn new(on_message: Option<MessageTap>) -> Self {
         Self {
             ring: Arc::new(Mutex::new(VecDeque::new())),
             revision: Arc::new(AtomicU64::new(0)),
+            on_message,
         }
     }
 
@@ -77,6 +85,9 @@ impl ChatSink {
         let text = clean(text, 200);
         if text.is_empty() {
             return;
+        }
+        if let Some(tap) = &self.on_message {
+            tap(&text);
         }
         let mut ring = self
             .ring
@@ -135,7 +146,10 @@ pub(crate) fn interruptible_sleep(total: Duration, stop: &AtomicBool) {
 /// Start the chat overlay: one ingest thread per configured platform, all
 /// feeding the bounded ring; a renderer publishing transparent-background
 /// text frames on the standard latest-wins session channel.
-pub fn start_chat_overlay(config: &ChatOverlayConfig) -> Result<CaptureSession, CaptureError> {
+pub fn start_chat_overlay(
+    config: &ChatOverlayConfig,
+    on_message: Option<MessageTap>,
+) -> Result<CaptureSession, CaptureError> {
     let youtube = config.youtube.trim().to_string();
     let twitch = config.twitch.trim().trim_start_matches('#').to_string();
     let kick = config.kick.trim().to_string();
@@ -145,7 +159,7 @@ pub fn start_chat_overlay(config: &ChatOverlayConfig) -> Result<CaptureSession, 
         ));
     }
 
-    let sink = ChatSink::new();
+    let sink = ChatSink::new(on_message);
     let stop = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = frame_channel();
 
@@ -209,7 +223,7 @@ mod tests {
 
     #[test]
     fn the_ring_drops_oldest_under_flood_and_never_grows() {
-        let sink = ChatSink::new();
+        let sink = ChatSink::new(None);
         for index in 0..(RING_CAP + 50) {
             sink.push("twitch", "user", &format!("message {index}"));
         }
@@ -224,7 +238,7 @@ mod tests {
 
     #[test]
     fn messages_sanitize_control_chars_and_bound_length() {
-        let sink = ChatSink::new();
+        let sink = ChatSink::new(None);
         sink.push(
             "twitch",
             "user\u{0007}",
@@ -247,6 +261,6 @@ mod tests {
             max_lines: 12,
             font_size: 22.0,
         };
-        assert!(start_chat_overlay(&config).is_err());
+        assert!(start_chat_overlay(&config, None).is_err());
     }
 }

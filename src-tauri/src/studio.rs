@@ -55,6 +55,14 @@ const AUTO_RETRY_MAX: Duration = Duration::from_secs(60);
 const PREVIEW_MAX_WIDTH: u32 = 1280;
 const PREVIEW_MAX_HEIGHT: u32 = 720;
 const PREVIEW_JPEG_QUALITY: u8 = 75;
+/// The system emoji face reaction sprites rasterize from (monochrome
+/// outlines tinted per emoji — we own no color-emoji rasterizer, honestly).
+#[cfg(target_os = "windows")]
+const EMOJI_FONT: &str = "Segoe UI Emoji";
+#[cfg(target_os = "macos")]
+const EMOJI_FONT: &str = "Apple Color Emoji";
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+const EMOJI_FONT: &str = "Noto Color Emoji";
 
 // ---------------------------------------------------------------------------
 // Shared state + the command-side mutation surface
@@ -772,6 +780,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // Rising-edge detector for transitions (uploads the luma image / resets
     // the stinger exactly once per commit).
     let mut transition_was_active = false;
+    // Floating reactions (TASK-614): the live particle pool + its rng, and
+    // the shared queue chat ingests push into.
+    let mut reaction_particles: Vec<crate::reactions::Particle> = Vec::new();
+    let mut reaction_rng = crate::reactions::Lcg(0x9E37_79B9_7F4A_7C15);
+    let reactions_queue = app
+        .state::<crate::reactions::ReactionState>()
+        .queue_handle();
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
     // Whether the Studio-Mode preview pane currently has a published frame
@@ -1004,7 +1019,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         static_specs.remove(&source.id);
                         compositor.remove_source(source.id);
                         capture_specs.insert(source.id, spec);
-                        start_session(source.id, &source.settings, &mut starting);
+                        start_session(source.id, &source.settings, &mut starting, &reactions_queue);
                         statuses.insert(source.id, SourceRuntime::waiting());
                         statuses_changed = true;
                     }
@@ -1337,6 +1352,44 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             eprintln!("studio: compose failed: {err}");
         }
         composed_this_second += 1;
+
+        // -- 6r. Floating reactions (TASK-614): baked INTO the program ----------
+        // Drawn after the compose (and any transition/stinger), before the
+        // native present + readback — so preview, recording, and stream all
+        // carry the exact same floating emoji.
+        {
+            let pending = app.state::<crate::reactions::ReactionState>().drain();
+            crate::reactions::spawn(&mut reaction_particles, pending, time, &mut reaction_rng);
+            let draws = crate::reactions::step(&mut reaction_particles, time, canvas);
+            if !draws.is_empty() {
+                for draw in &draws {
+                    if !compositor.has_reaction_sprite(&draw.sprite) {
+                        let style = fcap_sources::text::TextStyle {
+                            text: draw.sprite.clone(),
+                            font_family: Some(EMOJI_FONT.to_string()),
+                            size_px: 96.0,
+                            color: crate::reactions::tint_of(&draw.sprite),
+                            ..Default::default()
+                        };
+                        match fcap_sources::text::render_text(&style) {
+                            Ok(frame) => {
+                                if let Err(err) =
+                                    compositor.set_reaction_sprite(&draw.sprite, &frame)
+                                {
+                                    eprintln!("studio: reaction sprite upload failed: {err}");
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("studio: reaction sprite render failed: {err}")
+                            }
+                        }
+                    }
+                }
+                if let Err(err) = compositor.render_reactions(&draws) {
+                    eprintln!("studio: reactions pass failed: {err}");
+                }
+            }
+        }
 
         // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
         if !native_disabled {
@@ -1748,9 +1801,11 @@ fn start_session(
     id: SourceId,
     settings: &SourceSettings,
     starting: &mut HashMap<SourceId, mpsc::Receiver<Result<CaptureSession, CaptureError>>>,
+    reactions_queue: &Arc<Mutex<Vec<String>>>,
 ) {
     let (tx, rx) = mpsc::channel();
     let settings = settings.clone();
+    let reactions_queue = Arc::clone(reactions_queue);
     let spawned = std::thread::Builder::new()
         .name("fcap-source-start".into())
         .spawn(move || {
@@ -1797,16 +1852,26 @@ fn start_session(
                     width,
                     max_lines,
                     font_size,
-                } => {
-                    fcap_sources::chat::start_chat_overlay(&fcap_sources::chat::ChatOverlayConfig {
+                } => fcap_sources::chat::start_chat_overlay(
+                    &fcap_sources::chat::ChatOverlayConfig {
                         youtube: youtube.clone(),
                         twitch: twitch.clone(),
                         kick: kick.clone(),
                         width: *width,
                         max_lines: *max_lines,
                         font_size: *font_size,
-                    })
-                }
+                    },
+                    // TASK-614: reaction emoji spotted in chat float over
+                    // the program — the same no-key ingest, no extra API.
+                    Some({
+                        let queue = Arc::clone(&reactions_queue);
+                        Arc::new(move |text: &str| {
+                            for emoji in crate::reactions::reactions_in_chat(text) {
+                                let _ = crate::reactions::push_into(&queue, emoji);
+                            }
+                        })
+                    }),
+                ),
                 // Frames are pushed from the webview's WebRTC session over
                 // IPC — the session just opens the push channel.
                 SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),

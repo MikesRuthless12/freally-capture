@@ -19,7 +19,7 @@ mod gpu;
 mod native_preview;
 pub mod transform;
 
-pub use compositor::{Compositor, ProgramFrame};
+pub use compositor::{Compositor, ProgramFrame, ReactionDraw, REACTION_POOL};
 pub use filters::{cube::parse_cube, FilterResourceData};
 pub use native_preview::{NativePreview, PreviewOverlay};
 

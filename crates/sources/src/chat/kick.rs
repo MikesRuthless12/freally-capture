@@ -94,6 +94,7 @@ mod tests {
         let sink = ChatSink {
             ring: Arc::new(std::sync::Mutex::new(VecDeque::new())),
             revision: Arc::new(AtomicU64::new(0)),
+            on_message: None,
         };
         let mut seen = VecDeque::new();
         let payload = serde_json::json!({
