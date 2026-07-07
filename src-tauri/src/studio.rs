@@ -1090,15 +1090,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
-        // The recorder + the live stream want the full-res program frame
-        // every tick while their sessions run; the preview JPEG keeps its
-        // ~30 fps cadence. One readback serves all three.
+        // The recorder, the live stream and the replay buffer want the
+        // full-res program frame every tick while their sessions run; the
+        // preview JPEG keeps its ~30 fps cadence. One readback serves all.
         let recording = app.state::<crate::recording::RecordingState>();
         let streaming = app.state::<crate::stream::StreamBridgeState>();
+        let replaying = app.state::<crate::replay::ReplayState>();
         let record_due = recording.wants_frames();
         let stream_due = streaming.wants_frames();
+        let replay_due = replaying.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if record_due || stream_due || preview_due {
+        if record_due || stream_due || replay_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
@@ -1108,6 +1110,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                     if stream_due {
                         streaming.push_video(Arc::clone(&data));
+                    }
+                    if replay_due {
+                        replaying.push_video(Arc::clone(&data));
                     }
                     if preview_due {
                         if let Some(jpeg) = encode_program_jpeg(

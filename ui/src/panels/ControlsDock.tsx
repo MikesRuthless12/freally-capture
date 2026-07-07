@@ -12,10 +12,12 @@ import type { RecordingStatus, Settings } from "../api/types";
 import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
+import { ReplayControls } from "../components/ReplayControls";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsOutput } from "./SettingsOutput";
+import { SettingsReplay } from "./SettingsReplay";
 import { SettingsStream } from "./SettingsStream";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 
@@ -34,7 +36,7 @@ export function ControlsDock({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<
-    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | null
+    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | "replay" | null
   >(null);
 
   useEffect(() => {
@@ -159,6 +161,7 @@ export function ControlsDock({
           onNeedsComponents={() => setDialog("components")}
           onNeedsSettings={() => setDialog("stream")}
         />
+        <ReplayControls disabled={!settings} onNeedsComponents={() => setDialog("components")} />
         <button
           type="button"
           disabled
@@ -202,8 +205,16 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("replay")}
+            title="Replay buffer length + quality presets"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⟲ Replay…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("hotkeys")}
-            title="Global hotkeys: record, Go Live, transition"
+            title="Global hotkeys: record, Go Live, transition, save replay"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
             ⌨ Keys…
@@ -248,6 +259,13 @@ export function ControlsDock({
       )}
       {dialog === "hotkeys" && (
         <SettingsHotkeys
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "replay" && (
+        <SettingsReplay
           settings={settings}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}

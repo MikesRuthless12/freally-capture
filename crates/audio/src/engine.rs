@@ -106,6 +106,9 @@ enum Cmd {
     /// The live stream's tap — independent of the recording's, so a stream
     /// and a recording can run (and stop) without touching each other.
     StreamTap(Option<RecordTap>),
+    /// The replay buffer's tap (Phase 6) — the third independent twin, so
+    /// the rolling buffer never contends with recording or streaming.
+    ReplayTap(Option<RecordTap>),
 }
 
 /// Cloneable handle to the engine thread.
@@ -159,6 +162,12 @@ impl AudioEngine {
         let _ = self.tx.send(Cmd::StreamTap(tap));
     }
 
+    /// Install (or clear) the replay-buffer tap — the third independent
+    /// twin, so the rolling buffer never contends with the other two.
+    pub fn set_replay_tap(&self, tap: Option<RecordTap>) {
+        let _ = self.tx.send(Cmd::ReplayTap(tap));
+    }
+
     /// The latest levels/status snapshot.
     pub fn snapshot(&self) -> EngineSnapshot {
         self.snapshot.lock().clone()
@@ -206,6 +215,7 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
     let mut sources: HashMap<SourceId, SourceRuntime> = HashMap::new();
     let mut record_tap: Option<RecordTap> = None;
     let mut stream_tap: Option<RecordTap> = None;
+    let mut replay_tap: Option<RecordTap> = None;
     let mut monitor: Option<MonitorStream> = None;
     let mut monitor_device = String::new();
     let mut monitor_error: Option<String> = None;
@@ -279,6 +289,7 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
                 }
                 Ok(Cmd::RecordTap(tap)) => record_tap = tap,
                 Ok(Cmd::StreamTap(tap)) => stream_tap = tap,
+                Ok(Cmd::ReplayTap(tap)) => replay_tap = tap,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return, // app gone
             }
@@ -342,6 +353,13 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
             (tap.sink)(&blocks);
         }
         if let Some(tap) = &mut stream_tap {
+            let blocks: Vec<(usize, &[f32])> = (0..fcap_scene::TRACK_COUNT)
+                .filter(|index| tap.tracks & (1 << index) != 0)
+                .map(|index| (index, core.track(index)))
+                .collect();
+            (tap.sink)(&blocks);
+        }
+        if let Some(tap) = &mut replay_tap {
             let blocks: Vec<(usize, &[f32])> = (0..fcap_scene::TRACK_COUNT)
                 .filter(|index| tap.tracks & (1 << index) != 0)
                 .map(|index| (index, core.track(index)))

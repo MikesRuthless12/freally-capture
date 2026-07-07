@@ -49,6 +49,8 @@ pub struct Settings {
     pub remote: RemoteSettings,
     /// Live-stream configuration (Phase 5).
     pub stream: StreamSettings,
+    /// The rolling replay buffer (Phase 6).
+    pub replay: ReplaySettings,
     /// Studio Mode's commit transition (Phase 5).
     pub transition: TransitionSettings,
     /// Global action hotkeys (Phase 5).
@@ -65,9 +67,61 @@ impl Default for Settings {
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
+            replay: ReplaySettings::default(),
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
         }
+    }
+}
+
+/// The rolling replay buffer (Phase 6, TASK-603): while armed, a background
+/// encode keeps the last N seconds as small encoded segments (bounded disk,
+/// tiny memory); Save stitches them into a playable file without touching
+/// the stream or the recording. The UI's length/quality presets write these
+/// fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ReplaySettings {
+    /// How much history Save keeps, in seconds.
+    pub seconds: u32,
+    /// CBR video bitrate of the buffer's own encode.
+    pub bitrate_kbps: u32,
+    pub audio_bitrate_kbps: u32,
+    pub fps: u32,
+    /// The mixer track the buffer records (1-based, like the UI dots).
+    pub track: u8,
+}
+
+impl Default for ReplaySettings {
+    fn default() -> Self {
+        Self {
+            seconds: 30,
+            bitrate_kbps: 6_000,
+            audio_bitrate_kbps: 160,
+            fps: 60,
+            track: 1,
+        }
+    }
+}
+
+impl ReplaySettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(5..=300).contains(&self.seconds) {
+            return Err("replay length out of range (5–300 s)".to_owned());
+        }
+        if !(500..=60_000).contains(&self.bitrate_kbps) {
+            return Err("replay bitrate out of range (500–60000 kbps)".to_owned());
+        }
+        if !(32..=512).contains(&self.audio_bitrate_kbps) {
+            return Err("replay audio bitrate out of range (32–512 kbps)".to_owned());
+        }
+        if !(1..=240).contains(&self.fps) {
+            return Err("replay fps out of range (1–240)".to_owned());
+        }
+        if !(1..=6).contains(&self.track) {
+            return Err("the replay track must be 1–6".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -83,13 +137,20 @@ pub struct HotkeySettings {
     pub go_live: Option<String>,
     /// Commit the Studio-Mode Preview → Program transition.
     pub transition: Option<String>,
+    /// Save the replay buffer's last N seconds (Phase 6).
+    pub save_replay: Option<String>,
 }
 
 impl HotkeySettings {
     pub fn validate(&self) -> Result<(), String> {
-        for key in [&self.record, &self.go_live, &self.transition]
-            .into_iter()
-            .flatten()
+        for key in [
+            &self.record,
+            &self.go_live,
+            &self.transition,
+            &self.save_replay,
+        ]
+        .into_iter()
+        .flatten()
         {
             if key.trim().is_empty() {
                 continue;
@@ -515,6 +576,7 @@ impl Settings {
         self.recording.validate()?;
         self.remote.validate()?;
         self.stream.validate()?;
+        self.replay.validate()?;
         self.transition.validate()?;
         self.hotkeys.validate()?;
         Ok(())
@@ -728,6 +790,10 @@ mod tests {
                 ],
                 auto_record: true,
             },
+            replay: ReplaySettings {
+                seconds: 60,
+                ..ReplaySettings::default()
+            },
             transition: TransitionSettings {
                 kind: fcap_scene::TransitionKind::SlideLeft,
                 duration_ms: 500,
@@ -736,6 +802,7 @@ mod tests {
                 record: Some("Ctrl+Shift+R".to_owned()),
                 go_live: None,
                 transition: Some("F13".to_owned()),
+                save_replay: Some("Ctrl+Shift+S".to_owned()),
             },
         };
         store.set(next.clone()).expect("save settings");

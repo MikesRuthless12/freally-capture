@@ -243,7 +243,10 @@ impl Drop for ResetOnDrop<'_> {
 
 /// Resolve "auto" (or validate an explicit encoder) to a **verified H.264**
 /// encoder — FLV/RTMP carries H.264; anything else fails at the ingest.
-fn resolve_stream_encoder<R: Runtime>(app: &AppHandle<R>, wanted: &str) -> Result<String, String> {
+pub(crate) fn resolve_stream_encoder<R: Runtime>(
+    app: &AppHandle<R>,
+    wanted: &str,
+) -> Result<String, String> {
     let catalog = crate::commands::recording::ensure_catalog(app)?;
     if wanted == "auto" {
         return catalog

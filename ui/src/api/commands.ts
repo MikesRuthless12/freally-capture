@@ -25,6 +25,7 @@ import type {
   NormRect,
   RecordingFile,
   RecordingStatus,
+  ReplayStatus,
   SceneId,
   Settings,
   SourceId,
@@ -69,6 +70,30 @@ export function streamStop(): Promise<StreamStatus> {
 /** The current stream status (the `stream` event pushes the same shape). */
 export function streamStatus(): Promise<StreamStatus> {
   return invoke<StreamStatus>("stream_status");
+}
+
+// ---------------------------------------------------------------------------
+// Replay buffer (Phase 6)
+// ---------------------------------------------------------------------------
+
+/** Arm the rolling replay buffer (starts its background encode). */
+export function replayArm(): Promise<void> {
+  return invoke("replay_arm");
+}
+
+/** Disarm the replay buffer (drops the un-saved history). */
+export function replayDisarm(): Promise<void> {
+  return invoke("replay_disarm");
+}
+
+/** Save the last N seconds to the recordings folder; resolves to the path. */
+export function replaySave(): Promise<string> {
+  return invoke<string>("replay_save");
+}
+
+/** The current replay-buffer status (the `replay` event pushes the same). */
+export function replayStatus(): Promise<ReplayStatus> {
+  return invoke<ReplayStatus>("replay_status");
 }
 
 // ---------------------------------------------------------------------------

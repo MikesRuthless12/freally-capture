@@ -200,7 +200,7 @@ pub fn recordings_folder(settings: &RecordingSettings) -> PathBuf {
 /// ` (2)`, ` (3)`… if that base (or, when splitting, its first `part…`
 /// segment) already exists — so two sessions in the same local-time second
 /// never overwrite each other.
-fn unique_recording_path(
+pub(crate) fn unique_recording_path(
     folder: &std::path::Path,
     prefix: &str,
     timestamp: &str,

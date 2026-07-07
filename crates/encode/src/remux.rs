@@ -2,7 +2,10 @@
 //! re-encode, no quality change — through the labeled ffmpeg component.
 //! (mkv is the crash-tolerant recording default; mp4 is what editors and
 //! phones expect. Remux gives both without paying for a second encode.)
+//! Also the replay buffer's **concat-copy** (Phase 6): stitch the ring's
+//! TS segments into one playable file, again without re-encoding.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -87,9 +90,84 @@ pub fn remux_to_mp4(ffmpeg: &Ffmpeg, input: &Path) -> Result<PathBuf, String> {
     Ok(output)
 }
 
+/// One `file '…'` line for the concat demuxer's list, with the only escape
+/// it honors (a quote closes, `\'` re-opens: `'` → `'\''`).
+fn concat_list_line(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\'', "'\\''");
+    format!("file '{text}'\n")
+}
+
+/// Stitch `segments` (MPEG-TS, same codec parameters — the replay ring's
+/// output) into `out` with `-c copy`: no re-encode, sub-second even for
+/// minutes of buffer. The newest segment may still be mid-write; TS cuts
+/// cleanly so the copy simply takes what has been flushed.
+pub fn concat_copy(ffmpeg: &Ffmpeg, segments: &[PathBuf], out: &Path) -> Result<(), String> {
+    if segments.is_empty() {
+        return Err("the replay buffer is still empty — nothing to save yet".to_string());
+    }
+    let list_path = out.with_extension("concat.txt");
+    {
+        let mut list = std::fs::File::create(&list_path)
+            .map_err(|err| format!("could not write the concat list: {err}"))?;
+        for segment in segments {
+            list.write_all(concat_list_line(segment).as_bytes())
+                .map_err(|err| format!("could not write the concat list: {err}"))?;
+        }
+    }
+    let mut cmd = command(ffmpeg);
+    cmd.args([
+        "-hide_banner",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+    ])
+    .arg(&list_path);
+    cmd.args(["-map", "0", "-c", "copy"]).arg(out);
+    let result = run_with_timeout(cmd, Duration::from_secs(10 * 60));
+    let _ = std::fs::remove_file(&list_path);
+    let result = result?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(out);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "replay save failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concat_list_lines_escape_quotes() {
+        assert_eq!(
+            concat_list_line(Path::new("C:/tmp/replay-000000001.ts")),
+            "file 'C:/tmp/replay-000000001.ts'\n"
+        );
+        assert_eq!(
+            concat_list_line(Path::new("/tmp/it's here.ts")),
+            "file '/tmp/it'\\''s here.ts'\n"
+        );
+    }
+
+    #[test]
+    fn concat_of_nothing_is_refused() {
+        let fake = Ffmpeg {
+            path: PathBuf::from("ffmpeg-not-real"),
+            version: "test".to_string(),
+        };
+        let err = concat_copy(&fake, &[], Path::new("out.mkv")).unwrap_err();
+        assert!(err.contains("empty"));
+    }
 
     #[test]
     fn sibling_names_avoid_collisions() {

@@ -706,6 +706,138 @@ fn tee_output(urls: &[String]) -> String {
         .join("|")
 }
 
+/// The rolling replay ring's encoder plan (Phase 6): the same rawvideo +
+/// one-audio-lane plumbing as a stream, muxed into small **MPEG-TS
+/// segments** in `dir` — TS because it cuts cleanly mid-stream, so the
+/// in-progress segment can ride a save. The stream crate's ring logic
+/// prunes old segments; Save concat-copies the tail without re-encoding.
+#[derive(Debug, Clone)]
+pub struct ReplayPlan {
+    pub encoder_id: String,
+    pub rate_control: RateControl,
+    pub preset: EncPreset,
+    pub audio_bitrate_kbps: u32,
+    /// Segment granularity — also the keyframe cadence, so every segment
+    /// starts decodable.
+    pub segment_sec: u32,
+    /// The ring directory (transient; the app owns its lifetime).
+    pub dir: PathBuf,
+    /// First segment number for this (re)spawn — continues the ring's
+    /// numbering across an encoder respawn instead of colliding at 0.
+    pub start_number: u64,
+}
+
+/// The replay ring's segment filename prefix/extension — shared with the
+/// ring logic in `fcap-stream` so the two can never drift.
+pub const REPLAY_SEGMENT_PREFIX: &str = "replay-";
+pub const REPLAY_SEGMENT_EXT: &str = "ts";
+
+impl FfmpegSink {
+    /// Spawn the replay ring's encoder: segments land in `plan.dir` as
+    /// `replay-%09d.ts`, one keyframe per segment boundary. The sink itself
+    /// never deletes or returns files — the ring owner does.
+    pub fn spawn_replay(
+        ffmpeg: &Ffmpeg,
+        spec: &RecordSpec,
+        plan: &ReplayPlan,
+    ) -> Result<Self, String> {
+        if spec.tracks.len() != 1 {
+            return Err("the replay buffer carries exactly one audio track".to_string());
+        }
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
+        let port = listener.local_addr().map_err(|err| err.to_string())?.port();
+
+        let keyint = plan.segment_sec.max(1) * spec.fps.max(1);
+        let mut cmd = crate::ffmpeg::command(ffmpeg);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        cmd.args(["-hide_banner", "-v", "error", "-y"]);
+        cmd.args(global_args(&plan.encoder_id));
+        cmd.args([
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            &format!("{}x{}", spec.width, spec.height),
+            "-r",
+            &spec.fps.to_string(),
+            "-i",
+            "pipe:0",
+        ]);
+        cmd.args([
+            "-f",
+            "f32le",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-i",
+            &format!("tcp://127.0.0.1:{port}"),
+        ]);
+        cmd.args(["-map", "0:v", "-map", "1:a"]);
+        cmd.args(video_args(
+            &plan.encoder_id,
+            &plan.rate_control,
+            plan.preset,
+            keyint,
+        ));
+        cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps)); // AAC in TS
+        cmd.args([
+            "-f",
+            "segment",
+            "-segment_time",
+            &plan.segment_sec.max(1).to_string(),
+            "-reset_timestamps",
+            "1",
+            "-segment_format",
+            "mpegts",
+            "-segment_start_number",
+            &plan.start_number.to_string(),
+        ]);
+        cmd.arg(
+            plan.dir
+                .join(format!("{REPLAY_SEGMENT_PREFIX}%09d.{REPLAY_SEGMENT_EXT}")),
+        );
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
+        let stdin = child.stdin.take().expect("stdin piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+        let stderr_thread = std::thread::Builder::new()
+            .name("fcap-replay-ffmpeg-err".into())
+            .spawn(move || {
+                use std::io::Read;
+                let mut tail = Vec::new();
+                let mut reader = std::io::BufReader::new(stderr);
+                let _ = reader.read_to_end(&mut tail);
+                if tail.len() > 4096 {
+                    tail.drain(..tail.len() - 4096);
+                }
+                tail
+            })
+            .map_err(|err| err.to_string())?;
+
+        let connect_cancel = Arc::new(AtomicBool::new(false));
+        let (video_tx, video_thread) = spawn_video_writer(stdin)?;
+        let lanes = vec![spawn_audio_writer(listener, Arc::clone(&connect_cancel))?];
+
+        Ok(FfmpegSink {
+            child,
+            video_tx: Some(video_tx),
+            video_thread: Some(video_thread),
+            lanes,
+            stderr_thread: Some(stderr_thread),
+            connect_cancel,
+            paths: Vec::new(), // the ring owner tracks the segment files
+            split: false,
+        })
+    }
+}
+
 /// Parse ffmpeg's tee slave-failure report — `Slave muxer #N failed…` (the
 /// same shape for a failed open and a failed write) — to the slave index.
 fn parse_slave_failure(line: &str) -> Option<usize> {

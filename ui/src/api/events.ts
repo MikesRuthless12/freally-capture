@@ -11,6 +11,7 @@ import type {
   FfmpegStatus,
   ProgramStatus,
   RecordingStatus,
+  ReplayStatus,
   StatsPayload,
   StreamStatus,
   StudioDto,
@@ -30,6 +31,16 @@ export function onRemoteInvite(handler: (url: string) => void): Promise<Unlisten
 /** Subscribe to live-stream status (~1 Hz while a session runs). */
 export function onStream(handler: (status: StreamStatus) => void): Promise<UnlistenFn> {
   return listen<StreamStatus>("stream", (event) => handler(event.payload));
+}
+
+/** Subscribe to replay-buffer status (~1 Hz while armed). */
+export function onReplay(handler: (status: ReplayStatus) => void): Promise<UnlistenFn> {
+  return listen<ReplayStatus>("replay", (event) => handler(event.payload));
+}
+
+/** Subscribe to saved-replay confirmations (the toast's trigger). */
+export function onReplaySaved(handler: (payload: { path: string }) => void): Promise<UnlistenFn> {
+  return listen<{ path: string }>("replay_saved", (event) => handler(event.payload));
 }
 
 /** Subscribe to model changes — the full collection on every mutation. */

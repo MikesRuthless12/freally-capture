@@ -11,6 +11,7 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["record", "Start / stop recording", "e.g. Ctrl+Shift+R"],
   ["goLive", "Go Live / End Stream", "e.g. Ctrl+Shift+L"],
   ["transition", "Studio-Mode Transition", "e.g. Ctrl+Shift+T or F13"],
+  ["saveReplay", "Save Replay (last N seconds)", "e.g. Ctrl+Shift+S"],
 ];
 
 /**
@@ -38,6 +39,7 @@ export function SettingsHotkeys({
       record: draft.record?.trim() || null,
       goLive: draft.goLive?.trim() || null,
       transition: draft.transition?.trim() || null,
+      saveReplay: draft.saveReplay?.trim() || null,
     };
     const next = { ...settings, hotkeys: normalized };
     settingsSet(next)

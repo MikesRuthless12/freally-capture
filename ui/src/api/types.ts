@@ -37,10 +37,35 @@ export type Settings = {
   remote: RemoteSettings;
   /** Live-stream configuration (Phase 5). */
   stream: StreamSettings;
+  /** The rolling replay buffer (Phase 6). */
+  replay: ReplaySettings;
   /** Studio Mode's commit transition (Phase 5). */
   transition: TransitionSettings;
   /** Global action hotkeys (Phase 5). */
   hotkeys: HotkeySettings;
+};
+
+/** The rolling replay buffer (mirrors `ReplaySettings` in settings.rs). */
+export type ReplaySettings = {
+  /** How much history Save keeps, in seconds (5–300). */
+  seconds: number;
+  /** CBR video bitrate of the buffer's own encode. */
+  bitrateKbps: number;
+  audioBitrateKbps: number;
+  fps: number;
+  /** The mixer track the buffer records (1-based). */
+  track: number;
+};
+
+/** The `replay` event payload / `replay_status` result. */
+export type ReplayStatus = {
+  armed: boolean;
+  /** "idle" | "buffering" | "recovering" | "failed". */
+  state: "idle" | "buffering" | "recovering" | "failed";
+  /** The armed window length (0 when idle). */
+  seconds: number;
+  error?: string;
+  lastSaved?: string;
 };
 
 /** Global action hotkeys — accelerator strings ("Ctrl+Shift+R", "F13") or
@@ -52,6 +77,8 @@ export type HotkeySettings = {
   goLive: string | null;
   /** Commit the Studio-Mode Preview → Program transition. */
   transition: string | null;
+  /** Save the replay buffer's last N seconds (Phase 6). */
+  saveReplay: string | null;
 };
 
 /** Studio Mode's commit transition (Phase 5). Stinger lands with the Phase 6

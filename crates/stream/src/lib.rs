@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 pub mod multistream;
+pub mod replay;
 pub mod rtmp;
 pub mod session;
 

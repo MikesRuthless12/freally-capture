@@ -34,10 +34,11 @@ pub use freally_video::{
 };
 pub use hardware::{GpuInfo, GpuVendor};
 pub use mux::{
-    tee_safe, Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, RtmpMonitor,
-    RtmpPlan, WirePlan,
+    tee_safe, Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, ReplayPlan,
+    RtmpMonitor, RtmpPlan, WirePlan,
 };
 pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
+pub use remux::concat_copy;
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

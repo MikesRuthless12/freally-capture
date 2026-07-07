@@ -19,6 +19,7 @@ mod preview;
 mod profiles;
 mod recording;
 mod remote;
+mod replay;
 mod settings;
 mod stream;
 mod studio;
@@ -97,6 +98,7 @@ fn main() {
         .manage(commands::recording::EncodeState::new())
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
+        .manage(replay::ReplayState::new())
         .manage(events::RuntimeStats::default())
         .manage(hotkeys::ActionHotkeys::default())
         .manage(profiles::WorkspaceState::load_default())
@@ -158,6 +160,10 @@ fn main() {
             stream::stream_start,
             stream::stream_stop,
             stream::stream_status,
+            replay::replay_arm,
+            replay::replay_disarm,
+            replay::replay_save,
+            replay::replay_status,
             profiles::profiles_list,
             profiles::profile_create,
             profiles::profile_switch,
@@ -245,6 +251,7 @@ fn main() {
             recording::spawn_status_thread(app.handle().clone());
             // The stream's ~1 Hz status/elapsed events (Phase 5).
             stream::spawn_status_thread(app.handle().clone());
+            replay::spawn_status_thread(app.handle().clone());
             // Global action hotkeys: record / go live / transition (Phase 5).
             hotkeys::spawn_reconcile_thread(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");
