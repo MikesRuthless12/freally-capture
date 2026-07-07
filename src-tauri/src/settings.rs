@@ -163,12 +163,19 @@ impl HotkeySettings {
     }
 }
 
-/// How Studio Mode commits Preview → Program.
+/// How Studio Mode commits Preview → Program. The Phase 6 pack adds the
+/// custom luma-wipe image and the stinger video (with its cut point).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TransitionSettings {
     pub kind: fcap_scene::TransitionKind,
     pub duration_ms: u32,
+    /// The grayscale wipe image for [`fcap_scene::TransitionKind::LumaImage`].
+    pub luma_image: String,
+    /// The video file for [`fcap_scene::TransitionKind::Stinger`].
+    pub stinger_path: String,
+    /// When the scene swap lands under the stinger, ms into the transition.
+    pub stinger_cut_ms: u32,
 }
 
 impl Default for TransitionSettings {
@@ -176,6 +183,9 @@ impl Default for TransitionSettings {
         Self {
             kind: fcap_scene::TransitionKind::Fade,
             duration_ms: 300,
+            luma_image: String::new(),
+            stinger_path: String::new(),
+            stinger_cut_ms: 500,
         }
     }
 }
@@ -184,6 +194,14 @@ impl TransitionSettings {
     pub fn validate(&self) -> Result<(), String> {
         if !(50..=5_000).contains(&self.duration_ms) {
             return Err("transition duration out of range (50–5000 ms)".to_owned());
+        }
+        for path in [&self.luma_image, &self.stinger_path] {
+            if path.len() > 512 || path.chars().any(char::is_control) {
+                return Err("invalid transition file path".to_owned());
+            }
+        }
+        if self.stinger_cut_ms > 5_000 {
+            return Err("stinger cut point out of range (0–5000 ms)".to_owned());
         }
         Ok(())
     }
@@ -816,6 +834,7 @@ mod tests {
             transition: TransitionSettings {
                 kind: fcap_scene::TransitionKind::SlideLeft,
                 duration_ms: 500,
+                ..TransitionSettings::default()
             },
             hotkeys: HotkeySettings {
                 record: Some("Ctrl+Shift+R".to_owned()),

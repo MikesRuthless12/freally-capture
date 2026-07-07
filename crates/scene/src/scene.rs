@@ -239,9 +239,10 @@ pub fn rects_overlap(a: NormRect, b: NormRect) -> bool {
     a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y
 }
 
-/// How Studio Mode commits Preview → Program (Phase 5). `Cut` is instant;
-/// the rest blend the two composed scenes on the GPU over a set duration.
-/// The stinger (a video overlay transition) arrives with the Phase 6 packs.
+/// How Studio Mode commits Preview → Program. `Cut` is instant; the rest
+/// blend the two composed scenes on the GPU over a set duration. The Phase 6
+/// pack adds more built-in luma patterns, custom luma-wipe images, and the
+/// stinger (a video played over the cut).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TransitionKind {
@@ -254,9 +255,19 @@ pub enum TransitionKind {
     SlideDown,
     SwipeLeft,
     SwipeRight,
-    /// Built-in luma patterns (custom luma images land with the Phase 6 packs).
+    /// Built-in luma patterns.
     LumaLinear,
     LumaRadial,
+    /// Phase 6 pack: more built-in wipe patterns.
+    LumaHorizontal,
+    LumaDiamond,
+    LumaClock,
+    /// A custom grayscale wipe image (Settings → transition's luma image).
+    LumaImage,
+    /// A video played over the cut (the scene swap lands at the configured
+    /// cut point). Files with straight alpha (e.g. ProRes 4444) composite
+    /// transparently; others draw opaque while they play.
+    Stinger,
 }
 
 /// One item's pre-focus placement, restored exactly when focus toggles off.

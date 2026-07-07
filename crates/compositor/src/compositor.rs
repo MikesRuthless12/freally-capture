@@ -203,21 +203,41 @@ pub struct Compositor {
     /// Studio Mode's transition machinery, built on first use and rebuilt on
     /// a canvas resize (its scratch textures are canvas-sized).
     transition: Option<TransitionRig>,
+    /// The custom luma-wipe image (CPU copy — survives rig rebuilds) and its
+    /// change counter.
+    transition_luma: Option<(u32, u32, Vec<u8>)>,
+    transition_luma_epoch: u64,
+    /// The stinger overlay: a fullscreen alpha-over pipeline + the frame
+    /// texture, built on first use.
+    stinger: Option<StingerRig>,
 
     /// CPU time spent encoding + submitting the last render.
     last_render_cpu_micros: u64,
 }
 
 /// Everything one blended transition frame needs: the fullscreen pipeline,
-/// its 16-byte uniform, and two canvas-sized scratch scenes (A = outgoing,
-/// B = incoming) with bind groups the pass samples.
+/// its 16-byte uniform, two canvas-sized scratch scenes (A = outgoing,
+/// B = incoming) with bind groups the pass samples, and the luma-wipe
+/// image slot (a 1×1 white dummy until a custom image is set).
 struct TransitionRig {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind: wgpu::BindGroup,
     scratch: [(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup); 2],
+    luma_bind: wgpu::BindGroup,
+    /// Which CPU copy the current `luma_bind` was built from (a counter —
+    /// bumped by [`Compositor::set_transition_luma`]).
+    luma_epoch: u64,
     width: u32,
     height: u32,
+}
+
+/// The stinger overlay (Phase 6): a fullscreen textured triangle drawn
+/// straight-alpha-over the rendered scene while the stinger video plays.
+struct StingerRig {
+    pipeline: wgpu::RenderPipeline,
+    /// The uploaded stinger frame, recreated on size/format change.
+    texture: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32, PixelFormat)>,
 }
 
 /// `[progress, mode, dir.x, dir.y]` for the transition shader. `dir` is the
@@ -233,6 +253,14 @@ fn transition_params(kind: TransitionKind, progress: f32) -> [f32; 4] {
         TransitionKind::SwipeRight => [progress, 2.0, -1.0, 0.0],
         TransitionKind::LumaLinear => [progress, 3.0, 0.0, 0.0],
         TransitionKind::LumaRadial => [progress, 4.0, 0.0, 0.0],
+        TransitionKind::LumaHorizontal => [progress, 5.0, 0.0, 0.0],
+        TransitionKind::LumaDiamond => [progress, 6.0, 0.0, 0.0],
+        TransitionKind::LumaClock => [progress, 7.0, 0.0, 0.0],
+        TransitionKind::LumaImage => [progress, 8.0, 0.0, 0.0],
+        // The stinger never blends here — the app renders the underlying
+        // scene and overlays the video (`render_scene_with_stinger`); a
+        // stray call falls back to a fade.
+        TransitionKind::Stinger => [progress, 0.0, 0.0, 0.0],
     }
 }
 
@@ -406,6 +434,9 @@ impl Compositor {
             filters,
             chain_cache: HashMap::new(),
             transition: None,
+            transition_luma: None,
+            transition_luma_epoch: 0,
+            stinger: None,
             last_render_cpu_micros: 0,
         })
     }
@@ -671,7 +702,12 @@ impl Compositor {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fcap transition layout"),
-            bind_group_layouts: &[&uniform_layout, &self.texture_layout, &self.texture_layout],
+            bind_group_layouts: &[
+                &uniform_layout,
+                &self.texture_layout,
+                &self.texture_layout,
+                &self.texture_layout, // the luma-wipe image (or its dummy)
+            ],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -714,15 +750,84 @@ impl Compositor {
             );
             (texture, view, bind)
         });
+        let luma_bind = self.make_transition_luma_bind();
 
         self.transition = Some(TransitionRig {
             pipeline,
             uniform_buffer,
             uniform_bind,
             scratch,
+            luma_bind,
+            luma_epoch: self.transition_luma_epoch,
             width,
             height,
         });
+    }
+
+    /// Build the group-3 bind for the current luma image (a 1×1 white dummy
+    /// when none is set — mode 8 then reads as a hard cut at p=1).
+    fn make_transition_luma_bind(&self) -> wgpu::BindGroup {
+        let device = &self.gpu.device;
+        let (width, height, pixels): (u32, u32, &[u8]) = match &self.transition_luma {
+            Some((width, height, data)) => (*width, *height, data.as_slice()),
+            None => (1, 1, &[0xff, 0xff, 0xff, 0xff]),
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fcap transition luma"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width.max(1) * 4),
+                rows_per_image: Some(height.max(1)),
+            },
+            wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self::make_texture_bind(
+            device,
+            &self.texture_layout,
+            &self.sampler,
+            &self.repeat_sampler,
+            &view,
+        )
+    }
+
+    /// Set (or clear) the custom luma-wipe image — tight RGBA rows. The CPU
+    /// copy survives canvas resizes; the GPU side rebuilds lazily.
+    pub fn set_transition_luma(&mut self, image: Option<(u32, u32, Vec<u8>)>) {
+        let same = match (&self.transition_luma, &image) {
+            (None, None) => true,
+            (Some(a), Some(b)) => *a == *b,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.transition_luma = image;
+        self.transition_luma_epoch += 1;
     }
 
     /// Compose BOTH scenes and blend them into the program texture — one
@@ -740,6 +845,19 @@ impl Compositor {
             return self.render(to, time_seconds);
         }
         self.ensure_transition_rig();
+        // A luma image set/cleared since the rig last built its group-3 bind.
+        if self
+            .transition
+            .as_ref()
+            .is_some_and(|rig| rig.luma_epoch != self.transition_luma_epoch)
+        {
+            let bind = self.make_transition_luma_bind();
+            let epoch = self.transition_luma_epoch;
+            if let Some(rig) = self.transition.as_mut() {
+                rig.luma_bind = bind;
+                rig.luma_epoch = epoch;
+            }
+        }
 
         let (from_view, to_view) = {
             let rig = self.transition.as_ref().expect("ensured above");
@@ -781,9 +899,187 @@ impl Compositor {
             pass.set_bind_group(0, &rig.uniform_bind, &[]);
             pass.set_bind_group(1, &rig.scratch[0].2, &[]);
             pass.set_bind_group(2, &rig.scratch[1].2, &[]);
+            pass.set_bind_group(3, &rig.luma_bind, &[]);
             pass.draw(0..3, 0..1);
         }
         self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// One stinger-transition frame (Phase 6): render `scene` (the side of
+    /// the cut the audience should see), then draw the newest stinger video
+    /// frame straight-alpha-over it. `frame` is `None` while the stinger
+    /// file spins up — the scene shows bare, honestly.
+    pub fn render_scene_with_stinger(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        frame: Option<&Frame>,
+    ) -> Result<(), CompositorError> {
+        self.render(scene, time_seconds)?;
+        self.ensure_stinger_rig();
+        if let Some(frame) = frame {
+            self.upload_stinger_frame(frame)?;
+        }
+        // Between video frames the last uploaded one keeps covering the swap
+        // (the render loop outpaces the stinger's fps).
+        let rig = self.stinger.as_ref().expect("ensured above");
+        let Some((_, bind, _, _, _)) = rig.texture.as_ref() else {
+            return Ok(());
+        };
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap stinger"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap stinger pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the rendered scene
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Forget the previous stinger's last frame (called when a new stinger
+    /// transition starts, so it can never flash stale pixels).
+    pub fn reset_stinger(&mut self) {
+        if let Some(rig) = self.stinger.as_mut() {
+            rig.texture = None;
+        }
+    }
+
+    fn ensure_stinger_rig(&mut self) {
+        if self.stinger.is_some() {
+            return;
+        }
+        let device = &self.gpu.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap stinger shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/stinger.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap stinger layout"),
+            bind_group_layouts: &[&self.texture_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap stinger pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        self.stinger = Some(StingerRig {
+            pipeline,
+            texture: None,
+        });
+    }
+
+    /// Upload the newest stinger frame (recreating the texture on a
+    /// size/format change), with the same geometry checks as sources.
+    fn upload_stinger_frame(&mut self, frame: &Frame) -> Result<(), CompositorError> {
+        if frame.width == 0 || frame.height == 0 || frame.stride < frame.width * 4 {
+            return Err(CompositorError::BadFrame("bad stinger frame".into()));
+        }
+        let needed = frame.stride as usize * frame.height as usize;
+        if frame.data.len() < needed {
+            return Err(CompositorError::BadFrame(
+                "stinger frame shorter than its geometry".into(),
+            ));
+        }
+        let needs_new = match self.stinger.as_ref().and_then(|rig| rig.texture.as_ref()) {
+            Some((_, _, width, height, format)) => {
+                *width != frame.width || *height != frame.height || *format != frame.format
+            }
+            None => true,
+        };
+        if needs_new {
+            let device = &self.gpu.device;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("fcap stinger frame"),
+                size: wgpu::Extent3d {
+                    width: frame.width,
+                    height: frame.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture_format(frame.format),
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind = Self::make_texture_bind(
+                device,
+                &self.texture_layout,
+                &self.sampler,
+                &self.repeat_sampler,
+                &view,
+            );
+            if let Some(rig) = self.stinger.as_mut() {
+                rig.texture = Some((texture, bind, frame.width, frame.height, frame.format));
+            }
+        }
+        let rig = self.stinger.as_ref().expect("ensured by caller");
+        let (texture, _, _, _, _) = rig.texture.as_ref().expect("just ensured");
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &frame.data[..needed],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(frame.stride),
+                rows_per_image: Some(frame.height),
+            },
+            wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+        );
         Ok(())
     }
 

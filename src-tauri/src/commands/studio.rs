@@ -358,11 +358,7 @@ pub fn studio_transition(
 ) -> Result<(), String> {
     let transition = settings.get().transition;
     transition.validate()?;
-    state.begin_transition(
-        &app,
-        transition.kind,
-        std::time::Duration::from_millis(u64::from(transition.duration_ms)),
-    )
+    state.begin_transition(&app, &transition)
 }
 
 /// Highlight Speaker (Focus/Spotlight): `Some(item)` promotes that item to

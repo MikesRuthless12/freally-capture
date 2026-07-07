@@ -97,11 +97,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
         }
         HotkeyAction::Transition => {
             let settings = app.state::<SettingsStore>().get().transition;
-            if let Err(err) = app.state::<crate::studio::StudioState>().begin_transition(
-                app,
-                settings.kind,
-                Duration::from_millis(u64::from(settings.duration_ms)),
-            ) {
+            if let Err(err) = app
+                .state::<crate::studio::StudioState>()
+                .begin_transition(app, &settings)
+            {
                 eprintln!("hotkey: transition failed: {err}");
             }
         }

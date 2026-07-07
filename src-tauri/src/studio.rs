@@ -86,6 +86,25 @@ struct ActiveTransition {
     kind: fcap_scene::TransitionKind,
     duration: Duration,
     started: Instant,
+    /// The stinger video playing over the cut (TASK-606), when the kind is
+    /// `Stinger`. Dropping it stops the decode.
+    stinger: Option<fcap_capture::CaptureSession>,
+    /// When (0..1 of the duration) the scene swap shows through a stinger.
+    cut: f32,
+    /// The custom luma-wipe image (tight RGBA), when the kind is `LumaImage`.
+    luma: Option<Arc<(u32, u32, Vec<u8>)>>,
+}
+
+/// What the render loop pulls per tick while a transition runs.
+pub(crate) struct TransitionFramePack {
+    pub from_scene: fcap_scene::Scene,
+    pub kind: fcap_scene::TransitionKind,
+    pub progress: f32,
+    pub cut: f32,
+    /// The newest stinger video frame (None between frames — the last
+    /// uploaded one keeps covering).
+    pub stinger_frame: Option<fcap_capture::Frame>,
+    pub luma: Option<Arc<(u32, u32, Vec<u8>)>>,
 }
 
 struct StudioCore {
@@ -216,9 +235,46 @@ impl StudioState {
     pub fn begin_transition<R: Runtime>(
         &self,
         app: &AppHandle<R>,
-        kind: fcap_scene::TransitionKind,
-        duration: Duration,
+        settings: &crate::settings::TransitionSettings,
     ) -> Result<(), String> {
+        let kind = settings.kind;
+        let duration =
+            Duration::from_millis(u64::from(settings.duration_ms)).max(Duration::from_millis(50));
+        // The pack extras load/start OUTSIDE the core lock (file I/O).
+        let stinger = if kind == fcap_scene::TransitionKind::Stinger {
+            let path = settings.stinger_path.trim();
+            if path.is_empty() {
+                return Err(
+                    "the Stinger transition needs a video file — pick one next to the transition controls"
+                        .to_string(),
+                );
+            }
+            // The stinger's own audio is not mixed (v1) — video only.
+            Some(
+                fcap_sources::media::start_media("stinger-transition", path, false, true)
+                    .map_err(|err| format!("stinger: {err}"))?,
+            )
+        } else {
+            None
+        };
+        let luma = if kind == fcap_scene::TransitionKind::LumaImage {
+            let path = settings.luma_image.trim();
+            if path.is_empty() {
+                return Err(
+                    "the Image Wipe transition needs a grayscale image — pick one next to the transition controls"
+                        .to_string(),
+                );
+            }
+            let frame = fcap_sources::image::load_image_rgba(std::path::Path::new(path))
+                .map_err(|err| format!("luma image: {err}"))?;
+            Some(Arc::new(tight_rgba(&frame)))
+        } else {
+            None
+        };
+        let cut = (settings.stinger_cut_ms.min(settings.duration_ms) as f32
+            / settings.duration_ms.max(1) as f32)
+            .clamp(0.0, 1.0);
+
         let dto = {
             let mut core = self.lock();
             let preview = core.preview_scene.ok_or("studio mode is off")?;
@@ -234,8 +290,11 @@ impl StudioState {
                 core.transition = Some(ActiveTransition {
                     from,
                     kind,
-                    duration: duration.max(Duration::from_millis(50)),
+                    duration,
                     started: Instant::now(),
+                    stinger,
+                    cut,
+                    luma,
                 });
             }
             core.revision += 1;
@@ -448,6 +507,26 @@ pub struct AudioSourceSpec {
     pub audio: AudioSettings,
     /// The retry nonce — bumping it forces a device reopen.
     pub nonce: u64,
+}
+
+/// A capture frame flattened to tight RGBA rows (the luma-wipe upload shape).
+fn tight_rgba(frame: &fcap_capture::Frame) -> (u32, u32, Vec<u8>) {
+    let (width, height) = (frame.width, frame.height);
+    let mut data = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        let start = (row * frame.stride) as usize;
+        let end = start + (width * 4) as usize;
+        let row_bytes = &frame.data[start..end.min(frame.data.len())];
+        match frame.format {
+            fcap_capture::PixelFormat::Rgba8 => data.extend_from_slice(row_bytes),
+            fcap_capture::PixelFormat::Bgra8 => {
+                for px in row_bytes.chunks_exact(4) {
+                    data.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                }
+            }
+        }
+    }
+    (width, height, data)
 }
 
 /// The on-disk file for a named scene collection: the live
@@ -686,6 +765,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut composed_this_second = 0u32;
     let mut composed_vertical_this_second = 0u32;
     let mut vertical_preview_live = false;
+    // Rising-edge detector for transitions (uploads the luma image / resets
+    // the stinger exactly once per commit).
+    let mut transition_was_active = false;
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
     // Whether the Studio-Mode preview pane currently has a published frame
@@ -748,11 +830,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         transition_ended = Some(dto_of(&guard));
                         None
                     } else {
-                        guard
-                            .collection
-                            .scene(tr.from)
-                            .cloned()
-                            .map(|from_scene| (from_scene, tr.kind, progress))
+                        // The newest stinger video frame, when one plays.
+                        let stinger_frame = tr.stinger.as_ref().and_then(|session| {
+                            session.frames().recv_timeout(Duration::ZERO).ok().flatten()
+                        });
+                        guard.collection.scene(tr.from).cloned().map(|from_scene| {
+                            TransitionFramePack {
+                                from_scene,
+                                kind: tr.kind,
+                                progress,
+                                cut: tr.cut,
+                                stinger_frame,
+                                luma: tr.luma.clone(),
+                            }
+                        })
                     }
                 }
                 None => None,
@@ -773,8 +864,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some(preview) = &preview_scene {
                 live_sources.extend(preview.items.iter().map(|item| item.source));
             }
-            if let Some((from_scene, _, _)) = &transition_pack {
-                live_sources.extend(from_scene.items.iter().map(|item| item.source));
+            if let Some(pack) = &transition_pack {
+                live_sources.extend(pack.from_scene.items.iter().map(|item| item.source));
             }
             // The second (vertical) canvas keeps ITS scene's sources live too.
             let vertical_pack = guard.collection.vertical.and_then(|config| {
@@ -973,7 +1064,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 .chain(
                     transition_pack
                         .iter()
-                        .flat_map(|(from_scene, _, _)| from_scene.items.iter().cloned()),
+                        .flat_map(|pack| pack.from_scene.items.iter().cloned()),
                 )
                 .chain(
                     vertical_pack
@@ -1138,12 +1229,37 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // -- 6. Compose + preview ------------------------------------------------
         let time = started_at.elapsed().as_secs_f32();
-        // A running Studio-Mode commit renders BOTH scenes and blends them;
-        // otherwise the program scene composes directly.
-        let compose_result = match &transition_pack {
-            Some((from_scene, kind, progress)) => {
-                compositor.render_transition(from_scene, &scene, *kind, *progress, time)
+        // A running Studio-Mode commit renders BOTH scenes and blends them
+        // (a stinger covers the swap with its video; a custom luma image
+        // uploads once per transition); otherwise the program scene
+        // composes directly.
+        if let Some(pack) = &transition_pack {
+            if !transition_was_active {
+                transition_was_active = true;
+                compositor.reset_stinger();
+                compositor.set_transition_luma(pack.luma.as_ref().map(|luma| (**luma).clone()));
             }
+        } else {
+            transition_was_active = false;
+        }
+        let compose_result = match &transition_pack {
+            Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
+                // The audience sees the outgoing scene until the cut point,
+                // the new program after — the stinger video covers the swap.
+                let shown = if pack.progress < pack.cut {
+                    &pack.from_scene
+                } else {
+                    &scene
+                };
+                compositor.render_scene_with_stinger(shown, time, pack.stinger_frame.as_ref())
+            }
+            Some(pack) => compositor.render_transition(
+                &pack.from_scene,
+                &scene,
+                pack.kind,
+                pack.progress,
+                time,
+            ),
             None => compositor.render(&scene, time),
         };
         if let Err(err) = compose_result {

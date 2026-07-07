@@ -93,7 +93,12 @@ export type TransitionKind =
   | "swipeLeft"
   | "swipeRight"
   | "lumaLinear"
-  | "lumaRadial";
+  | "lumaRadial"
+  | "lumaHorizontal"
+  | "lumaDiamond"
+  | "lumaClock"
+  | "lumaImage"
+  | "stinger";
 
 export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
   ["cut", "Cut"],
@@ -106,11 +111,22 @@ export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
   ["swipeRight", "Swipe →"],
   ["lumaLinear", "Luma wipe (linear)"],
   ["lumaRadial", "Luma wipe (radial)"],
+  ["lumaHorizontal", "Luma wipe (horizontal)"],
+  ["lumaDiamond", "Luma wipe (diamond)"],
+  ["lumaClock", "Luma wipe (clock)"],
+  ["lumaImage", "Image wipe (custom)"],
+  ["stinger", "Stinger (video)"],
 ];
 
 export type TransitionSettings = {
   kind: TransitionKind;
   durationMs: number;
+  /** The grayscale wipe image for `lumaImage`. */
+  lumaImage: string;
+  /** The video file for `stinger`. */
+  stingerPath: string;
+  /** When the scene swap lands under the stinger, ms into the transition. */
+  stingerCutMs: number;
 };
 
 /** The services the stream target picker offers (`srt`/`whip` are the
