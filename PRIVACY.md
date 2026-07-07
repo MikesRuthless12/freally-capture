@@ -30,9 +30,17 @@ Freally Capture works **fully offline** for building scenes, composing, recordin
 **only** for:
 
 - **the stream targets you configure** — when you go live, the Software connects
-  **directly** to the streaming services you chose (e.g. Twitch, YouTube, Kick)
-  and sends your broadcast to them, using the stream keys you entered. There is
+  **directly** to the streaming services you chose (e.g. Twitch, YouTube, Kick),
+  a self-hosted **SRT** ingest, or a **WHIP** (WebRTC) endpoint, and sends your
+  broadcast to them, using the stream keys/tokens you entered. When you enable
+  more than one target, each publishes **directly** to its platform. There is
   **no restream server we operate**; your video does not pass through us;
+- **the live chat overlay you configure** (optional) — if you add a chat overlay
+  and point it at a YouTube, Twitch, or Kick channel, the Software reads that
+  channel's **public** live chat the same way a logged-out visitor's browser does
+  — **no account, developer key, or sign-in is ever required or requested**. It
+  sends only the ordinary requests a viewer's browser makes to read public chat;
+  it transmits none of your content or personal data to those platforms;
 - **an on-demand download** of one optional, non-bundled component that *you*
   trigger — **ffmpeg** (used for the patent-encumbered "wire" codecs the
   streaming platforms and some exports require), fetched from its third-party

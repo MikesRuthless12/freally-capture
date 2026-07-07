@@ -40,7 +40,8 @@ leaves your machine is the stream you chose to send.
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
 > telemetry**, and **no cloud restreaming we run** — your stream goes **direct to the platform**. The
-> only network actions are the **stream targets you configure**, an
+> only network actions are the **stream targets you configure**, an optional **live chat overlay** you
+> point at a channel (public chat reads only — **never an API key, account, or sign-in**), an
 > optional **update check**, and the on-demand download of one clearly-labeled, non-bundled component:
 > **ffmpeg** (for the patent-encumbered wire codecs the platforms require). There are **no AI/ML
 > features and no model downloads**. See [`PRIVACY.md`](PRIVACY.md) and
@@ -52,7 +53,7 @@ leaves your machine is the stream you chose to send.
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
 4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — including **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
-5. **Extras** — a **virtual camera** (your produced feed as a webcam in Zoom/Meet/Discord), a rolling **replay buffer** with a save hotkey, **global hotkeys** for everything, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, **scripting** (Lua/JS), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
+5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything, **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate). A **virtual camera**, a **WebSocket remote-control API** (Stream Deck / Companion-style) + browser docks, and **scripting** (Lua/JS) are on the roadmap.
 
 It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
 local and account-free, the same on all three desktop OSes, and integrated with the Freally suite.

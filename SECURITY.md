@@ -30,8 +30,13 @@ remediate before any public disclosure.
 ## Scope & notes
 
 - **Local-first:** the core never transmits your captures or recordings. The outbound network actions
-  are *limited and explicit* — the **stream targets you configure**, the optional **ffmpeg / model
-  downloads** and the optional **update check**.
+  are *limited and explicit* — the **stream targets you configure** (RTMP/RTMPS/SRT/WHIP, each direct
+  to its platform), the optional **live chat overlay** you point at a channel (public chat reads only —
+  no account or key, the same requests a logged-out viewer's browser makes; the chat host is pinned to
+  the platform's own domains), the optional **ffmpeg / model downloads**, and the optional
+  **update check**. Secrets (stream keys, the WHIP bearer token) ride the publish URL / the
+  `Authorization` header, are redacted from every log and error, and are scrubbed from any ffmpeg
+  stderr tail.
 - **No account / no cloud video path:** there is no login and no server-side video. Streams are muxed
   on-device and sent **directly** to each platform you configured; there is no restream relay we run.
 - **Capture surface:** screen / window / game / webcam frames stay **in-process** and go only to the
