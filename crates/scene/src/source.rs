@@ -94,6 +94,18 @@ fn default_slide_fade_ms() -> u32 {
     300
 }
 
+fn default_chat_width() -> u32 {
+    480
+}
+
+fn default_chat_lines() -> u32 {
+    12
+}
+
+fn default_chat_font() -> f32 {
+    22.0
+}
+
 fn default_color_height() -> u32 {
     1080
 }
@@ -211,6 +223,33 @@ pub enum SourceSettings {
         #[serde(default)]
         shuffle: bool,
     },
+    /// The live chat overlay (Phase 6, TASK-613): a positionable,
+    /// transparent-background record of the incoming livestream chat —
+    /// username + message + a per-message 12-hour timestamp. **No API key,
+    /// no developer account, no sign-in, ever** (the hard rule): YouTube
+    /// reads through the owned InnerTube client exactly like the web
+    /// player, Twitch reads anonymous IRC, Kick polls its public endpoint.
+    /// Facebook would need the user's own token — opt-in and not
+    /// implemented yet; it never gates the others.
+    ChatOverlay {
+        /// A YouTube channel / watch / live_chat URL (empty = off).
+        #[serde(default)]
+        youtube: String,
+        /// A Twitch channel name (empty = off).
+        #[serde(default)]
+        twitch: String,
+        /// A Kick channel slug (empty = off).
+        #[serde(default)]
+        kick: String,
+        /// Overlay width in canvas pixels.
+        #[serde(default = "default_chat_width")]
+        width: u32,
+        /// How many newest lines stay on screen.
+        #[serde(default = "default_chat_lines")]
+        max_lines: u32,
+        #[serde(default = "default_chat_font")]
+        font_size: f32,
+    },
     /// Another scene composed as a source — nested scenes (Phase 6). The
     /// referenced scene renders at program-canvas size and follows its own
     /// edits live. Cycle-safe: the model rejects references that would make
@@ -274,6 +313,7 @@ impl SourceSettings {
             SourceSettings::AudioOutput { .. } => "audioOutput",
             SourceSettings::NestedScene { .. } => "nestedScene",
             SourceSettings::Slideshow { .. } => "slideshow",
+            SourceSettings::ChatOverlay { .. } => "chatOverlay",
             SourceSettings::Text { .. } => "text",
         }
     }
@@ -293,6 +333,7 @@ impl SourceSettings {
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
             SourceSettings::NestedScene { .. } => "Nested Scene",
             SourceSettings::Slideshow { .. } => "Image Slideshow",
+            SourceSettings::ChatOverlay { .. } => "Live Chat",
             SourceSettings::Text { .. } => "Text",
         }
     }

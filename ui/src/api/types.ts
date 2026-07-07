@@ -419,6 +419,15 @@ export type SourceSettings =
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "nestedScene"; scene: SceneId }
   | {
+      kind: "chatOverlay";
+      youtube: string;
+      twitch: string;
+      kick: string;
+      width: number;
+      maxLines: number;
+      fontSize: number;
+    }
+  | {
       kind: "slideshow";
       paths: string[];
       slideMs: number;

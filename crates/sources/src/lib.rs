@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod chat;
 pub mod color;
 pub mod image;
 pub mod media;

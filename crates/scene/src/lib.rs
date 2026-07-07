@@ -554,6 +554,10 @@ impl Collection {
         }
         let seat = if source.settings.is_audio_only() {
             None
+        } else if matches!(source.settings, SourceSettings::ChatOverlay { .. }) {
+            // The classic spot for a chat feed (the spec's default) — still
+            // freely draggable afterwards.
+            Some(scene::Corner::TopRight.slot())
         } else {
             self.free_corner_for_new_item(scene_id)
         };

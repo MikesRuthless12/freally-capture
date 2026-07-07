@@ -90,6 +90,7 @@ type PickerMode =
   | "text"
   | "nestedScene"
   | "slideshow"
+  | "chatOverlay"
   | "audioInput"
   | "audioOutput"
   | "existing";
@@ -106,6 +107,7 @@ const KIND_BADGE: Record<string, string> = {
   text: "Text",
   nestedScene: "Scene",
   slideshow: "Slides",
+  chatOverlay: "Chat",
   audioInput: "Audio In",
   audioOutput: "Audio Out",
 };
@@ -121,6 +123,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["text", "Text"],
   ["nestedScene", "Nested Scene"],
   ["slideshow", "Image Slideshow"],
+  ["chatOverlay", "Live Chat Overlay"],
   ["audioInput", "Audio Input Capture"],
   ["audioOutput", "Audio Output Capture"],
   ["existing", "Existing source…"],
@@ -531,6 +534,8 @@ export function SourcesRail({
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
         <TextForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "chatOverlay" ? (
+        <ChatOverlayForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "slideshow" ? (
         <SlideshowForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "nestedScene" ? (
@@ -624,6 +629,86 @@ export function SourcesRail({
 // ---------------------------------------------------------------------------
 // Pickers
 // ---------------------------------------------------------------------------
+
+/** Live Chat Overlay (TASK-613): a transparent, time-stamped record of the
+ * incoming chat. NO API key, developer account, or sign-in — ever: YouTube
+ * reads via the owned InnerTube client (exactly like the web player),
+ * Twitch via anonymous IRC, Kick via its public endpoint. */
+function ChatOverlayForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const [youtube, setYoutube] = useState("");
+  const [twitch, setTwitch] = useState("");
+  const [kick, setKick] = useState("");
+  const fieldClass =
+    "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
+  const any = Boolean(youtube.trim() || twitch.trim() || kick.trim());
+
+  return (
+    <PickerShell title="Add a Live Chat Overlay" onClose={onClose}>
+      <div className="flex flex-col gap-2 text-xs text-havoc-text">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          YouTube — channel, watch, or live_chat URL (no key, no sign-in)
+          <input
+            value={youtube}
+            onChange={(event) => setYoutube(event.target.value)}
+            placeholder="https://www.youtube.com/@yourchannel  ·  or a watch?v= URL"
+            className={`${fieldClass} font-mono`}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          Twitch — channel name (read anonymously, no account)
+          <input
+            value={twitch}
+            onChange={(event) => setTwitch(event.target.value)}
+            placeholder="yourchannel"
+            className={`${fieldClass} font-mono`}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          Kick — channel slug (public endpoint, best-effort)
+          <input
+            value={kick}
+            onChange={(event) => setKick(event.target.value)}
+            placeholder="yourchannel"
+            className={`${fieldClass} font-mono`}
+          />
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          Messages appear with a running h:mm:ss AM/PM timestamp on a transparent background
+          (default top-right; drag it anywhere). A chat flood only ages old lines out — it can never
+          stall the stream or the recording. Facebook chat needs your own Graph token and is not
+          implemented yet — it is never required and never gates the platforms above.
+        </p>
+        <button
+          type="button"
+          disabled={!any}
+          onClick={() =>
+            onPick(
+              {
+                kind: "chatOverlay",
+                youtube: youtube.trim(),
+                twitch: twitch.trim(),
+                kick: kick.trim(),
+                width: 480,
+                maxLines: 12,
+                fontSize: 22,
+              },
+              "Live Chat",
+            )
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          Add chat overlay
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
 
 /** Image Slideshow (TASK-607): an ordered image set cycling on a timer,
  * with an optional crossfade (equal sizes only — different sizes hard-cut),

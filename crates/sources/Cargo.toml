@@ -28,3 +28,9 @@ rustybuzz = { workspace = true }
 tiny-skia = { workspace = true }
 fontdb = { workspace = true }
 unicode-bidi = { workspace = true }
+# The chat overlay (P6.12): the owned no-key InnerTube/Kick clients poll
+# over HTTPS (rustls, same stack as the ffmpeg fetch); Twitch reads
+# anonymous plaintext IRC over std TcpStream. Timestamps are local time.
+ureq = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+chrono = { workspace = true }

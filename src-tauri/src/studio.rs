@@ -1655,6 +1655,7 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
             | SourceSettings::Slideshow { .. }
+            | SourceSettings::ChatOverlay { .. }
             | SourceSettings::RemoteGuest { .. }
     )
 }
@@ -1789,6 +1790,23 @@ fn start_session(
                     *looping,
                     *shuffle,
                 ),
+                SourceSettings::ChatOverlay {
+                    youtube,
+                    twitch,
+                    kick,
+                    width,
+                    max_lines,
+                    font_size,
+                } => {
+                    fcap_sources::chat::start_chat_overlay(&fcap_sources::chat::ChatOverlayConfig {
+                        youtube: youtube.clone(),
+                        twitch: twitch.clone(),
+                        kick: kick.clone(),
+                        width: *width,
+                        max_lines: *max_lines,
+                        font_size: *font_size,
+                    })
+                }
                 // Frames are pushed from the webview's WebRTC session over
                 // IPC — the session just opens the push channel.
                 SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),

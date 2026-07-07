@@ -1748,6 +1748,7 @@ dependencies = [
 name = "fcap-sources"
 version = "0.70.0"
 dependencies = [
+ "chrono",
  "fcap-audio",
  "fcap-capture",
  "fcap-encode",
@@ -1755,10 +1756,12 @@ dependencies = [
  "image",
  "nokhwa",
  "rustybuzz",
+ "serde_json",
  "thiserror 2.0.18",
  "tiny-skia",
  "tracing",
  "unicode-bidi",
+ "ureq",
 ]
 
 [[package]]
@@ -6472,6 +6475,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

@@ -107,6 +107,70 @@ function SettingsEditor({
   onChange: (settings: SourceSettings) => void;
 }) {
   switch (draft.kind) {
+    case "chatOverlay":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            YouTube — channel / watch / live_chat URL (no key, no sign-in, ever)
+            <input
+              value={draft.youtube}
+              onChange={(event) => onChange({ ...draft, youtube: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Twitch — channel name (anonymous)
+            <input
+              value={draft.twitch}
+              onChange={(event) => onChange({ ...draft, twitch: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Kick — channel slug (public endpoint)
+            <input
+              value={draft.kick}
+              onChange={(event) => onChange({ ...draft, kick: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Width (px)
+              <input
+                type="number"
+                min={120}
+                max={3840}
+                value={draft.width}
+                onChange={(event) => onChange({ ...draft, width: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Lines
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={draft.maxLines}
+                onChange={(event) => onChange({ ...draft, maxLines: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Font (px)
+              <input
+                type="number"
+                min={10}
+                max={96}
+                value={draft.fontSize}
+                onChange={(event) => onChange({ ...draft, fontSize: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+          </div>
+        </div>
+      );
     case "slideshow":
       return (
         <div className="flex flex-col gap-2">
