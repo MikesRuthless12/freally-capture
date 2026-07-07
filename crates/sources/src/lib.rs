@@ -22,6 +22,7 @@
 pub mod color;
 pub mod image;
 pub mod media;
+pub mod slideshow;
 pub mod static_source;
 pub mod text;
 pub mod video_device;

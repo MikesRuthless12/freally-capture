@@ -86,6 +86,14 @@ fn default_color_size() -> u32 {
     1920
 }
 
+fn default_slide_ms() -> u32 {
+    5_000
+}
+
+fn default_slide_fade_ms() -> u32 {
+    300
+}
+
 fn default_color_height() -> u32 {
     1080
 }
@@ -184,6 +192,25 @@ pub enum SourceSettings {
         #[serde(default)]
         device_id: String,
     },
+    /// An ordered set of images cycling on a timer (Phase 6): per-slide
+    /// duration, an optional crossfade (equal-size slides only — different
+    /// sizes hard-cut, honestly), loop or hold-last, optional shuffle.
+    Slideshow {
+        #[serde(default)]
+        paths: Vec<String>,
+        /// How long each slide holds, ms.
+        #[serde(default = "default_slide_ms")]
+        slide_ms: u32,
+        /// Crossfade length between slides, ms (0 = hard cut).
+        #[serde(default = "default_slide_fade_ms")]
+        transition_ms: u32,
+        /// Restart from the top at the end (else hold the last slide).
+        #[serde(default = "default_true", rename = "loop")]
+        looping: bool,
+        /// Re-shuffle the order each cycle.
+        #[serde(default)]
+        shuffle: bool,
+    },
     /// Another scene composed as a source — nested scenes (Phase 6). The
     /// referenced scene renders at program-canvas size and follows its own
     /// edits live. Cycle-safe: the model rejects references that would make
@@ -246,6 +273,7 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
             SourceSettings::NestedScene { .. } => "nestedScene",
+            SourceSettings::Slideshow { .. } => "slideshow",
             SourceSettings::Text { .. } => "text",
         }
     }
@@ -264,6 +292,7 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
             SourceSettings::NestedScene { .. } => "Nested Scene",
+            SourceSettings::Slideshow { .. } => "Image Slideshow",
             SourceSettings::Text { .. } => "Text",
         }
     }

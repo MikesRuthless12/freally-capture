@@ -1583,6 +1583,7 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
+            | SourceSettings::Slideshow { .. }
             | SourceSettings::RemoteGuest { .. }
     )
 }
@@ -1704,6 +1705,19 @@ fn start_session(
                     // The source id keys the mixer-side audio ring.
                     fcap_sources::media::start_media(&id.0.to_string(), path, *looping, *hw_decode)
                 }
+                SourceSettings::Slideshow {
+                    paths,
+                    slide_ms,
+                    transition_ms,
+                    looping,
+                    shuffle,
+                } => fcap_sources::slideshow::start_slideshow(
+                    paths,
+                    *slide_ms,
+                    *transition_ms,
+                    *looping,
+                    *shuffle,
+                ),
                 // Frames are pushed from the webview's WebRTC session over
                 // IPC — the session just opens the push channel.
                 SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),

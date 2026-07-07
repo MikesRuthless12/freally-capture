@@ -408,6 +408,14 @@ export type SourceSettings =
   | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "nestedScene"; scene: SceneId }
+  | {
+      kind: "slideshow";
+      paths: string[];
+      slideMs: number;
+      transitionMs: number;
+      loop: boolean;
+      shuffle: boolean;
+    }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
   | {

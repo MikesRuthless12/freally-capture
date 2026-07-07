@@ -89,6 +89,7 @@ type PickerMode =
   | "color"
   | "text"
   | "nestedScene"
+  | "slideshow"
   | "audioInput"
   | "audioOutput"
   | "existing";
@@ -104,6 +105,7 @@ const KIND_BADGE: Record<string, string> = {
   color: "Color",
   text: "Text",
   nestedScene: "Scene",
+  slideshow: "Slides",
   audioInput: "Audio In",
   audioOutput: "Audio Out",
 };
@@ -118,6 +120,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["color", "Color"],
   ["text", "Text"],
   ["nestedScene", "Nested Scene"],
+  ["slideshow", "Image Slideshow"],
   ["audioInput", "Audio Input Capture"],
   ["audioOutput", "Audio Output Capture"],
   ["existing", "Existing source…"],
@@ -528,6 +531,8 @@ export function SourcesRail({
         <ColorForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "text" ? (
         <TextForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "slideshow" ? (
+        <SlideshowForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "nestedScene" ? (
         <NestedSceneForm
           collection={collection}
@@ -619,6 +624,111 @@ export function SourcesRail({
 // ---------------------------------------------------------------------------
 // Pickers
 // ---------------------------------------------------------------------------
+
+/** Image Slideshow (TASK-607): an ordered image set cycling on a timer,
+ * with an optional crossfade (equal sizes only — different sizes hard-cut),
+ * loop/hold-last and shuffle. */
+function SlideshowForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const [paths, setPaths] = useState<string[]>([]);
+  const [slideMs, setSlideMs] = useState(5000);
+  const [transitionMs, setTransitionMs] = useState(300);
+  const [loop, setLoop] = useState(true);
+  const [shuffle, setShuffle] = useState(false);
+
+  const browse = () => {
+    void open({
+      multiple: true,
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif"] },
+      ],
+    }).then((picked) => {
+      if (Array.isArray(picked)) setPaths((current) => [...current, ...picked]);
+      else if (typeof picked === "string") setPaths((current) => [...current, picked]);
+    });
+  };
+
+  return (
+    <PickerShell title="Add an Image Slideshow" onClose={onClose}>
+      <div className="flex flex-col gap-2 text-xs text-havoc-text">
+        {paths.length === 0 ? (
+          <EmptyHint>No images yet — Browse adds them in order.</EmptyHint>
+        ) : (
+          <ul className="m-0 flex max-h-40 list-none flex-col gap-1 overflow-y-auto p-0">
+            {paths.map((path, index) => (
+              <li
+                key={`${path}-${index}`}
+                className="flex items-center gap-1.5 rounded border border-white/10 px-1.5 py-1 text-[11px]"
+              >
+                <span className="min-w-0 flex-1 truncate" title={path}>
+                  {path.split(/[\\/]/).pop()}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPaths(paths.filter((_, at) => at !== index))}
+                  aria-label={`Remove slide ${index + 1}`}
+                  className="shrink-0 rounded px-1 text-havoc-muted hover:text-red-300"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          type="button"
+          onClick={browse}
+          className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+        >
+          Browse images…
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField
+            label="Per-slide (ms)"
+            value={slideMs}
+            min={100}
+            max={600000}
+            step={500}
+            onCommit={(value) => setSlideMs(Math.round(value))}
+          />
+          <NumberField
+            label="Crossfade (ms, 0 = cut)"
+            value={transitionMs}
+            min={0}
+            max={5000}
+            step={50}
+            onCommit={(value) => setTransitionMs(Math.round(value))}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+          Loop (off = hold the last slide)
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input type="checkbox" checked={shuffle} onChange={(e) => setShuffle(e.target.checked)} />
+          Shuffle each cycle
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          The crossfade blends equal-sized images; different sizes hard-cut at the boundary (no
+          silent rescale).
+        </p>
+        <button
+          type="button"
+          disabled={paths.length === 0}
+          onClick={() => onPick({ kind: "slideshow", paths, slideMs, transitionMs, loop, shuffle })}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          Add slideshow ({paths.length})
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
 
 /** Nested Scene (TASK-605): compose another scene as a source — cycle-safe
  * (a scene that already contains this one is rejected by the model with an
@@ -909,6 +1019,34 @@ function WebcamPicker({
 
   const formats = selected && formatsFor?.deviceId === selected.id ? formatsFor.list : null;
 
+  // Capture-card format presets (TASK-607): the common Elgato/AVerMedia
+  // modes, offered when the device looks like a card and actually
+  // advertises a matching format — never an invented mode.
+  const looksLikeCard = /elgato|avermedia|aver media|cam link|live gamer|capture/i.test(
+    selected?.name ?? "",
+  );
+  const cardPresets: Array<[string, number]> = looksLikeCard
+    ? (
+        [
+          ["4K30", [3840, 2160, 30]],
+          ["1080p60", [1920, 1080, 60]],
+          ["1080p30", [1920, 1080, 30]],
+          ["720p60", [1280, 720, 60]],
+        ] as Array<[string, [number, number, number]]>
+      )
+        .map(([label, [w, h, fps]]): [string, number] => [
+          label,
+          (formats ?? []).findIndex(
+            (format) => format.width === w && format.height === h && format.fps === fps,
+          ),
+        ])
+        .filter(([, index]) => index >= 0)
+    : [];
+
+  const applyPreset = (index: number) => {
+    if (formatRef.current) formatRef.current.value = String(index);
+  };
+
   const add = () => {
     if (!selected) return;
     const index = formatRef.current ? Number(formatRef.current.value) : -1;
@@ -966,6 +1104,22 @@ function WebcamPicker({
                   ))}
                 </select>
               </label>
+              {cardPresets.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-havoc-muted">Card presets:</span>
+                  {cardPresets.map(([label, index]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => applyPreset(index)}
+                      title={`Select the ${label} mode this card advertises`}
+                      className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-havoc-muted hover:border-havoc-accent/60 hover:text-havoc-text"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={add}

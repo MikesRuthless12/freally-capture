@@ -107,6 +107,69 @@ function SettingsEditor({
   onChange: (settings: SourceSettings) => void;
 }) {
   switch (draft.kind) {
+    case "slideshow":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Image files (one path per line, shown in order)
+            <textarea
+              value={draft.paths.join("\n")}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  paths: event.target.value
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                })
+              }
+              rows={5}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Per-slide (ms)
+              <input
+                type="number"
+                min={100}
+                value={draft.slideMs}
+                onChange={(event) => onChange({ ...draft, slideMs: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Crossfade (ms, 0 = cut)
+              <input
+                type="number"
+                min={0}
+                max={5000}
+                value={draft.transitionMs}
+                onChange={(event) =>
+                  onChange({ ...draft, transitionMs: Number(event.target.value) })
+                }
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.loop}
+              onChange={(event) => onChange({ ...draft, loop: event.target.checked })}
+            />
+            Loop (off = hold the last slide)
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.shuffle}
+              onChange={(event) => onChange({ ...draft, shuffle: event.target.checked })}
+            />
+            Shuffle each cycle
+          </label>
+        </div>
+      );
     case "nestedScene":
       return (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
