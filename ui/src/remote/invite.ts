@@ -65,6 +65,17 @@ export function inviteLink(token: string): string {
   return `${INVITE_SCHEME}?token=${token}`;
 }
 
+/** The hosted web-join page (TASK-R3): the guest end running in a plain
+ * browser — what phone guests reach from the scanned QR, no install. The
+ * page (`docs/join.html`) mirrors this module's token format by hand — bump
+ * both together. */
+export const WEB_JOIN_BASE = "https://mikesruthless12.github.io/freally-capture/join.html";
+
+/** The browser form of an invite — what the QR encodes. */
+export function webJoinLink(token: string): string {
+  return `${WEB_JOIN_BASE}?token=${token}`;
+}
+
 /**
  * Pull a token out of whatever the guest pasted — a full `freally://join?token=…`
  * link, an `https://…/join?token=…` web-join URL, or a bare token. Returns

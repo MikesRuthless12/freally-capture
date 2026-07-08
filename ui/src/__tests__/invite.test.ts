@@ -7,6 +7,8 @@ import {
   mintInvite,
   parseInviteInput,
   resolveInvite,
+  WEB_JOIN_BASE,
+  webJoinLink,
 } from "../remote/invite";
 
 const NOW = 1_700_000_000_000;
@@ -43,6 +45,15 @@ describe("invite tokens", () => {
   it("builds a freally:// deep link", () => {
     const token = mintInvite(PEER, 30, NOW);
     expect(inviteLink(token)).toBe(`${INVITE_SCHEME}?token=${token}`);
+  });
+
+  it("builds a web-join link the join flow can round-trip", () => {
+    const token = mintInvite(PEER, 30, NOW);
+    const link = webJoinLink(token);
+    expect(link).toBe(`${WEB_JOIN_BASE}?token=${token}`);
+    // A scanned QR pastes back into the app too — same token, same peer.
+    expect(parseInviteInput(link)).toBe(token);
+    expect(joinTargetFromInput(link, NOW + 1000)).toEqual({ peerId: PEER });
   });
 });
 
