@@ -159,7 +159,9 @@ mod tests {
         let mut pos = 0u64;
         for _ in 0..frames {
             writer.write_frame(&frame).expect("frame");
-            writer.write_audio(0, pos, &vec![0.0f32; 1600]).expect("audio");
+            writer
+                .write_audio(0, pos, &vec![0.0f32; 1600])
+                .expect("audio");
             pos += 800; // 1600 interleaved stereo samples = 800 frames
         }
         writer.finish().expect("finish");

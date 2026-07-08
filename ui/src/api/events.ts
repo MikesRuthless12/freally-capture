@@ -73,3 +73,8 @@ export function onRecording(handler: (status: RecordingStatus) => void): Promise
 export function onRecordingExport(handler: (status: ExportStatus) => void): Promise<UnlistenFn> {
   return listen<ExportStatus>("recording-export", (event) => handler(event.payload));
 }
+
+/** Subscribe to a .frec opened via the OS while the app is already running. */
+export function onOpenFrec(handler: (path: string) => void): Promise<UnlistenFn> {
+  return listen<string>("open-frec", (event) => handler(event.payload));
+}

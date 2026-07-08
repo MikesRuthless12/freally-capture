@@ -759,7 +759,9 @@ pub fn frame_count(path: &Path) -> Result<u64, FrecError> {
     let file = File::open(path)?;
     let mut input = BufReader::with_capacity(1 << 16, file);
     let mut header = [0u8; 30];
-    input.read_exact(&mut header).map_err(|_| FrecError::NotFrec)?;
+    input
+        .read_exact(&mut header)
+        .map_err(|_| FrecError::NotFrec)?;
     if &header[0..4] != MAGIC {
         return Err(FrecError::NotFrec);
     }

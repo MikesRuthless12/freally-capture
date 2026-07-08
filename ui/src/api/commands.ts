@@ -633,6 +633,16 @@ export function recordingExportCancel(): Promise<void> {
   return invoke("recording_export_cancel");
 }
 
+/** A `.frec` the app was opened with (OS double-click), if any — one-shot. */
+export function openFrecPending(): Promise<string | null> {
+  return invoke<string | null>("open_frec_pending");
+}
+
+/** Export a `.frec` the user opened via the OS to a sibling wire file. */
+export function openFrecExport(path: string, container: string): Promise<void> {
+  return invoke("open_frec_export", { path, container });
+}
+
 /** The anonymous bug-report context: app/OS info + any pending crash. */
 export function bugReportContext(): Promise<BugReportContext> {
   return invoke<BugReportContext>("bug_report_context");

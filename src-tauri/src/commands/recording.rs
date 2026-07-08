@@ -466,26 +466,28 @@ pub fn recording_export_cancel(state: State<'_, ExportState>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
 
-/// Export a `.frec` recording to a sibling `mp4`/`mkv` — decode the owned
-/// codec and re-encode through the labeled ffmpeg component, so the file
-/// plays in any player. Progress rides the `recording-export` event; the
-/// command returns immediately. `container` is `"mp4"` | `"mkv"` | `"mov"` |
-/// `"webm"`. The path is confined to the recordings folder.
-#[tauri::command]
-pub fn recording_export<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-    container: String,
-) -> Result<(), String> {
-    use fcap_encode::{Container, WirePlan};
+fn parse_container(container: &str) -> Result<fcap_encode::Container, String> {
+    use fcap_encode::Container;
+    match container {
+        "mp4" => Ok(Container::Mp4),
+        "mkv" => Ok(Container::Mkv),
+        "mov" => Ok(Container::Mov),
+        "webm" => Ok(Container::Webm),
+        other => Err(format!("unsupported export container: {other}")),
+    }
+}
 
-    let target = match container.as_str() {
-        "mp4" => Container::Mp4,
-        "mkv" => Container::Mkv,
-        "mov" => Container::Mov,
-        "webm" => Container::Webm,
-        other => return Err(format!("unsupported export container: {other}")),
-    };
+/// Kick off a `.frec` → wire-container export on a worker thread: resolve the
+/// ffmpeg component + encoder, plan the encode to a sibling output that never
+/// clobbers, and pump progress on the `recording-export` event. Shared by the
+/// recordings-list export (folder-guarded) and the open-with-`.frec` export
+/// (a file the user chose via the OS). Callers validate the input path first.
+pub(crate) fn start_frec_export<R: Runtime>(
+    app: &AppHandle<R>,
+    input: std::path::PathBuf,
+    target: fcap_encode::Container,
+) -> Result<(), String> {
+    use fcap_encode::WirePlan;
 
     let export = app.state::<ExportState>();
     if export.running.swap(true, Ordering::SeqCst) {
@@ -498,34 +500,16 @@ pub fn recording_export<R: Runtime>(
         .state::<crate::settings::SettingsStore>()
         .get()
         .recording;
-    let folder = crate::recording::recordings_folder(&settings);
 
-    // Validate the input up front (before spawning) so obvious errors return
-    // synchronously; the heavy work runs on a worker thread.
-    let prep = (|| -> Result<(std::path::PathBuf, std::path::PathBuf, fcap_encode::Ffmpeg, String), String> {
-        let folder = folder
-            .canonicalize()
-            .map_err(|err| format!("recordings folder: {err}"))?;
-        let input = std::path::Path::new(&path)
-            .canonicalize()
-            .map_err(|err| format!("recording not found: {err}"))?;
-        if input.parent() != Some(folder.as_path()) {
-            return Err("only files in the recordings folder can be exported".to_string());
-        }
-        if input.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase())
-            != Some("frec".to_string())
-        {
-            return Err("only .frec recordings need exporting — others already play anywhere".to_string());
-        }
+    let prep = (|| -> Result<(fcap_encode::Ffmpeg, String), String> {
         let ready = app
             .state::<EncodeState>()
             .ready_ffmpeg()
             .ok_or("exporting needs the ffmpeg component — install it from Components")?;
-        let encoder_id = crate::recording::resolve_encoder(&app, &settings, target)?;
-        Ok((input, folder, ready, encoder_id))
+        let encoder_id = crate::recording::resolve_encoder(app, &settings, target)?;
+        Ok((ready, encoder_id))
     })();
-
-    let (input, _folder, ready, encoder_id) = match prep {
+    let (ready, encoder_id) = match prep {
         Ok(v) => v,
         Err(err) => {
             export.running.store(false, Ordering::SeqCst);
@@ -533,9 +517,7 @@ pub fn recording_export<R: Runtime>(
         }
     };
 
-    // A sibling output that never clobbers an existing file.
     let output = unique_sibling(&input, target.extension());
-
     let plan = WirePlan {
         container: target,
         encoder_id,
@@ -545,7 +527,7 @@ pub fn recording_export<R: Runtime>(
         audio_bitrate_kbps: settings.audio_bitrate_kbps,
         split_minutes: None,
         scale: None,
-        path: output.clone(),
+        path: output,
     };
 
     let handle = app.clone();
@@ -588,4 +570,59 @@ pub fn recording_export<R: Runtime>(
         return Err(format!("could not start the export: {err}"));
     }
     Ok(())
+}
+
+fn is_frec(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("frec"))
+        .unwrap_or(false)
+}
+
+/// Export a `.frec` from the **recordings folder** to a sibling wire file.
+/// Progress rides the `recording-export` event. `container` is `"mp4"` |
+/// `"mkv"` | `"mov"` | `"webm"`.
+#[tauri::command]
+pub fn recording_export<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    container: String,
+) -> Result<(), String> {
+    let target = parse_container(&container)?;
+    let settings = app
+        .state::<crate::settings::SettingsStore>()
+        .get()
+        .recording;
+    let folder = crate::recording::recordings_folder(&settings)
+        .canonicalize()
+        .map_err(|err| format!("recordings folder: {err}"))?;
+    let input = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|err| format!("recording not found: {err}"))?;
+    if input.parent() != Some(folder.as_path()) {
+        return Err("only files in the recordings folder can be exported".to_string());
+    }
+    if !is_frec(&input) {
+        return Err("only .frec recordings need exporting — others already play anywhere".into());
+    }
+    start_frec_export(&app, input, target)
+}
+
+/// Export a `.frec` the user **opened via the OS** (double-click / Open with).
+/// The path is confined only to being an existing `.frec` — the user's own
+/// file-open is the consent, so it need not live in the recordings folder.
+#[tauri::command]
+pub fn open_frec_export<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    container: String,
+) -> Result<(), String> {
+    let target = parse_container(&container)?;
+    let input = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|err| format!("file not found: {err}"))?;
+    if !input.is_file() || !is_frec(&input) {
+        return Err("not a .frec file".into());
+    }
+    start_frec_export(&app, input, target)
 }

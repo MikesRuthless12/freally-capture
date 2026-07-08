@@ -303,11 +303,7 @@ pub fn bug_report_submit(
     description: String,
     include_crash: bool,
 ) -> Result<(), String> {
-    let crash = if include_crash {
-        pending_crash()
-    } else {
-        None
-    };
+    let crash = if include_crash { pending_crash() } else { None };
     // Subject: [Freally Capture] <what went wrong> — the app + the error.
     let subject = subject(crash.as_deref(), &description);
     let body = compose_body(&description, crash.as_deref());

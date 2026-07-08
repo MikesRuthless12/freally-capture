@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   bugReportContext,
+  openFrecPending,
   recordingAddMarker,
   studioSendReaction,
   recordingPause,
@@ -10,7 +11,7 @@ import {
   recordingStatus,
   recordingStop,
 } from "../api/commands";
-import { onRecording } from "../api/events";
+import { onOpenFrec, onRecording } from "../api/events";
 import type { RecordingStatus, Settings } from "../api/types";
 import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
@@ -19,6 +20,7 @@ import { ReplayControls } from "../components/ReplayControls";
 import { BrowserDockDialog } from "./BrowserDock";
 import { BugReportDialog } from "./BugReport";
 import { ModelsDialog } from "./Models";
+import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
 import { ScriptsDialog } from "./ScriptsDialog";
 import { SettingsHotkeys } from "./SettingsHotkeys";
@@ -57,6 +59,8 @@ export function ControlsDock({
     | null
   >(null);
 
+  const [openedFrec, setOpenedFrec] = useState<string | null>(null);
+
   // Auto-surface the bug-report dialog on startup when the app crashed on a
   // previous run — this is the "relaunch → report" half of the loop.
   useEffect(() => {
@@ -68,6 +72,25 @@ export function ControlsDock({
       .catch(() => undefined);
     return () => {
       alive = false;
+    };
+  }, []);
+
+  // A .frec opened via the OS (cold start on load, or a second launch while
+  // running) → offer to export it (Capture records .frec; Player plays it).
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    openFrecPending()
+      .then((path) => {
+        if (alive && path) setOpenedFrec(path);
+      })
+      .catch(() => undefined);
+    onOpenFrec((path) => setOpenedFrec(path))
+      .then((fn) => (alive ? (unlisten = fn) : fn()))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
     };
   }, []);
 
@@ -391,6 +414,7 @@ export function ControlsDock({
         />
       )}
       {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
+      {openedFrec && <OpenedFrecDialog path={openedFrec} onClose={() => setOpenedFrec(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />
       )}

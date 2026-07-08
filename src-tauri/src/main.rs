@@ -17,6 +17,7 @@ mod docks;
 mod events;
 mod hotkeys;
 mod native_preview;
+mod openfile;
 mod preview;
 mod profiles;
 mod reactions;
@@ -77,10 +78,16 @@ fn main() {
     let mut builder = tauri::Builder::default();
     if !allow_multi {
         // Single instance FIRST (the plugins' documented order).
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            use tauri::Manager;
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::{Emitter, Manager};
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
+            }
+            // A second launch opening a .frec (double-click while running):
+            // forward the path so the UI offers to export it.
+            if let Some(frec) = openfile::frec_in_args(argv) {
+                openfile::store(frec.clone());
+                let _ = app.emit("open-frec", frec);
             }
         }));
     }
@@ -224,6 +231,8 @@ fn main() {
             commands::recording::recording_remux,
             commands::recording::recording_export,
             commands::recording::recording_export_cancel,
+            commands::recording::open_frec_export,
+            openfile::open_frec_pending,
             commands::native_preview_set_region,
             commands::native_preview_active,
             commands::native_preview_set_selection
@@ -262,6 +271,11 @@ fn main() {
                 {
                     let _ = app.deep_link().register_all();
                 }
+            }
+            // Opened with a .frec on the command line (cold start / OS
+            // double-click): stash it for the UI to offer an export.
+            if let Some(frec) = openfile::frec_in_args(std::env::args()) {
+                openfile::store(frec);
             }
             events::spawn_stats_emitter(app.handle().clone());
             // The compose loop: capture sessions + static sources → the
