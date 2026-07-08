@@ -254,7 +254,9 @@ export function SourcesRail({
                   </button>
                 ))}
                 <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                  Browser Source arrives later — it needs its own offscreen-webview work.
+                  Browser Source ships as its own on-demand component milestone (a ~180 MB Chromium
+                  engine — never bundled). Today: capture a real browser window with Window Capture
+                  + a chroma/color key, or open chat/alerts as a Dock (Controls → Docks).
                 </p>
               </div>
             )}
