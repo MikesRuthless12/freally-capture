@@ -12,6 +12,7 @@ import type {
   AudioFilterId,
   AudioFilterKind,
   BlendMode,
+  BugReportContext,
   CaptureSource,
   CornerSlot,
   EncoderCatalog,
@@ -630,4 +631,29 @@ export function recordingExport(path: string, container: string): Promise<void> 
 /** Cancel the running .frec export. */
 export function recordingExportCancel(): Promise<void> {
   return invoke("recording_export_cancel");
+}
+
+/** The anonymous bug-report context: app/OS info + any pending crash. */
+export function bugReportContext(): Promise<BugReportContext> {
+  return invoke<BugReportContext>("bug_report_context");
+}
+
+/** Open a pre-filled GitHub issue ("github") or email draft ("email") with
+ * the anonymous report — the user still clicks send. Nothing auto-sends. */
+export function bugReportSubmit(
+  target: "github" | "email",
+  description: string,
+  includeCrash: boolean,
+): Promise<void> {
+  return invoke("bug_report_submit", { target, description, includeCrash });
+}
+
+/** Dismiss + delete the pending crash report. */
+export function bugReportClearCrash(): Promise<void> {
+  return invoke("bug_report_clear_crash");
+}
+
+/** Write a harmless sample crash report to test the "we found a crash" flow. */
+export function bugReportSimulate(): Promise<void> {
+  return invoke("bug_report_simulate");
 }

@@ -11,6 +11,7 @@
 //! 60 fps compose loop; the engine lives in the owned `fcap-*` crates.
 
 mod audio;
+mod bugreport;
 mod commands;
 mod docks;
 mod events;
@@ -45,6 +46,11 @@ fn main() {
         println!("PANIC: {info}");
         default_panic_hook(info);
     }));
+    // Opt-in bug reporting: capture a SCRUBBED crash report locally so the
+    // next launch can offer to report it. Nothing is ever sent automatically
+    // (charter: no telemetry) — this only writes a local file. Chains the
+    // hook above (write → print → default backtrace).
+    bugreport::install_panic_hook();
 
     // Version banner on launch (visible in dev consoles and CI logs; the
     // release Windows build has no console by design).
@@ -133,6 +139,10 @@ fn main() {
             commands::video_device_formats,
             commands::open_privacy_settings,
             docks::browser_dock_open,
+            bugreport::bug_report_context,
+            bugreport::bug_report_submit,
+            bugreport::bug_report_clear_crash,
+            bugreport::bug_report_simulate,
             commands::studio::studio_get,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,

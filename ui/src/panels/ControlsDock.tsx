@@ -16,6 +16,7 @@ import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
 import { BrowserDockDialog } from "./BrowserDock";
+import { BugReportDialog } from "./BugReport";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
 import { ScriptsDialog } from "./ScriptsDialog";
@@ -51,6 +52,7 @@ export function ControlsDock({
     | "remote"
     | "docks"
     | "scripts"
+    | "bug"
     | null
   >(null);
 
@@ -300,6 +302,14 @@ export function ControlsDock({
           >
             ▣ Profiles…
           </button>
+          <button
+            type="button"
+            onClick={() => setDialog("bug")}
+            title="Report a bug — anonymous, opt-in (nothing is sent automatically)"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            🐞 Report a bug…
+          </button>
         </div>
         {shownError && (
           <p role="alert" className="m-0 text-[11px] leading-snug break-words text-red-300">
@@ -365,6 +375,7 @@ export function ControlsDock({
           onClose={() => setDialog(null)}
         />
       )}
+      {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />
       )}

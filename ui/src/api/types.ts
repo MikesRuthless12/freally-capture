@@ -820,6 +820,17 @@ export type FfmpegStatus =
   | { state: "ready"; version: string; path: string }
   | { state: "error"; message: string; build: FfmpegBuild | null };
 
+/** The anonymous bug-report context (mirrors `BugReportContextDto`). */
+export type BugReportContext = {
+  appVersion: string;
+  os: string;
+  arch: string;
+  /** The anonymous system line always included in a report. */
+  diagnostics: string;
+  /** The scrubbed crash text from the previous run, if the app crashed. */
+  pendingCrash: string | null;
+};
+
 /**
  * The `recording-export` event: a .frec → wire-container export's progress and
  * terminal state (mirrors `ExportStatusDto` in commands/recording.rs).
