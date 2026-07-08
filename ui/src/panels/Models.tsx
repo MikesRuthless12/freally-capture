@@ -120,36 +120,40 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {status?.state === "downloading" && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between">
-                <span>Downloading…</span>
-                <span className="text-havoc-muted">
-                  {formatMb(status.receivedBytes)}
-                  {status.totalBytes ? ` of ${formatMb(status.totalBytes)}` : ""} ·{" "}
-                  {formatRate(status.bytesPerSec)}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-havoc-accent to-havoc-accent-2 transition-[width]"
-                  style={{
-                    width: status.totalBytes
-                      ? `${Math.min(100, (status.receivedBytes / status.totalBytes) * 100).toFixed(1)}%`
-                      : "100%",
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => run(ffmpegCancel)}
-                className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
+          {status?.state === "downloading" &&
+            (() => {
+              const total = status.totalBytes ?? 0;
+              const pct = total > 0 ? Math.min(100, (status.receivedBytes / total) * 100) : null;
+              return (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span>Downloading…</span>
+                    <span className="text-havoc-muted">
+                      {pct !== null && (
+                        <span className="font-mono text-havoc-text">{pct.toFixed(2)}%</span>
+                      )}{" "}
+                      · {formatMb(status.receivedBytes)}
+                      {status.totalBytes ? ` of ${formatMb(status.totalBytes)}` : ""} ·{" "}
+                      {formatRate(status.bytesPerSec)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-havoc-accent to-havoc-accent-2 transition-[width]"
+                      style={{ width: pct !== null ? `${pct.toFixed(2)}%` : "100%" }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run(ffmpegCancel)}
+                    className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              );
+            })()}
 
           {status?.state === "verifying" && (
             <p className="m-0">Verifying the download against the pinned SHA-256…</p>
