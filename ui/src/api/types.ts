@@ -45,6 +45,14 @@ export type Settings = {
   hotkeys: HotkeySettings;
   /** The WebSocket remote-control API (Phase 7). */
   remoteControl: RemoteControlSettings;
+  /** Browser docks — named URLs opened as dock windows (Phase 7). */
+  browserDocks: BrowserDockSettings[];
+};
+
+/** One browser dock: a named URL opened as its own dock window. */
+export type BrowserDockSettings = {
+  name: string;
+  url: string;
 };
 
 /** The WebSocket remote-control API (mirrors `RemoteControlSettings` in

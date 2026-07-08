@@ -15,6 +15,7 @@ import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
+import { BrowserDockDialog } from "./BrowserDock";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
 import { SettingsHotkeys } from "./SettingsHotkeys";
@@ -47,6 +48,7 @@ export function ControlsDock({
     | "recordings"
     | "replay"
     | "remote"
+    | "docks"
     | null
   >(null);
 
@@ -266,6 +268,14 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("docks")}
+            title="Browser docks: open a chat popout, alerts page, or Companion buttons as a window beside the studio"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⧉ Docks…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("remote")}
             title="WebSocket remote API for Stream Deck / Companion controllers (off by default)"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
@@ -326,6 +336,13 @@ export function ControlsDock({
       )}
       {dialog === "remote" && (
         <SettingsRemote
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "docks" && (
+        <BrowserDockDialog
           settings={settings}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}

@@ -57,6 +57,8 @@ pub struct Settings {
     pub hotkeys: HotkeySettings,
     /// The WebSocket remote-control API (Phase 7).
     pub remote_control: RemoteControlSettings,
+    /// Browser docks — named URLs opened as dock windows (Phase 7).
+    pub browser_docks: Vec<BrowserDockSettings>,
 }
 
 impl Default for Settings {
@@ -73,7 +75,31 @@ impl Default for Settings {
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
             remote_control: RemoteControlSettings::default(),
+            browser_docks: Vec::new(),
         }
+    }
+}
+
+/// One browser dock: a named URL opened as its own dock window (TASK-702).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BrowserDockSettings {
+    pub name: String,
+    pub url: String,
+}
+
+impl BrowserDockSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.len() > 64 || self.name.chars().any(char::is_control) {
+            return Err("invalid dock name".to_owned());
+        }
+        if self.url.len() > 2048
+            || self.url.chars().any(char::is_control)
+            || !(self.url.starts_with("http://") || self.url.starts_with("https://"))
+        {
+            return Err("a dock URL must be http:// or https://".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -707,6 +733,12 @@ impl Settings {
         self.transition.validate()?;
         self.hotkeys.validate()?;
         self.remote_control.validate()?;
+        if self.browser_docks.len() > 16 {
+            return Err("too many browser docks (16 max)".to_owned());
+        }
+        for dock in &self.browser_docks {
+            dock.validate()?;
+        }
         Ok(())
     }
 }
@@ -940,6 +972,10 @@ mod tests {
                 lan: false,
                 password: "deck-pass".to_owned(),
             },
+            browser_docks: vec![BrowserDockSettings {
+                name: "Twitch Chat".to_owned(),
+                url: "https://www.twitch.tv/popout/someone/chat".to_owned(),
+            }],
         };
         store.set(next.clone()).expect("save settings");
 
@@ -955,12 +991,16 @@ mod tests {
         assert!(!defaults.enabled);
         assert!(defaults.validate().is_ok());
         // Enabling without a password is refused.
-        let mut no_password = RemoteControlSettings::default();
-        no_password.enabled = true;
+        let no_password = RemoteControlSettings {
+            enabled: true,
+            ..Default::default()
+        };
         assert!(no_password.validate().is_err());
         // A privileged port is refused; a sane config passes.
-        let mut privileged = RemoteControlSettings::default();
-        privileged.port = 80;
+        let privileged = RemoteControlSettings {
+            port: 80,
+            ..Default::default()
+        };
         assert!(privileged.validate().is_err());
         let ok = RemoteControlSettings {
             enabled: true,

@@ -12,6 +12,7 @@
 
 mod audio;
 mod commands;
+mod docks;
 mod events;
 mod hotkeys;
 mod native_preview;
@@ -129,6 +130,7 @@ fn main() {
             commands::video_devices_list,
             commands::video_device_formats,
             commands::open_privacy_settings,
+            docks::browser_dock_open,
             commands::studio::studio_get,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,

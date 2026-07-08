@@ -148,6 +148,11 @@ export function settingsSet(settings: Settings): Promise<void> {
   return invoke("settings_set", { settings });
 }
 
+/** Open (or focus) a browser dock window on an http(s) URL (TASK-702). */
+export function browserDockOpen(name: string, url: string): Promise<void> {
+  return invoke("browser_dock_open", { name, url });
+}
+
 /**
  * Enumerate screen/window sources. On Wayland this returns exactly one
  * portal entry — the system dialog picks the real source.
