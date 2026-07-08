@@ -86,10 +86,13 @@ pub trait PluginFilter: Send + Sync {
     fn apply(&self, params: &Value, frame: &mut PluginFrame);
 }
 
-/// The registry — the single seam. The app builds one at startup and hands
-/// it to the studio; a plugin crate exposes a `register(&mut PluginRegistry)`
-/// the app's plugin manifest calls. Duplicate kinds are refused (first one
-/// wins, the duplicate is reported) so two plugins can't shadow each other.
+/// The registry — the single seam a plugin registers through. A plugin crate
+/// exposes a `register(&mut PluginRegistry)` (see `plugins/checkerboard`);
+/// duplicate kinds are refused (first one wins, the duplicate is reported) so
+/// two plugins can't shadow each other. Wiring the registry into the studio's
+/// source/filter pickers (a `SourceSettings::Plugin { kind, params }` variant +
+/// registry-backed sessions) is the named follow-on these contracts are stable
+/// for — see `design/plugin-sdk.md`; the contracts + sample ship now.
 #[derive(Default)]
 pub struct PluginRegistry {
     sources: HashMap<&'static str, Box<dyn PluginSource>>,

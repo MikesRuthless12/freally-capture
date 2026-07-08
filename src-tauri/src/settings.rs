@@ -116,13 +116,10 @@ impl BrowserDockSettings {
         if self.name.len() > 64 || self.name.chars().any(char::is_control) {
             return Err("invalid dock name".to_owned());
         }
-        if self.url.len() > 2048
-            || self.url.chars().any(char::is_control)
-            || !(self.url.starts_with("http://") || self.url.starts_with("https://"))
-        {
-            return Err("a dock URL must be http:// or https://".to_owned());
-        }
-        Ok(())
+        // Delegate to the one open-time validator (Url::parse + scheme +
+        // bounds) so a dock that saves is a dock that opens — no weaker
+        // save-time prefix check that persists a URL Open then rejects.
+        crate::docks::validate_dock_url(&self.url).map(|_| ())
     }
 }
 

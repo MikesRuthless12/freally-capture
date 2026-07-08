@@ -7,10 +7,14 @@
 //! the remote page gets no IPC surface at all: it renders, and that's it.
 //! Docks open only on an explicit user click; the list persists in settings.
 
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
-/// Validate a dock URL: http(s) only, bounded, no control characters.
-fn validate_dock_url(url: &str) -> Result<Url, String> {
+/// Validate a dock URL: http(s) only, bounded, no control characters. The
+/// single source of truth — `settings.rs` validation and this open-time check
+/// both go through it, so a URL that saves is a URL that opens (no "saves fine,
+/// never opens" divergence).
+pub fn validate_dock_url(url: &str) -> Result<Url, String> {
     if url.len() > 2048 || url.chars().any(char::is_control) {
         return Err("invalid dock URL".to_owned());
     }
@@ -22,12 +26,21 @@ fn validate_dock_url(url: &str) -> Result<Url, String> {
 }
 
 /// A window label derived from the dock name (labels allow [a-zA-Z0-9-/:_]).
+/// A readable sanitized stem PLUS a hash of the *full* name, so distinct names
+/// that sanitize to the same stem ("Twitch Chat" vs "Twitch_Chat") get
+/// distinct labels — otherwise opening the second would just navigate the
+/// first dock's window to a different URL, destroying its page.
 fn dock_label(name: &str) -> String {
-    let cleaned: String = name
+    let stem: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    format!("dock-{}", cleaned.to_ascii_lowercase())
+    let digest = Sha256::digest(name.as_bytes());
+    let mut suffix = String::with_capacity(12);
+    for byte in &digest[..6] {
+        suffix.push_str(&format!("{byte:02x}"));
+    }
+    format!("dock-{}-{suffix}", stem.to_ascii_lowercase())
 }
 
 /// Open (or focus) the named dock window on `url`.
@@ -76,9 +89,16 @@ mod tests {
     }
 
     #[test]
-    fn labels_are_windowsafe_and_stable() {
-        assert_eq!(dock_label("Twitch Chat"), "dock-twitch-chat");
-        assert_eq!(dock_label("émoji �à"), "dock--moji---");
-        assert_eq!(dock_label(""), "dock-");
+    fn labels_are_windowsafe_stable_and_collision_free() {
+        // Stable for a given name (starts with the readable stem).
+        assert!(dock_label("Twitch Chat").starts_with("dock-twitch-chat-"));
+        assert_eq!(dock_label("Twitch Chat"), dock_label("Twitch Chat"));
+        // Names that sanitize to the same stem must NOT collide — the whole
+        // point of the hash suffix (else opening one navigates the other).
+        assert_ne!(dock_label("Twitch Chat"), dock_label("Twitch_Chat"));
+        assert_ne!(dock_label("Twitch Chat"), dock_label("twitch-chat"));
+        // A label never targets the app's own "main" IPC window.
+        assert!(dock_label("main").starts_with("dock-"));
+        assert_ne!(dock_label("main"), "main");
     }
 }

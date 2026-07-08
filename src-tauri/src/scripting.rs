@@ -7,6 +7,7 @@
 //! Scripts (and their `mlua::Lua` states, which are not `Send`) live entirely
 //! on the one scripting thread: loaded there, events emitted there.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -73,33 +74,48 @@ pub fn spawn_manager(app: AppHandle) {
     std::thread::Builder::new()
         .name("fcap-scripting".into())
         .spawn(move || {
-            let mut seen: Option<Vec<ScriptSettings>> = None;
-            let mut loaded: Vec<Script> = Vec::new();
+            // Keyed by `(path, enabled)` so a change to ONE entry only
+            // (re)loads or drops that script — an unrelated running script
+            // keeps its accumulated Lua state instead of being torn down and
+            // re-run whenever the user edits a different entry.
+            let mut loaded: HashMap<(String, bool), Script> = HashMap::new();
             let mut last_state: Option<Value> = None;
             loop {
                 let entries = app.state::<SettingsStore>().get().scripts;
-                if seen.as_ref() != Some(&entries) {
-                    loaded.clear();
-                    for entry in entries.iter().filter(|entry| entry.enabled) {
-                        match load_script(&app, entry) {
-                            Ok(script) => {
-                                println!("script loaded: {}", entry.path);
-                                loaded.push(script);
-                            }
-                            Err(err) => eprintln!("script failed to load: {err}"),
-                        }
+                let desired: std::collections::HashSet<(String, bool)> = entries
+                    .iter()
+                    .filter(|entry| entry.enabled)
+                    .map(|entry| (entry.path.clone(), entry.enabled))
+                    .collect();
+                // Drop scripts no longer enabled/present.
+                loaded.retain(|key, _| desired.contains(key));
+                // Load newly-enabled/added scripts (leave existing ones intact).
+                for entry in entries.iter().filter(|entry| entry.enabled) {
+                    let key = (entry.path.clone(), entry.enabled);
+                    if loaded.contains_key(&key) {
+                        continue;
                     }
-                    seen = Some(entries);
+                    match load_script(&app, entry) {
+                        Ok(script) => {
+                            println!("script loaded: {}", entry.path);
+                            loaded.insert(key, script);
+                        }
+                        Err(err) => eprintln!("script failed to load: {err}"),
+                    }
                 }
 
+                // ALWAYS advance the snapshot — even with no scripts loaded —
+                // so a script enabled later compares against CURRENT state and
+                // can't fire long-past transitions (e.g. yank the scene to
+                // "Live" mid-show because it saw a frozen pre-disable state).
+                let state = crate::remote_api::coarse_state(&app);
                 if !loaded.is_empty() {
-                    let state = crate::remote_api::coarse_state(&app);
                     if let Some(prev) = &last_state {
                         if prev != &state {
                             let mut events = derive_events(prev, &state);
                             events.push(("state".to_owned(), state.clone()));
                             for (event, data) in &events {
-                                for script in &loaded {
+                                for script in loaded.values() {
                                     if let Err(err) = script.emit(event, data) {
                                         eprintln!("script error: {err}");
                                     }
@@ -107,8 +123,8 @@ pub fn spawn_manager(app: AppHandle) {
                             }
                         }
                     }
-                    last_state = Some(state);
                 }
+                last_state = Some(state);
 
                 std::thread::sleep(Duration::from_millis(250));
             }

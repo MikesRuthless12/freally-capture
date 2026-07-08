@@ -134,8 +134,11 @@
           Nothing connects until you tap Join. Your camera and microphone travel
           <strong>directly to the host, peer-to-peer over WebRTC, encrypted in transit</strong> —
           this page runs entirely in your browser and uploads nothing anywhere. The host can hear,
-          seat, mute, or remove you; you are part of whatever they record or stream. Have the
-          desktop app? The same invite works there via its freally:// link.
+          seat, mute, or remove you; you are part of whatever they record or stream.
+          <span id="appLinkWrap" hidden>
+            Have Freally Capture installed? <a id="appLink" href="#">Open this invite in the app
+            instead</a> — it runs natively there, no browser needed.
+          </span>
         </p>
       </div>
     </main>
@@ -193,6 +196,16 @@
       }
 
       const token = parseToken(window.location.search) || parseToken(window.location.hash);
+
+      // Offer the native deep link for anyone who has the app installed — so a
+      // machine that scanned the QR (or opened this URL) isn't forced through
+      // the browser guest. The QR targets this page for phone guests; this
+      // link bounces app users back to freally://, keeping the old behavior.
+      if (token) {
+        const appLink = $("appLink");
+        appLink.href = "freally://join?token=" + encodeURIComponent(token);
+        $("appLinkWrap").hidden = false;
+      }
 
       function inviteNow() {
         if (!token) return { ok: false, reason: "missing" };
@@ -260,6 +273,10 @@
         $("hostShareWrap").hidden = true;
         muteBtn.hidden = true;
         shareBtn.hidden = true;
+        // Reset the share label — teardown stopped any share via track.stop(),
+        // which does NOT fire the track's `ended` handler, so the button would
+        // otherwise reappear reading "Stop sharing" with no share behind it.
+        shareBtn.textContent = "Share my screen";
         leaveBtn.hidden = true;
         joinBtn.hidden = false;
       }
@@ -308,6 +325,11 @@
           return;
         }
         const carried = rejoining ? rejoin : null;
+        // Preserve the guest's own mute choice across an auto-rejoin — a
+        // connection blip must NOT silently re-open a mic the guest muted
+        // (a hot mic into the host's stream/recording). A fresh, explicit
+        // Join (rejoining === false) starts unmuted.
+        const keepSelfMuted = rejoining ? selfGate : false;
         teardown();
         rejoin = carried;
         joinBtn.disabled = true;
@@ -336,9 +358,14 @@
         if (navigator.mediaDevices.getDisplayMedia) shareBtn.hidden = false;
         $("videos").style.display = "flex";
         $("selfView").srcObject = camStream;
-        selfGate = false;
+        // Re-apply the carried-over self-mute to the new mic track at the
+        // source, so a rejoin honors it before a single sample goes out.
+        selfGate = keepSelfMuted;
         hostGate = false;
+        const micTrack = camStream.getAudioTracks()[0];
+        if (micTrack) micTrack.enabled = !selfGate;
         renderMute();
+        if (selfGate) setStatus("Reconnected — your mic stays muted (you muted it).");
 
         // The host may share their view back — accept media only from them.
         peer.on("call", (call) => {

@@ -154,6 +154,16 @@ impl NativePreviewState {
 
     /// The UI reported a new preview region (position/size in physical px) and
     /// visibility. Repositions the overlay's visual and signals a surface resize.
+    ///
+    /// This runs on the **main (UI) thread** (it's a Tauri command), so it must
+    /// never park behind GPU work: `build_surface_serialized` holds the overlay
+    /// lock across the one-time first-surface build, and blocking the main
+    /// thread on it would freeze the window pump. So the geometry (the rect +
+    /// generation the render thread reconciles against) is always updated, but
+    /// the overlay reposition uses a **non-blocking `try_lock`** — if the build
+    /// happens to hold the lock this instant, we skip the direct reposition; the
+    /// build commits the current bounds it reads via `region()`, and the next
+    /// region tick (or the render loop's own resize) settles the final geometry.
     pub fn set_region(&self, bounds: Bounds, visible: bool) {
         {
             let mut rect = self
@@ -166,9 +176,11 @@ impl NativePreviewState {
             self.rect_gen.fetch_add(1, Ordering::Release);
         }
         self.visible.store(visible, Ordering::Relaxed);
-        if let Some(overlay) = self.lock_overlay().as_ref() {
-            overlay.set_bounds(bounds);
-            overlay.set_visible(visible);
+        if let Ok(guard) = self.overlay.try_lock() {
+            if let Some(overlay) = guard.as_ref() {
+                overlay.set_bounds(bounds);
+                overlay.set_visible(visible);
+            }
         }
     }
 }

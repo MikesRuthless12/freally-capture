@@ -195,10 +195,16 @@ fn serve_client(
     clients: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
     shutdown: Arc<AtomicBool>,
 ) {
-    if stream.set_read_timeout(Some(TICK)).is_err() {
-        return;
-    }
     let _ = stream.set_nodelay(true);
+    // The handshake needs a GENEROUS read timeout, not the 20 Hz poll tick:
+    // `accept_with_config` does not retry on WouldBlock/TimedOut (it returns
+    // Interrupted, which we'd treat as "not a WebSocket" and drop). The old
+    // 50 ms tick dropped any client whose HTTP upgrade bytes arrived a few ms
+    // late — i.e. every LAN / Wi-Fi controller, the whole point of the `lan`
+    // mode. `AUTH_DEADLINE` (10 s) is far longer than any real RTT yet still
+    // bounds a peer that opens the socket and never sends.
+    let _ = stream.set_read_timeout(Some(AUTH_DEADLINE));
+    let _ = stream.set_write_timeout(Some(AUTH_DEADLINE));
     let config = WebSocketConfig {
         max_message_size: Some(MAX_MESSAGE_BYTES),
         max_frame_size: Some(MAX_MESSAGE_BYTES),
@@ -207,6 +213,11 @@ fn serve_client(
     let Ok(mut ws) = tungstenite::accept_with_config(stream, Some(config)) else {
         return; // not a WebSocket handshake — drop it
     };
+    // NOW switch to the short poll timeout for the serve loop, so the loop
+    // wakes ~20×/s to see shutdown + drain queued events.
+    if ws.get_ref().set_read_timeout(Some(TICK)).is_err() {
+        return;
+    }
 
     // Per-connection random challenge + salt (UUID v4 = OS-seeded entropy).
     let challenge = uuid::Uuid::new_v4().to_string();

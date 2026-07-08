@@ -278,12 +278,24 @@ pub fn spawn_manager(app: AppHandle) {
                                 server.port()
                             );
                             *lock(&state.server) = Some(server);
+                            // Only commit `seen` once the server is actually up.
+                            *lock(&state.seen) = Some(settings);
+                            *lock(&state.last_pushed) = None;
                         }
-                        Err(err) => eprintln!("remote api: could not start: {err}"),
+                        // Leave `seen` UNCHANGED so the next tick retries. This
+                        // recovers the common cases the old code got permanently
+                        // stuck on: the reconcile's own stop→rebind (the accept
+                        // thread releases the port a moment later) and a
+                        // transiently-taken port that later frees up. The bind
+                        // error is logged each attempt.
+                        Err(err) => eprintln!("remote api: could not start ({err}) — retrying"),
                     }
+                } else {
+                    // Disabled or invalid: this IS the desired steady state, so
+                    // commit it (no server, no retry churn).
+                    *lock(&state.seen) = Some(settings);
+                    *lock(&state.last_pushed) = None;
                 }
-                *lock(&state.seen) = Some(settings);
-                *lock(&state.last_pushed) = None;
             }
 
             // Push the coarse state on change (server present + anyone may
