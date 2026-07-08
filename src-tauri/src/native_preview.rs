@@ -83,13 +83,25 @@ impl NativePreviewState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Commit the overlay's composition tree — the render thread calls this
-    /// right after building the surface, so wgpu's `SetContent` is composited
-    /// (otherwise the visual stays blank until the next region change).
-    pub fn commit(&self) {
-        if let Some(overlay) = self.lock_overlay().as_ref() {
-            overlay.commit();
+    /// Run the render thread's wgpu surface build serialized against the UI
+    /// thread's `set_region`/`set_visible` commits: wgpu's `SetContent`
+    /// mutates the composition visual, so it must not interleave with a
+    /// concurrent `Commit` (a resize landing exactly as the first surface is
+    /// built). On success the tree is committed while the lock is still held,
+    /// so the new swapchain composites immediately instead of staying blank
+    /// until the next geometry change.
+    pub fn build_surface_serialized<T, E>(
+        &self,
+        build: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let overlay = self.lock_overlay();
+        let built = build();
+        if built.is_ok() {
+            if let Some(overlay) = overlay.as_ref() {
+                overlay.commit();
+            }
         }
+        built
     }
 
     /// The UI's selected item, drawn as the native preview's selection box
@@ -142,6 +154,16 @@ impl NativePreviewState {
 
     /// The UI reported a new preview region (position/size in physical px) and
     /// visibility. Repositions the overlay's visual and signals a surface resize.
+    ///
+    /// This runs on the **main (UI) thread** (it's a Tauri command), so it must
+    /// never park behind GPU work: `build_surface_serialized` holds the overlay
+    /// lock across the one-time first-surface build, and blocking the main
+    /// thread on it would freeze the window pump. So the geometry (the rect +
+    /// generation the render thread reconciles against) is always updated, but
+    /// the overlay reposition uses a **non-blocking `try_lock`** — if the build
+    /// happens to hold the lock this instant, we skip the direct reposition; the
+    /// build commits the current bounds it reads via `region()`, and the next
+    /// region tick (or the render loop's own resize) settles the final geometry.
     pub fn set_region(&self, bounds: Bounds, visible: bool) {
         {
             let mut rect = self
@@ -154,9 +176,11 @@ impl NativePreviewState {
             self.rect_gen.fetch_add(1, Ordering::Release);
         }
         self.visible.store(visible, Ordering::Relaxed);
-        if let Some(overlay) = self.lock_overlay().as_ref() {
-            overlay.set_bounds(bounds);
-            overlay.set_visible(visible);
+        if let Ok(guard) = self.overlay.try_lock() {
+            if let Some(overlay) = guard.as_ref() {
+                overlay.set_bounds(bounds);
+                overlay.set_visible(visible);
+            }
         }
     }
 }

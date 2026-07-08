@@ -59,7 +59,7 @@ import {
   type RemoteAudioDevices,
   startMicTest,
 } from "../remote/devices";
-import { joinTargetFromInput } from "../remote/invite";
+import { joinTargetFromInput, parseInviteInput, webJoinLink } from "../remote/invite";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -254,7 +254,9 @@ export function SourcesRail({
                   </button>
                 ))}
                 <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                  Browser Source arrives later — it needs its own offscreen-webview work.
+                  Browser Source ships as its own on-demand component milestone (a ~180 MB Chromium
+                  engine — never bundled). Today: capture a real browser window with Window Capture
+                  + a chroma/color key, or open chat/alerts as a Dock (Controls → Docks).
                 </p>
               </div>
             )}
@@ -1493,6 +1495,10 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
   const [formError, setFormError] = useState<string | null>(null);
 
   const link = session.role === "host" ? session.invite : null;
+  // The QR carries the WEB join URL (docs/join.html) so a scanned phone lands
+  // in the browser guest — the copyable freally:// link stays for app users.
+  const qrToken = link ? parseInviteInput(link) : null;
+  const qrLink = qrToken ? webJoinLink(qrToken) : null;
   const startHosting = () => {
     setFormError(null);
     void spikeHost(sceneId, ttl);
@@ -1576,10 +1582,10 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                 set. The guest opens it and joins with their webcam.
               </p>
               <div className="flex items-center gap-2">
-                <InviteQr link={link} />
+                <InviteQr link={qrLink ?? link} />
                 <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-                  Scan to carry the invite over. The freally:// link opens on a machine with Freally
-                  Capture installed; phone guests need the web join page (a later milestone).
+                  Scan on a phone to join straight from the browser — camera + mic, no install. The
+                  copyable freally:// link above opens in Freally Capture on a machine that has it.
                 </p>
               </div>
             </>

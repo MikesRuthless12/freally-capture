@@ -15,9 +15,12 @@ import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
+import { BrowserDockDialog } from "./BrowserDock";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
+import { ScriptsDialog } from "./ScriptsDialog";
 import { SettingsHotkeys } from "./SettingsHotkeys";
+import { SettingsRemote } from "./SettingsRemote";
 import { SettingsOutput } from "./SettingsOutput";
 import { SettingsReplay } from "./SettingsReplay";
 import { SettingsStream } from "./SettingsStream";
@@ -38,7 +41,17 @@ export function ControlsDock({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<
-    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | "replay" | null
+    | "components"
+    | "output"
+    | "stream"
+    | "hotkeys"
+    | "workspace"
+    | "recordings"
+    | "replay"
+    | "remote"
+    | "docks"
+    | "scripts"
+    | null
   >(null);
 
   useEffect(() => {
@@ -257,6 +270,30 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("scripts")}
+            title="Sandboxed Lua scripts: react to go-live/scene/recording events, drive the studio"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⚡ Scripts…
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("docks")}
+            title="Browser docks: open a chat popout, alerts page, or Companion buttons as a window beside the studio"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⧉ Docks…
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("remote")}
+            title="WebSocket remote API for Stream Deck / Companion controllers (off by default)"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⌁ Remote…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("workspace")}
             title="Profiles (settings) + scene collections — switchable snapshots"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
@@ -302,6 +339,27 @@ export function ControlsDock({
       )}
       {dialog === "replay" && (
         <SettingsReplay
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "remote" && (
+        <SettingsRemote
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "docks" && (
+        <BrowserDockDialog
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "scripts" && (
+        <ScriptsDialog
           settings={settings}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}

@@ -63,13 +63,13 @@
       <article class="release latest">
         <div class="release-head">
           <div class="meta">
-            <span class="badge">In development</span>
+            <span class="badge">Latest</span>
             <span class="date">0.85.0 streaming depth · Jul 8, 2026</span>
           </div>
           <details class="dl">
             <summary>Download <span class="chev" aria-hidden="true">▾</span></summary>
             <div class="dl-menu" role="menu">
-              <span class="dl-note">v0.85.0 is the latest published build — streaming depth: multistream to several targets at once, SRT/WHIP, the rolling replay buffer, a vertical/second canvas, nested scenes, stinger/luma transitions, and the no-key live chat + floating reactions overlay. It is a strict superset of the 0.70.0 studio MVP.</span>
+              <span class="dl-note">v0.85.0 is the latest published build (multistream, SRT/WHIP, replay buffer, vertical canvas, chat overlay). The extensibility surface (0.90.0 — the remote-control API, browser docks, scripting, and the plugin SDK) is built and lands here when its release ships.</span>
               <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.85.0/Freally.Capture_0.85.0_x64-setup.exe">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.4 10.6 4.2v7.1H3zM11.6 4 21 2.7v8.6h-9.4zM3 12.7h7.6v7.1L3 18.6zM11.6 12.7H21v8.6l-9.4-1.3z"/></svg>
                 Windows (64-bit installer)
@@ -93,7 +93,7 @@
           </details>
         </div>
 
-        <h2>0.85.0 — streaming depth is here (multistream · SRT/WHIP · replay · vertical · chat)</h2>
+        <h2>Latest — streaming depth (0.85.0); the extensibility surface (0.90.0) is built, awaiting release</h2>
         <p class="summary">
           Capture is in (0.25.0): screens, windows, and webcams stream live into the program preview on
           Windows (DXGI + Windows.Graphics.Capture), macOS (ScreenCaptureKit), and Linux (the ScreenCast
@@ -117,14 +117,13 @@
           RTMP/RTMPS with auto-reconnect, Studio Mode (preview/program) with cut/fade/slide/swipe/luma
           transitions, global hotkeys, profiles + scene collections, and a real fps/CPU/GPU stats dock
           — the local recording keeps running no matter what the stream does. <strong>Streaming depth
-          (0.85.0) is now the latest published build</strong>: multistream to several targets at once
-          (shared-encode where settings match), SRT and WHIP alongside RTMP/RTMPS, a rolling replay
-          buffer you hotkey-save, a vertical/second canvas that records and streams independently,
-          nested scenes + source groups + per-scene audio, stinger and luma-wipe transitions, color/luma
-          key + render-delay filters, encoder depth (Rec.709, high-FPS/4K, per-target downscale), marker
-          → recording chapters, and a no-key live chat + floating-reactions overlay for YouTube, Twitch
-          and Kick — no account, developer key, or sign-in, ever. Grab the latest build from the download
-          menu above.
+          shipped (0.85.0)</strong>: simultaneous multistream to several platforms at once, SRT/WHIP, a
+          vertical 9:16 canvas recorded/streamed independently, nested scenes + source groups +
+          per-scene audio, a rolling replay buffer, high-FPS/4K/Rec.709 encoder depth, and a live chat
+          overlay + floating reactions that need no key or sign-in. <strong>The extensibility surface is
+          built (0.90.0)</strong>: a password-protected WebSocket remote-control API (Stream Deck /
+          Companion), browser docks, sandboxed Lua scripting, and a plugin SDK — all local, off by
+          default. Grab the latest published build from the download menu above.
         </p>
 
         <h3>What the first public build will do</h3>
@@ -183,15 +182,15 @@
             <span class="soon">Done — Jul 3, 2026</span>
           </li>
           <li>
-            <span class="badge">0.56.0</span>
+            <span class="badge upcoming">preview</span>
             <div>
               <strong>Native GPU preview ("OBS feel")</strong>
-              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag — on <strong>Windows</strong> (DirectComposition), <strong>macOS</strong> (CAMetalLayer), and <strong>Linux</strong> (X11/Vulkan), with the selection box + transform handles drawn into the GPU frame. The JPEG preview stays as the universal fallback (and covers Wayland).</p>
+              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag. Real-time on <strong>Windows</strong> (DirectComposition), with the selection box + transform handles drawn into the GPU frame; macOS (CAMetalLayer) and Linux (Vulkan) next. The JPEG preview stays as the universal fallback.</p>
             </div>
-            <span class="soon">Done — Jul 6, 2026</span>
+            <span class="soon">In development — Windows done</span>
           </li>
           <li>
-            <span class="badge">0.70.0</span>
+            <span class="badge upcoming">0.70.0</span>
             <div>
               <strong>Studio MVP — first public</strong>
               <p>Single-target streaming with reconnect, Studio Mode + transitions, global hotkeys, profiles + scene collections, and a real stats dock — plus opt-in P2P remote guests. The virtual camera follows as its own signed-driver milestone.</p>
@@ -202,15 +201,23 @@
             <span class="badge">0.85.0</span>
             <div>
               <strong>Multistream / SRT / WHIP + scene/source/encoder depth</strong>
-              <p>Simultaneous multistream to many targets, SRT/WHIP, vertical/multi-canvas, replay buffer, nested scenes + source groups, high-FPS/4K encoder depth, and the no-key live chat + floating reactions overlay.</p>
+              <p>Simultaneous multistream to many targets, SRT/WHIP, vertical/multi-canvas, replay-buffer presets, nested scenes + source groups, and high-FPS/4K encoder depth.</p>
             </div>
             <span class="soon">Done — Jul 8, 2026</span>
           </li>
           <li>
+            <span class="badge">0.90.0</span>
+            <div>
+              <strong>Remote control, scripting &amp; plugins</strong>
+              <p>The WebSocket remote-control API (Stream Deck / Companion), browser docks, sandboxed Lua scripting, and a plugin SDK — the extensibility surface, all local and off by default.</p>
+            </div>
+            <span class="soon">Built — awaiting release</span>
+          </li>
+          <li>
             <span class="badge upcoming">1.0.0</span>
             <div>
-              <strong>Remote API, scripting, game capture &amp; launch</strong>
-              <p>The WebSocket remote-control API + browser docks, Lua/JS scripting + plugins, game capture, signed installers, full localization (18 languages), and accessibility.</p>
+              <strong>Game capture &amp; launch</strong>
+              <p>Game capture (DX/GL/Vulkan hooking, flagged honestly), signed/notarized installers with auto-update, full localization (18 languages, incl. RTL), accessibility, and guided onboarding.</p>
             </div>
             <span class="soon">Coming soon</span>
           </li>

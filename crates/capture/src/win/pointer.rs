@@ -255,9 +255,16 @@ impl CursorTracker {
         // another. `WindowFromPoint` returns whatever window owns that screen
         // pixel; only when its top-level root is ours is the cursor really
         // "over" the capture.
-        let over = in_frame && Self::cursor_over_window(hwnd, info.ptScreenPos);
+        if !(in_frame && Self::cursor_over_window(hwnd, info.ptScreenPos)) {
+            // The canonical away key, not a live x/y with `over: false`: the
+            // key is the emit-dedup key, so a not-over position change must
+            // compare equal to the last not-over sample — else every cursor
+            // move anywhere on the desktop (or over an occluding window)
+            // synthesizes an undrawn frame at the pump cadence.
+            return CursorKey::AWAY;
+        }
         CursorKey {
-            over,
+            over: true,
             x,
             y,
             cursor: info.hCursor.0 as isize,

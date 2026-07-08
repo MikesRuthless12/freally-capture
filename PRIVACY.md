@@ -35,6 +35,18 @@ Freally Capture works **fully offline** for building scenes, composing, recordin
   broadcast to them, using the stream keys/tokens you entered. When you enable
   more than one target, each publishes **directly** to its platform. There is
   **no restream server we operate**; your video does not pass through us;
+- **the remote-guests session you start** (opt-in) — if you invite remote guests,
+  their camera/microphone/screen and yours travel **directly between the peers**
+  over WebRTC, **encrypted in transit (DTLS-SRTP)** — there is **no media server
+  we run**. Only the small connection handshake (peer ids and session
+  descriptions, never media) crosses a public signaling broker, and an invite is
+  an **expiring, host-chosen-lifetime** link; joining is always an **explicit
+  click** — nothing auto-connects. If both sides sit behind strict NATs you may
+  *optionally* configure your **own TURN relay**; its credential is stored
+  locally, never logged, and used only to reach the relay **you** chose. A
+  guest's feed lands in your composition like any local source, so it is part of
+  whatever you record or stream — guests take part knowingly, and the host can
+  mute, remove, or ban any guest at any time;
 - **the live chat overlay you configure** (optional) — if you add a chat overlay
   and point it at a YouTube, Twitch, or Kick channel, the Software reads that
   channel's **public** live chat the same way a logged-out visitor's browser does

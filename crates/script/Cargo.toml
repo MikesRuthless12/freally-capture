@@ -1,0 +1,15 @@
+# fcap-script — sandboxed Lua scripting for the studio (Phase 7, TASK-703).
+[package]
+name = "fcap-script"
+description = "Freally Capture — sandboxed Lua scripting: react to studio events, drive the command surface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+mlua = { workspace = true }
+serde_json = { workspace = true }

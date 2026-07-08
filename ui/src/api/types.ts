@@ -43,6 +43,37 @@ export type Settings = {
   transition: TransitionSettings;
   /** Global action hotkeys (Phase 5). */
   hotkeys: HotkeySettings;
+  /** The WebSocket remote-control API (Phase 7). */
+  remoteControl: RemoteControlSettings;
+  /** Browser docks — named URLs opened as dock windows (Phase 7). */
+  browserDocks: BrowserDockSettings[];
+  /** Sandboxed Lua scripts (Phase 7). */
+  scripts: ScriptSettings[];
+};
+
+/** One browser dock: a named URL opened as its own dock window. */
+export type BrowserDockSettings = {
+  name: string;
+  url: string;
+};
+
+/** One sandboxed Lua script: a .lua file path, loaded while enabled. */
+export type ScriptSettings = {
+  path: string;
+  enabled: boolean;
+};
+
+/** The WebSocket remote-control API (mirrors `RemoteControlSettings` in
+ * settings.rs). Off by default; requires a password; loopback unless `lan`. */
+export type RemoteControlSettings = {
+  enabled: boolean;
+  /** TCP port (1024–65535). */
+  port: number;
+  /** Accept LAN connections (0.0.0.0) instead of loopback only. */
+  lan: boolean;
+  /** A secret — masked in the UI; auth is challenge–response, the password
+   * itself never crosses the wire. */
+  password: string;
 };
 
 /** The rolling replay buffer (mirrors `ReplaySettings` in settings.rs). */

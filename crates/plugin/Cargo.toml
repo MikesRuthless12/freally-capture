@@ -1,0 +1,14 @@
+# fcap-plugin — the plugin SDK contracts + registry (Phase 7, TASK-704).
+[package]
+name = "fcap-plugin"
+description = "Freally Capture — the plugin SDK: documented Source/Filter contracts and the registry seam plugins register through."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

@@ -55,6 +55,12 @@ pub struct Settings {
     pub transition: TransitionSettings,
     /// Global action hotkeys (Phase 5).
     pub hotkeys: HotkeySettings,
+    /// The WebSocket remote-control API (Phase 7).
+    pub remote_control: RemoteControlSettings,
+    /// Browser docks — named URLs opened as dock windows (Phase 7).
+    pub browser_docks: Vec<BrowserDockSettings>,
+    /// Sandboxed Lua scripts (Phase 7).
+    pub scripts: Vec<ScriptSettings>,
 }
 
 impl Default for Settings {
@@ -70,7 +76,50 @@ impl Default for Settings {
             replay: ReplaySettings::default(),
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
+            remote_control: RemoteControlSettings::default(),
+            browser_docks: Vec::new(),
+            scripts: Vec::new(),
         }
+    }
+}
+
+/// One sandboxed Lua script (TASK-703): a user-chosen `.lua` file, loaded
+/// while enabled. The sandbox has no io/os/require — a script can only call
+/// the same command surface the remote API exposes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ScriptSettings {
+    pub path: String,
+    pub enabled: bool,
+}
+
+impl ScriptSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.path.is_empty() || self.path.len() > 1024 || self.path.chars().any(char::is_control)
+        {
+            return Err("invalid script path".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// One browser dock: a named URL opened as its own dock window (TASK-702).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BrowserDockSettings {
+    pub name: String,
+    pub url: String,
+}
+
+impl BrowserDockSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.len() > 64 || self.name.chars().any(char::is_control) {
+            return Err("invalid dock name".to_owned());
+        }
+        // Delegate to the one open-time validator (Url::parse + scheme +
+        // bounds) so a dock that saves is a dock that opens — no weaker
+        // save-time prefix check that persists a URL Open then rejects.
+        crate::docks::validate_dock_url(&self.url).map(|_| ())
     }
 }
 
@@ -507,6 +556,67 @@ impl RemoteSettings {
     }
 }
 
+/// The WebSocket remote-control API (Phase 7, TASK-701). **Off by default**;
+/// requires a password to enable; binds loopback unless `lan` is explicitly
+/// set. Disabled means the port is closed.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RemoteControlSettings {
+    pub enabled: bool,
+    /// TCP port (1024–65535).
+    pub port: u16,
+    /// Accept LAN connections (0.0.0.0) instead of loopback only.
+    pub lan: bool,
+    /// A secret: redacted from Debug, never logged. Auth is challenge–
+    /// response — the password itself never crosses the wire.
+    pub password: String,
+}
+
+impl Default for RemoteControlSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: fcap_stream::remote::DEFAULT_REMOTE_PORT,
+            lan: false,
+            password: String::new(),
+        }
+    }
+}
+
+// Manual Debug so a debug-printed Settings can never leak the password.
+impl std::fmt::Debug for RemoteControlSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteControlSettings")
+            .field("enabled", &self.enabled)
+            .field("port", &self.port)
+            .field("lan", &self.lan)
+            .field(
+                "password",
+                &if self.password.is_empty() {
+                    ""
+                } else {
+                    "[redacted]"
+                },
+            )
+            .finish()
+    }
+}
+
+impl RemoteControlSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.port < 1024 {
+            return Err("remote-control port must be 1024–65535".to_owned());
+        }
+        if self.password.len() > 256 || self.password.chars().any(char::is_control) {
+            return Err("invalid remote-control password".to_owned());
+        }
+        if self.enabled && self.password.trim().is_empty() {
+            return Err("the remote-control API requires a password".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// Recording configuration (Settings → Output). Independent of any future
 /// stream settings by design — the local copy never rides a stream's knobs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -642,6 +752,19 @@ impl Settings {
         self.replay.validate()?;
         self.transition.validate()?;
         self.hotkeys.validate()?;
+        self.remote_control.validate()?;
+        if self.browser_docks.len() > 16 {
+            return Err("too many browser docks (16 max)".to_owned());
+        }
+        for dock in &self.browser_docks {
+            dock.validate()?;
+        }
+        if self.scripts.len() > 16 {
+            return Err("too many scripts (16 max)".to_owned());
+        }
+        for script in &self.scripts {
+            script.validate()?;
+        }
         Ok(())
     }
 }
@@ -869,12 +992,55 @@ mod tests {
                 save_replay: Some("Ctrl+Shift+S".to_owned()),
                 add_marker: None,
             },
+            remote_control: RemoteControlSettings {
+                enabled: true,
+                port: 4460,
+                lan: false,
+                password: "deck-pass".to_owned(),
+            },
+            browser_docks: vec![BrowserDockSettings {
+                name: "Twitch Chat".to_owned(),
+                url: "https://www.twitch.tv/popout/someone/chat".to_owned(),
+            }],
+            scripts: vec![ScriptSettings {
+                path: "C:/scripts/go-live.lua".to_owned(),
+                enabled: true,
+            }],
         };
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
         assert_eq!(reloaded.get(), next);
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn remote_control_settings_validate() {
+        // Off by default, and the default validates.
+        let defaults = RemoteControlSettings::default();
+        assert!(!defaults.enabled);
+        assert!(defaults.validate().is_ok());
+        // Enabling without a password is refused.
+        let no_password = RemoteControlSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        assert!(no_password.validate().is_err());
+        // A privileged port is refused; a sane config passes.
+        let privileged = RemoteControlSettings {
+            port: 80,
+            ..Default::default()
+        };
+        assert!(privileged.validate().is_err());
+        let ok = RemoteControlSettings {
+            enabled: true,
+            port: 4456,
+            lan: false,
+            password: "deck-pass".to_owned(),
+        };
+        assert!(ok.validate().is_ok());
+        // The password never appears in Debug output.
+        assert!(!format!("{ok:?}").contains("deck-pass"));
     }
 
     #[test]

@@ -1,0 +1,15 @@
+# The sample plugin (TASK-704): adds a source + a filter WITHOUT touching core.
+[package]
+name = "fcap-plugin-checkerboard"
+description = "Freally Capture sample plugin — an animated checkerboard source and an invert filter, registered through the SDK seam."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+fcap-plugin = { path = "../../crates/plugin" }
+serde_json = { workspace = true }

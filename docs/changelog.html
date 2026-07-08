@@ -16,58 +16,60 @@
     <header class="hero">
       <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
       <h1>Changelog</h1>
-      <p class="sub">Every Freally Capture release lands here. Early development builds are downloadable per release; streaming depth (0.85.0) is the latest published build.</p>
+      <p class="sub">Every Freally Capture release lands here. Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.</p>
     </header>
 
     <main>
-      <!-- 0.85.0 — streaming depth (latest published) -->
+      <!-- 0.90.0 — remote control, scripting & plugins -->
       <article class="release latest">
         <div class="release-head">
           <div class="meta">
-            <span class="badge">0.85.0</span>
-            <span class="date">Jul 8, 2026 · Streaming depth</span>
+            <span class="badge">0.90.0</span>
+            <span class="date">Jul 8, 2026 · Remote control, scripting &amp; plugins</span>
           </div>
-          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.85.0">Download v0.85.0</a>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases">Releases</a>
         </div>
 
-        <h2>0.85.0 — Streaming depth (multistream · SRT/WHIP · replay · vertical · chat)</h2>
+        <h2>0.90.0 — Remote control, scripting &amp; plugins (the extensibility surface)</h2>
         <p class="summary">
-          The one that turns going live into <strong>going live everywhere, your way</strong>.
-          <strong>Multistream</strong> to several platforms at once (sharing one encode where the
-          settings match), <strong>SRT and WHIP</strong> alongside RTMP/RTMPS, a rolling
-          <strong>replay buffer</strong> you hotkey-save, a <strong>vertical / second canvas</strong>
-          that records and streams independently, and a no-key <strong>live chat + floating reactions</strong>
-          overlay. A strict superset of the 0.70.0 studio MVP — it is the latest published build.
+          Drive the studio from a Stream Deck, react to going live with a script, embed a chat dock,
+          and extend the app with a plugin — all <strong>local and off by default</strong>.
         </p>
-
-        <h3>Stream to everywhere at once</h3>
         <ul class="features">
-          <li><strong>Multistream</strong>: broadcast to two or more targets simultaneously — Twitch, YouTube, Kick, Facebook, Trovo, custom ingest — each direct to its platform. Where target settings match, one encode is shared (via ffmpeg's tee) so multistream doesn't multiply your CPU/GPU cost.</li>
-          <li><strong>SRT and WHIP</strong> join RTMP/RTMPS: SRT for low-latency/lossy links, WHIP for WebRTC ingest — the WHIP bearer token rides the <code>Authorization</code> header, never the URL, and is scrubbed from every log.</li>
-          <li>Per-target <strong>output size</strong> and canvas: a 4K program can send 1080p to one service and 720p to another at the same time, and a vertical target streams the 9:16 canvas.</li>
+          <li><strong>WebSocket remote-control API</strong> — a password-protected socket a Stream Deck / Companion-style controller connects to: switch scenes, run the transition, start/stop the stream and recording, save replays, set mutes/volumes. Off by default, this-machine-only unless you opt into LAN, and the password never crosses the wire (challenge–response). It can't read files.</li>
+          <li><strong>Browser docks</strong> — open a chat popout, alerts page, or Companion web buttons as their own window beside the studio. The docked page renders and gets no access to the app.</li>
+          <li><strong>Sandboxed Lua scripting</strong> — <code>.lua</code> scripts that react to go-live / scene / recording events and drive the same commands as the remote API. No file or OS access; a script error can't touch your stream or recording.</li>
+          <li><strong>Plugin SDK</strong> — documented Source/Filter contracts + a sample plugin, so the community can add sources and filters without touching core.</li>
+          <li>Plus the <strong>web join page</strong> for phone guests (scan the invite QR, join from a browser — no install) and a Windows native-preview + cursor-capture polish pass.</li>
         </ul>
-
-        <h3>Replay, vertical, and deeper scenes</h3>
-        <ul class="features">
-          <li>A <strong>rolling replay buffer</strong> holds the last N seconds and saves an instant clip on a hotkey — a bounded segment ring, saved by stream-copy so it never stutters the live show.</li>
-          <li>A <strong>vertical / second canvas</strong> composes any scene at its own size (9:16 for shorts/reels), recordable and streamable independently of the main program.</li>
-          <li><strong>Nested scenes, source groups, and per-scene audio</strong> — compose a scene inside another (cycle-safe), group items to move them together, and give a scene its own fader/mute mix.</li>
-          <li><strong>Stinger and luma-wipe transitions</strong>, plus color-key / luma-key and per-source render-delay filters, and <strong>image slideshow</strong> + capture-card format presets.</li>
-        </ul>
-
-        <h3>Chat + reactions — no key, no account, ever</h3>
-        <ul class="features">
-          <li>A <strong>live chat overlay</strong> for YouTube, Twitch, and Kick that needs <strong>no API key, no developer account, and no sign-in</strong> — it reads public chat the same way a logged-out viewer's browser does, pinned to each platform's own domains, in a flood-proof bounded ring.</li>
-          <li><strong>Floating reactions</strong>: viewer emoji rise, wobble, and fade over the program — baked into the composed frame so the preview, the recording, and every stream target carry the exact same moment. A reaction flood can only cap what's on screen; it never touches the encoder.</li>
-          <li><strong>Encoder depth</strong> (Rec.709 color, high-FPS/4K, per-target downscale) and <strong>stream markers → recording chapters</strong> round out the release.</li>
-        </ul>
-
         <p class="note">
-          Everything still runs <strong>on your machine</strong>: no accounts, no telemetry, no restream
-          server we operate. The <strong>browser source</strong> and a signed <strong>virtual-camera</strong>
-          driver follow in their own milestones (Phase 7). The patent-encumbered wire codecs are provided
-          by the clearly-labeled, on-demand, hash-verified ffmpeg bridge — never bundled.
+          The true <strong>browser source</strong> (a full Chromium engine) and the <strong>virtual
+          camera</strong> (a signed OS driver) each follow as their own on-demand-component milestones.
         </p>
+      </article>
+
+      <!-- 0.85.0 — streaming depth -->
+      <article class="release">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.85.0</span>
+            <span class="date">Jul 7, 2026 · Streaming depth</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases">Releases</a>
+        </div>
+
+        <h2>0.85.0 — Streaming depth (multistream / SRT / WHIP + scene/source/encoder depth)</h2>
+        <p class="summary">
+          The magic moment — go live to Twitch <strong>and</strong> YouTube at once while recording a
+          separate local copy and saving a 30-second replay, with a vertical 9:16 output, nested
+          scenes, and a live chat overlay that needs <strong>no API key or sign-in, ever</strong>.
+        </p>
+        <ul class="features">
+          <li><strong>Simultaneous multistream</strong> to several targets, direct to each platform (no restream server) — matching targets share one hardware encode, a failed target splits to its own reconnecting lane, per-target health + bitrate in the stats dock.</li>
+          <li><strong>SRT and WHIP</strong> alongside RTMP/RTMPS (honestly probed for support); a rolling <strong>replay buffer</strong> with presets and a save hotkey that never interrupts the stream or recording.</li>
+          <li><strong>Vertical / multi-canvas</strong> 9:16 output recorded &amp; streamed independently; <strong>nested scenes</strong>, source groups, per-scene audio; stinger + luma transition packs; color-key / luma-key / render-delay filters; high-FPS / 4K / Rec.709 / downscale encoder depth; recording chapter markers.</li>
+          <li><strong>Live chat overlay</strong> (YouTube / Twitch / Kick — no key or sign-in) and <strong>floating reactions</strong> baked into the program.</li>
+        </ul>
       </article>
 
       <!-- 0.70.0 — streaming + Studio MVP (first public) -->
@@ -343,20 +345,20 @@
             <span class="soon">Done — Jul 6, 2026</span>
           </li>
           <li>
-            <span class="badge">0.70.0</span>
+            <span class="badge upcoming">0.70.0</span>
             <div>
               <strong>Studio MVP — first public</strong>
-              <p>Single-target streaming + reconnect, Studio Mode + transitions, hotkeys, profiles, the stats dock, and opt-in P2P remote guests.</p>
+              <p>Single-target streaming + reconnect, Studio Mode + transitions, the virtual camera, hotkeys, profiles, and the stats dock.</p>
             </div>
-            <span class="soon">Done — Jul 6, 2026</span>
+            <span class="soon">First public</span>
           </li>
           <li>
-            <span class="badge">0.85.0</span>
+            <span class="badge upcoming">0.85.0</span>
             <div>
               <strong>Multistream / SRT / WHIP + scene/source/encoder depth</strong>
-              <p>Simultaneous multistream to many targets, SRT/WHIP, vertical/multi-canvas, replay buffer, nested scenes + source groups, high-FPS/4K encoder depth, and the no-key live chat + floating reactions overlay.</p>
+              <p>Simultaneous multistream to many targets, SRT/WHIP, vertical/multi-canvas, replay presets, nested scenes + source groups, and high-FPS/4K encoder depth.</p>
             </div>
-            <span class="soon">Done — Jul 8, 2026</span>
+            <span class="soon">Coming soon</span>
           </li>
           <li>
             <span class="badge upcoming">1.0.0</span>
