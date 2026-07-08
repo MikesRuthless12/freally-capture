@@ -15,7 +15,7 @@ pub mod cube;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 
-use fcap_scene::{FilterId, FilterKind, MaskMode, Rgba};
+use fcap_scene::{Filter, FilterId, FilterKind, MaskMode, Rgba};
 
 use crate::CompositorError;
 
@@ -359,16 +359,7 @@ pub(crate) fn plan_filter(
             right,
             bottom,
         } => {
-            if *left == 0 && *top == 0 && *right == 0 && *bottom == 0 {
-                return None;
-            }
-            // Chained saturating subs — hostile values must clamp, not
-            // overflow the `left + right` sum.
-            let out_w = in_size.0.saturating_sub(*left).saturating_sub(*right);
-            let out_h = in_size.1.saturating_sub(*top).saturating_sub(*bottom);
-            if out_w == 0 || out_h == 0 {
-                return None; // cropping everything away = contribute nothing
-            }
+            let (out_w, out_h) = crop_output_size(in_size, *left, *top, *right, *bottom)?;
             let w = in_size.0 as f32;
             let h = in_size.1 as f32;
             let mut uniform = FilterUniform::zero().with_texel(in_size);
@@ -386,6 +377,54 @@ pub(crate) fn plan_filter(
             }])
         }
     }
+}
+
+/// One enabled Crop's output size, with the engine's exact skip semantics:
+/// `None` = the crop contributes nothing (all-zero, or it would zero an axis)
+/// and the chain size is unchanged. The single source of truth for the
+/// size-changing filter — [`plan_filter`]'s Crop arm and
+/// [`effective_source_size`] both fold through here. Chained saturating subs:
+/// hostile values must clamp, not overflow the `left + right` sum.
+fn crop_output_size(
+    in_size: (u32, u32),
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+) -> Option<(u32, u32)> {
+    if left == 0 && top == 0 && right == 0 && bottom == 0 {
+        return None;
+    }
+    let out_w = in_size.0.saturating_sub(left).saturating_sub(right);
+    let out_h = in_size.1.saturating_sub(top).saturating_sub(bottom);
+    if out_w == 0 || out_h == 0 {
+        return None; // cropping everything away = contribute nothing
+    }
+    Some((out_w, out_h))
+}
+
+/// The size an item's enabled filter chain actually composes: the reported
+/// source resolution folded through its Crop filters (the only size-changing
+/// kind) exactly as `compose_scene` plans them. Exposed so the app reuses the
+/// engine's own fold instead of re-implementing it (the UI's
+/// `effectiveSourceSize` in `ui/src/lib/transform.ts` mirrors the same
+/// semantics in TS).
+pub fn effective_source_size(source: (u32, u32), filters: &[Filter]) -> (u32, u32) {
+    let mut size = source;
+    for filter in filters.iter().filter(|filter| filter.enabled) {
+        if let FilterKind::Crop {
+            left,
+            top,
+            right,
+            bottom,
+        } = filter.kind
+        {
+            if let Some(out) = crop_output_size(size, left, top, right, bottom) {
+                size = out;
+            }
+        }
+    }
+    size
 }
 
 /// The GPU half: pipelines, the dynamic uniform buffer, and uploaded
@@ -861,6 +900,42 @@ mod tests {
         )
         .expect("planned");
         assert_eq!(plan[0].out, (52, 24));
+    }
+
+    #[test]
+    fn effective_source_size_folds_like_the_engine() {
+        let crop = |left, top, right, bottom| Filter {
+            id: FilterId::new(),
+            enabled: true,
+            kind: FilterKind::Crop {
+                left,
+                top,
+                right,
+                bottom,
+            },
+        };
+        // Chained crops fold in order, exactly as compose_scene plans them.
+        assert_eq!(
+            effective_source_size((64, 32), &[crop(4, 2, 8, 6), crop(2, 0, 2, 0)]),
+            (48, 24)
+        );
+        // A disabled crop contributes nothing.
+        let mut disabled = crop(4, 2, 8, 6);
+        disabled.enabled = false;
+        assert_eq!(effective_source_size((64, 32), &[disabled]), (64, 32));
+        // The engine's skip semantics: an axis-zeroing crop is skipped, the
+        // size unchanged — never zero.
+        assert_eq!(
+            effective_source_size((64, 32), &[crop(64, 0, 1, 0)]),
+            (64, 32)
+        );
+        // Non-crop filters never change the chain size.
+        let blur = Filter {
+            id: FilterId::new(),
+            enabled: true,
+            kind: FilterKind::Blur { radius: 8.0 },
+        };
+        assert_eq!(effective_source_size((64, 32), &[blur]), (64, 32));
     }
 
     #[test]

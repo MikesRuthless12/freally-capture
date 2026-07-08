@@ -20,7 +20,7 @@ mod native_preview;
 pub mod transform;
 
 pub use compositor::{Compositor, ProgramFrame, ReactionDraw, REACTION_POOL};
-pub use filters::{cube::parse_cube, FilterResourceData};
+pub use filters::{cube::parse_cube, effective_source_size, FilterResourceData};
 pub use native_preview::{NativePreview, PreviewOverlay};
 
 use thiserror::Error;

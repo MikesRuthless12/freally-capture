@@ -1420,28 +1420,29 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 let sized = bounds.width > 0 && bounds.height > 0;
                 if sized && native.is_visible() {
                     match &mut native_surface {
-                        None => match handle
-                            .create_surface(compositor.instance())
-                            .map_err(|err| err.to_string())
-                            .and_then(|surface| {
-                                compositor
-                                    .native_preview_from_surface(
-                                        surface,
-                                        bounds.width,
-                                        bounds.height,
-                                    )
-                                    .map_err(|err| err.to_string())
-                            }) {
+                        // The build runs under the overlay lock: its SetContent
+                        // must not interleave with a UI-thread Commit, and the
+                        // post-build commit rides the same lock.
+                        None => match native.build_surface_serialized(|| {
+                            handle
+                                .create_surface(compositor.instance())
+                                .map_err(|err| err.to_string())
+                                .and_then(|surface| {
+                                    compositor
+                                        .native_preview_from_surface(
+                                            surface,
+                                            bounds.width,
+                                            bounds.height,
+                                        )
+                                        .map_err(|err| err.to_string())
+                                })
+                        }) {
                             Ok(surface) => {
                                 println!(
                                     "native preview: surface created {}x{} at ({},{})",
                                     bounds.width, bounds.height, bounds.x, bounds.y
                                 );
                                 native_surface = Some((surface, gen));
-                                // wgpu just bound the swapchain to the visual;
-                                // commit so DComp composites it immediately, not
-                                // only after the next resize.
-                                native.commit();
                             }
                             Err(err) => {
                                 eprintln!(
@@ -1764,51 +1765,14 @@ fn native_selection_overlay(
         return None;
     }
     let (source_w, source_h) = compositor.source_size(item.source)?;
-    let (eff_w, eff_h) = effective_source_size(source_w, source_h, &item.filters);
+    let (eff_w, eff_h) =
+        fcap_compositor::effective_source_size((source_w, source_h), &item.filters);
     let content = fcap_compositor::transform::content_size(eff_w, eff_h, &item.transform.crop)?;
     Some(fcap_compositor::PreviewOverlay {
         corners: fcap_compositor::transform::corners(&item.transform, content),
         canvas: (canvas.0 as f32, canvas.1 as f32),
         locked: item.locked,
     })
-}
-
-/// The source size the compositor actually composes for an item: the reported
-/// resolution after its enabled Crop *filters* (the only size-changing filter
-/// kind), folded in chain order with the engine's skip semantics. Mirrors
-/// `effectiveSourceSize` in `ui/src/lib/transform.ts` so the native selection
-/// box hugs the same pixels the HTML one does.
-fn effective_source_size(
-    source_w: u32,
-    source_h: u32,
-    filters: &[fcap_scene::Filter],
-) -> (u32, u32) {
-    let mut w = source_w;
-    let mut h = source_h;
-    for filter in filters {
-        if !filter.enabled {
-            continue;
-        }
-        if let FilterKind::Crop {
-            left,
-            top,
-            right,
-            bottom,
-        } = filter.kind
-        {
-            if left == 0 && top == 0 && right == 0 && bottom == 0 {
-                continue;
-            }
-            let out_w = w.saturating_sub(left).saturating_sub(right);
-            let out_h = h.saturating_sub(top).saturating_sub(bottom);
-            if out_w == 0 || out_h == 0 {
-                continue; // the engine skips a crop that would zero an axis
-            }
-            w = out_w;
-            h = out_h;
-        }
-    }
-    (w, h)
 }
 
 /// A change-detection fingerprint of a source's settings.

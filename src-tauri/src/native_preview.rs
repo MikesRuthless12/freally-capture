@@ -83,13 +83,25 @@ impl NativePreviewState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Commit the overlay's composition tree — the render thread calls this
-    /// right after building the surface, so wgpu's `SetContent` is composited
-    /// (otherwise the visual stays blank until the next region change).
-    pub fn commit(&self) {
-        if let Some(overlay) = self.lock_overlay().as_ref() {
-            overlay.commit();
+    /// Run the render thread's wgpu surface build serialized against the UI
+    /// thread's `set_region`/`set_visible` commits: wgpu's `SetContent`
+    /// mutates the composition visual, so it must not interleave with a
+    /// concurrent `Commit` (a resize landing exactly as the first surface is
+    /// built). On success the tree is committed while the lock is still held,
+    /// so the new swapchain composites immediately instead of staying blank
+    /// until the next geometry change.
+    pub fn build_surface_serialized<T, E>(
+        &self,
+        build: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let overlay = self.lock_overlay();
+        let built = build();
+        if built.is_ok() {
+            if let Some(overlay) = overlay.as_ref() {
+                overlay.commit();
+            }
         }
+        built
     }
 
     /// The UI's selected item, drawn as the native preview's selection box
