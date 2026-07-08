@@ -86,12 +86,26 @@ fn library_names() -> &'static [&'static str] {
     }
 }
 
-/// The per-OS default directories the runtime installs into.
+/// The per-OS default directories the runtime installs into. **Absolute paths
+/// only** — we never load by bare name, because a bare-name `LoadLibrary` would
+/// search the exe dir / CWD / PATH and could load a planted DLL (whose
+/// `DllMain` runs on load). We only ever load from the NDI redistributable's
+/// own env-var dir (see [`runtime_env_vars`]) or its known install location.
 fn default_dirs() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        // The Windows loader also searches PATH; bare names cover that.
-        vec![PathBuf::new()]
+        // The NDI runtime installs under Program Files and also sets the
+        // NDI_RUNTIME_DIR_V* env var (the primary path). These are the known
+        // fallback install dirs — all absolute, all write-protected.
+        let program_files = std::env::var("ProgramFiles")
+            .or_else(|_| std::env::var("ProgramW6432"))
+            .unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let base = PathBuf::from(program_files).join("NDI");
+        vec![
+            base.join("NDI 6 Runtime").join("v6"),
+            base.join("NDI 5 Runtime").join("v5"),
+            base.join("NDI 4 Runtime").join("v4"),
+        ]
     }
     #[cfg(target_os = "macos")]
     {
@@ -129,13 +143,13 @@ fn resolve_candidates(
 
     let mut out = Vec::new();
     for dir in &dirs {
+        // Skip empty dirs: we never emit a bare name (that would trigger the OS
+        // loader's exe-dir/CWD/PATH search — a DLL-planting vector).
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
         for name in names {
-            // An empty dir yields the bare name (relies on the OS loader path).
-            out.push(if dir.as_os_str().is_empty() {
-                PathBuf::from(name)
-            } else {
-                dir.join(name)
-            });
+            out.push(dir.join(name));
         }
     }
     out
@@ -155,9 +169,9 @@ pub fn detect() -> NdiStatus {
     let candidates =
         resolve_candidates(|k| std::env::var(k).ok(), &default_dirs(), library_names());
     for path in candidates {
-        // Bare names (Windows PATH search) can't be existence-checked; only
-        // skip absolute/relative paths we can see are absent.
-        if path.parent().is_some_and(|p| !p.as_os_str().is_empty()) && !path_exists(&path) {
+        // Every candidate is an absolute path from a trusted dir; skip the ones
+        // that aren't present rather than letting the loader search.
+        if !path_exists(&path) {
             continue;
         }
         if let Some((path, version)) = probe_library(&path) {
@@ -176,13 +190,18 @@ fn path_exists(path: &Path) -> bool {
     path.exists()
 }
 
-/// Try to load `path` and resolve any NDI load entry point. Returns the path +
-/// the matched version on success. The `unsafe` (loading a user library) is
-/// contained here; we never *call* into the runtime.
-#[allow(unsafe_code)] // libloading probe of a user-installed runtime
+/// Try to load `path` (an **absolute** path from a trusted dir) and resolve any
+/// NDI load entry point. Returns the path + the matched version on success.
+///
+/// Loading a library runs its `DllMain`/init, so this only ever loads from the
+/// NDI redistributable's own env-var dir or its Program-Files install — never a
+/// bare name (which would let the OS loader search the exe dir / CWD / PATH and
+/// pick up a planted DLL). `detect()` guarantees the path is absolute + exists.
+#[allow(unsafe_code)] // libloading load of a trusted, user-installed runtime path
 fn probe_library(path: &Path) -> Option<(PathBuf, String)> {
-    // SAFETY: opening a shared library and resolving a symbol's presence. We do
-    // not invoke it, so no foreign code runs from this probe.
+    debug_assert!(path.is_absolute(), "only load absolute, trusted NDI paths");
+    // SAFETY: loading a shared library from a trusted absolute path and checking
+    // a symbol's presence; we do not call into it beyond its own load-time init.
     unsafe {
         let lib = libloading::Library::new(path.as_os_str()).ok()?;
         for (symbol, version) in LOAD_SYMBOLS {
@@ -254,9 +273,26 @@ mod tests {
     }
 
     #[test]
-    fn empty_dir_yields_bare_name_for_loader_search() {
+    fn empty_dir_is_skipped_never_a_bare_name() {
+        // A bare name would let the OS loader search the exe dir / CWD / PATH —
+        // a DLL-planting vector. Empty dirs must produce no candidate at all.
         let got = resolve_candidates(|_| None, &[PathBuf::new()], &["Processing.NDI.Lib.x64.dll"]);
-        assert_eq!(got, vec![PathBuf::from("Processing.NDI.Lib.x64.dll")]);
+        assert!(got.is_empty(), "empty dir must not yield a bare-name load");
+    }
+
+    #[test]
+    fn no_candidate_is_a_bare_name() {
+        // detect() relies on this: every candidate carries a (non-empty) parent
+        // dir, so we never trigger the loader's bare-name search.
+        let got = resolve_candidates(
+            |k| (k == "NDI_RUNTIME_DIR_V6").then(|| "/opt/ndi".to_string()),
+            &[PathBuf::from("/usr/lib")],
+            &["libndi.so"],
+        );
+        assert!(!got.is_empty());
+        assert!(got
+            .iter()
+            .all(|p| p.parent().is_some_and(|par| !par.as_os_str().is_empty())));
     }
 
     #[test]

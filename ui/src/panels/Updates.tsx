@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -22,7 +22,6 @@ type Phase =
  */
 export function UpdatesDialog({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
-  const startedRef = useRef(false);
 
   const runCheck = useCallback(async () => {
     setPhase({ kind: "checking" });
@@ -35,11 +34,13 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
+    // Rely on `alive` (not a ref guard): under React StrictMode the effect runs
+    // setup→cleanup→setup, and a ref guard would swallow the second setup's
+    // check while the first's result was already discarded — leaving the dialog
+    // stuck on "checking". Re-issuing the check on the second setup is harmless.
     let alive = true;
-    // Initial state is already "checking" — run the check and set state only in
-    // the async callback (never synchronously inside the effect).
+    // Initial state is already "checking" — set state only in the async callback
+    // (never synchronously inside the effect).
     check()
       .then((update) => {
         if (alive) setPhase(update ? { kind: "available", update } : { kind: "uptodate" });

@@ -153,7 +153,11 @@ pub fn list_audio_apps() -> Result<Vec<AudioApp>, AppAudioError> {
                 continue;
             };
             // Skip the system-sounds session and anything not currently active.
-            if control2.IsSystemSoundsSession().is_ok() {
+            // NB: IsSystemSoundsSession returns a bare HRESULT — S_OK (0) means
+            // "is the system-sounds session", S_FALSE (1) means "is not". Using
+            // .is_ok() (>= 0) would be true for BOTH and skip every session, so
+            // compare S_OK explicitly.
+            if control2.IsSystemSoundsSession().0 == 0 {
                 continue;
             }
             if control2.GetState().unwrap_or(AudioSessionStateActive) != AudioSessionStateActive {
@@ -213,7 +217,7 @@ impl ProcessCapture {
         let wake = unsafe { CreateEventW(None, false, false, PCWSTR::null()).map_err(backend)? };
         let stop_thread = stop.clone();
         let wake_send = SendHandle(wake);
-        let thread = std::thread::Builder::new()
+        let thread = match std::thread::Builder::new()
             .name(format!("appaudio-{pid}"))
             .spawn(move || {
                 // Bind the whole SendHandle first so the closure captures it
@@ -222,8 +226,17 @@ impl ProcessCapture {
                 if let Err(e) = capture_loop(pid, wake.0, &stop_thread, &mut on_frames) {
                     tracing_warn(&e);
                 }
-            })
-            .map_err(backend)?;
+            }) {
+            Ok(thread) => thread,
+            // The thread never started, so nothing will close `wake` — do it here.
+            Err(err) => {
+                // SAFETY: the capture thread never spawned, so `wake` is unshared.
+                unsafe {
+                    let _ = CloseHandle(wake);
+                }
+                return Err(backend(err));
+            }
+        };
         Ok(Self {
             stop,
             wake,
@@ -296,13 +309,19 @@ fn capture_loop(
     // device id; we wait on `done`, then read the result. The `pv` pointer is a
     // layout-correct C PROPVARIANT the FFI only reads as a raw pointer.
     let audio_client: IAudioClient = unsafe {
-        let op = ActivateAudioInterfaceAsync(
+        let op = match ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
             &IAudioClient::IID,
             Some(&pv as *const PropVariantBlob as *const windows_core::PROPVARIANT),
             &handler,
-        )
-        .map_err(backend)?;
+        ) {
+            Ok(op) => op,
+            // Close `done` on the early-error path (it isn't waited on here).
+            Err(err) => {
+                let _ = CloseHandle(done);
+                return Err(backend(err));
+            }
+        };
         WaitForSingleObject(done, INFINITE);
         let _ = CloseHandle(done);
 
