@@ -751,6 +751,45 @@ pub fn read_index(path: &Path) -> Result<Option<Vec<(u64, u64)>>, FrecError> {
     Ok(Some(entries))
 }
 
+/// Count the video frames in a `.frec` by scanning chunk **headers only**
+/// (payloads are seeked past, never decoded) — fast enough for a progress
+/// total before an export. Stops at the trailer index or a truncated tail, so
+/// a crashed recording reports the frames it actually holds.
+pub fn frame_count(path: &Path) -> Result<u64, FrecError> {
+    let file = File::open(path)?;
+    let mut input = BufReader::with_capacity(1 << 16, file);
+    let mut header = [0u8; 30];
+    input.read_exact(&mut header).map_err(|_| FrecError::NotFrec)?;
+    if &header[0..4] != MAGIC {
+        return Err(FrecError::NotFrec);
+    }
+    if header[4] != VERSION {
+        return Err(FrecError::Version(header[4]));
+    }
+    let mut frames = 0u64;
+    loop {
+        let mut head = [0u8; 5];
+        if !read_exact_or_eof(&mut input, &mut head)? {
+            break; // clean EOF or truncated head
+        }
+        let tag = head[0];
+        let len = u32::from_le_bytes(head[1..5].try_into().expect("4"));
+        if len > MAX_PAYLOAD {
+            return Err(FrecError::Corrupt("payload over cap"));
+        }
+        if tag == TAG_INDEX {
+            break; // the trailer follows; no more frames
+        }
+        if tag == TAG_VIDEO {
+            frames += 1;
+        }
+        if input.seek(SeekFrom::Current(i64::from(len))).is_err() {
+            break; // truncated tail — count what we could reach
+        }
+    }
+    Ok(frames)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { recordingRemux, recordingsList } from "../api/commands";
-import type { RecordingFile } from "../api/types";
+import {
+  recordingExport,
+  recordingExportCancel,
+  recordingRemux,
+  recordingsList,
+} from "../api/commands";
+import { onRecordingExport } from "../api/events";
+import type { ExportStatus, RecordingFile } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 
 function formatSize(bytes: number): string {
@@ -14,13 +20,16 @@ function formatWhen(ms: number): string {
 }
 
 /**
- * The recordings list: what landed in the recordings folder, newest first,
- * with the post-record remux action (mkv → mp4, stream copy — no
- * re-encode) on mkv files.
+ * The recordings list: what landed in the recordings folder, newest first.
+ * `.mkv` files get a stream-copy Remux to MP4; owned `.frec` files get an
+ * Export to MP4/MKV (decode + re-encode through the ffmpeg component) so they
+ * play in any player, with a live percentage, a progress bar, and Cancel.
  */
 export function RecordingsDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<RecordingFile[] | null>(null);
   const [remuxing, setRemuxing] = useState<string | null>(null);
+  const [exportingPath, setExportingPath] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ExportStatus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +46,40 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
     refresh();
   }, [refresh]);
 
+  // Live export progress + terminal states arrive on the `recording-export`
+  // event (the work runs on a worker thread; the command returns at once).
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    onRecordingExport((status) => {
+      if (!alive) return;
+      setProgress(status);
+      if (status.state === "done") {
+        setExportingPath(null);
+        setProgress(null);
+        setNotice(`Exported to ${status.path}`);
+        refresh();
+      } else if (status.state === "error") {
+        setExportingPath(null);
+        setProgress(null);
+        setError(status.message);
+      } else if (status.state === "cancelled") {
+        setExportingPath(null);
+        setProgress(null);
+        setNotice("Export cancelled.");
+      }
+    })
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [refresh]);
+
   const remux = async (path: string) => {
     setRemuxing(path);
     setError(null);
@@ -51,6 +94,25 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
       setRemuxing(null);
     }
   };
+
+  const startExport = async (path: string, container: string) => {
+    setError(null);
+    setNotice(null);
+    setExportingPath(path);
+    setProgress({ state: "exporting", framesDone: 0, framesTotal: 0 });
+    try {
+      await recordingExport(path, container);
+    } catch (err) {
+      setExportingPath(null);
+      setProgress(null);
+      setError(String(err));
+    }
+  };
+
+  const pct =
+    progress?.state === "exporting" && progress.framesTotal > 0
+      ? Math.min(100, (progress.framesDone / progress.framesTotal) * 100)
+      : null;
 
   return (
     <PickerShell title="Recordings" onClose={onClose} wide>
@@ -78,7 +140,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
             {file.ext === "mkv" && (
               <button
                 type="button"
-                disabled={remuxing !== null}
+                disabled={remuxing !== null || exportingPath !== null}
                 onClick={() => remux(file.path)}
                 title="Rewrap as mp4 — stream copy, no re-encode, no quality change (needs the FFmpeg component)"
                 className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
@@ -86,8 +148,58 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 {remuxing === file.path ? "Remuxing…" : "Remux to MP4"}
               </button>
             )}
+            {file.ext === "frec" && (
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  type="button"
+                  disabled={exportingPath !== null || remuxing !== null}
+                  onClick={() => startExport(file.path, "mp4")}
+                  title="Decode the owned .frec and re-encode to MP4 (H.264/AAC) so it plays in any player — needs the FFmpeg component"
+                  className="rounded-md border border-havoc-accent/40 bg-havoc-accent/10 px-2 py-1 text-[11px] text-havoc-text transition-colors enabled:hover:border-havoc-accent/70 disabled:opacity-50"
+                >
+                  {exportingPath === file.path ? "Exporting…" : "Export → MP4"}
+                </button>
+                <button
+                  type="button"
+                  disabled={exportingPath !== null || remuxing !== null}
+                  onClick={() => startExport(file.path, "mkv")}
+                  title="Decode the owned .frec and re-encode to MKV so it plays in any player"
+                  className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                >
+                  MKV
+                </button>
+              </div>
+            )}
           </div>
         ))}
+
+        {exportingPath && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-havoc-accent/30 bg-havoc-accent/[0.06] px-2.5 py-2">
+            <div className="flex items-baseline justify-between">
+              <span>Exporting…</span>
+              <span className="font-mono text-havoc-muted">
+                {pct !== null ? `${pct.toFixed(2)}%` : "starting…"}
+                {progress?.state === "exporting" && progress.framesTotal > 0
+                  ? ` · ${progress.framesDone} / ${progress.framesTotal} frames`
+                  : ""}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-havoc-accent to-havoc-accent-2 transition-[width]"
+                style={{ width: pct !== null ? `${pct.toFixed(2)}%` : "8%" }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => recordingExportCancel().catch(() => undefined)}
+              className="self-start rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-havoc-muted transition-colors hover:text-havoc-text"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {notice && <p className="m-0 text-[11px] break-all text-emerald-300">{notice}</p>}
         {error && (
           <p role="alert" className="m-0 text-[11px] break-words text-red-300">

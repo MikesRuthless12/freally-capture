@@ -419,3 +419,173 @@ pub async fn recording_remux<R: Runtime>(
     .await
     .map_err(|err| format!("remux task failed: {err}"))?
 }
+
+// --- .frec → MP4/MKV export (decode + re-encode) ---------------------------
+
+/// `<stem>.<ext>` beside `input`, adding ` (1)`, ` (2)`, … until it's free so
+/// an export never clobbers an existing file.
+fn unique_sibling(input: &std::path::Path, ext: &str) -> std::path::PathBuf {
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    let base = input.with_file_name(format!("{stem}.{ext}"));
+    if !base.exists() {
+        return base;
+    }
+    for n in 1..10_000 {
+        let candidate = input.with_file_name(format!("{stem} ({n}).{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    base
+}
+
+/// Export progress + terminal state, pushed on the `recording-export` event so
+/// the Recordings dialog can show a live percentage, a bar, and a cancel.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum ExportStatusDto {
+    Exporting { frames_done: u64, frames_total: u64 },
+    Done { path: String },
+    Error { message: String },
+    Cancelled,
+}
+
+/// Managed state for the single in-flight export (one at a time).
+#[derive(Default)]
+pub struct ExportState {
+    running: AtomicBool,
+    cancel: Arc<AtomicBool>,
+}
+
+/// Cancel the running export (the partial output is removed by the worker).
+#[tauri::command]
+pub fn recording_export_cancel(state: State<'_, ExportState>) {
+    state.cancel.store(true, Ordering::SeqCst);
+}
+
+/// Export a `.frec` recording to a sibling `mp4`/`mkv` — decode the owned
+/// codec and re-encode through the labeled ffmpeg component, so the file
+/// plays in any player. Progress rides the `recording-export` event; the
+/// command returns immediately. `container` is `"mp4"` | `"mkv"` | `"mov"` |
+/// `"webm"`. The path is confined to the recordings folder.
+#[tauri::command]
+pub fn recording_export<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    container: String,
+) -> Result<(), String> {
+    use fcap_encode::{Container, WirePlan};
+
+    let target = match container.as_str() {
+        "mp4" => Container::Mp4,
+        "mkv" => Container::Mkv,
+        "mov" => Container::Mov,
+        "webm" => Container::Webm,
+        other => return Err(format!("unsupported export container: {other}")),
+    };
+
+    let export = app.state::<ExportState>();
+    if export.running.swap(true, Ordering::SeqCst) {
+        return Err("an export is already running".to_string());
+    }
+    export.cancel.store(false, Ordering::SeqCst);
+    let cancel = Arc::clone(&export.cancel);
+
+    let settings = app
+        .state::<crate::settings::SettingsStore>()
+        .get()
+        .recording;
+    let folder = crate::recording::recordings_folder(&settings);
+
+    // Validate the input up front (before spawning) so obvious errors return
+    // synchronously; the heavy work runs on a worker thread.
+    let prep = (|| -> Result<(std::path::PathBuf, std::path::PathBuf, fcap_encode::Ffmpeg, String), String> {
+        let folder = folder
+            .canonicalize()
+            .map_err(|err| format!("recordings folder: {err}"))?;
+        let input = std::path::Path::new(&path)
+            .canonicalize()
+            .map_err(|err| format!("recording not found: {err}"))?;
+        if input.parent() != Some(folder.as_path()) {
+            return Err("only files in the recordings folder can be exported".to_string());
+        }
+        if input.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase())
+            != Some("frec".to_string())
+        {
+            return Err("only .frec recordings need exporting — others already play anywhere".to_string());
+        }
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("exporting needs the ffmpeg component — install it from Components")?;
+        let encoder_id = crate::recording::resolve_encoder(&app, &settings, target)?;
+        Ok((input, folder, ready, encoder_id))
+    })();
+
+    let (input, _folder, ready, encoder_id) = match prep {
+        Ok(v) => v,
+        Err(err) => {
+            export.running.store(false, Ordering::SeqCst);
+            return Err(err);
+        }
+    };
+
+    // A sibling output that never clobbers an existing file.
+    let output = unique_sibling(&input, target.extension());
+
+    let plan = WirePlan {
+        container: target,
+        encoder_id,
+        rate_control: settings.rate_control,
+        preset: settings.preset,
+        keyframe_sec: settings.keyframe_sec,
+        audio_bitrate_kbps: settings.audio_bitrate_kbps,
+        split_minutes: None,
+        scale: None,
+        path: output.clone(),
+    };
+
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fcap-frec-export".into())
+        .spawn(move || {
+            let progress_handle = handle.clone();
+            let result = fcap_encode::export_frec(
+                &ready,
+                &input,
+                &plan,
+                move |p: fcap_encode::ExportProgress| {
+                    let _ = progress_handle.emit(
+                        "recording-export",
+                        ExportStatusDto::Exporting {
+                            frames_done: p.frames_done,
+                            frames_total: p.frames_total,
+                        },
+                    );
+                },
+                &cancel,
+            );
+            let status = match result {
+                Ok(out) => ExportStatusDto::Done {
+                    path: out.display().to_string(),
+                },
+                Err(err) if err.contains("cancelled") => ExportStatusDto::Cancelled,
+                Err(err) => ExportStatusDto::Error { message: err },
+            };
+            let _ = handle.emit("recording-export", status);
+            handle
+                .state::<ExportState>()
+                .running
+                .store(false, Ordering::SeqCst);
+        });
+    if let Err(err) = spawned {
+        app.state::<ExportState>()
+            .running
+            .store(false, Ordering::SeqCst);
+        return Err(format!("could not start the export: {err}"));
+    }
+    Ok(())
+}

@@ -819,3 +819,13 @@ export type FfmpegStatus =
   | { state: "extracting" }
   | { state: "ready"; version: string; path: string }
   | { state: "error"; message: string; build: FfmpegBuild | null };
+
+/**
+ * The `recording-export` event: a .frec → wire-container export's progress and
+ * terminal state (mirrors `ExportStatusDto` in commands/recording.rs).
+ */
+export type ExportStatus =
+  | { state: "exporting"; framesDone: number; framesTotal: number }
+  | { state: "done"; path: string }
+  | { state: "error"; message: string }
+  | { state: "cancelled" };

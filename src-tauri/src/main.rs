@@ -100,6 +100,7 @@ fn main() {
         .manage(AudioRuntime::new())
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
+        .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
         .manage(replay::ReplayState::new())
@@ -210,6 +211,8 @@ fn main() {
             commands::recording::recording_status,
             commands::recording::recordings_list,
             commands::recording::recording_remux,
+            commands::recording::recording_export,
+            commands::recording::recording_export_cancel,
             commands::native_preview_set_region,
             commands::native_preview_active,
             commands::native_preview_set_selection

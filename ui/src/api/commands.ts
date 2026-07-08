@@ -619,3 +619,15 @@ export function recordingsList(): Promise<RecordingFile[]> {
 export function recordingRemux(path: string): Promise<string> {
   return invoke<string>("recording_remux", { path });
 }
+
+/** Export a .frec recording to a sibling mp4/mkv/mov/webm (decode + re-encode
+ * through the ffmpeg component, so it plays in any player). Progress rides the
+ * `recording-export` event. */
+export function recordingExport(path: string, container: string): Promise<void> {
+  return invoke("recording_export", { path, container });
+}
+
+/** Cancel the running .frec export. */
+export function recordingExportCancel(): Promise<void> {
+  return invoke("recording_export_cancel");
+}

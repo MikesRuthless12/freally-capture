@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   AudioLevelsPayload,
+  ExportStatus,
   FfmpegStatus,
   ProgramStatus,
   RecordingStatus,
@@ -66,4 +67,9 @@ export function onFfmpeg(handler: (status: FfmpegStatus) => void): Promise<Unlis
 /** Subscribe to recording state/progress (~2 Hz while a session runs). */
 export function onRecording(handler: (status: RecordingStatus) => void): Promise<UnlistenFn> {
   return listen<RecordingStatus>("recording", (event) => handler(event.payload));
+}
+
+/** Subscribe to .frec export progress (frames done/total + terminal state). */
+export function onRecordingExport(handler: (status: ExportStatus) => void): Promise<UnlistenFn> {
+  return listen<ExportStatus>("recording-export", (event) => handler(event.payload));
 }

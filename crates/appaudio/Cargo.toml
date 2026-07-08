@@ -1,0 +1,31 @@
+# fcap-appaudio — per-application audio capture (Phase 8, TASK-805).
+#
+# Isolated so the WASAPI process-loopback `unsafe` lives here, NOT in the
+# `#![forbid(unsafe_code)]` fcap-audio engine. It produces stereo f32 frames
+# the app pushes into the mixer's existing external-ring seam.
+[package]
+name = "fcap-appaudio"
+description = "Freally Capture — per-application audio capture (Windows WASAPI process loopback; honest per-OS elsewhere)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_Security",
+    "Win32_UI_Shell_PropertiesSystem",
+    "implement",
+] }
