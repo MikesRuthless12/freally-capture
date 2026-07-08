@@ -20,6 +20,7 @@ mod profiles;
 mod reactions;
 mod recording;
 mod remote;
+mod remote_api;
 mod replay;
 mod settings;
 mod stream;
@@ -105,6 +106,7 @@ fn main() {
         .manage(hotkeys::ActionHotkeys::default())
         .manage(profiles::WorkspaceState::load_default())
         .manage(native_preview::NativePreviewState::new())
+        .manage(remote_api::RemoteApiState::default())
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -263,6 +265,9 @@ fn main() {
             replay::spawn_status_thread(app.handle().clone());
             // Global action hotkeys: record / go live / transition (Phase 5).
             hotkeys::spawn_reconcile_thread(app.handle().clone());
+            // The WebSocket remote-control API (Phase 7) — off by default;
+            // the manager starts/stops the server as settings change.
+            remote_api::spawn_manager(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");
             // The native preview child window (Windows). Created here on the
             // main thread; the studio thread presents the GPU surface onto it.

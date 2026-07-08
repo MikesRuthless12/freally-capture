@@ -55,6 +55,8 @@ pub struct Settings {
     pub transition: TransitionSettings,
     /// Global action hotkeys (Phase 5).
     pub hotkeys: HotkeySettings,
+    /// The WebSocket remote-control API (Phase 7).
+    pub remote_control: RemoteControlSettings,
 }
 
 impl Default for Settings {
@@ -70,6 +72,7 @@ impl Default for Settings {
             replay: ReplaySettings::default(),
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
+            remote_control: RemoteControlSettings::default(),
         }
     }
 }
@@ -507,6 +510,67 @@ impl RemoteSettings {
     }
 }
 
+/// The WebSocket remote-control API (Phase 7, TASK-701). **Off by default**;
+/// requires a password to enable; binds loopback unless `lan` is explicitly
+/// set. Disabled means the port is closed.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RemoteControlSettings {
+    pub enabled: bool,
+    /// TCP port (1024–65535).
+    pub port: u16,
+    /// Accept LAN connections (0.0.0.0) instead of loopback only.
+    pub lan: bool,
+    /// A secret: redacted from Debug, never logged. Auth is challenge–
+    /// response — the password itself never crosses the wire.
+    pub password: String,
+}
+
+impl Default for RemoteControlSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: fcap_stream::remote::DEFAULT_REMOTE_PORT,
+            lan: false,
+            password: String::new(),
+        }
+    }
+}
+
+// Manual Debug so a debug-printed Settings can never leak the password.
+impl std::fmt::Debug for RemoteControlSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteControlSettings")
+            .field("enabled", &self.enabled)
+            .field("port", &self.port)
+            .field("lan", &self.lan)
+            .field(
+                "password",
+                &if self.password.is_empty() {
+                    ""
+                } else {
+                    "[redacted]"
+                },
+            )
+            .finish()
+    }
+}
+
+impl RemoteControlSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.port < 1024 {
+            return Err("remote-control port must be 1024–65535".to_owned());
+        }
+        if self.password.len() > 256 || self.password.chars().any(char::is_control) {
+            return Err("invalid remote-control password".to_owned());
+        }
+        if self.enabled && self.password.trim().is_empty() {
+            return Err("the remote-control API requires a password".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// Recording configuration (Settings → Output). Independent of any future
 /// stream settings by design — the local copy never rides a stream's knobs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -642,6 +706,7 @@ impl Settings {
         self.replay.validate()?;
         self.transition.validate()?;
         self.hotkeys.validate()?;
+        self.remote_control.validate()?;
         Ok(())
     }
 }
@@ -869,12 +934,43 @@ mod tests {
                 save_replay: Some("Ctrl+Shift+S".to_owned()),
                 add_marker: None,
             },
+            remote_control: RemoteControlSettings {
+                enabled: true,
+                port: 4460,
+                lan: false,
+                password: "deck-pass".to_owned(),
+            },
         };
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
         assert_eq!(reloaded.get(), next);
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn remote_control_settings_validate() {
+        // Off by default, and the default validates.
+        let defaults = RemoteControlSettings::default();
+        assert!(!defaults.enabled);
+        assert!(defaults.validate().is_ok());
+        // Enabling without a password is refused.
+        let mut no_password = RemoteControlSettings::default();
+        no_password.enabled = true;
+        assert!(no_password.validate().is_err());
+        // A privileged port is refused; a sane config passes.
+        let mut privileged = RemoteControlSettings::default();
+        privileged.port = 80;
+        assert!(privileged.validate().is_err());
+        let ok = RemoteControlSettings {
+            enabled: true,
+            port: 4456,
+            lan: false,
+            password: "deck-pass".to_owned(),
+        };
+        assert!(ok.validate().is_ok());
+        // The password never appears in Debug output.
+        assert!(!format!("{ok:?}").contains("deck-pass"));
     }
 
     #[test]

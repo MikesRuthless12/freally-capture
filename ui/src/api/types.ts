@@ -43,6 +43,21 @@ export type Settings = {
   transition: TransitionSettings;
   /** Global action hotkeys (Phase 5). */
   hotkeys: HotkeySettings;
+  /** The WebSocket remote-control API (Phase 7). */
+  remoteControl: RemoteControlSettings;
+};
+
+/** The WebSocket remote-control API (mirrors `RemoteControlSettings` in
+ * settings.rs). Off by default; requires a password; loopback unless `lan`. */
+export type RemoteControlSettings = {
+  enabled: boolean;
+  /** TCP port (1024–65535). */
+  port: number;
+  /** Accept LAN connections (0.0.0.0) instead of loopback only. */
+  lan: boolean;
+  /** A secret — masked in the UI; auth is challenge–response, the password
+   * itself never crosses the wire. */
+  password: string;
 };
 
 /** The rolling replay buffer (mirrors `ReplaySettings` in settings.rs). */
