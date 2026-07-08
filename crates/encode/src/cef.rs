@@ -542,12 +542,17 @@ mod tests {
         // The minimal distribution must carry the runnable Release binaries.
         let release = ready.runtime_dir.join("Release");
         assert!(release.is_dir(), "Release/ present");
+        // Windows/Linux ship a top-level Resources/; macOS keeps resources INSIDE
+        // the "Chromium Embedded Framework.framework" bundle under Release/, so it
+        // has no top-level Resources/ dir.
+        #[cfg(not(target_os = "macos"))]
         assert!(ready.runtime_dir.join("Resources").is_dir(), "Resources/");
+        // libcef.dll (win) / libcef.so (linux) / the framework bundle (macOS).
         let has_libcef = fs::read_dir(&release).unwrap().flatten().any(|e| {
             let n = e.file_name().to_string_lossy().to_lowercase();
             n.contains("libcef") || n.contains("chromium embedded framework")
         });
-        assert!(has_libcef, "libcef present in Release/");
+        assert!(has_libcef, "CEF runtime present in Release/");
         assert!(installed().is_some(), "marker round-trips");
 
         // Idempotent: a second install returns the SAME runtime, never
