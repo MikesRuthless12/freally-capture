@@ -20,7 +20,8 @@
 
 /// Why VST hosting is unavailable — surfaced verbatim in the UI so the boundary
 /// is never a silent no-op.
-pub const VST_STATUS: &str = "VST2/3 plugins are not available: the VST2 SDK is no longer licensed \
+pub const VST_STATUS: &str =
+    "VST2/3 plugins are not available: the VST2 SDK is no longer licensed \
      by Steinberg, and VST3 is GPLv3-or-proprietary — both conflict with a $0, \
      no-extra-license build. Use the built-in filters (denoise, gate, \
      compressor, limiter, EQ, gain, ducking), which need no plugin and stay on \

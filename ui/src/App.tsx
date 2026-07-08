@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  eulaStatus,
   health,
   remotePendingInvite,
   settingsGet,
@@ -19,6 +20,7 @@ import {
 import { onAudio, onProgram, onRemoteInvite, onStudio } from "./api/events";
 import type {
   AudioLevelsPayload,
+  EulaStatus,
   Health,
   ItemId,
   ProgramStatus,
@@ -33,6 +35,7 @@ import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
 import { spikeSetJoinPrefill } from "./remote/spike";
 import { ControlsDock } from "./panels/ControlsDock";
+import { EulaGate } from "./panels/EulaGate";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { RemoteSessionBar } from "./panels/RemoteSessionBar";
@@ -53,6 +56,9 @@ type OpenDialog =
 export default function App() {
   const [core, setCore] = useState<Health | null>(null);
   const [coreError, setCoreError] = useState(false);
+  // First-run EULA gate: `null` while loading, then the status. Until the
+  // current version is accepted, the studio does not render.
+  const [eula, setEula] = useState<EulaStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   // The stats dock renders only after settings settle (loaded or failed), so
   // a persisted "off" never flashes visible on launch.
@@ -69,6 +75,14 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    eulaStatus()
+      .then((status) => {
+        if (!cancelled) setEula(status);
+      })
+      // No bridge (plain browser / tests): don't block the app on the gate.
+      .catch(() => {
+        if (!cancelled) setEula({ version: "", text: "", accepted: true });
+      });
     health()
       .then((report) => {
         if (!cancelled) setCore(report);
@@ -286,6 +300,15 @@ export default function App() {
     dialog?.kind === "audioFilters"
       ? (collection?.sources.find((source) => source.id === dialog.sourceId) ?? null)
       : null;
+
+  // First-run gate: hold rendering until the EULA status is known, then block
+  // the studio until the current version is accepted.
+  if (eula === null) {
+    return <div className="h-full w-full bg-havoc-bg" />;
+  }
+  if (!eula.accepted) {
+    return <EulaGate status={eula} onAccepted={() => setEula({ ...eula, accepted: true })} />;
+  }
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">

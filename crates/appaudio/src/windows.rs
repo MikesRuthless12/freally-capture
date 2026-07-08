@@ -27,14 +27,14 @@ use std::thread::JoinHandle;
 use windows::core::{implement, Interface, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, MAX_PATH, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    ActivateAudioInterfaceAsync, eConsole, eRender, IActivateAudioInterfaceAsyncOperation,
-    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
-    IAudioCaptureClient, IAudioClient, IAudioSessionControl2, IAudioSessionEnumerator,
-    IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_PARAMS_0,
-    AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
-    AudioSessionStateActive, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+    eConsole, eRender, ActivateAudioInterfaceAsync, AudioSessionStateActive,
+    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
+    IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionManager2, IMMDeviceEnumerator,
+    MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, AUDIOCLIENT_ACTIVATION_PARAMS,
+    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
     VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
 };
 use windows::Win32::System::Com::{
@@ -86,7 +86,11 @@ struct ComGuard;
 impl ComGuard {
     fn new() -> Result<Self, AppAudioError> {
         // SAFETY: paired with CoUninitialize in Drop; MTA is fine for WASAPI.
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().map_err(backend)? };
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED)
+                .ok()
+                .map_err(backend)?
+        };
         Ok(ComGuard)
     }
 }
@@ -136,10 +140,8 @@ pub fn list_audio_apps() -> Result<Vec<AudioApp>, AppAudioError> {
         let device = enumerator
             .GetDefaultAudioEndpoint(eRender, eConsole)
             .map_err(backend)?;
-        let manager: IAudioSessionManager2 =
-            device.Activate(CLSCTX_ALL, None).map_err(backend)?;
-        let sessions: IAudioSessionEnumerator =
-            manager.GetSessionEnumerator().map_err(backend)?;
+        let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).map_err(backend)?;
+        let sessions: IAudioSessionEnumerator = manager.GetSessionEnumerator().map_err(backend)?;
         let count = sessions.GetCount().map_err(backend)?;
 
         let mut out: Vec<AudioApp> = Vec::new();
@@ -208,9 +210,7 @@ impl ProcessCapture {
         // An auto-reset event the capture thread waits on; SetEvent both from
         // WASAPI (buffer ready) and from `stop()` (to wake the wait promptly).
         // SAFETY: CreateEventW with defaults; closed when the thread exits.
-        let wake = unsafe {
-            CreateEventW(None, false, false, PCWSTR::null()).map_err(backend)?
-        };
+        let wake = unsafe { CreateEventW(None, false, false, PCWSTR::null()).map_err(backend)? };
         let stop_thread = stop.clone();
         let wake_send = SendHandle(wake);
         let thread = std::thread::Builder::new()
@@ -308,7 +308,8 @@ fn capture_loop(
 
         let mut hr = windows::core::HRESULT(0);
         let mut activated: Option<windows::core::IUnknown> = None;
-        op.GetActivateResult(&mut hr, &mut activated).map_err(backend)?;
+        op.GetActivateResult(&mut hr, &mut activated)
+            .map_err(backend)?;
         hr.ok().map_err(backend)?;
         activated
             .ok_or_else(|| AppAudioError::Backend("process loopback returned no interface".into()))?

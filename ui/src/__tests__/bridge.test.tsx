@@ -12,6 +12,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => {
     invokeCalls.push({ cmd, args });
     switch (cmd) {
+      case "eula_status":
+        return Promise.resolve({ version: "test", text: "", accepted: true });
       case "health":
         return Promise.resolve({
           appVersion: "9.9.9",

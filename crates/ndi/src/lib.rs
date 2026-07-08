@@ -152,11 +152,8 @@ const LOAD_SYMBOLS: &[(&str, &str)] = &[
 
 /// Probe for an installed, linkable NDI runtime.
 pub fn detect() -> NdiStatus {
-    let candidates = resolve_candidates(
-        |k| std::env::var(k).ok(),
-        &default_dirs(),
-        library_names(),
-    );
+    let candidates =
+        resolve_candidates(|k| std::env::var(k).ok(), &default_dirs(), library_names());
     for path in candidates {
         // Bare names (Windows PATH search) can't be existence-checked; only
         // skip absolute/relative paths we can see are absent.
@@ -264,7 +261,11 @@ mod tests {
 
     #[test]
     fn empty_env_value_is_ignored() {
-        let got = resolve_candidates(|_| Some(String::new()), &[PathBuf::from("/usr/lib")], &["x"]);
+        let got = resolve_candidates(
+            |_| Some(String::new()),
+            &[PathBuf::from("/usr/lib")],
+            &["x"],
+        );
         assert_eq!(got, vec![PathBuf::from("/usr/lib/x")]);
     }
 
@@ -301,6 +302,9 @@ mod tests {
             cfg_on.effective(&absent),
             Err(NdiError::RuntimeMissing)
         ));
-        assert!(matches!(cfg_off.effective(&present), Err(NdiError::Disabled)));
+        assert!(matches!(
+            cfg_off.effective(&present),
+            Err(NdiError::Disabled)
+        ));
     }
 }

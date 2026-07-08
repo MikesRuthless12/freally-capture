@@ -363,7 +363,8 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             let mut seen_monitor: Option<String> = None;
             let mut had_sources = false;
             // Running per-app captures, keyed by source id (owned by this thread).
-            let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> = HashMap::new();
+            let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> =
+                HashMap::new();
             loop {
                 // 1. Model → engine (sources + hotkeys), only on change. The
                 //    revision is a cheap read; the (cloning) spec fetch happens

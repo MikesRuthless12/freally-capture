@@ -17,6 +17,7 @@ import type {
   CaptureSource,
   CornerSlot,
   EncoderCatalog,
+  EulaStatus,
   FfmpegStatus,
   FilterId,
   FilterKind,
@@ -461,6 +462,16 @@ export function integrationsStatus(): Promise<IntegrationsStatus> {
 /** Game-capture status: honest anti-cheat/AV risk + the working fallback. */
 export function gameCaptureStatus(): Promise<GameCaptureStatus> {
   return invoke<GameCaptureStatus>("game_capture_status");
+}
+
+/** The EULA text + version + whether the current version is already accepted. */
+export function eulaStatus(): Promise<EulaStatus> {
+  return invoke<EulaStatus>("eula_status");
+}
+
+/** Record acceptance of the current EULA version (persisted). */
+export function eulaAccept(): Promise<void> {
+  return invoke("eula_accept");
 }
 
 export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {

@@ -134,7 +134,10 @@ mod tests {
                 start_capture(1234, |_, _, _| {}),
                 Err(AppAudioError::Unsupported(_))
             ));
-            assert!(matches!(list_audio_apps(), Err(AppAudioError::Unsupported(_))));
+            assert!(matches!(
+                list_audio_apps(),
+                Err(AppAudioError::Unsupported(_))
+            ));
         }
     }
 

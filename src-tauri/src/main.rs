@@ -14,6 +14,7 @@ mod audio;
 mod bugreport;
 mod commands;
 mod docks;
+mod eula;
 mod events;
 mod hotkeys;
 mod native_preview;
@@ -142,6 +143,8 @@ fn main() {
             commands::health,
             commands::integrations_status,
             commands::game_capture_status,
+            eula::eula_status,
+            eula::eula_accept,
             commands::settings_get,
             commands::settings_set,
             commands::capture_list_sources,

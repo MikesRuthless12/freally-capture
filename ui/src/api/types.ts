@@ -604,6 +604,13 @@ export type IntegrationsStatus = {
   vstStatus: string;
 };
 
+/** First-run EULA gate payload. */
+export type EulaStatus = {
+  version: string;
+  text: string;
+  accepted: boolean;
+};
+
 /** Game-capture status: the honest anti-cheat/AV risk + the working fallback. */
 export type GameCaptureStatus = {
   support: "hookPlanned" | "portalOnly" | "windowCaptureOnly";
