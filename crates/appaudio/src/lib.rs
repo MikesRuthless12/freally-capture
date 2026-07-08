@@ -142,4 +142,22 @@ mod tests {
     fn version_is_a_semver_triple() {
         assert_eq!(VERSION.split('.').count(), 3);
     }
+
+    /// Live drill (Windows, `--ignored`): enumerate the apps currently making
+    /// sound. Not deterministic in CI (depends on what's playing), so it's
+    /// `#[ignore]`; run it by hand with something playing audio:
+    /// `cargo test -p fcap-appaudio -- --ignored --nocapture list_audio_apps_live`.
+    #[test]
+    #[ignore = "live drill: requires an app playing audio (Windows)"]
+    fn list_audio_apps_live() {
+        match list_audio_apps() {
+            Ok(apps) => {
+                println!("apps making sound: {}", apps.len());
+                for app in &apps {
+                    println!("  pid {} — {} ({})", app.pid, app.name, app.exe);
+                }
+            }
+            Err(e) => println!("per-app audio unavailable here: {e}"),
+        }
+    }
 }

@@ -20,6 +20,7 @@ members = [
     "crates/compositor", # OWNED wgpu GPU compositor: transforms, blend modes, filter chain, scene transitions
     "crates/scene",     # OWNED scene/source/filter data model (+ serde, scripting hooks)
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
+    "crates/appaudio",  # per-application audio capture (isolated WASAPI process-loopback unsafe; honest per-OS)
     "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
     "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Win/mac/Linux-X11, JPEG fallback)

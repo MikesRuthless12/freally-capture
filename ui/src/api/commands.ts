@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddedItem,
+  AppAudioList,
   AudioDevice,
   AudioFilterId,
   AudioFilterKind,
@@ -443,6 +444,11 @@ export function audioOutputDevices(): Promise<AudioDevice[]> {
 /** Desktop-audio capture candidates + the honest per-OS guidance. */
 export function audioLoopbackDevices(): Promise<LoopbackDevices> {
   return invoke<LoopbackDevices>("audio_loopback_devices");
+}
+
+/** Apps currently making sound (Windows) + the honest per-OS guidance. */
+export function appAudioApps(): Promise<AppAudioList> {
+  return invoke<AppAudioList>("app_audio_apps");
 }
 
 export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {

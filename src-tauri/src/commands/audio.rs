@@ -55,6 +55,56 @@ pub async fn audio_output_devices() -> Result<Vec<AudioDeviceDto>, String> {
     .map_err(|err| format!("audio device listing task failed: {err}"))?
 }
 
+/// One application currently producing audio (the App Audio picker rows).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAudioDto {
+    pub pid: u32,
+    pub name: String,
+    pub exe: String,
+}
+
+/// What the App Audio picker offers + the per-OS honest guidance.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAudioListDto {
+    pub apps: Vec<AppAudioDto>,
+    /// Whether single-call per-app capture exists on this OS/build.
+    pub supported: bool,
+    /// The honest per-OS guidance (shown when unsupported or the list is empty).
+    pub guidance: String,
+}
+
+/// Apps currently making sound (Windows: WASAPI process loopback). Elsewhere the
+/// list is empty and `supported` is false with the honest guidance.
+#[tauri::command]
+pub async fn app_audio_apps() -> Result<AppAudioListDto, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let guidance = fcap_appaudio::per_app_guidance();
+        match fcap_appaudio::list_audio_apps() {
+            Ok(apps) => AppAudioListDto {
+                apps: apps
+                    .into_iter()
+                    .map(|a| AppAudioDto {
+                        pid: a.pid,
+                        name: a.name,
+                        exe: a.exe,
+                    })
+                    .collect(),
+                supported: true,
+                guidance,
+            },
+            Err(_) => AppAudioListDto {
+                apps: Vec::new(),
+                supported: false,
+                guidance,
+            },
+        }
+    })
+    .await
+    .map_err(|err| format!("app audio listing task failed: {err}"))
+}
+
 /// What the Audio Output Capture picker offers + the per-OS honest guidance.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

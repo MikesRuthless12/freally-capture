@@ -208,6 +208,7 @@ fn main() {
             profiles::collection_switch,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
+            commands::audio::app_audio_apps,
             commands::audio::audio_loopback_devices,
             commands::audio::studio_set_audio_volume,
             commands::audio::studio_set_audio_muted,

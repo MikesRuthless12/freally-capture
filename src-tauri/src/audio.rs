@@ -291,6 +291,12 @@ fn specs_to_configs(
                 SourceSettings::RemoteGuest { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
+                // Per-app audio: the WASAPI process-loopback capture feeds the
+                // same hub ring (keyed by the source id); the manager thread
+                // starts/stops the capture (see `reconcile_app_audio`).
+                SourceSettings::AppAudio { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
                 _ => return None,
             };
             let mut settings = spec.audio.clone();
@@ -306,6 +312,46 @@ fn specs_to_configs(
         .collect()
 }
 
+/// Start/stop the per-app (WASAPI process-loopback) captures to match the
+/// current `AppAudio` sources. Each running capture pushes stereo f32 @ 48 kHz
+/// into the media hub ring keyed by its source id — exactly the ring the engine
+/// drains for that source's `InputSpec::Media`. Off-Windows (or on an
+/// unsupported build) `start_capture` returns an honest error and no capture
+/// runs. Captures live on the audio-bridge thread and are never moved off it.
+fn reconcile_app_audio(
+    specs: &[AudioSourceSpec],
+    running: &mut HashMap<String, (u32, fcap_appaudio::AppCapture)>,
+) {
+    let mut wanted: HashMap<String, u32> = HashMap::new();
+    for spec in specs {
+        if let SourceSettings::AppAudio { pid, .. } = &spec.settings {
+            wanted.insert(spec.id.0.to_string(), *pid);
+        }
+    }
+    // Drop captures no longer wanted, or whose target pid changed (dropping a
+    // ProcessCapture stops the WASAPI stream + joins its thread).
+    running.retain(|id, entry| wanted.get(id) == Some(&entry.0));
+    // Start captures for newly-present app-audio sources.
+    for (id, pid) in wanted {
+        if running.contains_key(&id) {
+            continue;
+        }
+        let ring = fcap_audio::media_hub::ring(&id);
+        match fcap_appaudio::start_capture(pid, move |samples, _rate, _channels| {
+            ring.push(samples);
+        }) {
+            Ok(capture) => {
+                running.insert(id, (pid, capture));
+            }
+            Err(err) => {
+                // Honest, non-fatal: the source stays in the model (and shows
+                // its guidance in the UI); it simply produces no audio here.
+                eprintln!("fcap: per-app audio capture for pid {pid} unavailable: {err}");
+            }
+        }
+    }
+}
+
 /// Spawn the reconcile + levels thread. It winds down once the app is gone
 /// (emit failures), like the other emitter threads.
 pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
@@ -316,6 +362,8 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             let mut seen_revision = 0u64;
             let mut seen_monitor: Option<String> = None;
             let mut had_sources = false;
+            // Running per-app captures, keyed by source id (owned by this thread).
+            let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> = HashMap::new();
             loop {
                 // 1. Model → engine (sources + hotkeys), only on change. The
                 //    revision is a cheap read; the (cloning) spec fetch happens
@@ -329,6 +377,7 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                     reconcile_hotkeys(&app, &specs);
                     let registered = app.state::<HotkeyRegistry>().registered();
                     engine.set_sources(specs_to_configs(&specs, &registered));
+                    reconcile_app_audio(&specs, &mut app_captures);
                 }
 
                 // 2. Settings → monitor device, only on change (read just the

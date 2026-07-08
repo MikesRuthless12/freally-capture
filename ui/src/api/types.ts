@@ -468,6 +468,7 @@ export type SourceSettings =
     }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
+  | { kind: "appAudio"; pid: number; exe: string }
   | {
       kind: "text";
       text: string;
@@ -486,7 +487,11 @@ export type SourceKindName = SourceSettings["kind"];
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
   return (
-    kind === "audioInput" || kind === "audioOutput" || kind === "media" || kind === "remoteGuest"
+    kind === "audioInput" ||
+    kind === "audioOutput" ||
+    kind === "appAudio" ||
+    kind === "media" ||
+    kind === "remoteGuest"
   );
 }
 
@@ -574,6 +579,20 @@ export type AudioDevice = {
 export type LoopbackDevices = {
   devices: AudioDevice[];
   guidance?: string;
+};
+
+/** One app currently making sound (the App Audio picker rows). */
+export type AppAudioApp = {
+  pid: number;
+  name: string;
+  exe: string;
+};
+
+/** The App Audio picker payload + the honest per-OS guidance. */
+export type AppAudioList = {
+  apps: AppAudioApp[];
+  supported: boolean;
+  guidance: string;
 };
 
 /** One source's live levels/status in the `audio` event. */

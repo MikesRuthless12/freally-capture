@@ -266,6 +266,15 @@ function SettingsEditor({
     case "audioInput":
     case "audioOutput":
       return <AudioDeviceEditor draft={draft} onChange={onChange} />;
+    case "appAudio":
+      return (
+        <p className="m-0 text-xs leading-relaxed text-havoc-muted">
+          Capturing audio from{" "}
+          <span className="text-havoc-text">{draft.exe || "an application"}</span>
+          {draft.pid ? <span className="font-mono"> · pid {draft.pid}</span> : null}. Re-add the
+          source to target a different app (a process id changes when the app restarts).
+        </p>
+      );
     case "image":
       return (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">

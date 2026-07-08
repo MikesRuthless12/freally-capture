@@ -1680,6 +1680,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
+name = "fcap-appaudio"
+version = "0.90.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
+]
+
+[[package]]
 name = "fcap-audio"
 version = "0.90.0"
 dependencies = [
@@ -1977,6 +1986,7 @@ dependencies = [
  "chrono",
  "directories",
  "env_logger",
+ "fcap-appaudio",
  "fcap-audio",
  "fcap-capture",
  "fcap-compositor",
