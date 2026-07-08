@@ -180,6 +180,8 @@ fn main() {
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,
+            commands::studio::studio_media_set_paused,
+            commands::studio::studio_media_paused,
             commands::studio::studio_add_filter,
             commands::studio::studio_remove_filter,
             commands::studio::studio_reorder_filter,

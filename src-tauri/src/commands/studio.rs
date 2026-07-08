@@ -415,6 +415,22 @@ pub fn studio_retry_source(
     state.retry_source(source_id)
 }
 
+/// Pause or resume a **Media source** (an embedded video) mid-broadcast — it
+/// holds the last frame + goes silent while paused, so a streamer can talk
+/// over a video, resume it, and remove it at any time, all live on the stream
+/// and the recording. A no-op for non-media sources.
+#[tauri::command]
+pub fn studio_media_set_paused(source_id: SourceId, paused: bool) {
+    fcap_sources::media::set_media_paused(&source_id.0.to_string(), paused);
+}
+
+/// Whether a Media source is currently paused (the UI reads this to label the
+/// pause/resume button after a reload).
+#[tauri::command]
+pub fn studio_media_paused(source_id: SourceId) -> bool {
+    fcap_sources::media::is_media_paused(&source_id.0.to_string())
+}
+
 // -- filters --------------------------------------------------------------------
 
 #[tauri::command]

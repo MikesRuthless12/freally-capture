@@ -638,6 +638,16 @@ export function openFrecPending(): Promise<string | null> {
   return invoke<string | null>("open_frec_pending");
 }
 
+/** Pause or resume an embedded Media source (video) live on the stream. */
+export function studioMediaSetPaused(sourceId: SourceId, paused: boolean): Promise<void> {
+  return invoke("studio_media_set_paused", { sourceId, paused });
+}
+
+/** Whether an embedded Media source is currently paused. */
+export function studioMediaPaused(sourceId: SourceId): Promise<boolean> {
+  return invoke<boolean>("studio_media_paused", { sourceId });
+}
+
 /** Export a `.frec` the user opened via the OS to a sibling wire file. */
 export function openFrecExport(path: string, container: string): Promise<void> {
   return invoke("open_frec_export", { path, container });

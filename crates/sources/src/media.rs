@@ -19,10 +19,11 @@
 //! within normal tolerance, and the strip's sync-offset covers the rest;
 //! the `.frec` path paces both from one clock.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame, FrameSender, PixelFormat};
@@ -32,6 +33,39 @@ use fcap_encode::freally_video::{FrecChunk, FrecReader};
 use crate::image::load_image_rgba;
 
 const STILL_EXTS: [&str; 8] = ["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff"];
+
+// --- Playback pause control (TASK: embed & critique a video mid-stream) -----
+//
+// A Media source's decode loop **holds position** while its pause flag is set
+// — the compositor keeps showing the last frame (latest-wins) and no audio is
+// pushed — so a streamer can pause a video to talk over it, then resume, then
+// remove it, all live on the broadcast. Keyed by the source id (== the audio
+// hub id). Entries are tiny and persist for the process; toggling is cheap.
+
+fn pause_registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static REG: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn pause_flag(id: &str) -> Arc<AtomicBool> {
+    pause_registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(id.to_string())
+        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone()
+}
+
+/// Pause or resume a Media source's playback (the studio command drives this).
+/// Idempotent; a fresh source starts unpaused.
+pub fn set_media_paused(id: &str, paused: bool) {
+    pause_flag(id).store(paused, Ordering::Relaxed);
+}
+
+/// Whether a Media source is currently paused.
+pub fn is_media_paused(id: &str) -> bool {
+    pause_flag(id).load(Ordering::Relaxed)
+}
 
 /// Start playing a media file. `hub_id` keys the mixer-side audio ring —
 /// the studio passes the source id.
@@ -128,12 +162,27 @@ fn run_frec(
     let frame_period =
         Duration::from_secs_f64(spec.fps_den.max(1) as f64 / spec.fps_num.max(1) as f64);
 
+    let pause = pause_flag(&hub_id);
     'playback: loop {
-        let started = Instant::now();
+        let mut started = Instant::now();
         let mut frames_sent: u64 = 0;
         loop {
             if stop.load(Ordering::Relaxed) || !sender.is_open() {
                 break 'playback;
+            }
+            // Pause: hold the last frame (no video/audio pushed) until resumed,
+            // then shift the clock so playback continues — never bursts to
+            // "catch up" — from exactly where it paused.
+            if pause.load(Ordering::Relaxed) {
+                let paused_at = Instant::now();
+                while pause.load(Ordering::Relaxed)
+                    && !stop.load(Ordering::Relaxed)
+                    && sender.is_open()
+                {
+                    std::thread::sleep(Duration::from_millis(30));
+                }
+                started += paused_at.elapsed();
+                continue;
             }
             match reader.next_chunk() {
                 Ok(Some(FrecChunk::Video { pixels, .. })) => {
@@ -257,16 +306,26 @@ fn run_wire(
         })
         .ok();
 
+    let pause = pause_flag(&hub_id);
     // The audio pump: decoded 48 kHz stereo straight into the mixer's ring.
     let audio_thread = audio_stdout.map(|mut stdout| {
         let ring = fcap_audio::media_hub::ring(&hub_id);
         ring.clear();
+        let audio_stop = Arc::clone(&stop);
+        let audio_pause = Arc::clone(&pause);
         std::thread::Builder::new()
             .name("fcap-media-audio".into())
             .spawn(move || {
                 let mut bytes = [0u8; 3840]; // one 10 ms stereo f32 block
                 let mut samples = Vec::with_capacity(960);
                 loop {
+                    // Pause: stop draining the pipe (ffmpeg -re backpressures
+                    // and holds) and push no audio, so a paused video is silent
+                    // + frozen on the broadcast.
+                    while audio_pause.load(Ordering::Relaxed) && !audio_stop.load(Ordering::Relaxed)
+                    {
+                        std::thread::sleep(Duration::from_millis(30));
+                    }
                     // `filled` may be a whole block, or a short final block at
                     // end-of-stream — push whatever complete stereo frames it
                     // holds so the clip's last < 10 ms of audio isn't dropped.
@@ -295,6 +354,16 @@ fn run_wire(
         loop {
             if stop.load(Ordering::Relaxed) || !sender.is_open() {
                 ended_cleanly = true; // stopped by the studio — not an error
+                break;
+            }
+            // Pause: hold the last frame (don't read the next), which
+            // backpressures ffmpeg so playback resumes where it paused.
+            while pause.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed) && sender.is_open()
+            {
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            if stop.load(Ordering::Relaxed) || !sender.is_open() {
+                ended_cleanly = true;
                 break;
             }
             if !read_exact_or_end(&mut stdout, &mut data) {

@@ -12,6 +12,8 @@ import {
   settingsSet,
   studioApplyLayout,
   studioCreateGroup,
+  studioMediaPaused,
+  studioMediaSetPaused,
   studioRenameSource,
   studioRetrySource,
   studioSetCenterView,
@@ -157,6 +159,27 @@ export function SourcesRail({
   const [groupPick, setGroupPick] = useState<ItemId[] | null>(null);
   const [showLayout, setShowLayout] = useState(false);
   const [renaming, setRenaming] = useState<{ source: SourceId; draft: string } | null>(null);
+  // Paused state of embedded Media sources (videos), keyed by source id — the
+  // streamer pauses/resumes a video live on the broadcast.
+  const [mediaPaused, setMediaPaused] = useState<Record<string, boolean>>({});
+  // Keep the pause buttons synced with the backend for the current Media
+  // sources (e.g. after a reload — a video may already be paused).
+  const mediaIdsKey = (collection?.sources ?? [])
+    .filter((source) => source.kind === "media")
+    .map((source) => source.id)
+    .join(",");
+  useEffect(() => {
+    if (!mediaIdsKey) return;
+    let alive = true;
+    for (const id of mediaIdsKey.split(",")) {
+      studioMediaPaused(id as SourceId)
+        .then((paused) => alive && setMediaPaused((prev) => ({ ...prev, [id]: paused })))
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [mediaIdsKey]);
 
   const items = scene?.items ?? [];
   const topFirst = [...items].reverse();
@@ -452,6 +475,32 @@ export function SourcesRail({
                       }`}
                     />
                   ) : null}
+                  {source?.kind === "media" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !mediaPaused[item.source];
+                        setMediaPaused((prev) => ({ ...prev, [item.source]: next }));
+                        studioMediaSetPaused(item.source, next).catch((err) =>
+                          console.error("media pause failed:", err),
+                        );
+                      }}
+                      title={
+                        mediaPaused[item.source]
+                          ? "Resume the video (live on the stream)"
+                          : "Pause the video — hold the frame + go silent, live on the stream"
+                      }
+                      aria-label={`${mediaPaused[item.source] ? "Resume" : "Pause"} ${source?.name ?? "video"}`}
+                      aria-pressed={Boolean(mediaPaused[item.source])}
+                      className={`shrink-0 rounded px-1 text-[11px] ${
+                        mediaPaused[item.source]
+                          ? "text-amber-300"
+                          : "text-havoc-muted hover:text-havoc-text"
+                      }`}
+                    >
+                      {mediaPaused[item.source] ? "▶" : "⏸"}
+                    </button>
+                  )}
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"
