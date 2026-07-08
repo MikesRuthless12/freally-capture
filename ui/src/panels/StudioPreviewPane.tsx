@@ -25,30 +25,43 @@ export function StudioPreviewPane({
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasFrame, setHasFrame] = useState(false);
+  const [mirrors, setMirrors] = useState(false);
 
-  // Poll the preview-side JPEG; blob-swap so the <img> never flickers.
+  // Poll the preview-side JPEG; blob-swap so the <img> never flickers. When the
+  // preview scene *is* the program scene (its own slot is empty — e.g. the moment
+  // Studio Mode turns on, or with a single scene), fall back to the program frame
+  // so the pane shows the program instead of a broken image.
   useEffect(() => {
     if (typeof createImageBitmap === "undefined") return; // jsdom/tests
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let lastSeq = "";
     let objectUrl: string | null = null;
-    const url = convertFileSrc("studio-preview", "preview");
+    const previewUrl = convertFileSrc("studio-preview", "preview");
+    const programUrl = convertFileSrc("frame", "preview");
     const tick = async () => {
       if (stopped) return;
       try {
-        const response = await fetch(url, { cache: "no-store" });
+        let response = await fetch(previewUrl, { cache: "no-store" });
+        let mirroring = false;
+        if (response.status !== 200) {
+          response = await fetch(programUrl, { cache: "no-store" });
+          mirroring = true;
+        }
         if (response.status === 200) {
-          const seq = response.headers.get("x-frame-seq") ?? "";
+          const seq = (mirroring ? "p:" : "s:") + (response.headers.get("x-frame-seq") ?? "");
           if (seq !== lastSeq) {
             lastSeq = seq;
             const blob = await response.blob();
             const next = URL.createObjectURL(blob);
-            if (imgRef.current && !stopped) {
-              imgRef.current.src = next;
-            }
+            if (imgRef.current && !stopped) imgRef.current.src = next;
             if (objectUrl) URL.revokeObjectURL(objectUrl);
             objectUrl = next;
+            if (!stopped) {
+              setHasFrame(true);
+              setMirrors(mirroring);
+            }
           }
         }
       } catch {
@@ -92,9 +105,19 @@ export function StudioPreviewPane({
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
         <img
           ref={imgRef}
-          alt="Preview scene"
-          className="absolute inset-0 h-full w-full object-contain"
+          alt=""
+          className={`absolute inset-0 h-full w-full object-contain ${hasFrame ? "" : "hidden"}`}
         />
+        {!hasFrame && (
+          <div className="absolute inset-0 flex items-center justify-center text-[11px] text-havoc-muted">
+            The preview will appear here.
+          </div>
+        )}
+        {hasFrame && mirrors && (
+          <span className="absolute top-1.5 left-1.5 rounded bg-black/50 px-1.5 py-0.5 text-[9px] tracking-wide text-havoc-muted uppercase">
+            mirrors program
+          </span>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <select

@@ -3077,6 +3077,37 @@ mod tests {
     }
 
     #[test]
+    fn reorder_scene_moves_and_never_duplicates() {
+        let mut c = Collection::new();
+        let a = c.active_scene;
+        let b = c.add_scene("B");
+        let d = c.add_scene("D");
+        assert_eq!(
+            c.scenes.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![a, b, d]
+        );
+
+        // Move the 2nd scene (b) up to index 0 — it swaps above a, no copy.
+        c.reorder_scene(b, 0).unwrap();
+        assert_eq!(
+            c.scenes.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![b, a, d],
+            "up = a clean move, not a duplicate"
+        );
+        assert_eq!(c.scenes.len(), 3, "count unchanged");
+
+        // Move d down past the end — clamps to last, still no dup.
+        c.reorder_scene(d, 99).unwrap();
+        assert_eq!(c.scenes.last().unwrap().id, d);
+
+        // Every scene id is still unique (never two of the same scene).
+        let mut ids: Vec<_> = c.scenes.iter().map(|s| s.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 3, "no scene was duplicated");
+    }
+
+    #[test]
     fn set_item_slot_rejects_an_unknown_item() {
         let mut collection = Collection::new();
         let scene = collection.active_scene;

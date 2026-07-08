@@ -1,9 +1,96 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { exit } from "@tauri-apps/plugin-process";
 
 import { eulaAccept } from "../api/commands";
 import type { EulaStatus } from "../api/types";
+
+/** Decode the HTML entities the source doc may carry (belt + suspenders). */
+function decodeEntities(s: string): string {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
+/** Inline formatting: **bold** + `code`, entities decoded. */
+function inline(text: string): ReactNode[] {
+  return decodeEntities(text)
+    .split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
+    .map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={i} className="font-semibold text-havoc-text">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code key={i} className="rounded bg-white/10 px-1 font-mono text-[10px]">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      return <Fragment key={i}>{part}</Fragment>;
+    });
+}
+
+/**
+ * A tiny, safe markdown → JSX for the embedded EULA (headings, bold, lists,
+ * blockquotes, paragraphs). No external parser; the text is build-time-embedded
+ * and trusted, so there is no injection surface.
+ */
+function renderMarkdown(text: string): ReactElement[] {
+  const blocks: ReactElement[] = [];
+  let list: string[] = [];
+  const flushList = () => {
+    if (list.length === 0) return;
+    const items = list;
+    list = [];
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="my-1 ml-4 list-disc space-y-0.5">
+        {items.map((li, i) => (
+          <li key={i}>{inline(li)}</li>
+        ))}
+      </ul>,
+    );
+  };
+  for (const line of text.split("\n")) {
+    if (/^#{2,}\s/.test(line)) {
+      flushList();
+      blocks.push(
+        <h3 key={`b-${blocks.length}`} className="mt-3 mb-1 text-xs font-semibold text-havoc-text">
+          {inline(line.replace(/^#{2,}\s/, ""))}
+        </h3>,
+      );
+    } else if (/^#\s/.test(line)) {
+      flushList();
+      blocks.push(
+        <h2 key={`b-${blocks.length}`} className="mt-2 mb-1.5 text-sm font-bold text-havoc-text">
+          {inline(line.replace(/^#\s/, ""))}
+        </h2>,
+      );
+    } else if (/^>\s/.test(line)) {
+      flushList();
+      blocks.push(
+        <p key={`b-${blocks.length}`} className="my-1 border-l-2 border-white/15 pl-2 italic">
+          {inline(line.replace(/^>\s/, ""))}
+        </p>,
+      );
+    } else if (/^[-*]\s/.test(line)) {
+      list.push(line.replace(/^[-*]\s/, ""));
+    } else if (line.trim() === "") {
+      flushList();
+    } else {
+      flushList();
+      blocks.push(
+        <p key={`b-${blocks.length}`} className="my-1">
+          {inline(line)}
+        </p>,
+      );
+    }
+  }
+  flushList();
+  return blocks;
+}
 
 /**
  * First-run EULA acceptance gate (Phase 8). Rendered by `App` instead of the
@@ -66,9 +153,9 @@ export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepte
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="min-h-0 flex-1 overflow-auto rounded-lg border border-white/10 bg-black/30 p-3 text-[11px] leading-relaxed whitespace-pre-wrap text-havoc-muted"
+          className="min-h-0 flex-1 overflow-auto rounded-lg border border-white/10 bg-black/30 p-3 text-[11px] leading-relaxed text-havoc-muted"
         >
-          {status.text}
+          {renderMarkdown(status.text)}
         </div>
         {error && (
           <p role="alert" className="m-0 text-[11px] text-red-300">

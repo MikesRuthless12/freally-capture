@@ -5,7 +5,7 @@
 > distributed publicly. It is not legal advice.
 
 **Software:** Freally Capture ("the Software")
-**Licensor:** Mike Weaver &lt;mythodikalone@gmail.com&gt; ("the Licensor")
+**Licensor:** Mike Weaver <mythodikalone@gmail.com> ("the Licensor")
 **Effective date:** ______ *(to be set on release)*
 
 By installing, copying, or using the Software, you ("the User") agree to this
@@ -104,4 +104,4 @@ to be completed on legal review)*, without regard to conflict-of-laws rules.
 This Agreement, together with `LICENSE` and `THIRD-PARTY-NOTICES.md`, is the
 entire agreement between you and the Licensor regarding the Software.
 
-© Mike Weaver &lt;mythodikalone@gmail.com&gt; — All Rights Reserved.
+© Mike Weaver <mythodikalone@gmail.com> — All Rights Reserved.
