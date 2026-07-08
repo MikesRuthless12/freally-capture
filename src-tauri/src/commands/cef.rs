@@ -102,6 +102,17 @@ pub fn cef_install<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     if cef::platform_key().is_none() {
         return Err("CEF publishes no browser-source runtime for this platform".to_string());
     }
+    // Already installed → report Ready without touching the network or disk.
+    if let Some(ready) = cef::installed() {
+        set_and_emit(
+            &app,
+            CefStatusDto::Ready {
+                version: ready.cef_version,
+                path: ready.runtime_dir.display().to_string(),
+            },
+        );
+        return Ok(());
+    }
     if state.installing.swap(true, Ordering::SeqCst) {
         return Err("an install is already in progress".to_string());
     }

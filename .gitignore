@@ -66,3 +66,6 @@ secrets.json
 
 # Tauri updater signing key (private — never commit; public key lives in tauri.conf.json)
 .tauri/
+
+# Local drill runbook (not shipped)
+Steps-Drills.md

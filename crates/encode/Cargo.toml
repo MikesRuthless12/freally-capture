@@ -22,7 +22,7 @@ ureq = { workspace = true }
 # The optional CEF (browser-source) runtime ships as a .tar.bz2 on every OS —
 # fetched on demand, verified against the CDN-published SHA-1, extracted here.
 tar = { workspace = true }
-bzip2-rs = { workspace = true }
+bzip2 = { workspace = true }
 # GPU enumeration only (vendor/device ids drive encoder detection) — the
 # compositor owns the rendering device; this crate never creates one.
 wgpu = { workspace = true }

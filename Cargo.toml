@@ -117,7 +117,7 @@ sha1 = "0.10"             # SHA-1 verification of the CEF archive (the CDN publi
 zip = { version = "2", default-features = false, features = ["deflate"] } # gyan/riedl archives
 tar = "0.4"               # BtbN Linux archive (with lzma-rs for the xz layer) + CEF tar.bz2
 lzma-rs = "0.3"           # pure-Rust xz decode (Linux archive only)
-bzip2-rs = "0.1"          # pure-Rust bzip2 decode (CEF .tar.bz2; no system deps)
+bzip2 = "0.4"             # bzip2 decode (CEF .tar.bz2, multi-stream); libbz2 C is vendored + compiled (no system lib)
 
 [profile.release]
 opt-level = 3

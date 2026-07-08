@@ -275,6 +275,11 @@ pub fn install(
     mut progress: impl FnMut(FetchProgress),
     cancel: &AtomicBool,
 ) -> Result<CefRuntime, CefError> {
+    // Already installed → reuse it; never re-download (idempotent, like ffmpeg).
+    // To update to a newer build, `remove()` first, then install.
+    if let Some(ready) = installed() {
+        return Ok(ready);
+    }
     let root = cache_root()
         .ok_or_else(|| CefError::Http("no per-user cache directory could be resolved".into()))?;
     let current = root.join("current");
@@ -398,11 +403,13 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Extract a `.tar.bz2` into `target_dir`. `tar`'s `unpack` sanitizes member
+/// Extract a `.tar.bz2` into `target_dir`. `MultiBzDecoder` handles CEF's
+/// multi-stream bzip2 (concatenated streams — a single-stream decoder would stop
+/// after the first and truncate the tar). `tar`'s `unpack` sanitizes member
 /// paths (traversal entries are refused), and the archive was SHA-1-verified.
 fn extract_tar_bz2(archive: &Path, target_dir: &Path) -> Result<(), CefError> {
     let file = File::open(archive)?;
-    let decoder = bzip2_rs::DecoderReader::new(BufReader::new(file));
+    let decoder = bzip2::read::MultiBzDecoder::new(BufReader::new(file));
     let mut tar = tar::Archive::new(decoder);
     tar.unpack(target_dir)
         .map_err(|err| CefError::Archive(err.to_string()))?;
@@ -487,5 +494,70 @@ mod tests {
     fn pick_build_is_none_for_unknown_platform() {
         let index: Index = serde_json::from_str(r#"{"windows64":{"versions":[]}}"#).unwrap();
         assert!(pick_build(&index, "solaris").is_none());
+    }
+
+    /// The real thing (network + ~100 MB): resolve the newest stable build from
+    /// the CEF index, download it, SHA-1-verify, extract, and confirm the runnable
+    /// runtime files + idempotency. On demand:
+    /// `cargo test -p fcap-encode --release -- --ignored --nocapture cef_end_to_end_download`
+    #[test]
+    #[ignore = "network + ~100 MB download — run on demand"]
+    fn cef_end_to_end_download() {
+        // Start clean so we exercise a real download, not a cached short-circuit.
+        let _ = remove();
+        let build = resolve_build().expect("resolve a build from the CEF index");
+        eprintln!(
+            "resolved CEF {} ({} MB): {}",
+            build.cef_version,
+            build.size_bytes / 1_000_000,
+            build.url
+        );
+        assert_eq!(build.sha1.len(), 40, "index carries a real sha1");
+
+        let cancel = AtomicBool::new(false);
+        let mut last = 0u64;
+        let ready = install(
+            &build,
+            |p| {
+                if p.received.saturating_sub(last) > 20_000_000 {
+                    last = p.received;
+                    eprintln!(
+                        "  {:?}: {} MB ({} MB/s)",
+                        p.phase,
+                        p.received / 1_000_000,
+                        p.bytes_per_sec / 1_000_000
+                    );
+                }
+            },
+            &cancel,
+        )
+        .expect("CEF install succeeds (download + sha1 verify + extract)");
+
+        eprintln!(
+            "installed CEF {} at {}",
+            ready.cef_version,
+            ready.runtime_dir.display()
+        );
+        assert!(ready.runtime_dir.is_dir());
+        // The minimal distribution must carry the runnable Release binaries.
+        let release = ready.runtime_dir.join("Release");
+        assert!(release.is_dir(), "Release/ present");
+        assert!(ready.runtime_dir.join("Resources").is_dir(), "Resources/");
+        let has_libcef = fs::read_dir(&release).unwrap().flatten().any(|e| {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            n.contains("libcef") || n.contains("chromium embedded framework")
+        });
+        assert!(has_libcef, "libcef present in Release/");
+        assert!(installed().is_some(), "marker round-trips");
+
+        // Idempotent: a second install returns the SAME runtime, never
+        // re-downloading (the progress closure must never fire).
+        let again = install(
+            &build,
+            |_| panic!("must not re-download an already-installed runtime"),
+            &AtomicBool::new(false),
+        )
+        .expect("idempotent install");
+        assert_eq!(again.runtime_dir, ready.runtime_dir);
     }
 }
