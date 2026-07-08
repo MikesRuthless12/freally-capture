@@ -64,5 +64,14 @@ a real browser window (Window Capture + chroma/color key — both ship).
 1. Approve CEF-as-component (size + Chromium-update cadence accepted)?
 2. Or keep Browser source out of scope until a lighter path exists?
 
+## Decision (Mike, 2026-07-08): DEFER to Phase 7
+
+The browser source is **deferred to Phase 7**. The CEF engine + on-demand
+component distribution stays the recommended approach when it is built, but
+the ~150–200 MB download and the ongoing Chromium security-update burden are
+not worth taking on for 0.85.0's scope. Until then the documented workaround
+is **Window Capture + a chroma/color key** on a regular browser window (both
+already ship). Phase 7's task list carries it (see `product-roadmap.md`).
+
 *Written 2026-07-07 during the Phase 6 build; no code was built for this
-task by design ("decide with Mike before building").*
+task by design ("decide with Mike before building"). Deferred 2026-07-08.*
