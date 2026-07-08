@@ -14,7 +14,7 @@
     "By installing or using the Software you agree to this Agreement. You are " +
     "solely responsible for your content, your streams, and how you use the " +
     "Software, including having all necessary rights and complying with all laws " +
-    "and platform terms. THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF " +
+    'and platform terms. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ' +
     "ANY KIND. (Mocked text for the UI gallery.)\n".repeat(6);
 
   const scene = {
