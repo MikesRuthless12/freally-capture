@@ -109,10 +109,26 @@ impl Script {
             fcap.set("on", on_fn).map_err(err_str)?;
 
             let globals = lua.globals();
-            // The Lua base library ships file loaders even without
-            // `StdLib::IO` — close them; the sandbox test proves they're gone.
+            // The Lua base library is ALWAYS opened by mlua (regardless of the
+            // StdLib flags), so it ships loaders even without `StdLib::IO`.
+            // Close every door to loading a new chunk — the sandbox test
+            // proves they're gone:
+            //   * dofile/loadfile: read + run a file.
+            //   * load/loadstring: compile a chunk — and in Lua 5.4 the
+            //     default mode is "bt", which accepts BINARY (bytecode)
+            //     chunks; the 5.4 bytecode loader is unverified, so a crafted
+            //     bytecode string is a native-RCE VM escape that bypasses the
+            //     no-io/no-os sandbox entirely. Removing `load` shuts it.
+            //   * string.dump: serialize a function to bytecode (the other
+            //     half of the escape — nil it so a script can't even mint
+            //     bytecode to feed back in).
             globals.set("dofile", LuaValue::Nil).map_err(err_str)?;
             globals.set("loadfile", LuaValue::Nil).map_err(err_str)?;
+            globals.set("load", LuaValue::Nil).map_err(err_str)?;
+            globals.set("loadstring", LuaValue::Nil).map_err(err_str)?;
+            if let Ok(string_lib) = globals.get::<mlua::Table>("string") {
+                let _ = string_lib.set("dump", LuaValue::Nil);
+            }
             // `print` routes to the host log instead of raw stdout.
             globals
                 .set("print", fcap.get::<Function>("log").map_err(err_str)?)
@@ -240,6 +256,12 @@ mod tests {
             assert(require == nil, "require must be absent")
             assert(dofile == nil, "dofile must be absent")
             assert(loadfile == nil, "loadfile must be absent")
+            -- The bytecode-escape doors: load/loadstring compile chunks
+            -- (5.4's load accepts binary bytecode by default → VM escape),
+            -- string.dump mints bytecode. All must be gone.
+            assert(load == nil, "load must be absent")
+            assert(loadstring == nil, "loadstring must be absent")
+            assert(string.dump == nil, "string.dump must be absent")
             "#,
             command,
             no_log(),
