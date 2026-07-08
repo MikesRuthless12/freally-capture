@@ -1,11 +1,14 @@
 //! Live-hardware smoke tests: prove real frames flow from the OS capture
-//! pipelines. `#[ignore]` because CI runners are headless — run explicitly
-//! with `cargo test -p fcap-capture -- --ignored` on a real desktop.
+//! pipelines. `#[ignore]` because CI runners are headless — run on a real
+//! desktop via `scripts/live-capture-tests.ps1`, which runs **each test in
+//! its own process**.
 //!
-//! Run ONE TEST AT A TIME (pass its name). The OS capture stacks tear down
-//! racily when several sessions run inside one test process — a pre-existing
-//! WinRT/D3D teardown race that intermittently ACCESS_VIOLATIONs the harness
-//! even with `--test-threads=1`. Every test passes alone.
+//! Why process-per-test: the OS capture stacks tear down racily when several
+//! sessions run inside one test process — a pre-existing WinRT/D3D teardown
+//! race that intermittently ACCESS_VIOLATIONs the harness even with
+//! `--test-threads=1`, while every test passes alone. A process boundary is
+//! the isolation that actually holds. Running a single test by hand stays
+//! fine: `cargo test -p fcap-capture --test live_capture -- --ignored --exact <name>`.
 
 use std::time::{Duration, Instant};
 
@@ -106,7 +109,9 @@ fn window_capture_rebinds_after_a_stale_handle() {
 fn spawn_console_at(title: &str, rect: (i32, i32, i32, i32)) -> (std::process::Child, isize) {
     use std::os::windows::process::CommandExt;
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, MoveWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, MoveWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
     let child = std::process::Command::new("cmd")
@@ -130,9 +135,21 @@ fn spawn_console_at(title: &str, rect: (i32, i32, i32, i32)) -> (std::process::C
         );
         std::thread::sleep(Duration::from_millis(100));
     };
-    // SAFETY: positioning our own live window.
+    // SAFETY: positioning + raising our own live window. The explicit
+    // HWND_TOP raise makes "spawned last sits on top" hold even when the test
+    // runs from a background process (no foreground rights), where creation
+    // order alone does not.
     unsafe {
         let _ = MoveWindow(hwnd, rect.0, rect.1, rect.2, rect.3, true);
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
     std::thread::sleep(Duration::from_millis(300));
     (child, hwnd.0 as isize)
@@ -224,13 +241,39 @@ fn window_capture_hides_cursor_when_occluded() {
 
     let rect = (120, 120, 700, 520);
     let (mut target, _) = spawn_console_at("fcap-occ-target", rect);
-    // The occluder covers the same rect and, spawned last, sits on top.
-    let (mut occluder, _) = spawn_console_at("fcap-occ-cover", rect);
+    // The occluder covers the same rect and is explicitly raised on top.
+    let (mut occluder, occluder_hwnd) = spawn_console_at("fcap-occ-cover", rect);
     let id = capture_id_for("fcap-occ-target");
     // Park the cursor squarely on the overlap (over the occluder, not us).
     // SAFETY: plain cursor move.
     unsafe {
         let _ = SetCursorPos(rect.0 + 350, rect.1 + 260);
+    }
+    // Prove the staging before testing the capture: the OS must agree the
+    // parked point belongs to the occluder, else a placement/z-order miss
+    // would masquerade as a pointer.rs occlusion bug.
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+        std::thread::sleep(Duration::from_millis(200));
+        // SAFETY: a plain hit-test + ancestor walk over live window handles.
+        let covered = unsafe {
+            let hit = WindowFromPoint(POINT {
+                x: rect.0 + 350,
+                y: rect.1 + 260,
+            });
+            !hit.is_invalid()
+                && GetAncestor(hit, GA_ROOT).0 as isize
+                    == GetAncestor(
+                        windows::Win32::Foundation::HWND(occluder_hwnd as *mut core::ffi::c_void),
+                        GA_ROOT,
+                    )
+                    .0 as isize
+        };
+        assert!(
+            covered,
+            "staging failed: the occluder console did not end up covering the parked point"
+        );
     }
 
     let session = start_capture(&id).expect("capture the occluded console");
