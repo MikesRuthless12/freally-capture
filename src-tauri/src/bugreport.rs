@@ -338,6 +338,26 @@ pub fn bug_report_simulate<R: Runtime>(app: AppHandle<R>) {
     let _ = app.emit("bug-report-crash-detected", ());
 }
 
+/// TEST ONLY: write a crash report, then **force-exit the whole app** so the
+/// full crash → relaunch → report loop can be exercised. The next launch
+/// auto-surfaces the report. Uses a delayed `exit(101)` (a panic-like code)
+/// rather than a real panic so it exits identically in dev (unwind) and
+/// release (abort); the delay lets the IPC reply + a warning reach the UI
+/// first. Relaunching is the user's one manual step (robust — no fragile
+/// self-restart / single-instance race).
+#[tauri::command]
+pub fn bug_report_test_crash<R: Runtime>(app: AppHandle<R>) {
+    write_crash(&scrub(
+        "Panic at src/testcrash.rs:1\nMessage: TEST CRASH — triggered from “Report a bug”; no \
+         real fault occurred. Relaunch the app to see the crash-report prompt.\n\nBacktrace:\n(test)\n",
+    ));
+    let _ = app.emit("bug-report-test-exit", ());
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        std::process::exit(101);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,6 +5,7 @@ import {
   bugReportContext,
   bugReportSimulate,
   bugReportSubmit,
+  bugReportTestCrash,
 } from "../api/commands";
 import type { BugReportContext } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
@@ -162,18 +163,39 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={() =>
-            bugReportSimulate()
-              .then(load)
-              .catch(() => undefined)
-          }
-          className="self-start text-[10px] text-havoc-muted underline decoration-dotted hover:text-havoc-text"
-          title="Writes a harmless sample crash report so you can test the crash-report flow without crashing the app"
-        >
-          Simulate a crash report (for testing)
-        </button>
+        <div className="flex flex-col gap-1 border-t border-white/5 pt-2">
+          <span className="text-[10px] tracking-wide text-havoc-muted uppercase">Testing</span>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                bugReportSimulate()
+                  .then(load)
+                  .catch(() => undefined)
+              }
+              className="text-[10px] text-havoc-muted underline decoration-dotted hover:text-havoc-text"
+              title="Writes a harmless sample crash report right now so you can preview + send it — no crash, no relaunch"
+            >
+              Simulate a crash report (no exit)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "This writes a TEST crash report and then EXITS the app. Relaunch it to see the crash-report prompt appear automatically. Continue?",
+                  )
+                ) {
+                  bugReportTestCrash().catch(() => undefined);
+                }
+              }}
+              className="text-[10px] text-amber-300/80 underline decoration-dotted hover:text-amber-200"
+              title="Writes a TEST crash report and force-exits the app — relaunch to see the full crash → report loop"
+            >
+              Force a test crash + exit (relaunch to see the report)
+            </button>
+          </div>
+        </div>
       </div>
     </PickerShell>
   );

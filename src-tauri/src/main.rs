@@ -143,6 +143,7 @@ fn main() {
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,
             bugreport::bug_report_simulate,
+            bugreport::bug_report_test_crash,
             commands::studio::studio_get,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,

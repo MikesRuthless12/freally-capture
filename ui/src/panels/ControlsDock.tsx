@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  bugReportContext,
   recordingAddMarker,
   studioSendReaction,
   recordingPause,
@@ -55,6 +56,20 @@ export function ControlsDock({
     | "bug"
     | null
   >(null);
+
+  // Auto-surface the bug-report dialog on startup when the app crashed on a
+  // previous run — this is the "relaunch → report" half of the loop.
+  useEffect(() => {
+    let alive = true;
+    bugReportContext()
+      .then((ctx) => {
+        if (alive && ctx.pendingCrash) setDialog("bug");
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;

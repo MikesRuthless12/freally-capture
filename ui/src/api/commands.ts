@@ -657,3 +657,9 @@ export function bugReportClearCrash(): Promise<void> {
 export function bugReportSimulate(): Promise<void> {
   return invoke("bug_report_simulate");
 }
+
+/** TEST ONLY: write a crash report and force-exit the app, so the full
+ * crash → relaunch → report loop can be exercised (relaunch to see it). */
+export function bugReportTestCrash(): Promise<void> {
+  return invoke("bug_report_test_crash");
+}
