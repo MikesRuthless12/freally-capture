@@ -82,8 +82,8 @@ export function LiveButton({
         onClick={toggle}
         title={
           live
-            ? "End the stream (a running recording continues)"
-            : "Go live to the Settings → Stream target"
+            ? "End the stream — every target (a running recording continues)"
+            : "Go live to every enabled Settings → Stream target"
         }
         className={`${buttonBase} ${
           live

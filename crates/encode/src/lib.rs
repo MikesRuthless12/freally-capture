@@ -26,15 +26,19 @@ pub mod recorder;
 pub mod remux;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
-pub use ffmpeg::{FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild};
+pub use ffmpeg::{
+    stream_support, FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild, StreamSupport,
+};
 pub use freally_video::{
     FrecChunk, FrecError, FrecReader, FrecSpec, FrecStats, FrecWriter, PixelFormat,
 };
 pub use hardware::{GpuInfo, GpuVendor};
 pub use mux::{
-    Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, RtmpPlan, WirePlan,
+    tee_safe, Container, EncPreset, FfmpegSink, FrecSink, RateControl, RcMode, ReplayPlan,
+    RtmpMonitor, RtmpPlan, WirePlan,
 };
 pub use recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle, RecorderStats};
+pub use remux::{concat_copy, write_mkv_chapters};
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

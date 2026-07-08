@@ -127,6 +127,10 @@ export function MixerDock({
                   audio={source.audio ?? defaultStrip}
                   levels={audio?.sources[source.id]}
                   orientation="vertical"
+                  sceneId={scene?.id ?? null}
+                  sceneOverride={
+                    scene?.audioOverrides?.find((entry) => entry.source === source.id) ?? null
+                  }
                   onOpenFilters={() => onOpenAudioFilters(source.id)}
                   onOpenAdvanced={() => setAdvancedFor(source.id)}
                 />
@@ -144,6 +148,10 @@ export function MixerDock({
                   source={source}
                   audio={source.audio ?? defaultStrip}
                   levels={audio?.sources[source.id]}
+                  sceneId={scene?.id ?? null}
+                  sceneOverride={
+                    scene?.audioOverrides?.find((entry) => entry.source === source.id) ?? null
+                  }
                   onOpenFilters={() => onOpenAudioFilters(source.id)}
                   onOpenAdvanced={() => setAdvancedFor(source.id)}
                 />

@@ -288,6 +288,12 @@ pub async fn recording_stop<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>
         .map_err(|err| format!("recording stop task failed: {err}"))?
 }
 
+/// Drop a chapter marker at the current recording position (TASK-610).
+#[tauri::command]
+pub fn recording_add_marker<R: Runtime>(app: AppHandle<R>) -> Result<u32, String> {
+    crate::recording::add_marker(&app)
+}
+
 /// Pause the running recording (no frames written; the file stays one
 /// contiguous timeline).
 #[tauri::command]

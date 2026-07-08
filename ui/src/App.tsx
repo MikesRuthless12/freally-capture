@@ -40,11 +40,13 @@ import { ScenesRail } from "./panels/ScenesRail";
 import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
 import { StudioPreviewPane } from "./panels/StudioPreviewPane";
+import { VerticalCanvasDialog } from "./panels/VerticalCanvasDialog";
 
 type OpenDialog =
   | { kind: "filters"; itemId: ItemId }
   | { kind: "properties"; sourceId: SourceId }
   | { kind: "audioFilters"; sourceId: SourceId }
+  | { kind: "vertical" }
   | null;
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
@@ -321,6 +323,20 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setDialog({ kind: "vertical" })}
+            disabled={!collection}
+            title="The second (vertical 9:16) output canvas — recordable and streamable independently"
+            aria-pressed={Boolean(collection?.vertical)}
+            className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
+              collection?.vertical
+                ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text"
+                : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
+            }`}
+          >
+            9:16 {collection?.vertical ? "on" : "off"}
+          </button>
+          <button
+            type="button"
             onClick={toggleStatsDock}
             disabled={!settings}
             title={showStats ? "Hide the stats dock" : "Show the stats dock"}
@@ -398,6 +414,9 @@ export default function App() {
         </div>
       </main>
 
+      {dialog?.kind === "vertical" && (
+        <VerticalCanvasDialog studio={studio} onClose={() => setDialog(null)} />
+      )}
       {dialog?.kind === "filters" && activeScene && dialogItem && (
         <FiltersDialog
           sceneId={activeScene.id}
@@ -409,7 +428,11 @@ export default function App() {
         />
       )}
       {dialog?.kind === "properties" && dialogSource && (
-        <PropertiesDialog source={dialogSource} onClose={() => setDialog(null)} />
+        <PropertiesDialog
+          source={dialogSource}
+          scenes={collection?.scenes.map((entry) => ({ id: entry.id, name: entry.name })) ?? []}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "audioFilters" && dialogAudioSource && (
         <AudioFiltersDialog

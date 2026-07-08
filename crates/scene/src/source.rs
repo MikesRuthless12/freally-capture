@@ -86,6 +86,26 @@ fn default_color_size() -> u32 {
     1920
 }
 
+fn default_slide_ms() -> u32 {
+    5_000
+}
+
+fn default_slide_fade_ms() -> u32 {
+    300
+}
+
+fn default_chat_width() -> u32 {
+    480
+}
+
+fn default_chat_lines() -> u32 {
+    12
+}
+
+fn default_chat_font() -> f32 {
+    22.0
+}
+
 fn default_color_height() -> u32 {
     1080
 }
@@ -184,6 +204,60 @@ pub enum SourceSettings {
         #[serde(default)]
         device_id: String,
     },
+    /// An ordered set of images cycling on a timer (Phase 6): per-slide
+    /// duration, an optional crossfade (equal-size slides only — different
+    /// sizes hard-cut, honestly), loop or hold-last, optional shuffle.
+    Slideshow {
+        #[serde(default)]
+        paths: Vec<String>,
+        /// How long each slide holds, ms.
+        #[serde(default = "default_slide_ms")]
+        slide_ms: u32,
+        /// Crossfade length between slides, ms (0 = hard cut).
+        #[serde(default = "default_slide_fade_ms")]
+        transition_ms: u32,
+        /// Restart from the top at the end (else hold the last slide).
+        #[serde(default = "default_true", rename = "loop")]
+        looping: bool,
+        /// Re-shuffle the order each cycle.
+        #[serde(default)]
+        shuffle: bool,
+    },
+    /// The live chat overlay (Phase 6, TASK-613): a positionable,
+    /// transparent-background record of the incoming livestream chat —
+    /// username + message + a per-message 12-hour timestamp. **No API key,
+    /// no developer account, no sign-in, ever** (the hard rule): YouTube
+    /// reads through the owned InnerTube client exactly like the web
+    /// player, Twitch reads anonymous IRC, Kick polls its public endpoint.
+    /// Facebook would need the user's own token — opt-in and not
+    /// implemented yet; it never gates the others.
+    ChatOverlay {
+        /// A YouTube channel / watch / live_chat URL (empty = off).
+        #[serde(default)]
+        youtube: String,
+        /// A Twitch channel name (empty = off).
+        #[serde(default)]
+        twitch: String,
+        /// A Kick channel slug (empty = off).
+        #[serde(default)]
+        kick: String,
+        /// Overlay width in canvas pixels.
+        #[serde(default = "default_chat_width")]
+        width: u32,
+        /// How many newest lines stay on screen.
+        #[serde(default = "default_chat_lines")]
+        max_lines: u32,
+        #[serde(default = "default_chat_font")]
+        font_size: f32,
+    },
+    /// Another scene composed as a source — nested scenes (Phase 6). The
+    /// referenced scene renders at program-canvas size and follows its own
+    /// edits live. Cycle-safe: the model rejects references that would make
+    /// a scene contain itself, directly or through other scenes.
+    NestedScene {
+        #[serde(default)]
+        scene: crate::scene::SceneId,
+    },
     /// Shaped, rasterized text (rustybuzz shaping, RTL-aware).
     Text {
         #[serde(default)]
@@ -237,6 +311,9 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
+            SourceSettings::NestedScene { .. } => "nestedScene",
+            SourceSettings::Slideshow { .. } => "slideshow",
+            SourceSettings::ChatOverlay { .. } => "chatOverlay",
             SourceSettings::Text { .. } => "text",
         }
     }
@@ -254,6 +331,9 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
+            SourceSettings::NestedScene { .. } => "Nested Scene",
+            SourceSettings::Slideshow { .. } => "Image Slideshow",
+            SourceSettings::ChatOverlay { .. } => "Live Chat",
             SourceSettings::Text { .. } => "Text",
         }
     }

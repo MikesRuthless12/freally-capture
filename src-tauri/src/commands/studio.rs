@@ -249,6 +249,83 @@ pub fn studio_set_center_view(
     })
 }
 
+/// Group items so they move / show / hide together (Phase 6, TASK-605).
+#[tauri::command]
+pub fn studio_create_group(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    name: String,
+    item_ids: Vec<ItemId>,
+) -> Result<fcap_scene::GroupId, String> {
+    state.mutate(&app, |collection| {
+        collection.create_group(scene_id, &name, &item_ids)
+    })
+}
+
+/// Dissolve a group — its items stay exactly where they are.
+#[tauri::command]
+pub fn studio_ungroup(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    group_id: fcap_scene::GroupId,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| collection.ungroup(scene_id, group_id))
+}
+
+/// A group's eye toggle — hides/shows every member together.
+#[tauri::command]
+pub fn studio_set_group_visible(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    group_id: fcap_scene::GroupId,
+    visible: bool,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| {
+        collection.set_group_visible(scene_id, group_id, visible)
+    })
+}
+
+/// A source's per-scene mixer override (Phase 6, TASK-605): while the scene
+/// is the program, the override replaces the global fader/mute. `null`
+/// clears it (back to the global mix).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneAudioOverrideArg {
+    pub volume_db: f32,
+    pub muted: bool,
+}
+
+#[tauri::command]
+pub fn studio_set_scene_audio_override(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    source_id: fcap_scene::SourceId,
+    over: Option<SceneAudioOverrideArg>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| {
+        collection.set_scene_audio_override(
+            scene_id,
+            source_id,
+            over.as_ref().map(|entry| (entry.volume_db, entry.muted)),
+        )
+    })
+}
+
+/// Configure (or clear, with `null`) the second output canvas — e.g. a
+/// vertical 9:16 feed composed from any scene (Phase 6, TASK-604).
+#[tauri::command]
+pub fn studio_set_vertical(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    vertical: Option<fcap_scene::VerticalCanvas>,
+) -> Result<(), String> {
+    state.mutate(&app, |collection| collection.set_vertical(vertical))
+}
+
 /// Studio Mode (Phase 5): on = a preview pane opens on the program scene;
 /// off = back to single-pane editing.
 #[tauri::command]
@@ -281,11 +358,7 @@ pub fn studio_transition(
 ) -> Result<(), String> {
     let transition = settings.get().transition;
     transition.validate()?;
-    state.begin_transition(
-        &app,
-        transition.kind,
-        std::time::Duration::from_millis(u64::from(transition.duration_ms)),
-    )
+    state.begin_transition(&app, &transition)
 }
 
 /// Highlight Speaker (Focus/Spotlight): `Some(item)` promotes that item to

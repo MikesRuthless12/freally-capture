@@ -17,8 +17,10 @@ mod hotkeys;
 mod native_preview;
 mod preview;
 mod profiles;
+mod reactions;
 mod recording;
 mod remote;
+mod replay;
 mod settings;
 mod stream;
 mod studio;
@@ -97,6 +99,8 @@ fn main() {
         .manage(commands::recording::EncodeState::new())
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
+        .manage(replay::ReplayState::new())
+        .manage(reactions::ReactionState::new())
         .manage(events::RuntimeStats::default())
         .manage(hotkeys::ActionHotkeys::default())
         .manage(profiles::WorkspaceState::load_default())
@@ -141,6 +145,11 @@ fn main() {
             commands::studio::studio_set_item_slot,
             commands::studio::studio_set_center_view,
             commands::studio::studio_set_focus,
+            commands::studio::studio_create_group,
+            commands::studio::studio_ungroup,
+            commands::studio::studio_set_group_visible,
+            commands::studio::studio_set_scene_audio_override,
+            commands::studio::studio_set_vertical,
             commands::studio::studio_set_studio_mode,
             commands::studio::studio_set_preview_scene,
             commands::studio::studio_transition,
@@ -158,6 +167,11 @@ fn main() {
             stream::stream_start,
             stream::stream_stop,
             stream::stream_status,
+            replay::replay_arm,
+            replay::replay_disarm,
+            replay::replay_save,
+            replay::replay_status,
+            reactions::studio_send_reaction,
             profiles::profiles_list,
             profiles::profile_create,
             profiles::profile_switch,
@@ -185,6 +199,7 @@ fn main() {
             commands::recording::ffmpeg_remove,
             commands::recording::recording_start,
             commands::recording::recording_stop,
+            commands::recording::recording_add_marker,
             commands::recording::recording_pause,
             commands::recording::recording_resume,
             commands::recording::recording_status,
@@ -245,6 +260,7 @@ fn main() {
             recording::spawn_status_thread(app.handle().clone());
             // The stream's ~1 Hz status/elapsed events (Phase 5).
             stream::spawn_status_thread(app.handle().clone());
+            replay::spawn_status_thread(app.handle().clone());
             // Global action hotkeys: record / go live / transition (Phase 5).
             hotkeys::spawn_reconcile_thread(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");

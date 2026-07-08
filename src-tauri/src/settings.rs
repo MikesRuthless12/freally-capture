@@ -49,6 +49,8 @@ pub struct Settings {
     pub remote: RemoteSettings,
     /// Live-stream configuration (Phase 5).
     pub stream: StreamSettings,
+    /// The rolling replay buffer (Phase 6).
+    pub replay: ReplaySettings,
     /// Studio Mode's commit transition (Phase 5).
     pub transition: TransitionSettings,
     /// Global action hotkeys (Phase 5).
@@ -65,9 +67,61 @@ impl Default for Settings {
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
+            replay: ReplaySettings::default(),
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
         }
+    }
+}
+
+/// The rolling replay buffer (Phase 6, TASK-603): while armed, a background
+/// encode keeps the last N seconds as small encoded segments (bounded disk,
+/// tiny memory); Save stitches them into a playable file without touching
+/// the stream or the recording. The UI's length/quality presets write these
+/// fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ReplaySettings {
+    /// How much history Save keeps, in seconds.
+    pub seconds: u32,
+    /// CBR video bitrate of the buffer's own encode.
+    pub bitrate_kbps: u32,
+    pub audio_bitrate_kbps: u32,
+    pub fps: u32,
+    /// The mixer track the buffer records (1-based, like the UI dots).
+    pub track: u8,
+}
+
+impl Default for ReplaySettings {
+    fn default() -> Self {
+        Self {
+            seconds: 30,
+            bitrate_kbps: 6_000,
+            audio_bitrate_kbps: 160,
+            fps: 60,
+            track: 1,
+        }
+    }
+}
+
+impl ReplaySettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(5..=300).contains(&self.seconds) {
+            return Err("replay length out of range (5–300 s)".to_owned());
+        }
+        if !(500..=60_000).contains(&self.bitrate_kbps) {
+            return Err("replay bitrate out of range (500–60000 kbps)".to_owned());
+        }
+        if !(32..=512).contains(&self.audio_bitrate_kbps) {
+            return Err("replay audio bitrate out of range (32–512 kbps)".to_owned());
+        }
+        if !(1..=240).contains(&self.fps) {
+            return Err("replay fps out of range (1–240)".to_owned());
+        }
+        if !(1..=6).contains(&self.track) {
+            return Err("the replay track must be 1–6".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -83,13 +137,23 @@ pub struct HotkeySettings {
     pub go_live: Option<String>,
     /// Commit the Studio-Mode Preview → Program transition.
     pub transition: Option<String>,
+    /// Save the replay buffer's last N seconds (Phase 6).
+    pub save_replay: Option<String>,
+    /// Drop a chapter marker into the active recording (Phase 6).
+    pub add_marker: Option<String>,
 }
 
 impl HotkeySettings {
     pub fn validate(&self) -> Result<(), String> {
-        for key in [&self.record, &self.go_live, &self.transition]
-            .into_iter()
-            .flatten()
+        for key in [
+            &self.record,
+            &self.go_live,
+            &self.transition,
+            &self.save_replay,
+            &self.add_marker,
+        ]
+        .into_iter()
+        .flatten()
         {
             if key.trim().is_empty() {
                 continue;
@@ -102,12 +166,19 @@ impl HotkeySettings {
     }
 }
 
-/// How Studio Mode commits Preview → Program.
+/// How Studio Mode commits Preview → Program. The Phase 6 pack adds the
+/// custom luma-wipe image and the stinger video (with its cut point).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TransitionSettings {
     pub kind: fcap_scene::TransitionKind,
     pub duration_ms: u32,
+    /// The grayscale wipe image for [`fcap_scene::TransitionKind::LumaImage`].
+    pub luma_image: String,
+    /// The video file for [`fcap_scene::TransitionKind::Stinger`].
+    pub stinger_path: String,
+    /// When the scene swap lands under the stinger, ms into the transition.
+    pub stinger_cut_ms: u32,
 }
 
 impl Default for TransitionSettings {
@@ -115,6 +186,9 @@ impl Default for TransitionSettings {
         Self {
             kind: fcap_scene::TransitionKind::Fade,
             duration_ms: 300,
+            luma_image: String::new(),
+            stinger_path: String::new(),
+            stinger_cut_ms: 500,
         }
     }
 }
@@ -124,16 +198,39 @@ impl TransitionSettings {
         if !(50..=5_000).contains(&self.duration_ms) {
             return Err("transition duration out of range (50–5000 ms)".to_owned());
         }
+        for path in [&self.luma_image, &self.stinger_path] {
+            if path.len() > 512 || path.chars().any(char::is_control) {
+                return Err("invalid transition file path".to_owned());
+            }
+        }
+        if self.stinger_cut_ms > 5_000 {
+            return Err("stinger cut point out of range (0–5000 ms)".to_owned());
+        }
         Ok(())
     }
 }
 
-/// Live-stream configuration (Settings → Stream). The **stream key is a
-/// secret**: redacted from `Debug`, masked in the UI, never logged.
+/// Which canvas a stream target publishes (Phase 6 multi-canvas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StreamCanvas {
+    /// The program canvas.
+    #[default]
+    Main,
+    /// The second (vertical) canvas — needs one configured in the studio.
+    Vertical,
+}
+
+/// One stream target (Settings → Stream). The **stream key is a secret**:
+/// redacted from `Debug`, masked in the UI, never logged.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct StreamSettings {
+pub struct StreamTargetSettings {
+    /// Go Live publishes to every enabled target at once.
+    pub enabled: bool,
     pub service: fcap_stream::StreamService,
+    /// Which canvas this target publishes.
+    pub canvas: StreamCanvas,
     /// Overrides the service's preset ingest when non-empty (regional or
     /// custom `rtmp://`/`rtmps://`).
     pub ingest_url: String,
@@ -146,16 +243,19 @@ pub struct StreamSettings {
     pub audio_bitrate_kbps: u32,
     pub keyframe_sec: f32,
     pub fps: u32,
-    /// The mixer track that goes to the stream (1-based, like the UI dots).
+    /// The mixer track that goes to this target (1-based, like the UI dots).
     pub track: u8,
-    /// TASK-508: start a local recording automatically on Go Live.
-    pub auto_record: bool,
+    /// Publish at this size instead of the canvas size (0 = canvas).
+    pub output_width: u32,
+    pub output_height: u32,
 }
 
-impl Default for StreamSettings {
+impl Default for StreamTargetSettings {
     fn default() -> Self {
         Self {
+            enabled: true,
             service: fcap_stream::StreamService::Twitch,
+            canvas: StreamCanvas::Main,
             ingest_url: String::new(),
             stream_key: String::new(),
             encoder_id: "auto".to_owned(),
@@ -164,15 +264,17 @@ impl Default for StreamSettings {
             keyframe_sec: 2.0,
             fps: 60,
             track: 1,
-            auto_record: false,
+            output_width: 0,
+            output_height: 0,
         }
     }
 }
 
-// Manual Debug so a debug-printed Settings can never leak the stream key.
-impl std::fmt::Debug for StreamSettings {
+// Manual Debug so a debug-printed Settings can never leak a stream key.
+impl std::fmt::Debug for StreamTargetSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamSettings")
+        f.debug_struct("StreamTargetSettings")
+            .field("enabled", &self.enabled)
             .field("service", &self.service)
             .field("ingest_url", &self.ingest_url)
             .field(
@@ -187,18 +289,30 @@ impl std::fmt::Debug for StreamSettings {
             .field("bitrate_kbps", &self.bitrate_kbps)
             .field("fps", &self.fps)
             .field("track", &self.track)
-            .field("auto_record", &self.auto_record)
             .finish()
     }
 }
 
-impl StreamSettings {
+impl StreamTargetSettings {
     pub fn validate(&self) -> Result<(), String> {
-        if !self.ingest_url.is_empty()
-            && !self.ingest_url.starts_with("rtmp://")
-            && !self.ingest_url.starts_with("rtmps://")
-        {
-            return Err("the ingest URL must start with rtmp:// or rtmps://".to_owned());
+        if !self.ingest_url.is_empty() {
+            let scheme_ok = match self.service.protocol() {
+                fcap_stream::StreamProtocol::Rtmp => {
+                    self.ingest_url.starts_with("rtmp://")
+                        || self.ingest_url.starts_with("rtmps://")
+                }
+                fcap_stream::StreamProtocol::Srt => self.ingest_url.starts_with("srt://"),
+                fcap_stream::StreamProtocol::Whip => {
+                    self.ingest_url.starts_with("https://")
+                        || self.ingest_url.starts_with("http://")
+                }
+            };
+            if !scheme_ok {
+                return Err(
+                    "the ingest URL scheme doesn't match the service (rtmp(s):// / srt:// / https:// for WHIP)"
+                        .to_owned(),
+                );
+            }
         }
         for field in [&self.ingest_url, &self.stream_key] {
             if field.len() > 512 || field.chars().any(char::is_control) {
@@ -227,6 +341,116 @@ impl StreamSettings {
         }
         if !(1..=6).contains(&self.track) {
             return Err("the stream track must be 1–6".to_owned());
+        }
+        for size in [self.output_width, self.output_height] {
+            if size != 0 && !(16..=16_384).contains(&size) {
+                return Err("output size out of range (16–16384, 0 = canvas)".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Live-stream configuration (Settings → Stream): the target list — Go Live
+/// publishes to every enabled target at once, and targets with **equal
+/// encode settings share one encode** (Phase 6 multistream) — plus the
+/// auto-record toggle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "StreamSettingsWire", rename_all = "camelCase")]
+pub struct StreamSettings {
+    pub targets: Vec<StreamTargetSettings>,
+    /// TASK-508: start a local recording automatically on Go Live.
+    pub auto_record: bool,
+}
+
+impl Default for StreamSettings {
+    fn default() -> Self {
+        Self {
+            targets: vec![StreamTargetSettings::default()],
+            auto_record: false,
+        }
+    }
+}
+
+/// The on-disk shape, tolerant of the 0.70.0 single-target layout: when no
+/// `targets` list exists yet, the old flat fields migrate into `targets[0]`.
+#[derive(Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct StreamSettingsWire {
+    targets: Option<Vec<StreamTargetSettings>>,
+    auto_record: bool,
+    // The 0.70.0 flat single-target fields.
+    service: fcap_stream::StreamService,
+    ingest_url: String,
+    stream_key: String,
+    encoder_id: String,
+    bitrate_kbps: u32,
+    audio_bitrate_kbps: u32,
+    keyframe_sec: f32,
+    fps: u32,
+    track: u8,
+}
+
+impl Default for StreamSettingsWire {
+    fn default() -> Self {
+        let target = StreamTargetSettings::default();
+        Self {
+            targets: None,
+            auto_record: false,
+            service: target.service,
+            ingest_url: target.ingest_url,
+            stream_key: target.stream_key,
+            encoder_id: target.encoder_id,
+            bitrate_kbps: target.bitrate_kbps,
+            audio_bitrate_kbps: target.audio_bitrate_kbps,
+            keyframe_sec: target.keyframe_sec,
+            fps: target.fps,
+            track: target.track,
+        }
+    }
+}
+
+impl From<StreamSettingsWire> for StreamSettings {
+    fn from(wire: StreamSettingsWire) -> Self {
+        let targets = match wire.targets {
+            Some(targets) => targets,
+            None => vec![StreamTargetSettings {
+                enabled: true,
+                service: wire.service,
+                canvas: StreamCanvas::Main,
+                ingest_url: wire.ingest_url,
+                stream_key: wire.stream_key,
+                encoder_id: wire.encoder_id,
+                bitrate_kbps: wire.bitrate_kbps,
+                audio_bitrate_kbps: wire.audio_bitrate_kbps,
+                keyframe_sec: wire.keyframe_sec,
+                fps: wire.fps,
+                track: wire.track,
+                output_width: 0,
+                output_height: 0,
+            }],
+        };
+        StreamSettings {
+            targets,
+            auto_record: wire.auto_record,
+        }
+    }
+}
+
+impl StreamSettings {
+    /// The most simultaneous targets Go Live will drive (encoder sessions
+    /// and upload bandwidth are finite; this bound keeps the UI honest).
+    pub const MAX_TARGETS: usize = 6;
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.targets.len() > Self::MAX_TARGETS {
+            return Err(format!(
+                "at most {} stream targets are supported",
+                Self::MAX_TARGETS
+            ));
+        }
+        for target in &self.targets {
+            target.validate()?;
         }
         Ok(())
     }
@@ -308,6 +532,13 @@ pub struct RecordingSettings {
     pub filename_prefix: String,
     /// Split into playable segments every N minutes (0 = off).
     pub split_minutes: u32,
+    /// Also record the second (vertical) canvas when one is configured —
+    /// a parallel `… (vertical)` file with the same settings (Phase 6).
+    pub record_vertical: bool,
+    /// Encode at this size instead of the canvas size (0 = canvas). Wire
+    /// containers only — the lossless .frec always records the canvas.
+    pub output_width: u32,
+    pub output_height: u32,
 }
 
 impl Default for RecordingSettings {
@@ -328,6 +559,9 @@ impl Default for RecordingSettings {
             folder: String::new(),
             filename_prefix: "Freally Capture".to_owned(),
             split_minutes: 0,
+            record_vertical: false,
+            output_width: 0,
+            output_height: 0,
         }
     }
 }
@@ -362,6 +596,11 @@ impl RecordingSettings {
         }
         if self.split_minutes > 24 * 60 {
             return Err("split interval over 24 h".to_owned());
+        }
+        for size in [self.output_width, self.output_height] {
+            if size != 0 && !(16..=16_384).contains(&size) {
+                return Err("output size out of range (16–16384, 0 = canvas)".to_owned());
+            }
         }
         if self.folder.len() > 1024 || self.folder.chars().any(char::is_control) {
             return Err("invalid recording folder".to_owned());
@@ -400,6 +639,7 @@ impl Settings {
         self.recording.validate()?;
         self.remote.validate()?;
         self.stream.validate()?;
+        self.replay.validate()?;
         self.transition.validate()?;
         self.hotkeys.validate()?;
         Ok(())
@@ -597,20 +837,37 @@ mod tests {
                 turn_credential: "s3cret".to_owned(),
             },
             stream: StreamSettings {
-                service: fcap_stream::StreamService::YouTube,
-                stream_key: "yt-key".to_owned(),
-                bitrate_kbps: 4_500,
+                targets: vec![
+                    StreamTargetSettings {
+                        service: fcap_stream::StreamService::YouTube,
+                        stream_key: "yt-key".to_owned(),
+                        bitrate_kbps: 4_500,
+                        ..StreamTargetSettings::default()
+                    },
+                    StreamTargetSettings {
+                        service: fcap_stream::StreamService::Twitch,
+                        stream_key: "tw-key".to_owned(),
+                        track: 2,
+                        ..StreamTargetSettings::default()
+                    },
+                ],
                 auto_record: true,
-                ..StreamSettings::default()
+            },
+            replay: ReplaySettings {
+                seconds: 60,
+                ..ReplaySettings::default()
             },
             transition: TransitionSettings {
                 kind: fcap_scene::TransitionKind::SlideLeft,
                 duration_ms: 500,
+                ..TransitionSettings::default()
             },
             hotkeys: HotkeySettings {
                 record: Some("Ctrl+Shift+R".to_owned()),
                 go_live: None,
                 transition: Some("F13".to_owned()),
+                save_replay: Some("Ctrl+Shift+S".to_owned()),
+                add_marker: None,
             },
         };
         store.set(next.clone()).expect("save settings");
@@ -682,7 +939,10 @@ mod tests {
     #[test]
     fn debug_never_prints_the_stream_key() {
         let settings = StreamSettings {
-            stream_key: "live_secret_key".to_owned(),
+            targets: vec![StreamTargetSettings {
+                stream_key: "live_secret_key".to_owned(),
+                ..StreamTargetSettings::default()
+            }],
             ..StreamSettings::default()
         };
         let printed = format!("{settings:?}");
@@ -696,38 +956,77 @@ mod tests {
     #[test]
     fn validate_bounds_the_stream_settings() {
         assert!(Settings::default().validate().is_ok());
+        let with = |target: StreamTargetSettings| StreamSettings {
+            targets: vec![target],
+            ..StreamSettings::default()
+        };
         for (bad, why) in [
             (
-                StreamSettings {
+                with(StreamTargetSettings {
                     ingest_url: "http://nope".to_owned(),
-                    ..StreamSettings::default()
-                },
+                    ..StreamTargetSettings::default()
+                }),
                 "scheme",
             ),
             (
-                StreamSettings {
+                with(StreamTargetSettings {
                     bitrate_kbps: 100,
-                    ..StreamSettings::default()
-                },
+                    ..StreamTargetSettings::default()
+                }),
                 "bitrate",
             ),
             (
-                StreamSettings {
+                with(StreamTargetSettings {
                     track: 0,
-                    ..StreamSettings::default()
-                },
+                    ..StreamTargetSettings::default()
+                }),
                 "track",
             ),
             (
-                StreamSettings {
+                with(StreamTargetSettings {
                     stream_key: "x\u{0007}".to_owned(),
+                    ..StreamTargetSettings::default()
+                }),
+                "control chars",
+            ),
+            (
+                StreamSettings {
+                    targets: vec![StreamTargetSettings::default(); 7],
                     ..StreamSettings::default()
                 },
-                "control chars",
+                "too many targets",
             ),
         ] {
             assert!(bad.validate().is_err(), "should reject: {why}");
         }
+    }
+
+    #[test]
+    fn a_single_target_070_stream_settings_file_migrates_into_the_list() {
+        // The exact flat shape 0.70.0 wrote — no `targets` key.
+        let legacy = r#"{
+            "stream": {
+                "service": "youTube",
+                "ingestUrl": "",
+                "streamKey": "yt-legacy-key",
+                "encoderId": "auto",
+                "bitrateKbps": 4500,
+                "audioBitrateKbps": 160,
+                "keyframeSec": 2.0,
+                "fps": 60,
+                "track": 3,
+                "autoRecord": true
+            }
+        }"#;
+        let settings: Settings = serde_json::from_str(legacy).expect("parses");
+        assert_eq!(settings.stream.targets.len(), 1);
+        let target = &settings.stream.targets[0];
+        assert!(target.enabled);
+        assert_eq!(target.service, fcap_stream::StreamService::YouTube);
+        assert_eq!(target.stream_key, "yt-legacy-key");
+        assert_eq!(target.bitrate_kbps, 4_500);
+        assert_eq!(target.track, 3);
+        assert!(settings.stream.auto_record);
     }
 
     #[test]

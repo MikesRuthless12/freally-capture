@@ -63,6 +63,31 @@ fn fs_chroma_key(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb, alpha);
 }
 
+// -- Color key ------------------------------------------------------------------
+// Key out an arbitrary color by RGB distance (non-green backdrops).
+// p0 = (key.r, key.g, key.b, similarity) · p1 = (smoothness, 0, 0, 0)
+@fragment
+fn fs_color_key(in: VsOut) -> @location(0) vec4<f32> {
+    let color = textureSample(t_in, s_clamp, in.uv);
+    let dist = distance(color.rgb, f.p0.xyz) / sqrt(3.0);
+    let base = dist - f.p0.w;
+    let mask = pow(clamp(base / max(f.p1.x, 1e-4), 0.0, 1.0), 1.5);
+    return vec4<f32>(color.rgb, color.a * mask);
+}
+
+// -- Luma key ---------------------------------------------------------------------
+// Key on brightness: outside [min, max] goes transparent, soft edges.
+// p0 = (luma_min, luma_max, smoothness, 0)
+@fragment
+fn fs_luma_key(in: VsOut) -> @location(0) vec4<f32> {
+    let color = textureSample(t_in, s_clamp, in.uv);
+    let l = luma(color.rgb);
+    let soft = max(f.p0.z, 1e-4);
+    let above = smoothstep(f.p0.x - soft, f.p0.x, l);
+    let below = 1.0 - smoothstep(f.p0.y, f.p0.y + soft, l);
+    return vec4<f32>(color.rgb, color.a * above * below);
+}
+
 // -- Color correction ---------------------------------------------------------
 // m0..m2 = combined contrast/brightness/saturation/hue affine matrix;
 // p0 = (gamma_exponent, opacity, 0, 0)

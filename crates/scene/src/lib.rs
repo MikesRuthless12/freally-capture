@@ -30,8 +30,8 @@ pub use audio::{
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
 pub use scene::{
-    BlendMode, Corner, Crop, FocusRestore, FocusState, ItemId, NormRect, Scene, SceneId, SceneItem,
-    Transform, TransitionKind,
+    BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, ItemId, NormRect, Scene,
+    SceneAudioOverride, SceneId, SceneItem, SourceGroup, Transform, TransitionKind,
 };
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 
@@ -74,6 +74,12 @@ pub enum SceneError {
     SourceNotAudio,
     #[error("slot outside the canvas (normalized 0..=1)")]
     InvalidSlot,
+    #[error("a nested scene cannot contain itself (directly or through other scenes)")]
+    SceneCycle,
+    #[error("group not found")]
+    GroupNotFound,
+    #[error("an item can belong to only one group")]
+    AlreadyGrouped,
 }
 
 fn default_format_version() -> u32 {
@@ -112,6 +118,23 @@ pub struct Collection {
     pub scenes: Vec<Scene>,
     /// Always a valid scene id after any constructor or mutation.
     pub active_scene: SceneId,
+    /// The optional second output canvas (Phase 6, TASK-604): e.g. a
+    /// vertical 9:16 feed composed from any scene in the collection,
+    /// recordable/streamable independently of the program canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical: Option<VerticalCanvas>,
+}
+
+/// The second canvas: its own size + the scene it composes. Item transforms
+/// are canvas-pixel-based, so an item sits at the same pixel spot on either
+/// canvas — arrange the chosen scene for these dimensions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerticalCanvas {
+    pub width: u32,
+    pub height: u32,
+    /// The scene this canvas composes (independent of the program scene).
+    pub scene: SceneId,
 }
 
 impl Default for Collection {
@@ -132,6 +155,7 @@ impl Collection {
             sources: Vec::new(),
             scenes: vec![scene],
             active_scene: active,
+            vertical: None,
         }
     }
 
@@ -158,10 +182,60 @@ impl Collection {
         {
             self.active_scene = self.scenes[0].id;
         }
+        // The vertical canvas must point at a real scene with sane bounds.
+        if let Some(vertical) = &mut self.vertical {
+            vertical.width = vertical.width.clamp(1, MAX_CANVAS_DIMENSION);
+            vertical.height = vertical.height.clamp(1, MAX_CANVAS_DIMENSION);
+            let scene = vertical.scene;
+            if !self.scenes.iter().any(|s| s.id == scene) {
+                self.vertical = None;
+            }
+        }
+        // Nested-scene sources with a missing target render nothing forever —
+        // drop them (their items go with the dangling-source pass below).
+        let scene_ids: Vec<SceneId> = self.scenes.iter().map(|scene| scene.id).collect();
+        self.sources.retain(|source| {
+            !matches!(&source.settings, SourceSettings::NestedScene { scene } if !scene_ids.contains(scene))
+        });
+        // A hand-edited file could hold a nested-scene cycle the engine must
+        // never walk: drop any nested source whose target reaches back to a
+        // scene showing it.
+        let cyclic: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter_map(|source| match &source.settings {
+                SourceSettings::NestedScene { scene: target } => {
+                    let cycles = self.scenes.iter().any(|holder| {
+                        holder.items.iter().any(|item| item.source == source.id)
+                            && (*target == holder.id || self.scene_reaches(*target, holder.id))
+                    });
+                    cycles.then_some(source.id)
+                }
+                _ => None,
+            })
+            .collect();
+        self.sources.retain(|source| !cyclic.contains(&source.id));
         // Drop items pointing at sources that don't exist…
         let source_ids: Vec<SourceId> = self.sources.iter().map(|source| source.id).collect();
         for scene in &mut self.scenes {
             scene.items.retain(|item| source_ids.contains(&item.source));
+            // Groups only ever reference live items; empty groups go.
+            scene.prune_groups();
+        }
+        // Per-scene mixer overrides stay bounded and only on audio sources.
+        let audio_ids: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|source| source.settings.has_audio())
+            .map(|source| source.id)
+            .collect();
+        for scene in &mut self.scenes {
+            scene
+                .audio_overrides
+                .retain(|entry| audio_ids.contains(&entry.source));
+            for entry in &mut scene.audio_overrides {
+                entry.volume_db = entry.volume_db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB);
+            }
         }
         // …then sources nothing references.
         self.gc_sources();
@@ -253,8 +327,46 @@ impl Collection {
         if self.active_scene == id {
             self.active_scene = self.scenes[index.min(self.scenes.len() - 1)].id;
         }
+        if self.vertical.is_some_and(|vertical| vertical.scene == id) {
+            self.vertical = None; // its scene is gone — the canvas goes dark honestly
+        }
+        // Nested-scene sources pointing at the removed scene die with it.
+        let dead: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|source| {
+                matches!(&source.settings, SourceSettings::NestedScene { scene } if *scene == id)
+            })
+            .map(|source| source.id)
+            .collect();
+        if !dead.is_empty() {
+            for scene in &mut self.scenes {
+                scene.items.retain(|item| !dead.contains(&item.source));
+                scene.prune_groups();
+            }
+        }
         self.gc_sources();
         Ok(())
+    }
+
+    /// Configure (or clear, with `None`) the second output canvas
+    /// (Phase 6, TASK-604). The scene must exist; dimensions clamp.
+    pub fn set_vertical(&mut self, vertical: Option<VerticalCanvas>) -> Result<(), SceneError> {
+        match vertical {
+            None => {
+                self.vertical = None;
+                Ok(())
+            }
+            Some(mut config) => {
+                if !self.scenes.iter().any(|scene| scene.id == config.scene) {
+                    return Err(SceneError::SceneNotFound);
+                }
+                config.width = config.width.clamp(1, MAX_CANVAS_DIMENSION);
+                config.height = config.height.clamp(1, MAX_CANVAS_DIMENSION);
+                self.vertical = Some(config);
+                Ok(())
+            }
+        }
     }
 
     /// Move a scene to `to_index` in the rail (clamped).
@@ -340,9 +452,56 @@ impl Collection {
         id: SourceId,
         settings: SourceSettings,
     ) -> Result<(), SceneError> {
+        // Repointing a nested-scene source must not create a cycle through
+        // any scene that shows it.
+        if let SourceSettings::NestedScene { scene: target } = &settings {
+            let target = *target;
+            if self.scene(target).is_none() {
+                return Err(SceneError::SceneNotFound);
+            }
+            let holders: Vec<SceneId> = self
+                .scenes
+                .iter()
+                .filter(|scene| scene.items.iter().any(|item| item.source == id))
+                .map(|scene| scene.id)
+                .collect();
+            for holder in holders {
+                if holder == target || self.scene_reaches(target, holder) {
+                    return Err(SceneError::SceneCycle);
+                }
+            }
+        }
         let source = self.source_mut(id).ok_or(SceneError::SourceNotFound)?;
         source.settings = settings;
         Ok(())
+    }
+
+    /// Whether composing `from` (walking its nested-scene sources
+    /// transitively) eventually reaches `needle`. Cycle-safe on its own —
+    /// visited scenes are walked once.
+    pub fn scene_reaches(&self, from: SceneId, needle: SceneId) -> bool {
+        let mut stack = vec![from];
+        let mut visited: Vec<SceneId> = Vec::new();
+        while let Some(current) = stack.pop() {
+            if current == needle {
+                return true;
+            }
+            if visited.contains(&current) {
+                continue;
+            }
+            visited.push(current);
+            let Some(scene) = self.scene(current) else {
+                continue;
+            };
+            for item in &scene.items {
+                if let Some(source) = self.source(item.source) {
+                    if let SourceSettings::NestedScene { scene: target } = &source.settings {
+                        stack.push(*target);
+                    }
+                }
+            }
+        }
+        false
     }
 
     // -- items -------------------------------------------------------------
@@ -358,10 +517,14 @@ impl Collection {
         }
         let source_id = source.id;
         self.sources.push(source);
-        let item_id = self
-            .add_item_with_existing_source(scene_id, source_id)
-            .expect("scene and source were just verified");
-        Ok((source_id, item_id))
+        match self.add_item_with_existing_source(scene_id, source_id) {
+            Ok(item_id) => Ok((source_id, item_id)),
+            Err(err) => {
+                // Roll the pool push back (a rejected nested-scene cycle).
+                self.sources.retain(|source| source.id != source_id);
+                Err(err)
+            }
+        }
     }
 
     /// Place an existing pool source on top of `scene_id` (source sharing).
@@ -379,8 +542,22 @@ impl Collection {
         let Some(source) = self.source(source_id) else {
             return Err(SceneError::SourceNotFound);
         };
+        // A nested-scene source must never make a scene contain itself.
+        if let SourceSettings::NestedScene { scene: target } = &source.settings {
+            let target = *target;
+            if self.scene(target).is_none() {
+                return Err(SceneError::SceneNotFound);
+            }
+            if target == scene_id || self.scene_reaches(target, scene_id) {
+                return Err(SceneError::SceneCycle);
+            }
+        }
         let seat = if source.settings.is_audio_only() {
             None
+        } else if matches!(source.settings, SourceSettings::ChatOverlay { .. }) {
+            // The classic spot for a chat feed (the spec's default) — still
+            // freely draggable afterwards.
+            Some(scene::Corner::TopRight.slot())
         } else {
             self.free_corner_for_new_item(scene_id)
         };
@@ -437,6 +614,7 @@ impl Collection {
             .position(|item| item.id == item_id)
             .ok_or(SceneError::ItemNotFound)?;
         scene.items.remove(index);
+        scene.prune_groups();
         self.gc_sources();
         Ok(())
     }
@@ -475,11 +653,136 @@ impl Collection {
         item_id: ItemId,
         transform: Transform,
     ) -> Result<(), SceneError> {
-        let item = self.item_mut(scene_id, item_id)?;
-        item.transform = transform;
-        // A user-driven transform supersedes any pending first-frame placement.
-        item.pending_fit = false;
-        item.pending_slot = None;
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let old = scene
+            .item(item_id)
+            .ok_or(SceneError::ItemNotFound)?
+            .transform;
+        {
+            let item = scene.item_mut(item_id).expect("checked above");
+            item.transform = transform;
+            // A user-driven transform supersedes any pending first-frame placement.
+            item.pending_fit = false;
+            item.pending_slot = None;
+        }
+        // Grouped items move as one: a translation carries the group along
+        // (scale / rotate / crop stay per-item).
+        let (dx, dy) = (transform.x - old.x, transform.y - old.y);
+        if dx != 0.0 || dy != 0.0 {
+            let mates: Vec<ItemId> = scene
+                .group_of(item_id)
+                .map(|group| group.items.clone())
+                .unwrap_or_default();
+            for mate in mates {
+                if mate == item_id {
+                    continue;
+                }
+                if let Some(item) = scene.item_mut(mate) {
+                    item.transform.x += dx;
+                    item.transform.y += dy;
+                    item.pending_fit = false;
+                    item.pending_slot = None;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // -- source groups (Phase 6) --------------------------------------------
+
+    /// Group `items` (all in `scene_id`, none already grouped) so they move
+    /// and show/hide together.
+    pub fn create_group(
+        &mut self,
+        scene_id: SceneId,
+        name: &str,
+        items: &[ItemId],
+    ) -> Result<GroupId, SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if items.is_empty() {
+            return Err(SceneError::ItemNotFound);
+        }
+        for id in items {
+            if scene.item(*id).is_none() {
+                return Err(SceneError::ItemNotFound);
+            }
+            if scene.group_of(*id).is_some() {
+                return Err(SceneError::AlreadyGrouped);
+            }
+        }
+        let name = name.trim();
+        let group = scene::SourceGroup {
+            id: GroupId::new(),
+            name: if name.is_empty() {
+                format!("Group {}", scene.groups.len() + 1)
+            } else {
+                name.to_string()
+            },
+            items: items.to_vec(),
+            visible: true,
+        };
+        let id = group.id;
+        scene.groups.push(group);
+        Ok(id)
+    }
+
+    /// Dissolve a group — its items stay exactly where they are.
+    pub fn ungroup(&mut self, scene_id: SceneId, group: GroupId) -> Result<(), SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let before = scene.groups.len();
+        scene.groups.retain(|candidate| candidate.id != group);
+        if scene.groups.len() == before {
+            return Err(SceneError::GroupNotFound);
+        }
+        Ok(())
+    }
+
+    /// A group's eye toggle — hides/shows every member together (ANDs with
+    /// each member's own visibility).
+    pub fn set_group_visible(
+        &mut self,
+        scene_id: SceneId,
+        group: GroupId,
+        visible: bool,
+    ) -> Result<(), SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let group = scene
+            .groups
+            .iter_mut()
+            .find(|candidate| candidate.id == group)
+            .ok_or(SceneError::GroupNotFound)?;
+        group.visible = visible;
+        Ok(())
+    }
+
+    // -- per-scene audio (Phase 6) -------------------------------------------
+
+    /// Set (or clear, with `None`) a source's per-scene mixer override:
+    /// while `scene_id` is the program, the override replaces the source's
+    /// global fader/mute.
+    pub fn set_scene_audio_override(
+        &mut self,
+        scene_id: SceneId,
+        source: SourceId,
+        override_: Option<(f32, bool)>,
+    ) -> Result<(), SceneError> {
+        let has_audio = self
+            .source(source)
+            .ok_or(SceneError::SourceNotFound)?
+            .settings
+            .has_audio();
+        if !has_audio {
+            return Err(SceneError::SourceNotAudio);
+        }
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        scene.audio_overrides.retain(|entry| entry.source != source);
+        if let Some((volume_db, muted)) = override_ {
+            scene.audio_overrides.push(scene::SceneAudioOverride {
+                source,
+                volume_db: volume_db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB),
+                muted,
+            });
+        }
         Ok(())
     }
 
@@ -2871,5 +3174,201 @@ mod tests {
                 .unwrap()
                 .pending_fit
         );
+    }
+
+    #[test]
+    fn nested_scene_cycles_are_rejected() {
+        let mut collection = Collection::new();
+        let scene_a = collection.active_scene;
+        let scene_b = collection.add_scene("Inner");
+
+        // A shows B — fine.
+        let (nested_b, _) = collection
+            .add_item_with_new_source(
+                scene_a,
+                Source::new("Inner view", SourceSettings::NestedScene { scene: scene_b }),
+            )
+            .expect("A can nest B");
+
+        // B showing A would loop A→B→A.
+        let err = collection
+            .add_item_with_new_source(
+                scene_b,
+                Source::new("Loop", SourceSettings::NestedScene { scene: scene_a }),
+            )
+            .unwrap_err();
+        assert_eq!(err, SceneError::SceneCycle);
+        assert!(
+            !collection
+                .sources
+                .iter()
+                .any(|source| source.name == "Loop"),
+            "the rejected source rolled back out of the pool"
+        );
+
+        // A scene can never nest itself.
+        let err = collection
+            .add_item_with_new_source(
+                scene_a,
+                Source::new("Selfie", SourceSettings::NestedScene { scene: scene_a }),
+            )
+            .unwrap_err();
+        assert_eq!(err, SceneError::SceneCycle);
+
+        // Repointing the existing nested source at its holder loops too.
+        let err = collection
+            .update_source_settings(nested_b, SourceSettings::NestedScene { scene: scene_a })
+            .unwrap_err();
+        assert_eq!(err, SceneError::SceneCycle);
+
+        // Removing B kills the nested source that showed it.
+        collection.remove_scene(scene_b).expect("removable");
+        assert!(collection.source(nested_b).is_none());
+        assert!(collection.scene(scene_a).expect("A lives").items.is_empty());
+    }
+
+    #[test]
+    fn groups_move_and_hide_together() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_, item_a) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 100,
+                        height: 100,
+                    },
+                ),
+            )
+            .expect("adds");
+        let (_, item_b) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Logo",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 10,
+                        height: 10,
+                    },
+                ),
+            )
+            .expect("adds");
+
+        let group = collection
+            .create_group(scene, "Overlay", &[item_a, item_b])
+            .expect("groups");
+        assert_eq!(
+            collection
+                .create_group(scene, "Again", &[item_a])
+                .unwrap_err(),
+            SceneError::AlreadyGrouped
+        );
+
+        // Moving one member carries the other by the same delta.
+        let before_b = collection
+            .scene(scene)
+            .unwrap()
+            .item(item_b)
+            .unwrap()
+            .transform;
+        let mut moved = collection
+            .scene(scene)
+            .unwrap()
+            .item(item_a)
+            .unwrap()
+            .transform;
+        moved.x += 40.0;
+        moved.y -= 10.0;
+        collection
+            .set_item_transform(scene, item_a, moved)
+            .expect("moves");
+        let after_b = collection
+            .scene(scene)
+            .unwrap()
+            .item(item_b)
+            .unwrap()
+            .transform;
+        assert_eq!(after_b.x, before_b.x + 40.0);
+        assert_eq!(after_b.y, before_b.y - 10.0);
+
+        // The group eye hides every member (without touching their own flag).
+        collection
+            .set_group_visible(scene, group, false)
+            .expect("hides");
+        let scene_ref = collection.scene(scene).unwrap();
+        assert!(scene_ref.group_hides(item_a));
+        assert!(scene_ref.group_hides(item_b));
+        assert!(
+            scene_ref.item(item_a).unwrap().visible,
+            "own flag untouched"
+        );
+
+        // Removing a member prunes it from the group; the last removal
+        // dissolves the group.
+        collection.remove_item(scene, item_a).expect("removes");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .unwrap()
+                .group_of(item_b)
+                .map(|g| g.id),
+            Some(group)
+        );
+        collection.remove_item(scene, item_b).expect("removes");
+        assert!(collection.scene(scene).unwrap().groups.is_empty());
+    }
+
+    #[test]
+    fn per_scene_audio_overrides_apply_and_sanitize() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (mic, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Mic",
+                    SourceSettings::AudioInput {
+                        device_id: String::new(),
+                    },
+                ),
+            )
+            .expect("adds");
+        let (color, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Block",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 8,
+                        height: 8,
+                    },
+                ),
+            )
+            .expect("adds");
+
+        assert_eq!(
+            collection
+                .set_scene_audio_override(scene, color, Some((0.0, false)))
+                .unwrap_err(),
+            SceneError::SourceNotAudio
+        );
+
+        collection
+            .set_scene_audio_override(scene, mic, Some((-990.0, true)))
+            .expect("sets");
+        let entry = collection.scene(scene).unwrap().audio_overrides[0];
+        assert_eq!(entry.volume_db, MIN_VOLUME_DB, "clamped");
+        assert!(entry.muted);
+
+        // Clearing removes the entry.
+        collection
+            .set_scene_audio_override(scene, mic, None)
+            .expect("clears");
+        assert!(collection.scene(scene).unwrap().audio_overrides.is_empty());
     }
 }

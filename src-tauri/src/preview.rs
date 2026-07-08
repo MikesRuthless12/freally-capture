@@ -23,6 +23,8 @@ pub struct PreviewState {
     latest: Mutex<Option<EncodedFrame>>,
     /// Studio Mode's preview-side scene (`/studio-preview`).
     studio_preview: Mutex<Option<EncodedFrame>>,
+    /// The second (vertical) canvas (`/vertical-preview`).
+    vertical_preview: Mutex<Option<EncodedFrame>>,
     frame_seq: AtomicU64,
 }
 
@@ -41,6 +43,15 @@ impl PreviewState {
             .studio_preview
             .lock()
             .expect("studio preview slot poisoned") = jpeg.map(|jpeg| EncodedFrame { jpeg, seq });
+    }
+
+    /// Park the vertical canvas's JPEG (None clears it — canvas off).
+    pub fn publish_vertical_preview(&self, jpeg: Option<Vec<u8>>) {
+        let seq = self.frame_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        *self
+            .vertical_preview
+            .lock()
+            .expect("vertical preview slot poisoned") = jpeg.map(|jpeg| EncodedFrame { jpeg, seq });
     }
 
     /// The `preview://` scheme body: newest JPEG or 204 while there is none.
@@ -64,6 +75,8 @@ impl PreviewState {
 
         let slot = if path.ends_with("studio-preview") {
             &self.studio_preview
+        } else if path.ends_with("vertical-preview") {
+            &self.vertical_preview
         } else {
             &self.latest
         };
@@ -123,6 +136,20 @@ mod tests {
             "http://tauri.localhost",
             "unknown origins never get themselves echoed back"
         );
+    }
+
+    #[test]
+    fn vertical_preview_rides_its_own_slot() {
+        let state = PreviewState::default();
+        state.publish(vec![1]);
+        state.publish_vertical_preview(Some(vec![9]));
+        let program = state.protocol_response(Some("http://tauri.localhost"), "/frame");
+        let vertical = state.protocol_response(Some("http://tauri.localhost"), "/vertical-preview");
+        assert_eq!(program.body().as_ref(), &[1]);
+        assert_eq!(vertical.body().as_ref(), &[9]);
+        state.publish_vertical_preview(None);
+        let cleared = state.protocol_response(Some("http://tauri.localhost"), "/vertical-preview");
+        assert_eq!(cleared.status(), 204);
     }
 
     #[test]

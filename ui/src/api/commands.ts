@@ -25,6 +25,7 @@ import type {
   NormRect,
   RecordingFile,
   RecordingStatus,
+  ReplayStatus,
   SceneId,
   Settings,
   SourceId,
@@ -32,6 +33,7 @@ import type {
   StreamStatus,
   StudioDto,
   Transform,
+  VerticalCanvas,
   VideoDevice,
   VideoFormat,
 } from "./types";
@@ -69,6 +71,41 @@ export function streamStop(): Promise<StreamStatus> {
 /** The current stream status (the `stream` event pushes the same shape). */
 export function streamStatus(): Promise<StreamStatus> {
   return invoke<StreamStatus>("stream_status");
+}
+
+// ---------------------------------------------------------------------------
+// Replay buffer (Phase 6)
+// ---------------------------------------------------------------------------
+
+/** Arm the rolling replay buffer (starts its background encode). */
+export function replayArm(): Promise<void> {
+  return invoke("replay_arm");
+}
+
+/** Disarm the replay buffer (drops the un-saved history). */
+export function replayDisarm(): Promise<void> {
+  return invoke("replay_disarm");
+}
+
+/** Save the last N seconds to the recordings folder; resolves to the path. */
+export function replaySave(): Promise<string> {
+  return invoke<string>("replay_save");
+}
+
+/** Float a reaction emoji over the program (TASK-614 — baked into what
+ * records and streams). */
+export function studioSendReaction(emoji: string): Promise<void> {
+  return invoke("studio_send_reaction", { emoji });
+}
+
+/** Drop a chapter marker at the current recording position (TASK-610). */
+export function recordingAddMarker(): Promise<number> {
+  return invoke<number>("recording_add_marker");
+}
+
+/** The current replay-buffer status (the `replay` event pushes the same). */
+export function replayStatus(): Promise<ReplayStatus> {
+  return invoke<ReplayStatus>("replay_status");
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +311,43 @@ export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise
 /** Studio Mode on/off (on = a preview pane opens on the program scene). */
 export function studioSetStudioMode(on: boolean): Promise<void> {
   return invoke("studio_set_studio_mode", { on });
+}
+
+/** Group items so they move / show / hide together (Phase 6). */
+export function studioCreateGroup(
+  sceneId: SceneId,
+  name: string,
+  itemIds: ItemId[],
+): Promise<string> {
+  return invoke<string>("studio_create_group", { sceneId, name, itemIds });
+}
+
+/** Dissolve a group — its items stay exactly where they are. */
+export function studioUngroup(sceneId: SceneId, groupId: string): Promise<void> {
+  return invoke("studio_ungroup", { sceneId, groupId });
+}
+
+/** A group's eye toggle — hides/shows every member together. */
+export function studioSetGroupVisible(
+  sceneId: SceneId,
+  groupId: string,
+  visible: boolean,
+): Promise<void> {
+  return invoke("studio_set_group_visible", { sceneId, groupId, visible });
+}
+
+/** Set (or clear, with `null`) a source's per-scene mixer override. */
+export function studioSetSceneAudioOverride(
+  sceneId: SceneId,
+  sourceId: SourceId,
+  over: { volumeDb: number; muted: boolean } | null,
+): Promise<void> {
+  return invoke("studio_set_scene_audio_override", { sceneId, sourceId, over });
+}
+
+/** Configure (or clear, with `null`) the second (vertical) output canvas. */
+export function studioSetVertical(vertical: VerticalCanvas | null): Promise<void> {
+  return invoke("studio_set_vertical", { vertical });
 }
 
 /** Point the Studio-Mode preview pane at a scene. */

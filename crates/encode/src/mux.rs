@@ -23,8 +23,8 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -287,10 +287,42 @@ pub fn video_args(
         // themselves.
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
-    if encoder_id.ends_with("_vaapi") {
-        args.extend(["-vf".into(), "format=nv12,hwupload".into()]);
-    }
+    // VAAPI's upload chain rides `color_and_scale_args` (one -vf per encode).
     args
+}
+
+/// The `-vf` chain + color metadata every wire encode gets (TASK-609):
+/// the RGB→YUV conversion pinned to **Rec.709** (swscale silently defaults
+/// to BT.601, which shifts HD colors), an optional output **downscale**
+/// (record/stream at a different resolution than the canvas), and VAAPI's
+/// nv12 upload. Dimensions floor to even (yuv420 needs it). HDR is out of
+/// scope honestly: the canvas is 8-bit SDR — these tags say exactly that.
+pub fn color_and_scale_args(encoder_id: &str, scale: Option<(u32, u32)>) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    match scale {
+        Some((width, height)) => chain.push(format!(
+            "scale={}:{}:flags=bicubic:out_color_matrix=bt709",
+            (width.max(2) / 2) * 2,
+            (height.max(2) / 2) * 2
+        )),
+        None => chain.push("scale=out_color_matrix=bt709".to_string()),
+    }
+    if encoder_id.ends_with("_vaapi") {
+        chain.push("format=nv12".into());
+        chain.push("hwupload".into());
+    }
+    vec![
+        "-vf".into(),
+        chain.join(","),
+        "-color_primaries".into(),
+        "bt709".into(),
+        "-color_trc".into(),
+        "bt709".into(),
+        "-colorspace".into(),
+        "bt709".into(),
+        "-color_range".into(),
+        "tv".into(),
+    ]
 }
 
 /// The audio-encoder args for a container (`aac` everywhere it is legal;
@@ -450,6 +482,8 @@ pub struct WirePlan {
     pub audio_bitrate_kbps: u32,
     /// Split into playable segments every N minutes (`None` = one file).
     pub split_minutes: Option<u32>,
+    /// Encode at this size instead of the canvas size (TASK-609 downscale).
+    pub scale: Option<(u32, u32)>,
     /// The output path (used as a `part%03d` template when splitting).
     pub path: PathBuf,
 }
@@ -542,6 +576,7 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
+        cmd.args(color_and_scale_args(&plan.encoder_id, plan.scale));
         if !spec.tracks.is_empty() {
             cmd.args(audio_args(plan.container, plan.audio_bitrate_kbps));
         }
@@ -615,9 +650,14 @@ impl FfmpegSink {
     }
 }
 
-/// What a live stream pushes and how (Phase 5): H.264 + AAC in FLV to an
-/// RTMP/RTMPS publish URL. One audio lane — the program mix. The URL embeds
-/// the stream key, so this struct redacts it from `Debug` (never logged).
+/// What a live stream pushes and how: one H.264 encode published to one or
+/// more URLs. One audio lane — the program mix. The container/protocol
+/// follows each URL's scheme: `rtmp(s)://` = FLV+AAC, `srt://` =
+/// MPEG-TS+AAC, `http(s)://` = the WHIP muxer (WebRTC, H.264+**Opus**).
+/// One URL is a plain publish; several share this single encode through
+/// ffmpeg's `tee` muxer (Phase 6 multistream — WHIP never shares: its audio
+/// codec differs). The URLs embed the stream keys, so this struct redacts
+/// them from `Debug` (never logged).
 #[derive(Clone)]
 pub struct RtmpPlan {
     pub encoder_id: String,
@@ -625,8 +665,21 @@ pub struct RtmpPlan {
     pub preset: EncPreset,
     pub keyframe_sec: f32,
     pub audio_bitrate_kbps: u32,
-    /// The full publish URL (`rtmp://…` or `rtmps://…`), key included.
-    pub url: String,
+    /// The full publish URLs, keys included.
+    /// One = plain publish; several = one shared encode fanned out via `tee`.
+    pub urls: Vec<String>,
+    /// Publish at this size instead of the canvas size (TASK-609 downscale).
+    pub scale: Option<(u32, u32)>,
+    /// The WHIP bearer token (SECRET). It rides ffmpeg's `-authorization`
+    /// option (the WebRTC `Authorization` header) and stays out of the
+    /// publish URL, out of every log, and out of any error string (Debug is
+    /// redacted; the stderr scrubber masks it). The one place it is visible
+    /// is the ffmpeg child's argv — same-user-readable, the *same* exposure
+    /// as the on-disk key and the RTMP/SRT keys that ride the publish URL;
+    /// this is a single-user local app, so a same-user process reading argv
+    /// already has the settings file. Only meaningful for one `http(s)://`
+    /// URL.
+    pub auth_bearer: Option<String>,
 }
 
 impl std::fmt::Debug for RtmpPlan {
@@ -637,31 +690,109 @@ impl std::fmt::Debug for RtmpPlan {
             .field("preset", &self.preset)
             .field("keyframe_sec", &self.keyframe_sec)
             .field("audio_bitrate_kbps", &self.audio_bitrate_kbps)
-            .field("url", &"[redacted publish url]")
+            .field(
+                "urls",
+                &format!("[{} redacted publish urls]", self.urls.len()),
+            )
+            .field(
+                "auth_bearer",
+                &self.auth_bearer.as_ref().map(|_| "[redacted]"),
+            )
             .finish()
     }
 }
 
-impl FfmpegSink {
-    /// Spawn the labeled ffmpeg component publishing FLV to an RTMP(S)
-    /// ingest. The streaming twin of [`FfmpegSink::spawn`]: the same
-    /// rawvideo-stdin and loopback-audio plumbing and backpressure rules,
-    /// with the muxer output aimed at the network instead of a file.
-    /// `spec.tracks` must name exactly one mixer track (the stream's
-    /// program audio).
-    pub fn spawn_rtmp(ffmpeg: &Ffmpeg, spec: &RecordSpec, plan: &RtmpPlan) -> Result<Self, String> {
-        if spec.tracks.len() != 1 {
-            return Err("a stream carries exactly one audio track".to_string());
-        }
-        if !(plan.url.starts_with("rtmp://") || plan.url.starts_with("rtmps://")) {
-            return Err("the publish URL must start with rtmp:// or rtmps://".to_string());
-        }
+/// Live telemetry a running RTMP sink reports back (Phase 6 multistream):
+/// per-slave tee failures and the muxer's bytes-out counter. The stream
+/// engine polls these; the channels outlive any single (re)spawn.
+#[derive(Clone, Default)]
+pub struct RtmpMonitor {
+    /// Tee slave indexes (the order of [`RtmpPlan::urls`]) ffmpeg reported
+    /// failed while the process kept publishing the rest (`onfail=ignore`).
+    pub slave_failures: Arc<Mutex<Vec<usize>>>,
+    /// Total bytes the muxer wrote (from `-progress`). Stays 0 when the
+    /// muxer can't tell (tee reports no aggregate size) — the caller falls
+    /// back to the configured bitrate, honestly.
+    pub bytes_out: Arc<AtomicU64>,
+}
 
+/// Whether a publish URL can ride inside a tee output spec without any
+/// escaping ambiguity. Tee splits slaves on `|`, reads `[options]` prefixes,
+/// and honors backslash/quote escapes — rather than escape, a URL using any
+/// of those characters simply gets its own ffmpeg process.
+pub fn tee_safe(url: &str) -> bool {
+    !url.contains(['|', '[', ']', '\'', '\\'])
+}
+
+/// The output format a publish URL's scheme implies.
+fn url_format(url: &str) -> &'static str {
+    if url.starts_with("srt://") {
+        "mpegts"
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        "whip"
+    } else {
+        "flv"
+    }
+}
+
+/// The `tee` muxer output spec: each slave publishes its scheme's container
+/// (FLV for RTMP, MPEG-TS for SRT), keeps publishing when a sibling fails
+/// (`onfail=ignore` — the engine splits the failed one out to its own
+/// reconnecting session), and FLV slaves skip the duration/filesize header
+/// fields a live ingest can't know.
+fn tee_output(urls: &[String]) -> String {
+    urls.iter()
+        .map(|url| match url_format(url) {
+            "flv" => format!("[f=flv:flvflags=no_duration_filesize:onfail=ignore]{url}"),
+            format => format!("[f={format}:onfail=ignore]{url}"),
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// The rolling replay ring's encoder plan (Phase 6): the same rawvideo +
+/// one-audio-lane plumbing as a stream, muxed into small **MPEG-TS
+/// segments** in `dir` — TS because it cuts cleanly mid-stream, so the
+/// in-progress segment can ride a save. The stream crate's ring logic
+/// prunes old segments; Save concat-copies the tail without re-encoding.
+#[derive(Debug, Clone)]
+pub struct ReplayPlan {
+    pub encoder_id: String,
+    pub rate_control: RateControl,
+    pub preset: EncPreset,
+    pub audio_bitrate_kbps: u32,
+    /// Segment granularity — also the keyframe cadence, so every segment
+    /// starts decodable.
+    pub segment_sec: u32,
+    /// The ring directory (transient; the app owns its lifetime).
+    pub dir: PathBuf,
+    /// First segment number for this (re)spawn — continues the ring's
+    /// numbering across an encoder respawn instead of colliding at 0.
+    pub start_number: u64,
+}
+
+/// The replay ring's segment filename prefix/extension — shared with the
+/// ring logic in `fcap-stream` so the two can never drift.
+pub const REPLAY_SEGMENT_PREFIX: &str = "replay-";
+pub const REPLAY_SEGMENT_EXT: &str = "ts";
+
+impl FfmpegSink {
+    /// Spawn the replay ring's encoder: segments land in `plan.dir` as
+    /// `replay-%09d.ts`, one keyframe per segment boundary. The sink itself
+    /// never deletes or returns files — the ring owner does.
+    pub fn spawn_replay(
+        ffmpeg: &Ffmpeg,
+        spec: &RecordSpec,
+        plan: &ReplayPlan,
+    ) -> Result<Self, String> {
+        if spec.tracks.len() != 1 {
+            return Err("the replay buffer carries exactly one audio track".to_string());
+        }
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
         let port = listener.local_addr().map_err(|err| err.to_string())?.port();
 
-        let keyint = (plan.keyframe_sec.max(0.25) * spec.fps as f32).round() as u32;
+        let keyint = plan.segment_sec.max(1) * spec.fps.max(1);
         let mut cmd = crate::ffmpeg::command(ffmpeg);
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -697,24 +828,32 @@ impl FfmpegSink {
             plan.preset,
             keyint,
         ));
-        // FLV requires AAC on this path (the Webm/Opus branch never applies).
-        cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps));
-        cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
-        cmd.arg(&plan.url);
+        cmd.args(color_and_scale_args(&plan.encoder_id, None));
+        cmd.args(audio_args(Container::Mp4, plan.audio_bitrate_kbps)); // AAC in TS
+        cmd.args([
+            "-f",
+            "segment",
+            "-segment_time",
+            &plan.segment_sec.max(1).to_string(),
+            "-reset_timestamps",
+            "1",
+            "-segment_format",
+            "mpegts",
+            "-segment_start_number",
+            &plan.start_number.to_string(),
+        ]);
+        cmd.arg(
+            plan.dir
+                .join(format!("{REPLAY_SEGMENT_PREFIX}%09d.{REPLAY_SEGMENT_EXT}")),
+        );
 
         let mut child = cmd
             .spawn()
             .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
         let stdin = child.stdin.take().expect("stdin piped");
         let stderr = child.stderr.take().expect("stderr piped");
-        // ffmpeg echoes the full output URL — **key included** — into stderr
-        // when the ingest rejects the connection (a wrong/expired key, the
-        // single most common failure). That tail flows into the user-visible
-        // error, so scrub the secret out at the source: the publish URL never
-        // survives into any string this sink hands back.
-        let secret = plan.url.clone();
         let stderr_thread = std::thread::Builder::new()
-            .name("fcap-stream-ffmpeg-err".into())
+            .name("fcap-replay-ffmpeg-err".into())
             .spawn(move || {
                 use std::io::Read;
                 let mut tail = Vec::new();
@@ -723,7 +862,239 @@ impl FfmpegSink {
                 if tail.len() > 4096 {
                     tail.drain(..tail.len() - 4096);
                 }
-                scrub_secret(&tail, secret.as_bytes())
+                tail
+            })
+            .map_err(|err| err.to_string())?;
+
+        let connect_cancel = Arc::new(AtomicBool::new(false));
+        let (video_tx, video_thread) = spawn_video_writer(stdin)?;
+        let lanes = vec![spawn_audio_writer(listener, Arc::clone(&connect_cancel))?];
+
+        Ok(FfmpegSink {
+            child,
+            video_tx: Some(video_tx),
+            video_thread: Some(video_thread),
+            lanes,
+            stderr_thread: Some(stderr_thread),
+            connect_cancel,
+            paths: Vec::new(), // the ring owner tracks the segment files
+            split: false,
+        })
+    }
+}
+
+/// Parse ffmpeg's tee slave-failure report — `Slave muxer #N failed…` (the
+/// same shape for a failed open and a failed write) — to the slave index.
+fn parse_slave_failure(line: &str) -> Option<usize> {
+    let rest = &line[line.find("Slave muxer #")? + "Slave muxer #".len()..];
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Parse a `-progress` key=value line's `total_size` (absent/`N/A` → None).
+fn parse_progress_size(line: &str) -> Option<u64> {
+    line.strip_prefix("total_size=")?.trim().parse().ok()
+}
+
+impl FfmpegSink {
+    /// Spawn the labeled ffmpeg component publishing FLV to one or more
+    /// RTMP(S) ingests. The streaming twin of [`FfmpegSink::spawn`]: the
+    /// same rawvideo-stdin and loopback-audio plumbing and backpressure
+    /// rules, with the muxer output aimed at the network instead of a file.
+    /// Several URLs share this single encode through the `tee` muxer — a
+    /// failed slave is reported into `monitor` while the rest keep
+    /// publishing. `spec.tracks` must name exactly one mixer track (the
+    /// stream's program audio).
+    pub fn spawn_rtmp(
+        ffmpeg: &Ffmpeg,
+        spec: &RecordSpec,
+        plan: &RtmpPlan,
+        monitor: &RtmpMonitor,
+    ) -> Result<Self, String> {
+        if spec.tracks.len() != 1 {
+            return Err("a stream carries exactly one audio track".to_string());
+        }
+        if plan.urls.is_empty() {
+            return Err("a stream needs at least one publish URL".to_string());
+        }
+        for url in &plan.urls {
+            if !(url.starts_with("rtmp://")
+                || url.starts_with("rtmps://")
+                || url.starts_with("srt://")
+                || url.starts_with("http://")
+                || url.starts_with("https://"))
+            {
+                return Err(
+                    "the publish URL must be rtmp(s)://, srt://, or http(s):// (WHIP)".to_string(),
+                );
+            }
+            if plan.urls.len() > 1 {
+                if url_format(url) == "whip" {
+                    return Err("a WHIP target cannot share an encode".to_string());
+                }
+                if !tee_safe(url) {
+                    return Err(
+                        "this publish URL cannot share an encode — give it its own".to_string()
+                    );
+                }
+            }
+        }
+        let whip = plan.urls.len() == 1 && url_format(&plan.urls[0]) == "whip";
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
+        let port = listener.local_addr().map_err(|err| err.to_string())?.port();
+
+        let keyint = (plan.keyframe_sec.max(0.25) * spec.fps as f32).round() as u32;
+        let mut cmd = crate::ffmpeg::command(ffmpeg);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped()) // `-progress` rides stdout (input is stdin)
+            .stderr(Stdio::piped());
+        cmd.args(["-hide_banner", "-v", "error", "-y"]);
+        cmd.args(["-progress", "pipe:1", "-stats_period", "1"]);
+        cmd.args(global_args(&plan.encoder_id));
+        cmd.args([
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            &format!("{}x{}", spec.width, spec.height),
+            "-r",
+            &spec.fps.to_string(),
+            "-i",
+            "pipe:0",
+        ]);
+        cmd.args([
+            "-f",
+            "f32le",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-i",
+            &format!("tcp://127.0.0.1:{port}"),
+        ]);
+        cmd.args(["-map", "0:v", "-map", "1:a"]);
+        cmd.args(video_args(
+            &plan.encoder_id,
+            &plan.rate_control,
+            plan.preset,
+            keyint,
+        ));
+        cmd.args(color_and_scale_args(&plan.encoder_id, plan.scale));
+        if whip {
+            // WebRTC: no B-frames (RTP H.264 reordering breaks receivers).
+            cmd.args(["-bf", "0"]);
+        }
+        // FLV/MPEG-TS carry AAC; WHIP (WebRTC) requires Opus — the Webm
+        // audio branch maps exactly onto that.
+        let audio_container = if whip {
+            Container::Webm
+        } else {
+            Container::Mp4
+        };
+        cmd.args(audio_args(audio_container, plan.audio_bitrate_kbps));
+        if plan.urls.len() == 1 {
+            match url_format(&plan.urls[0]) {
+                "mpegts" => {
+                    cmd.args(["-f", "mpegts"]);
+                }
+                "whip" => {
+                    cmd.args(["-f", "whip"]);
+                    if let Some(token) = plan.auth_bearer.as_deref().filter(|t| !t.is_empty()) {
+                        cmd.args(["-authorization", token]);
+                    }
+                }
+                _ => {
+                    cmd.args(["-f", "flv", "-flvflags", "no_duration_filesize"]);
+                }
+            }
+            cmd.arg(&plan.urls[0]);
+        } else {
+            // The tee muxer does NOT propagate its slave formats'
+            // global-header requirement to the encoder (a documented tee
+            // caveat), so without this the FLV/AAC slaves carry no
+            // AVCDecoderConfigurationRecord / AudioSpecificConfig and the
+            // ingest rejects the publish. A single-target `-f flv` sets the
+            // flag itself; the shared-encode path must set it explicitly.
+            cmd.args(["-flags", "+global_header"]);
+            cmd.args(["-f", "tee"]);
+            cmd.arg(tee_output(&plan.urls));
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
+        let stdin = child.stdin.take().expect("stdin piped");
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+
+        // ffmpeg echoes output URLs — **keys included** — into stderr when an
+        // ingest rejects the connection (a wrong/expired key, the single most
+        // common failure). That tail flows into the user-visible error, so
+        // scrub every publish URL out at the source, line by line: no secret
+        // survives into any string this sink hands back. The same reader
+        // watches for tee slave-failure reports so the stream engine can
+        // split a dead target out while the healthy ones keep publishing.
+        let mut secrets: Vec<Vec<u8>> = plan
+            .urls
+            .iter()
+            .map(|url| url.clone().into_bytes())
+            .collect();
+        if let Some(token) = plan.auth_bearer.as_deref().filter(|t| !t.is_empty()) {
+            secrets.push(token.as_bytes().to_vec());
+        }
+        let failures = Arc::clone(&monitor.slave_failures);
+        let stderr_thread = std::thread::Builder::new()
+            .name("fcap-stream-ffmpeg-err".into())
+            .spawn(move || {
+                use std::io::BufRead;
+                let mut tail: Vec<u8> = Vec::new();
+                let mut reader = std::io::BufReader::new(stderr);
+                let mut line = Vec::new();
+                loop {
+                    line.clear();
+                    match reader.read_until(b'\n', &mut line) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    let mut scrubbed = line.clone();
+                    for secret in &secrets {
+                        scrubbed = scrub_secret(&scrubbed, secret);
+                    }
+                    if let Some(slave) = parse_slave_failure(&String::from_utf8_lossy(&scrubbed)) {
+                        let mut failed = failures
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if failed.len() < 64 {
+                            failed.push(slave);
+                        }
+                    }
+                    tail.extend_from_slice(&scrubbed);
+                    if tail.len() > 4096 {
+                        tail.drain(..tail.len() - 4096);
+                    }
+                }
+                tail
+            })
+            .map_err(|err| err.to_string())?;
+
+        // `-progress` reports the muxer's bytes-out ~1 Hz — the honest
+        // measured bitrate for the stats dock (tee reports no aggregate
+        // size; the counter simply stays 0 there and the engine falls back
+        // to the configured bitrate).
+        let bytes_out = Arc::clone(&monitor.bytes_out);
+        std::thread::Builder::new()
+            .name("fcap-stream-ffmpeg-progress".into())
+            .spawn(move || {
+                use std::io::BufRead;
+                for line in std::io::BufReader::new(stdout).lines() {
+                    let Ok(line) = line else { break };
+                    if let Some(size) = parse_progress_size(&line) {
+                        bytes_out.store(size, Ordering::Relaxed);
+                    }
+                }
             })
             .map_err(|err| err.to_string())?;
 
@@ -1101,6 +1472,98 @@ mod tests {
         assert_eq!(scrub_secret(b"anything", b""), b"anything");
     }
 
+    #[test]
+    fn tee_output_publishes_flv_per_slave_and_survives_a_sibling() {
+        let urls = vec![
+            "rtmp://live.twitch.tv/app/key1".to_string(),
+            "rtmps://a.rtmp.youtube.com/live2/key2".to_string(),
+        ];
+        let spec = tee_output(&urls);
+        assert_eq!(
+            spec,
+            "[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmp://live.twitch.tv/app/key1\
+             |[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmps://a.rtmp.youtube.com/live2/key2"
+        );
+    }
+
+    #[test]
+    fn tee_output_muxes_each_slave_by_its_scheme() {
+        let urls = vec![
+            "rtmp://live.twitch.tv/app/key1".to_string(),
+            "srt://relay.lan:8890?streamid=publish:cam".to_string(),
+        ];
+        assert_eq!(
+            tee_output(&urls),
+            "[f=flv:flvflags=no_duration_filesize:onfail=ignore]rtmp://live.twitch.tv/app/key1\
+             |[f=mpegts:onfail=ignore]srt://relay.lan:8890?streamid=publish:cam"
+        );
+    }
+
+    #[test]
+    fn url_formats_follow_the_scheme() {
+        assert_eq!(url_format("rtmp://a/b"), "flv");
+        assert_eq!(url_format("rtmps://a/b"), "flv");
+        assert_eq!(url_format("srt://host:9000"), "mpegts");
+        assert_eq!(url_format("https://sfu/whip/x"), "whip");
+        assert_eq!(url_format("http://sfu/whip/x"), "whip");
+    }
+
+    #[test]
+    fn tee_safety_rejects_the_muxers_own_syntax() {
+        assert!(tee_safe("rtmp://live.twitch.tv/app/live_123"));
+        for bad in [
+            "rtmp://host/app/key|extra",
+            "rtmp://host/app/[key]",
+            "rtmp://host/app/k'ey",
+            "rtmp://host/app/k\\ey",
+        ] {
+            assert!(!tee_safe(bad), "{bad} should not ride a tee");
+        }
+    }
+
+    #[test]
+    fn slave_failures_parse_from_the_tee_report() {
+        assert_eq!(
+            parse_slave_failure(
+                "[tee @ 0x55] Slave muxer #1 failed: Broken pipe, continuing with 1/2 slaves."
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            parse_slave_failure("[tee @ 0x55] Slave muxer #0 failed to open"),
+            Some(0)
+        );
+        assert_eq!(parse_slave_failure("frame=  100 fps= 60"), None);
+        assert_eq!(parse_slave_failure("Slave muxer #x failed"), None);
+    }
+
+    #[test]
+    fn progress_size_parses_and_tolerates_na() {
+        assert_eq!(parse_progress_size("total_size=123456"), Some(123_456));
+        assert_eq!(parse_progress_size("total_size=N/A"), None);
+        assert_eq!(parse_progress_size("out_time_ms=1000"), None);
+    }
+
+    #[test]
+    fn rtmp_plan_debug_redacts_every_url() {
+        let plan = RtmpPlan {
+            encoder_id: "libx264".into(),
+            rate_control: rc(RcMode::Cbr),
+            preset: EncPreset::Performance,
+            keyframe_sec: 2.0,
+            audio_bitrate_kbps: 160,
+            urls: vec![
+                "rtmp://live.twitch.tv/app/hunter2".into(),
+                "rtmp://a.rtmp.youtube.com/live2/hunter3".into(),
+            ],
+            scale: None,
+            auth_bearer: Some("hunter4-bearer".into()),
+        };
+        let printed = format!("{plan:?}");
+        assert!(!printed.contains("hunter"), "keys leaked: {printed}");
+        assert!(printed.contains("2 redacted publish urls"));
+    }
+
     fn rc(mode: RcMode) -> RateControl {
         RateControl {
             mode,
@@ -1160,11 +1623,29 @@ mod tests {
             .windows(2)
             .any(|w| w == ["-init_hw_device", "vaapi=va"]));
         assert!(!global.iter().any(|arg| arg.contains("renderD")));
-        let video = video_args("h264_vaapi", &rc(RcMode::Cbr), EncPreset::Balanced, 60);
+        let video = color_and_scale_args("h264_vaapi", None);
         assert!(video
             .windows(2)
-            .any(|w| w == ["-vf", "format=nv12,hwupload"]));
+            .any(|w| w == ["-vf", "scale=out_color_matrix=bt709,format=nv12,hwupload"]));
         assert!(global_args("h264_nvenc").is_empty());
+    }
+
+    #[test]
+    fn every_wire_encode_pins_rec709_and_scales_even() {
+        let plain = color_and_scale_args("libx264", None);
+        assert!(plain
+            .windows(2)
+            .any(|w| w == ["-vf", "scale=out_color_matrix=bt709"]));
+        assert!(plain.windows(2).any(|w| w == ["-colorspace", "bt709"]));
+        assert!(plain.windows(2).any(|w| w == ["-color_range", "tv"]));
+
+        let scaled = color_and_scale_args("libx264", Some((1281, 719)));
+        assert!(
+            scaled
+                .windows(2)
+                .any(|w| w == ["-vf", "scale=1280:718:flags=bicubic:out_color_matrix=bt709"]),
+            "odd downscale dims floor to even: {scaled:?}"
+        );
     }
 
     #[test]

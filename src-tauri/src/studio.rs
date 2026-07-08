@@ -55,6 +55,14 @@ const AUTO_RETRY_MAX: Duration = Duration::from_secs(60);
 const PREVIEW_MAX_WIDTH: u32 = 1280;
 const PREVIEW_MAX_HEIGHT: u32 = 720;
 const PREVIEW_JPEG_QUALITY: u8 = 75;
+/// The system emoji face reaction sprites rasterize from (monochrome
+/// outlines tinted per emoji — we own no color-emoji rasterizer, honestly).
+#[cfg(target_os = "windows")]
+const EMOJI_FONT: &str = "Segoe UI Emoji";
+#[cfg(target_os = "macos")]
+const EMOJI_FONT: &str = "Apple Color Emoji";
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+const EMOJI_FONT: &str = "Noto Color Emoji";
 
 // ---------------------------------------------------------------------------
 // Shared state + the command-side mutation surface
@@ -86,6 +94,25 @@ struct ActiveTransition {
     kind: fcap_scene::TransitionKind,
     duration: Duration,
     started: Instant,
+    /// The stinger video playing over the cut (TASK-606), when the kind is
+    /// `Stinger`. Dropping it stops the decode.
+    stinger: Option<fcap_capture::CaptureSession>,
+    /// When (0..1 of the duration) the scene swap shows through a stinger.
+    cut: f32,
+    /// The custom luma-wipe image (tight RGBA), when the kind is `LumaImage`.
+    luma: Option<Arc<(u32, u32, Vec<u8>)>>,
+}
+
+/// What the render loop pulls per tick while a transition runs.
+pub(crate) struct TransitionFramePack {
+    pub from_scene: fcap_scene::Scene,
+    pub kind: fcap_scene::TransitionKind,
+    pub progress: f32,
+    pub cut: f32,
+    /// The newest stinger video frame (None between frames — the last
+    /// uploaded one keeps covering).
+    pub stinger_frame: Option<fcap_capture::Frame>,
+    pub luma: Option<Arc<(u32, u32, Vec<u8>)>>,
 }
 
 struct StudioCore {
@@ -216,9 +243,46 @@ impl StudioState {
     pub fn begin_transition<R: Runtime>(
         &self,
         app: &AppHandle<R>,
-        kind: fcap_scene::TransitionKind,
-        duration: Duration,
+        settings: &crate::settings::TransitionSettings,
     ) -> Result<(), String> {
+        let kind = settings.kind;
+        let duration =
+            Duration::from_millis(u64::from(settings.duration_ms)).max(Duration::from_millis(50));
+        // The pack extras load/start OUTSIDE the core lock (file I/O).
+        let stinger = if kind == fcap_scene::TransitionKind::Stinger {
+            let path = settings.stinger_path.trim();
+            if path.is_empty() {
+                return Err(
+                    "the Stinger transition needs a video file — pick one next to the transition controls"
+                        .to_string(),
+                );
+            }
+            // The stinger's own audio is not mixed (v1) — video only.
+            Some(
+                fcap_sources::media::start_media("stinger-transition", path, false, true)
+                    .map_err(|err| format!("stinger: {err}"))?,
+            )
+        } else {
+            None
+        };
+        let luma = if kind == fcap_scene::TransitionKind::LumaImage {
+            let path = settings.luma_image.trim();
+            if path.is_empty() {
+                return Err(
+                    "the Image Wipe transition needs a grayscale image — pick one next to the transition controls"
+                        .to_string(),
+                );
+            }
+            let frame = fcap_sources::image::load_image_rgba(std::path::Path::new(path))
+                .map_err(|err| format!("luma image: {err}"))?;
+            Some(Arc::new(tight_rgba(&frame)))
+        } else {
+            None
+        };
+        let cut = (settings.stinger_cut_ms.min(settings.duration_ms) as f32
+            / settings.duration_ms.max(1) as f32)
+            .clamp(0.0, 1.0);
+
         let dto = {
             let mut core = self.lock();
             let preview = core.preview_scene.ok_or("studio mode is off")?;
@@ -234,8 +298,11 @@ impl StudioState {
                 core.transition = Some(ActiveTransition {
                     from,
                     kind,
-                    duration: duration.max(Duration::from_millis(50)),
+                    duration,
                     started: Instant::now(),
+                    stinger,
+                    cut,
+                    luma,
                 });
             }
             core.revision += 1;
@@ -252,29 +319,64 @@ impl StudioState {
         self.lock().revision
     }
 
-    /// What the audio engine reconciles against: the revision plus the active
-    /// scene's audio-capable sources (visible items only — the eye toggle
-    /// silences audio exactly like it hides video), with their strips and
-    /// retry nonces.
+    /// What the audio engine reconciles against: the revision plus the
+    /// audible sources of the program scene **and every scene nested into
+    /// it** (their audio plays exactly like their video composes). Visible
+    /// items only — the eye toggle (and a group's eye, Phase 6) silences
+    /// audio exactly like it hides video — with the program scene's
+    /// per-scene mixer overrides applied (TASK-605).
     pub fn audio_specs(&self) -> (u64, Vec<AudioSourceSpec>) {
         let core = self.lock();
-        let scene = core.collection.active_scene();
-        let specs = core
-            .collection
+        let collection = &core.collection;
+        // The program scene + its transitively nested scenes.
+        let mut scene_ids = vec![collection.active_scene];
+        let mut index = 0;
+        while index < scene_ids.len() {
+            let current = scene_ids[index];
+            index += 1;
+            if let Some(scene) = collection.scene(current) {
+                for item in &scene.items {
+                    if let Some(source) = collection.source(item.source) {
+                        if let SourceSettings::NestedScene { scene: target } = &source.settings {
+                            if !scene_ids.contains(target) {
+                                scene_ids.push(*target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let audible = |source_id: SourceId| -> bool {
+            scene_ids.iter().any(|id| {
+                collection.scene(*id).is_some_and(|scene| {
+                    scene.items.iter().any(|item| {
+                        item.source == source_id && item.visible && !scene.group_hides(item.id)
+                    })
+                })
+            })
+        };
+        let active = collection.active_scene();
+        let specs = collection
             .sources
             .iter()
             .filter(|source| source.settings.has_audio())
-            .filter(|source| {
-                scene
-                    .items
+            .filter(|source| audible(source.id))
+            .map(|source| {
+                let mut audio = source.audio.clone().unwrap_or_default();
+                if let Some(entry) = active
+                    .audio_overrides
                     .iter()
-                    .any(|item| item.source == source.id && item.visible)
-            })
-            .map(|source| AudioSourceSpec {
-                id: source.id,
-                settings: source.settings.clone(),
-                audio: source.audio.clone().unwrap_or_default(),
-                nonce: core.retry_nonces.get(&source.id).copied().unwrap_or(0),
+                    .find(|entry| entry.source == source.id)
+                {
+                    audio.volume_db = entry.volume_db;
+                    audio.muted = entry.muted;
+                }
+                AudioSourceSpec {
+                    id: source.id,
+                    settings: source.settings.clone(),
+                    audio,
+                    nonce: core.retry_nonces.get(&source.id).copied().unwrap_or(0),
+                }
             })
             .collect();
         (core.revision, specs)
@@ -413,6 +515,26 @@ pub struct AudioSourceSpec {
     pub audio: AudioSettings,
     /// The retry nonce — bumping it forces a device reopen.
     pub nonce: u64,
+}
+
+/// A capture frame flattened to tight RGBA rows (the luma-wipe upload shape).
+fn tight_rgba(frame: &fcap_capture::Frame) -> (u32, u32, Vec<u8>) {
+    let (width, height) = (frame.width, frame.height);
+    let mut data = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        let start = (row * frame.stride) as usize;
+        let end = start + (width * 4) as usize;
+        let row_bytes = &frame.data[start..end.min(frame.data.len())];
+        match frame.format {
+            fcap_capture::PixelFormat::Rgba8 => data.extend_from_slice(row_bytes),
+            fcap_capture::PixelFormat::Bgra8 => {
+                for px in row_bytes.chunks_exact(4) {
+                    data.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                }
+            }
+        }
+    }
+    (width, height, data)
 }
 
 /// The on-disk file for a named scene collection: the live
@@ -581,6 +703,10 @@ struct SessionSlot {
     session: CaptureSession,
     frames_this_second: u32,
     live_size: Option<(u32, u32)>,
+    /// Render Delay (TASK-608): frames held back by the filter, bounded —
+    /// raw frames are memory, so both the delay (500 ms) and the queue
+    /// length are capped.
+    delayed: std::collections::VecDeque<(Instant, fcap_capture::Frame)>,
 }
 
 fn lock_core(core: &Arc<Mutex<StudioCore>>) -> std::sync::MutexGuard<'_, StudioCore> {
@@ -640,6 +766,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
     let started_at = Instant::now();
     let mut seen_revision = 0u64;
+    // The nested-scene pool the compositor resolves against, deep-cloned only
+    // when the model revision changes (not per frame) — see the snapshot.
+    let mut cached_scene_pool: Vec<fcap_scene::Scene> = Vec::new();
+    let mut pool_revision = u64::MAX;
     let mut sessions: HashMap<SourceId, SessionSlot> = HashMap::new();
     let mut starting: HashMap<SourceId, mpsc::Receiver<Result<CaptureSession, CaptureError>>> =
         HashMap::new();
@@ -649,6 +779,18 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut statuses: HashMap<SourceId, SourceRuntime> = HashMap::new();
 
     let mut composed_this_second = 0u32;
+    let mut composed_vertical_this_second = 0u32;
+    let mut vertical_preview_live = false;
+    // Rising-edge detector for transitions (uploads the luma image / resets
+    // the stinger exactly once per commit).
+    let mut transition_was_active = false;
+    // Floating reactions (TASK-614): the live particle pool + its rng, and
+    // the shared queue chat ingests push into.
+    let mut reaction_particles: Vec<crate::reactions::Particle> = Vec::new();
+    let mut reaction_rng = crate::reactions::Lcg(0x9E37_79B9_7F4A_7C15);
+    let reactions_queue = app
+        .state::<crate::reactions::ReactionState>()
+        .queue_handle();
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
     // Whether the Studio-Mode preview pane currently has a published frame
@@ -685,7 +827,18 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // -- 1. Snapshot the model (brief lock) --------------------------------
         let mut transition_ended: Option<StudioDto> = None;
-        let (revision, scene, scene_sources, canvas, nonces, preview_scene, transition_pack) = {
+        let (
+            revision,
+            scene,
+            scene_sources,
+            canvas,
+            nonces,
+            preview_scene,
+            transition_pack,
+            vertical_pack,
+            scene_pool_rebuild,
+            scene_refs,
+        ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
             let transition_pack = match &guard.transition {
@@ -700,11 +853,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         transition_ended = Some(dto_of(&guard));
                         None
                     } else {
-                        guard
-                            .collection
-                            .scene(tr.from)
-                            .cloned()
-                            .map(|from_scene| (from_scene, tr.kind, progress))
+                        // The newest stinger video frame, when one plays.
+                        let stinger_frame = tr.stinger.as_ref().and_then(|session| {
+                            session.frames().recv_timeout(Duration::ZERO).ok().flatten()
+                        });
+                        guard.collection.scene(tr.from).cloned().map(|from_scene| {
+                            TransitionFramePack {
+                                from_scene,
+                                kind: tr.kind,
+                                progress,
+                                cut: tr.cut,
+                                stinger_frame,
+                                luma: tr.luma.clone(),
+                            }
+                        })
                     }
                 }
                 None => None,
@@ -725,9 +887,66 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some(preview) = &preview_scene {
                 live_sources.extend(preview.items.iter().map(|item| item.source));
             }
-            if let Some((from_scene, _, _)) = &transition_pack {
-                live_sources.extend(from_scene.items.iter().map(|item| item.source));
+            if let Some(pack) = &transition_pack {
+                live_sources.extend(pack.from_scene.items.iter().map(|item| item.source));
             }
+            // The second (vertical) canvas keeps ITS scene's sources live too.
+            let vertical_pack = guard.collection.vertical.and_then(|config| {
+                guard
+                    .collection
+                    .scene(config.scene)
+                    .cloned()
+                    .map(|scene| (scene, config.width, config.height))
+            });
+            if let Some((vertical_scene, _, _)) = &vertical_pack {
+                live_sources.extend(vertical_scene.items.iter().map(|item| item.source));
+            }
+            // Nested scenes (Phase 6): the source→scene map, the pool the
+            // compositor resolves against, and every transitively nested
+            // scene's sources joining the live set.
+            let scene_refs: HashMap<SourceId, SceneId> = guard
+                .collection
+                .sources
+                .iter()
+                .filter_map(|source| match &source.settings {
+                    SourceSettings::NestedScene { scene } => Some((source.id, *scene)),
+                    _ => None,
+                })
+                .collect();
+            // The reachability walk runs every tick (cheap — it reads items,
+            // no deep copy) so nested scenes' sources always join the live
+            // set; the expensive full-scene deep clone into the pool happens
+            // only when the model actually changed (revision), reused from
+            // the cache otherwise.
+            if !scene_refs.is_empty() {
+                let mut reachable: Vec<SceneId> = live_sources
+                    .iter()
+                    .filter_map(|source| scene_refs.get(source).copied())
+                    .collect();
+                let mut index = 0;
+                while index < reachable.len() {
+                    let current = reachable[index];
+                    index += 1;
+                    if let Some(nested) = guard.collection.scene(current) {
+                        for item in &nested.items {
+                            live_sources.push(item.source);
+                            if let Some(target) = scene_refs.get(&item.source) {
+                                if !reachable.contains(target) {
+                                    reachable.push(*target);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let scene_pool_rebuild: Option<Vec<fcap_scene::Scene>> =
+                (guard.revision != pool_revision).then(|| {
+                    if scene_refs.is_empty() {
+                        Vec::new()
+                    } else {
+                        guard.collection.scenes.clone()
+                    }
+                });
             (
                 guard.revision,
                 guard.collection.active_scene().clone(),
@@ -745,12 +964,23 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 guard.retry_nonces.clone(),
                 preview_scene,
                 transition_pack,
+                vertical_pack,
+                scene_pool_rebuild,
+                scene_refs,
             )
         };
         if let Some(dto) = transition_ended {
             let _ = app.emit("studio", &dto);
         }
         compositor.set_canvas_size(canvas.0, canvas.1);
+        // Hand the compositor a fresh nested-scene pool only when the model
+        // changed — never a per-frame deep clone.
+        if let Some(pool) = scene_pool_rebuild {
+            cached_scene_pool = pool;
+            pool_revision = revision;
+            compositor.set_scene_pool(cached_scene_pool.clone(), scene_refs);
+        }
+        let scene_pool = &cached_scene_pool;
 
         // -- 2. Reconcile sources against the active scene ---------------------
         if revision != seen_revision {
@@ -776,6 +1006,24 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     compositor.remove_source(source.id);
                     continue;
                 }
+                // Nested scenes need no OS pipeline: the compositor composes
+                // them straight into their slot every frame.
+                if matches!(source.settings, SourceSettings::NestedScene { .. }) {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        statuses.entry(source.id)
+                    {
+                        slot.insert(SourceRuntime::live(canvas.0, canvas.1));
+                        statuses_changed = true;
+                    }
+                    keep_ids.push(source.id);
+                    continue;
+                }
                 // The retry nonce is part of the fingerprint: bumping it is
                 // how an errored source gets restarted with equal settings.
                 let nonce = nonces.get(&source.id).copied().unwrap_or(0);
@@ -792,7 +1040,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         static_specs.remove(&source.id);
                         compositor.remove_source(source.id);
                         capture_specs.insert(source.id, spec);
-                        start_session(source.id, &source.settings, &mut starting);
+                        start_session(source.id, &source.settings, &mut starting, &reactions_queue);
                         statuses.insert(source.id, SourceRuntime::waiting());
                         statuses_changed = true;
                     }
@@ -848,15 +1096,27 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             compositor.retain_sources(&keep_ids);
 
-            // Filter files (LUT lattices, mask images) — the preview pane's
-            // and the outgoing scene's filters render too.
+            // Filter files (LUT lattices, mask images) — the preview pane's,
+            // the outgoing scene's, and the vertical canvas's filters render too.
             let extra_items: Vec<fcap_scene::SceneItem> = preview_scene
                 .iter()
                 .flat_map(|preview| preview.items.iter().cloned())
                 .chain(
                     transition_pack
                         .iter()
-                        .flat_map(|(from_scene, _, _)| from_scene.items.iter().cloned()),
+                        .flat_map(|pack| pack.from_scene.items.iter().cloned()),
+                )
+                .chain(
+                    vertical_pack
+                        .iter()
+                        .flat_map(|(vertical_scene, _, _)| vertical_scene.items.iter().cloned()),
+                )
+                .chain(
+                    // Nested scenes' filters render too (pool is empty
+                    // unless nesting is in use).
+                    scene_pool
+                        .iter()
+                        .flat_map(|nested| nested.items.iter().cloned()),
                 )
                 .collect();
             let mut live_filters: Vec<FilterId> = Vec::new();
@@ -914,6 +1174,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             session,
                             frames_this_second: 0,
                             live_size: None,
+                            delayed: std::collections::VecDeque::new(),
                         },
                     );
                 }
@@ -927,10 +1188,78 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         }
 
         // -- 4. Drain the newest frame from every live session ------------------
+        // Render Delay (TASK-608): a source whose visible items carry the
+        // filter shows frames from `delay_ms` ago — held in a bounded queue
+        // (the 500 ms cap is honest: raw frames are memory).
+        let mut delay_by_source: HashMap<SourceId, u32> = HashMap::new();
+        {
+            let mut scan = |items: &[fcap_scene::SceneItem]| {
+                for item in items {
+                    for filter in item.filters.iter().filter(|filter| filter.enabled) {
+                        if let fcap_scene::FilterKind::RenderDelay { delay_ms } = &filter.kind {
+                            let entry = delay_by_source.entry(item.source).or_insert(0);
+                            *entry = (*entry).max((*delay_ms).min(500));
+                        }
+                    }
+                }
+            };
+            scan(&scene.items);
+            if let Some(preview) = &preview_scene {
+                scan(&preview.items);
+            }
+            if let Some(pack) = &transition_pack {
+                scan(&pack.from_scene.items);
+            }
+            if let Some((vertical_scene, _, _)) = &vertical_pack {
+                scan(&vertical_scene.items);
+            }
+            for nested in scene_pool {
+                scan(&nested.items);
+            }
+        }
         let mut ended: Vec<(SourceId, CaptureError)> = Vec::new();
         for (id, slot) in sessions.iter_mut() {
+            let delay_ms = delay_by_source.get(id).copied().unwrap_or(0);
             match slot.session.frames().recv_timeout(Duration::ZERO) {
                 Ok(Some(frame)) => {
+                    if delay_ms == 0 && slot.delayed.is_empty() {
+                        let size = (frame.width, frame.height);
+                        match compositor.upload_frame(*id, &frame) {
+                            Ok(()) => {
+                                slot.frames_this_second += 1;
+                                if slot.live_size != Some(size) {
+                                    slot.live_size = Some(size);
+                                    statuses.insert(*id, SourceRuntime::live(size.0, size.1));
+                                    statuses_changed = true;
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("studio: dropped a broken frame: {err}");
+                            }
+                        }
+                    } else {
+                        slot.delayed.push_back((Instant::now(), frame));
+                        if slot.delayed.len() > 64 {
+                            slot.delayed.pop_front(); // bounded, oldest goes
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => ended.push((*id, err)),
+            }
+            // Release the newest delayed frame that has come due (all of
+            // them at once when the filter was just removed).
+            if !slot.delayed.is_empty() {
+                let due = Duration::from_millis(u64::from(delay_ms));
+                let mut release: Option<fcap_capture::Frame> = None;
+                while slot
+                    .delayed
+                    .front()
+                    .is_some_and(|(arrived, _)| arrived.elapsed() >= due)
+                {
+                    release = slot.delayed.pop_front().map(|(_, frame)| frame);
+                }
+                if let Some(frame) = release {
                     let size = (frame.width, frame.height);
                     match compositor.upload_frame(*id, &frame) {
                         Ok(()) => {
@@ -946,8 +1275,6 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         }
                     }
                 }
-                Ok(None) => {}
-                Err(err) => ended.push((*id, err)),
             }
         }
         for (id, err) in ended {
@@ -1009,18 +1336,81 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // -- 6. Compose + preview ------------------------------------------------
         let time = started_at.elapsed().as_secs_f32();
-        // A running Studio-Mode commit renders BOTH scenes and blends them;
-        // otherwise the program scene composes directly.
-        let compose_result = match &transition_pack {
-            Some((from_scene, kind, progress)) => {
-                compositor.render_transition(from_scene, &scene, *kind, *progress, time)
+        // A running Studio-Mode commit renders BOTH scenes and blends them
+        // (a stinger covers the swap with its video; a custom luma image
+        // uploads once per transition); otherwise the program scene
+        // composes directly.
+        if let Some(pack) = &transition_pack {
+            if !transition_was_active {
+                transition_was_active = true;
+                compositor.reset_stinger();
+                compositor.set_transition_luma(pack.luma.as_ref().map(|luma| (**luma).clone()));
             }
+        } else {
+            transition_was_active = false;
+        }
+        let compose_result = match &transition_pack {
+            Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
+                // The audience sees the outgoing scene until the cut point,
+                // the new program after — the stinger video covers the swap.
+                let shown = if pack.progress < pack.cut {
+                    &pack.from_scene
+                } else {
+                    &scene
+                };
+                compositor.render_scene_with_stinger(shown, time, pack.stinger_frame.as_ref())
+            }
+            Some(pack) => compositor.render_transition(
+                &pack.from_scene,
+                &scene,
+                pack.kind,
+                pack.progress,
+                time,
+            ),
             None => compositor.render(&scene, time),
         };
         if let Err(err) = compose_result {
             eprintln!("studio: compose failed: {err}");
         }
         composed_this_second += 1;
+
+        // -- 6r. Floating reactions (TASK-614): baked INTO the program ----------
+        // Drawn after the compose (and any transition/stinger), before the
+        // native present + readback — so preview, recording, and stream all
+        // carry the exact same floating emoji.
+        {
+            let pending = app.state::<crate::reactions::ReactionState>().drain();
+            crate::reactions::spawn(&mut reaction_particles, pending, time, &mut reaction_rng);
+            let draws = crate::reactions::step(&mut reaction_particles, time, canvas);
+            if !draws.is_empty() {
+                for draw in &draws {
+                    if !compositor.has_reaction_sprite(&draw.sprite) {
+                        let style = fcap_sources::text::TextStyle {
+                            text: draw.sprite.clone(),
+                            font_family: Some(EMOJI_FONT.to_string()),
+                            size_px: 96.0,
+                            color: crate::reactions::tint_of(&draw.sprite),
+                            ..Default::default()
+                        };
+                        match fcap_sources::text::render_text(&style) {
+                            Ok(frame) => {
+                                if let Err(err) =
+                                    compositor.set_reaction_sprite(&draw.sprite, &frame)
+                                {
+                                    eprintln!("studio: reaction sprite upload failed: {err}");
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("studio: reaction sprite render failed: {err}")
+                            }
+                        }
+                    }
+                }
+                if let Err(err) = compositor.render_reactions(&draws) {
+                    eprintln!("studio: reactions pass failed: {err}");
+                }
+            }
+        }
 
         // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
         if !native_disabled {
@@ -1090,15 +1480,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
-        // The recorder + the live stream want the full-res program frame
-        // every tick while their sessions run; the preview JPEG keeps its
-        // ~30 fps cadence. One readback serves all three.
+        // The recorder, the live stream and the replay buffer want the
+        // full-res program frame every tick while their sessions run; the
+        // preview JPEG keeps its ~30 fps cadence. One readback serves all.
         let recording = app.state::<crate::recording::RecordingState>();
         let streaming = app.state::<crate::stream::StreamBridgeState>();
+        let replaying = app.state::<crate::replay::ReplayState>();
         let record_due = recording.wants_frames();
         let stream_due = streaming.wants_frames();
+        let replay_due = replaying.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if record_due || stream_due || preview_due {
+        if record_due || stream_due || replay_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
@@ -1108,6 +1500,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                     if stream_due {
                         streaming.push_video(Arc::clone(&data));
+                    }
+                    if replay_due {
+                        replaying.push_video(Arc::clone(&data));
                     }
                     if preview_due {
                         if let Some(jpeg) = encode_program_jpeg(
@@ -1158,6 +1553,52 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
+        // -- 5c. The second (vertical) canvas (TASK-604) -------------------------
+        // Rendered at full rate while a recorder/stream lane consumes it, at
+        // the preview cadence otherwise (so its dialog preview stays live).
+        compositor.set_vertical_canvas(vertical_pack.as_ref().map(|(_, w, h)| (*w, *h)));
+        match &vertical_pack {
+            Some((vertical_scene, _, _)) => {
+                let vertical_record = recording.wants_vertical_frames();
+                let vertical_stream = streaming.wants_vertical_frames();
+                if vertical_record || vertical_stream || preview_due {
+                    match compositor
+                        .render_vertical(vertical_scene, started_at.elapsed().as_secs_f32())
+                    {
+                        Ok(frame) => {
+                            composed_vertical_this_second += 1;
+                            let (frame_w, frame_h) = (frame.width, frame.height);
+                            let data = Arc::new(frame.data);
+                            if vertical_record {
+                                recording.push_video_vertical(Arc::clone(&data));
+                            }
+                            if vertical_stream {
+                                streaming.push_video_vertical(Arc::clone(&data));
+                            }
+                            if preview_due {
+                                let jpeg = encode_program_jpeg(
+                                    frame_w,
+                                    frame_h,
+                                    &data,
+                                    PREVIEW_MAX_WIDTH,
+                                    PREVIEW_MAX_HEIGHT,
+                                    PREVIEW_JPEG_QUALITY,
+                                );
+                                preview.publish_vertical_preview(jpeg);
+                                vertical_preview_live = true;
+                            }
+                        }
+                        Err(err) => eprintln!("studio: vertical compose failed: {err}"),
+                    }
+                }
+            }
+            None if vertical_preview_live => {
+                preview.publish_vertical_preview(None);
+                vertical_preview_live = false;
+            }
+            None => {}
+        }
+
         // -- 7. The program event (1 Hz, or sooner on a state change) -----------
         if statuses_changed || last_program_event.elapsed() >= PROGRAM_EVENT_INTERVAL {
             let elapsed = last_program_event.elapsed().as_secs_f32().max(0.001);
@@ -1190,6 +1631,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // Hand the render numbers to the stats dock's emitter.
             app.state::<crate::events::RuntimeStats>().publish(
                 status.fps,
+                (composed_vertical_this_second as f32 / elapsed).round() as u32,
                 status.dropped,
                 status.render_micros,
             );
@@ -1197,6 +1639,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 break; // the app is gone — wind down
             }
             composed_this_second = 0;
+            composed_vertical_this_second = 0;
             last_program_event = Instant::now();
             statuses_changed = false;
         }
@@ -1285,6 +1728,8 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
+            | SourceSettings::Slideshow { .. }
+            | SourceSettings::ChatOverlay { .. }
             | SourceSettings::RemoteGuest { .. }
     )
 }
@@ -1377,9 +1822,11 @@ fn start_session(
     id: SourceId,
     settings: &SourceSettings,
     starting: &mut HashMap<SourceId, mpsc::Receiver<Result<CaptureSession, CaptureError>>>,
+    reactions_queue: &Arc<Mutex<Vec<String>>>,
 ) {
     let (tx, rx) = mpsc::channel();
     let settings = settings.clone();
+    let reactions_queue = Arc::clone(reactions_queue);
     let spawned = std::thread::Builder::new()
         .name("fcap-source-start".into())
         .spawn(move || {
@@ -1406,6 +1853,46 @@ fn start_session(
                     // The source id keys the mixer-side audio ring.
                     fcap_sources::media::start_media(&id.0.to_string(), path, *looping, *hw_decode)
                 }
+                SourceSettings::Slideshow {
+                    paths,
+                    slide_ms,
+                    transition_ms,
+                    looping,
+                    shuffle,
+                } => fcap_sources::slideshow::start_slideshow(
+                    paths,
+                    *slide_ms,
+                    *transition_ms,
+                    *looping,
+                    *shuffle,
+                ),
+                SourceSettings::ChatOverlay {
+                    youtube,
+                    twitch,
+                    kick,
+                    width,
+                    max_lines,
+                    font_size,
+                } => fcap_sources::chat::start_chat_overlay(
+                    &fcap_sources::chat::ChatOverlayConfig {
+                        youtube: youtube.clone(),
+                        twitch: twitch.clone(),
+                        kick: kick.clone(),
+                        width: *width,
+                        max_lines: *max_lines,
+                        font_size: *font_size,
+                    },
+                    // TASK-614: reaction emoji spotted in chat float over
+                    // the program — the same no-key ingest, no extra API.
+                    Some({
+                        let queue = Arc::clone(&reactions_queue);
+                        Arc::new(move |text: &str| {
+                            for emoji in crate::reactions::reactions_in_chat(text) {
+                                let _ = crate::reactions::push_into(&queue, emoji);
+                            }
+                        })
+                    }),
+                ),
                 // Frames are pushed from the webview's WebRTC session over
                 // IPC — the session just opens the push channel.
                 SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),

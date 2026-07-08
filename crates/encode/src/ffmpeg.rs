@@ -465,6 +465,86 @@ fn hide_window(cmd: &mut Command) {
     }
 }
 
+/// What the installed ffmpeg can stream beyond RTMP (Phase 6): probed
+/// honestly from its own `-protocols` / `-muxers` listings at Go Live —
+/// never assumed from the pinned build's feature list.
+#[derive(Debug, Clone, Copy)]
+pub struct StreamSupport {
+    /// The `srt` protocol (needs a libsrt-enabled build).
+    pub srt: bool,
+    /// The `whip` muxer (needs an ffmpeg 7.1+ build with DTLS support).
+    pub whip: bool,
+}
+
+/// Probe the installed binary's SRT/WHIP support, **memoized per binary
+/// path + version**: the answer cannot change without a component
+/// reinstall, so repeat Go Lives are instant instead of re-spawning two
+/// hard-bounded listing children (which could stall ~30 s where child
+/// spawns are slow, e.g. AV interception).
+pub fn stream_support(ffmpeg: &Ffmpeg) -> StreamSupport {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<(PathBuf, String), StreamSupport>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let key = (ffmpeg.path.clone(), ffmpeg.version.clone());
+    if let Some(support) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&key)
+    {
+        return *support;
+    }
+    let support = StreamSupport {
+        srt: protocol_listed(&capability_listing(ffmpeg, "-protocols"), "srt"),
+        whip: muxer_listed(&capability_listing(ffmpeg, "-muxers"), "whip"),
+    };
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key, support);
+    support
+}
+
+fn capability_listing(ffmpeg: &Ffmpeg, flag: &str) -> String {
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", flag]);
+    match run_with_timeout(cmd, Duration::from_secs(15)) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(_) => String::new(),
+    }
+}
+
+/// `-protocols` lists one bare protocol name per line under `Input:` /
+/// `Output:` headers — only an **Output** entry means we can publish.
+fn protocol_listed(listing: &str, name: &str) -> bool {
+    let mut in_output = false;
+    for line in listing.lines() {
+        let token = line.trim();
+        if token.eq_ignore_ascii_case("Output:") {
+            in_output = true;
+            continue;
+        }
+        if in_output && token == name {
+            return true;
+        }
+    }
+    false
+}
+
+/// `-muxers` lines read ` E name  Description` (`E` = muxing supported).
+fn muxer_listed(listing: &str, name: &str) -> bool {
+    for line in listing.lines() {
+        let mut tokens = line.split_whitespace();
+        let (Some(flags), Some(names)) = (tokens.next(), tokens.next()) else {
+            continue;
+        };
+        if flags == "E" && names.split(',').any(|n| n == name) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Run a command to completion with a hard timeout (a wedged driver must
 /// never hang the app). Output is drained on threads so full pipes can't
 /// deadlock the child.
@@ -642,6 +722,31 @@ mod tests {
             assert!(pin.url.starts_with("https://"), "pins are https-only");
             assert!(pin.size_bytes > 10_000_000);
         }
+    }
+
+    #[test]
+    fn protocol_listing_only_counts_the_output_section() {
+        let sample = "Supported file protocols:\nInput:\n  async\n  srtp\nOutput:\n  crypto\n  rtmp\n  srt\n  tee\n";
+        assert!(protocol_listed(sample, "srt"));
+        assert!(protocol_listed(sample, "rtmp"));
+        assert!(
+            !protocol_listed(sample, "async"),
+            "input-only protocols can't publish"
+        );
+        assert!(!protocol_listed(sample, "srtp"), "srtp is not srt");
+        assert!(!protocol_listed(sample, "whip"));
+    }
+
+    #[test]
+    fn muxer_listing_reads_the_e_column() {
+        let sample = "File formats:\n D. = Demuxing supported\n .E = Muxing supported\n --\n  E flv             FLV (Flash Video)\n  E whip            WHIP (WebRTC-HTTP ingestion protocol) muxer\n D  whip_demux_only fake\n";
+        assert!(muxer_listed(sample, "whip"));
+        assert!(muxer_listed(sample, "flv"));
+        assert!(!muxer_listed(sample, "mpegts"));
+        assert!(
+            !muxer_listed(sample, "whip_demux_only"),
+            "demux-only rows don't count"
+        );
     }
 
     #[test]

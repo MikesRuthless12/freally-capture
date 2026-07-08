@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use fcap_capture::{Frame, PixelFormat};
-use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SourceId, TransitionKind};
+use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SceneId, SourceId, TransitionKind};
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
 use crate::gpu::Gpu;
@@ -169,7 +169,12 @@ pub struct Compositor {
 
     program: wgpu::Texture,
     program_view: wgpu::TextureView,
-    readback: Option<wgpu::Buffer>,
+    /// The optional second output canvas (Phase 6: e.g. vertical 9:16),
+    /// rendered on demand from its own scene.
+    vertical: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// Readback staging per target size (program / vertical) — keyed so the
+    /// two canvases never thrash one buffer.
+    readback: HashMap<(u32, u32), wgpu::Buffer>,
 
     sampler: wgpu::Sampler,
     repeat_sampler: wgpu::Sampler,
@@ -184,6 +189,13 @@ pub struct Compositor {
 
     sources: HashMap<SourceId, SourceSlot>,
 
+    /// Nested scenes (Phase 6): the scenes a scene-source can reference and
+    /// the source→scene mapping, refreshed by the studio each tick. A
+    /// nested source's composed frame lives in `sources` under its id, so
+    /// transforms/filters/blends apply to it like any capture.
+    scene_pool: Vec<Scene>,
+    scene_refs: HashMap<SourceId, SceneId>,
+
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
     chain_cache: HashMap<ItemId, Vec<ChainTex>>,
@@ -191,21 +203,77 @@ pub struct Compositor {
     /// Studio Mode's transition machinery, built on first use and rebuilt on
     /// a canvas resize (its scratch textures are canvas-sized).
     transition: Option<TransitionRig>,
+    /// The custom luma-wipe image (CPU copy — survives rig rebuilds) and its
+    /// change counter.
+    transition_luma: Option<(u32, u32, Vec<u8>)>,
+    transition_luma_epoch: u64,
+    /// The stinger overlay: a fullscreen alpha-over pipeline + the frame
+    /// texture, built on first use.
+    stinger: Option<StingerRig>,
+    /// Floating reactions (TASK-614): the sprite pass + its uploaded emoji
+    /// sprites, built on first use.
+    reactions: Option<ReactionRig>,
 
     /// CPU time spent encoding + submitting the last render.
     last_render_cpu_micros: u64,
 }
 
 /// Everything one blended transition frame needs: the fullscreen pipeline,
-/// its 16-byte uniform, and two canvas-sized scratch scenes (A = outgoing,
-/// B = incoming) with bind groups the pass samples.
+/// its 16-byte uniform, two canvas-sized scratch scenes (A = outgoing,
+/// B = incoming) with bind groups the pass samples, and the luma-wipe
+/// image slot (a 1×1 white dummy until a custom image is set).
 struct TransitionRig {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind: wgpu::BindGroup,
     scratch: [(wgpu::Texture, wgpu::TextureView, wgpu::BindGroup); 2],
+    luma_bind: wgpu::BindGroup,
+    /// Which CPU copy the current `luma_bind` was built from (a counter —
+    /// bumped by [`Compositor::set_transition_luma`]).
+    luma_epoch: u64,
     width: u32,
     height: u32,
+}
+
+/// The stinger overlay (Phase 6): a fullscreen textured triangle drawn
+/// straight-alpha-over the rendered scene while the stinger video plays.
+struct StingerRig {
+    pipeline: wgpu::RenderPipeline,
+    /// The uploaded stinger frame, recreated on size/format change.
+    texture: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32, PixelFormat)>,
+}
+
+/// One reaction particle to draw this frame (canvas pixels; alpha 0..1).
+#[derive(Debug, Clone)]
+pub struct ReactionDraw {
+    /// Which uploaded sprite (see [`Compositor::set_reaction_sprite`]).
+    pub sprite: String,
+    pub x: f32,
+    pub y: f32,
+    /// Sprite size on the canvas, px (square-ish; the sprite's aspect holds).
+    pub size: f32,
+    pub alpha: f32,
+}
+
+/// The floating-reactions pass (TASK-614): a bounded pool of textured
+/// quads drawn alpha-over the composed program.
+struct ReactionRig {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind: wgpu::BindGroup,
+    uniform_stride: u64,
+    sprites: HashMap<String, SourceSlot>,
+}
+
+/// Reactions never draw more than this many sprites per frame — the pool
+/// bound that keeps a reaction flood from ever touching the encoder.
+pub const REACTION_POOL: usize = 64;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ReactionUniform {
+    rect: [f32; 4],
+    tint: [f32; 4],
 }
 
 /// `[progress, mode, dir.x, dir.y]` for the transition shader. `dir` is the
@@ -221,6 +289,14 @@ fn transition_params(kind: TransitionKind, progress: f32) -> [f32; 4] {
         TransitionKind::SwipeRight => [progress, 2.0, -1.0, 0.0],
         TransitionKind::LumaLinear => [progress, 3.0, 0.0, 0.0],
         TransitionKind::LumaRadial => [progress, 4.0, 0.0, 0.0],
+        TransitionKind::LumaHorizontal => [progress, 5.0, 0.0, 0.0],
+        TransitionKind::LumaDiamond => [progress, 6.0, 0.0, 0.0],
+        TransitionKind::LumaClock => [progress, 7.0, 0.0, 0.0],
+        TransitionKind::LumaImage => [progress, 8.0, 0.0, 0.0],
+        // The stinger never blends here — the app renders the underlying
+        // scene and overlays the video (`render_scene_with_stinger`); a
+        // stray call falls back to a fade.
+        TransitionKind::Stinger => [progress, 0.0, 0.0, 0.0],
     }
 }
 
@@ -377,7 +453,8 @@ impl Compositor {
             canvas_height: height,
             program,
             program_view,
-            readback: None,
+            vertical: None,
+            readback: HashMap::new(),
             sampler,
             repeat_sampler,
             uniform_layout,
@@ -388,9 +465,15 @@ impl Compositor {
             uniform_capacity: INITIAL_ITEM_CAPACITY,
             uniform_stride,
             sources: HashMap::new(),
+            scene_pool: Vec::new(),
+            scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
             transition: None,
+            transition_luma: None,
+            transition_luma_epoch: 0,
+            stinger: None,
+            reactions: None,
             last_render_cpu_micros: 0,
         })
     }
@@ -562,9 +645,56 @@ impl Compositor {
         let (program, view) = Self::make_program_texture(&self.gpu.device, width, height);
         self.program = program;
         self.program_view = view;
-        self.readback = None;
+        self.readback.clear();
         // The transition scratch textures are canvas-sized — rebuild lazily.
         self.transition = None;
+    }
+
+    /// Enable/resize (or drop, with `None`) the second output canvas. A
+    /// no-op when the size already matches — safe to call every tick.
+    pub fn set_vertical_canvas(&mut self, size: Option<(u32, u32)>) {
+        match size {
+            None => {
+                if self.vertical.take().is_some() {
+                    self.readback.clear();
+                }
+            }
+            Some((width, height)) => {
+                let width = Self::clamp_canvas(&self.gpu.device, width.max(1));
+                let height = Self::clamp_canvas(&self.gpu.device, height.max(1));
+                if self
+                    .vertical
+                    .as_ref()
+                    .is_some_and(|(_, _, w, h)| (*w, *h) == (width, height))
+                {
+                    return;
+                }
+                let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+                self.vertical = Some((texture, view, width, height));
+                // The readback map is keyed by target size; a resized vertical
+                // canvas orphans its old-size staging buffer. Drop the whole
+                // map (the program buffer re-creates on its next readback) so
+                // stepping through sizes can't leak GPU staging memory.
+                self.readback.clear();
+            }
+        }
+    }
+
+    /// Compose `scene` into the second canvas and read it back — one
+    /// vertical-output frame. Errors when no vertical canvas is set.
+    pub fn render_vertical(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+    ) -> Result<ProgramFrame, CompositorError> {
+        let (texture, view, width, height) = {
+            let (texture, view, width, height) = self.vertical.as_ref().ok_or_else(|| {
+                CompositorError::BadFrame("no vertical canvas is configured".into())
+            })?;
+            (texture.clone(), view.clone(), *width, *height)
+        };
+        self.render_to(scene, time_seconds, view, (width as f32, height as f32))?;
+        self.read_texture(&texture)
     }
 
     /// Build (or rebuild after a resize) the transition pipeline + its two
@@ -614,7 +744,12 @@ impl Compositor {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fcap transition layout"),
-            bind_group_layouts: &[&uniform_layout, &self.texture_layout, &self.texture_layout],
+            bind_group_layouts: &[
+                &uniform_layout,
+                &self.texture_layout,
+                &self.texture_layout,
+                &self.texture_layout, // the luma-wipe image (or its dummy)
+            ],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -657,15 +792,84 @@ impl Compositor {
             );
             (texture, view, bind)
         });
+        let luma_bind = self.make_transition_luma_bind();
 
         self.transition = Some(TransitionRig {
             pipeline,
             uniform_buffer,
             uniform_bind,
             scratch,
+            luma_bind,
+            luma_epoch: self.transition_luma_epoch,
             width,
             height,
         });
+    }
+
+    /// Build the group-3 bind for the current luma image (a 1×1 white dummy
+    /// when none is set — mode 8 then reads as a hard cut at p=1).
+    fn make_transition_luma_bind(&self) -> wgpu::BindGroup {
+        let device = &self.gpu.device;
+        let (width, height, pixels): (u32, u32, &[u8]) = match &self.transition_luma {
+            Some((width, height, data)) => (*width, *height, data.as_slice()),
+            None => (1, 1, &[0xff, 0xff, 0xff, 0xff]),
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fcap transition luma"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width.max(1) * 4),
+                rows_per_image: Some(height.max(1)),
+            },
+            wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self::make_texture_bind(
+            device,
+            &self.texture_layout,
+            &self.sampler,
+            &self.repeat_sampler,
+            &view,
+        )
+    }
+
+    /// Set (or clear) the custom luma-wipe image — tight RGBA rows. The CPU
+    /// copy survives canvas resizes; the GPU side rebuilds lazily.
+    pub fn set_transition_luma(&mut self, image: Option<(u32, u32, Vec<u8>)>) {
+        let same = match (&self.transition_luma, &image) {
+            (None, None) => true,
+            (Some(a), Some(b)) => *a == *b,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.transition_luma = image;
+        self.transition_luma_epoch += 1;
     }
 
     /// Compose BOTH scenes and blend them into the program texture — one
@@ -683,13 +887,27 @@ impl Compositor {
             return self.render(to, time_seconds);
         }
         self.ensure_transition_rig();
+        // A luma image set/cleared since the rig last built its group-3 bind.
+        if self
+            .transition
+            .as_ref()
+            .is_some_and(|rig| rig.luma_epoch != self.transition_luma_epoch)
+        {
+            let bind = self.make_transition_luma_bind();
+            let epoch = self.transition_luma_epoch;
+            if let Some(rig) = self.transition.as_mut() {
+                rig.luma_bind = bind;
+                rig.luma_epoch = epoch;
+            }
+        }
 
         let (from_view, to_view) = {
             let rig = self.transition.as_ref().expect("ensured above");
             (rig.scratch[0].1.clone(), rig.scratch[1].1.clone())
         };
-        self.render_to(from, time_seconds, from_view)?;
-        self.render_to(to, time_seconds, to_view)?;
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(from, time_seconds, from_view, canvas)?;
+        self.render_to(to, time_seconds, to_view, canvas)?;
 
         let rig = self.transition.as_ref().expect("ensured above");
         self.gpu.queue.write_buffer(
@@ -723,9 +941,428 @@ impl Compositor {
             pass.set_bind_group(0, &rig.uniform_bind, &[]);
             pass.set_bind_group(1, &rig.scratch[0].2, &[]);
             pass.set_bind_group(2, &rig.scratch[1].2, &[]);
+            pass.set_bind_group(3, &rig.luma_bind, &[]);
             pass.draw(0..3, 0..1);
         }
         self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// One stinger-transition frame (Phase 6): render `scene` (the side of
+    /// the cut the audience should see), then draw the newest stinger video
+    /// frame straight-alpha-over it. `frame` is `None` while the stinger
+    /// file spins up — the scene shows bare, honestly.
+    pub fn render_scene_with_stinger(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        frame: Option<&Frame>,
+    ) -> Result<(), CompositorError> {
+        self.render(scene, time_seconds)?;
+        self.ensure_stinger_rig();
+        if let Some(frame) = frame {
+            self.upload_stinger_frame(frame)?;
+        }
+        // Between video frames the last uploaded one keeps covering the swap
+        // (the render loop outpaces the stinger's fps).
+        let rig = self.stinger.as_ref().expect("ensured above");
+        let Some((_, bind, _, _, _)) = rig.texture.as_ref() else {
+            return Ok(());
+        };
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap stinger"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap stinger pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the rendered scene
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Forget the previous stinger's last frame (called when a new stinger
+    /// transition starts, so it can never flash stale pixels).
+    pub fn reset_stinger(&mut self) {
+        if let Some(rig) = self.stinger.as_mut() {
+            rig.texture = None;
+        }
+    }
+
+    /// Upload (or replace) one emoji sprite the reaction pass samples —
+    /// rasterized app-side (tight or padded rows, like any source frame).
+    pub fn set_reaction_sprite(&mut self, key: &str, frame: &Frame) -> Result<(), CompositorError> {
+        self.ensure_reaction_rig();
+        if frame.width == 0 || frame.height == 0 || frame.stride < frame.width * 4 {
+            return Err(CompositorError::BadFrame("bad reaction sprite".into()));
+        }
+        let needed = frame.stride as usize * frame.height as usize;
+        if frame.data.len() < needed {
+            return Err(CompositorError::BadFrame(
+                "reaction sprite shorter than its geometry".into(),
+            ));
+        }
+        let device = &self.gpu.device;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fcap reaction sprite"),
+            size: wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: texture_format(frame.format),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &frame.data[..needed],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(frame.stride),
+                rows_per_image: Some(frame.height),
+            },
+            wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = Self::make_texture_bind(
+            device,
+            &self.texture_layout,
+            &self.sampler,
+            &self.repeat_sampler,
+            &view,
+        );
+        let slot = SourceSlot {
+            texture,
+            bind_group,
+            width: frame.width,
+            height: frame.height,
+            format: frame.format,
+        };
+        if let Some(rig) = self.reactions.as_mut() {
+            rig.sprites.insert(key.to_string(), slot);
+        }
+        Ok(())
+    }
+
+    /// Whether a sprite is already uploaded (the app rasterizes lazily).
+    pub fn has_reaction_sprite(&self, key: &str) -> bool {
+        self.reactions
+            .as_ref()
+            .is_some_and(|rig| rig.sprites.contains_key(key))
+    }
+
+    /// Draw this frame's reaction particles alpha-over the composed
+    /// program — the pass that bakes them into what records and streams.
+    /// Hard-capped at [`REACTION_POOL`] draws; unknown sprites skip.
+    pub fn render_reactions(&mut self, draws: &[ReactionDraw]) -> Result<(), CompositorError> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.ensure_reaction_rig();
+        let (canvas_w, canvas_h) = (self.canvas_width as f32, self.canvas_height as f32);
+
+        // Stage the uniforms for every drawable particle.
+        let mut staging: Vec<u8> = Vec::new();
+        let mut jobs: Vec<(String, u32)> = Vec::new();
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            for draw in draws.iter().take(REACTION_POOL) {
+                let Some(sprite) = rig.sprites.get(&draw.sprite) else {
+                    continue;
+                };
+                let aspect = sprite.height.max(1) as f32 / sprite.width.max(1) as f32;
+                let w_clip = (draw.size / canvas_w) * 2.0;
+                let h_clip = (draw.size * aspect / canvas_h) * 2.0;
+                let x_clip = (draw.x / canvas_w) * 2.0 - 1.0;
+                let y_clip = 1.0 - (draw.y / canvas_h) * 2.0;
+                let uniform = ReactionUniform {
+                    rect: [x_clip, y_clip, w_clip, h_clip],
+                    tint: [draw.alpha.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
+                };
+                let offset = jobs.len() as u64 * rig.uniform_stride;
+                staging.resize(offset as usize, 0);
+                staging.extend_from_slice(bytemuck::bytes_of(&uniform));
+                jobs.push((draw.sprite.clone(), offset as u32));
+            }
+        }
+        if jobs.is_empty() {
+            return Ok(());
+        }
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            self.gpu
+                .queue
+                .write_buffer(&rig.uniform_buffer, 0, &staging);
+        }
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap reactions"),
+            });
+        {
+            let rig = self.reactions.as_ref().expect("ensured above");
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap reactions pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the composed program
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            for (sprite, offset) in &jobs {
+                let slot = rig.sprites.get(sprite).expect("staged above");
+                pass.set_bind_group(0, &rig.uniform_bind, &[*offset]);
+                pass.set_bind_group(1, &slot.bind_group, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    fn ensure_reaction_rig(&mut self) {
+        if self.reactions.is_some() {
+            return;
+        }
+        let device = &self.gpu.device;
+        let align = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let stride = (std::mem::size_of::<ReactionUniform>() as u64).div_ceil(align) * align;
+        let uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("fcap reaction uniform"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(
+                            std::mem::size_of::<ReactionUniform>() as u64
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap reaction uniforms"),
+            size: stride * REACTION_POOL as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fcap reaction uniforms"),
+            layout: &uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<ReactionUniform>() as u64),
+                }),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap reaction shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/reaction.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap reaction layout"),
+            bind_group_layouts: &[&uniform_layout, &self.texture_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap reaction pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        self.reactions = Some(ReactionRig {
+            pipeline,
+            uniform_buffer,
+            uniform_bind,
+            uniform_stride: stride,
+            sprites: HashMap::new(),
+        });
+    }
+
+    fn ensure_stinger_rig(&mut self) {
+        if self.stinger.is_some() {
+            return;
+        }
+        let device = &self.gpu.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap stinger shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/stinger.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap stinger layout"),
+            bind_group_layouts: &[&self.texture_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap stinger pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        self.stinger = Some(StingerRig {
+            pipeline,
+            texture: None,
+        });
+    }
+
+    /// Upload the newest stinger frame (recreating the texture on a
+    /// size/format change), with the same geometry checks as sources.
+    fn upload_stinger_frame(&mut self, frame: &Frame) -> Result<(), CompositorError> {
+        if frame.width == 0 || frame.height == 0 || frame.stride < frame.width * 4 {
+            return Err(CompositorError::BadFrame("bad stinger frame".into()));
+        }
+        let needed = frame.stride as usize * frame.height as usize;
+        if frame.data.len() < needed {
+            return Err(CompositorError::BadFrame(
+                "stinger frame shorter than its geometry".into(),
+            ));
+        }
+        let needs_new = match self.stinger.as_ref().and_then(|rig| rig.texture.as_ref()) {
+            Some((_, _, width, height, format)) => {
+                *width != frame.width || *height != frame.height || *format != frame.format
+            }
+            None => true,
+        };
+        if needs_new {
+            let device = &self.gpu.device;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("fcap stinger frame"),
+                size: wgpu::Extent3d {
+                    width: frame.width,
+                    height: frame.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture_format(frame.format),
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind = Self::make_texture_bind(
+                device,
+                &self.texture_layout,
+                &self.sampler,
+                &self.repeat_sampler,
+                &view,
+            );
+            if let Some(rig) = self.stinger.as_mut() {
+                rig.texture = Some((texture, bind, frame.width, frame.height, frame.format));
+            }
+        }
+        let rig = self.stinger.as_ref().expect("ensured by caller");
+        let (texture, _, _, _, _) = rig.texture.as_ref().expect("just ensured");
+        self.gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &frame.data[..needed],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(frame.stride),
+                rows_per_image: Some(frame.height),
+            },
+            wgpu::Extent3d {
+                width: frame.width,
+                height: frame.height,
+                depth_or_array_layers: 1,
+            },
+        );
         Ok(())
     }
 
@@ -742,7 +1379,8 @@ impl Compositor {
             let rig = self.transition.as_ref().expect("ensured above");
             (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
         };
-        self.render_to(scene, time_seconds, view)?;
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, view, canvas)?;
         self.read_texture(&texture)
     }
 
@@ -926,20 +1564,114 @@ impl Compositor {
     /// time-based ones (Scroll).
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
         let target = self.program_view.clone();
-        self.render_to(scene, time_seconds, target)
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, target, canvas)
     }
 
-    /// Compose `scene` into an arbitrary canvas-sized target — the program
-    /// texture normally; a transition's scratch textures / the Studio-Mode
-    /// preview pane otherwise.
+    /// The scenes a nested-scene source can reference + the source→scene
+    /// mapping (refreshed by the studio each tick; empty = no nesting).
+    pub fn set_scene_pool(&mut self, scenes: Vec<Scene>, refs: HashMap<SourceId, SceneId>) {
+        self.scene_pool = scenes;
+        self.scene_refs = refs;
+    }
+
+    /// Compose every nested-scene source `scene` shows into its slot texture
+    /// (children first — a nested scene inside a nested scene renders before
+    /// its parent samples it). Depth-capped so a pathological file can never
+    /// recurse away; the model already rejects true cycles. Nested frames
+    /// render at the **program** canvas size regardless of the target canvas,
+    /// so one slot serves the program and vertical canvases without thrash.
+    fn ensure_nested(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        depth: u8,
+    ) -> Result<(), CompositorError> {
+        if depth >= 4 || self.scene_refs.is_empty() {
+            return Ok(());
+        }
+        let jobs: Vec<(SourceId, SceneId)> = scene
+            .items
+            .iter()
+            .filter(|item| item.visible && !scene.group_hides(item.id))
+            .filter_map(|item| {
+                self.scene_refs
+                    .get(&item.source)
+                    .map(|target| (item.source, *target))
+            })
+            .collect();
+        for (source, target) in jobs {
+            let Some(inner) = self
+                .scene_pool
+                .iter()
+                .find(|candidate| candidate.id == target)
+                .cloned()
+            else {
+                continue; // the target vanished — keep the last frame
+            };
+            self.ensure_nested(&inner, time_seconds, depth + 1)?;
+
+            let (width, height) = (self.canvas_width, self.canvas_height);
+            let needs_new = match self.sources.get(&source) {
+                Some(slot) => slot.width != width || slot.height != height,
+                None => true,
+            };
+            if needs_new {
+                let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+                let bind_group = Self::make_texture_bind(
+                    &self.gpu.device,
+                    &self.texture_layout,
+                    &self.sampler,
+                    &self.repeat_sampler,
+                    &view,
+                );
+                self.sources.insert(
+                    source,
+                    SourceSlot {
+                        texture,
+                        bind_group,
+                        width,
+                        height,
+                        format: PixelFormat::Rgba8,
+                    },
+                );
+            }
+            let view = self
+                .sources
+                .get(&source)
+                .expect("ensured above")
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            self.compose_scene(&inner, time_seconds, view, (width as f32, height as f32))?;
+        }
+        Ok(())
+    }
+
+    /// Compose `scene` into an arbitrary target at `canvas` dimensions — the
+    /// program texture normally; a transition's scratch textures, the
+    /// Studio-Mode preview pane, or the second (vertical) canvas otherwise.
+    /// Nested-scene sources compose first (into their slot textures), then
+    /// the scene itself.
     fn render_to(
         &mut self,
         scene: &Scene,
         time_seconds: f32,
         target: wgpu::TextureView,
+        canvas: (f32, f32),
+    ) -> Result<(), CompositorError> {
+        self.ensure_nested(scene, time_seconds, 0)?;
+        self.compose_scene(scene, time_seconds, target, canvas)
+    }
+
+    /// One scene → one target, no nested pre-pass (callers ensure it).
+    fn compose_scene(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        target: wgpu::TextureView,
+        canvas: (f32, f32),
     ) -> Result<(), CompositorError> {
         let started = Instant::now();
-        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
 
         // Plan: filter passes + composite uniforms, all staged up front.
         let mut item_staging: Vec<u8> = Vec::new();
@@ -948,7 +1680,11 @@ impl Compositor {
         let mut chain_passes: Vec<ChainPass> = Vec::new();
         let mut live_chains: Vec<ItemId> = Vec::new();
 
-        for item in scene.items.iter().filter(|item| item.visible) {
+        for item in scene
+            .items
+            .iter()
+            .filter(|item| item.visible && !scene.group_hides(item.id))
+        {
             let Some(slot) = self.sources.get(&item.source) else {
                 continue; // no frame yet
             };
@@ -1188,30 +1924,26 @@ impl Compositor {
         self.read_texture(&texture)
     }
 
-    /// Read a canvas-sized texture back to the CPU (tight RGBA rows) —
-    /// the program normally; the Studio-Mode preview scratch otherwise.
+    /// Read a rendered target back to the CPU (tight RGBA rows) — the
+    /// program, the Studio-Mode preview scratch, or the vertical canvas.
+    /// Sizes come from the texture itself; each size keeps its own staging
+    /// buffer so alternating canvases never thrash one.
     fn read_texture(&mut self, texture: &wgpu::Texture) -> Result<ProgramFrame, CompositorError> {
-        let width = self.canvas_width;
-        let height = self.canvas_height;
+        let width = texture.width();
+        let height = texture.height();
         let unpadded = width as u64 * 4;
         let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
         let size = padded * height as u64;
 
-        // (`map_or`, not `is_none_or` — the declared MSRV is 1.80.)
-        if self
-            .readback
-            .as_ref()
-            .map_or(true, |buffer| buffer.size() != size)
-        {
-            self.readback = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = self.readback.entry((width, height)).or_insert_with(|| {
+            self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("fcap readback"),
                 size,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
-            }));
-        }
-        let buffer = self.readback.as_ref().expect("readback buffer ensured");
+            })
+        });
 
         let mut encoder = self
             .gpu

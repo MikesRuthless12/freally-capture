@@ -37,10 +37,35 @@ export type Settings = {
   remote: RemoteSettings;
   /** Live-stream configuration (Phase 5). */
   stream: StreamSettings;
+  /** The rolling replay buffer (Phase 6). */
+  replay: ReplaySettings;
   /** Studio Mode's commit transition (Phase 5). */
   transition: TransitionSettings;
   /** Global action hotkeys (Phase 5). */
   hotkeys: HotkeySettings;
+};
+
+/** The rolling replay buffer (mirrors `ReplaySettings` in settings.rs). */
+export type ReplaySettings = {
+  /** How much history Save keeps, in seconds (5–300). */
+  seconds: number;
+  /** CBR video bitrate of the buffer's own encode. */
+  bitrateKbps: number;
+  audioBitrateKbps: number;
+  fps: number;
+  /** The mixer track the buffer records (1-based). */
+  track: number;
+};
+
+/** The `replay` event payload / `replay_status` result. */
+export type ReplayStatus = {
+  armed: boolean;
+  /** "idle" | "buffering" | "recovering" | "failed". */
+  state: "idle" | "buffering" | "recovering" | "failed";
+  /** The armed window length (0 when idle). */
+  seconds: number;
+  error?: string;
+  lastSaved?: string;
 };
 
 /** Global action hotkeys — accelerator strings ("Ctrl+Shift+R", "F13") or
@@ -52,6 +77,10 @@ export type HotkeySettings = {
   goLive: string | null;
   /** Commit the Studio-Mode Preview → Program transition. */
   transition: string | null;
+  /** Save the replay buffer's last N seconds (Phase 6). */
+  saveReplay: string | null;
+  /** Drop a chapter marker into the active recording (Phase 6). */
+  addMarker: string | null;
 };
 
 /** Studio Mode's commit transition (Phase 5). Stinger lands with the Phase 6
@@ -66,7 +95,12 @@ export type TransitionKind =
   | "swipeLeft"
   | "swipeRight"
   | "lumaLinear"
-  | "lumaRadial";
+  | "lumaRadial"
+  | "lumaHorizontal"
+  | "lumaDiamond"
+  | "lumaClock"
+  | "lumaImage"
+  | "stinger";
 
 export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
   ["cut", "Cut"],
@@ -79,15 +113,28 @@ export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
   ["swipeRight", "Swipe →"],
   ["lumaLinear", "Luma wipe (linear)"],
   ["lumaRadial", "Luma wipe (radial)"],
+  ["lumaHorizontal", "Luma wipe (horizontal)"],
+  ["lumaDiamond", "Luma wipe (diamond)"],
+  ["lumaClock", "Luma wipe (clock)"],
+  ["lumaImage", "Image wipe (custom)"],
+  ["stinger", "Stinger (video)"],
 ];
 
 export type TransitionSettings = {
   kind: TransitionKind;
   durationMs: number;
+  /** The grayscale wipe image for `lumaImage`. */
+  lumaImage: string;
+  /** The video file for `stinger`. */
+  stingerPath: string;
+  /** When the scene swap lands under the stinger, ms into the transition. */
+  stingerCutMs: number;
 };
 
-/** The services the stream target picker offers. */
-export type StreamService = "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom";
+/** The services the stream target picker offers (`srt`/`whip` are the
+ * Phase 6 protocol targets — self-hosted SRT ingest / WebRTC WHIP endpoint). */
+export type StreamService =
+  "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom" | "srt" | "whip";
 
 export const STREAM_SERVICES: Array<[StreamService, string]> = [
   ["twitch", "Twitch"],
@@ -96,12 +143,18 @@ export const STREAM_SERVICES: Array<[StreamService, string]> = [
   ["facebook", "Facebook"],
   ["trovo", "Trovo"],
   ["custom", "Custom (RTMP/RTMPS)"],
+  ["srt", "SRT (self-hosted)"],
+  ["whip", "WHIP (WebRTC)"],
 ];
 
-/** Live-stream configuration (mirrors `StreamSettings` in settings.rs).
+/** One stream target (mirrors `StreamTargetSettings` in settings.rs).
  * The stream key is a SECRET — masked in the UI, never logged. */
-export type StreamSettings = {
+export type StreamTargetSettings = {
+  /** Go Live publishes to every enabled target at once. */
+  enabled: boolean;
   service: StreamService;
+  /** Which canvas this target publishes. */
+  canvas: "main" | "vertical";
   /** Overrides the service's preset ingest when non-empty. */
   ingestUrl: string;
   /** SECRET. */
@@ -113,10 +166,34 @@ export type StreamSettings = {
   audioBitrateKbps: number;
   keyframeSec: number;
   fps: number;
-  /** The mixer track that goes to the stream (1-based). */
+  /** The mixer track that goes to this target (1-based). */
   track: number;
+  /** Publish at this size instead of the canvas size (0 = canvas). */
+  outputWidth: number;
+  outputHeight: number;
+};
+
+/** Live-stream configuration (mirrors `StreamSettings` in settings.rs):
+ * the target list — targets with equal encode settings share one encode. */
+export type StreamSettings = {
+  targets: StreamTargetSettings[];
   /** Start a local recording automatically on Go Live. */
   autoRecord: boolean;
+};
+
+/** One target's slice of the `stream` event payload. */
+export type StreamTargetStatus = {
+  /** The settings row this target came from. */
+  id: number;
+  label: string;
+  state: "live" | "reconnecting" | "failed" | "ended";
+  error?: string;
+  reconnects: number;
+  framesDropped: number;
+  /** Publish bitrate (measured, or the configured rate on a shared lane). */
+  kbps: number;
+  /** How many other targets share this target's encode. */
+  shared: number;
 };
 
 /** The `stream` event payload / `stream_status` result. */
@@ -127,7 +204,10 @@ export type StreamStatus = {
   elapsedSec: number;
   reconnects: number;
   framesDropped: number;
+  /** The enabled services, joined (e.g. "Twitch + YouTube"). */
   service: string;
+  /** Per-target health + bitrate (empty when idle). */
+  targets: StreamTargetStatus[];
 };
 
 /** Remote Guests networking — the user's own **opt-in** TURN relay (never
@@ -170,6 +250,11 @@ export type RecordingSettings = {
   filenamePrefix: string;
   /** Split into playable segments every N minutes (0 = off). */
   splitMinutes: number;
+  /** Also record the vertical canvas (a parallel "… (vertical)" file). */
+  recordVertical: boolean;
+  /** Encode at this size instead of the canvas (0 = canvas; wire only). */
+  outputWidth: number;
+  outputHeight: number;
 };
 
 /** One file in the recordings folder (`recordings_list`). */
@@ -194,6 +279,8 @@ export type RecordingStatus =
       framesDuplicated: number;
       framesBehind: number;
       audioBlocksDropped: number;
+      /** Chapter markers dropped so far. */
+      markers: number;
     }
   | {
       state: "paused";
@@ -208,6 +295,8 @@ export type RecordingStatus =
 export type StatsPayload = {
   /** Composed frames per second (the program render rate). */
   fps: number;
+  /** The second (vertical) canvas's compose rate (0 = none running). */
+  verticalFps: number;
   /** This process's CPU usage, percent of the whole machine. */
   cpu: number;
   /** This process's resident memory, MiB. */
@@ -328,6 +417,24 @@ export type SourceSettings =
   | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
   | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
+  | { kind: "nestedScene"; scene: SceneId }
+  | {
+      kind: "chatOverlay";
+      youtube: string;
+      twitch: string;
+      kick: string;
+      width: number;
+      maxLines: number;
+      fontSize: number;
+    }
+  | {
+      kind: "slideshow";
+      paths: string[];
+      slideMs: number;
+      transitionMs: number;
+      loop: boolean;
+      shuffle: boolean;
+    }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
   | {
@@ -476,6 +583,9 @@ export type FilterKind =
   | { type: "lut"; path: string; amount: number }
   | { type: "blur"; radius: number }
   | { type: "mask"; path: string; mode: "alpha" | "luma"; invert: boolean }
+  | { type: "colorKey"; key: Rgba; similarity: number; smoothness: number }
+  | { type: "lumaKey"; lumaMin: number; lumaMax: number; smoothness: number }
+  | { type: "renderDelay"; delayMs: number }
   | { type: "sharpen"; amount: number }
   | { type: "scroll"; speedX: number; speedY: number }
   | { type: "crop"; left: number; top: number; right: number; bottom: number };
@@ -514,11 +624,39 @@ export type FocusState = {
   prior: FocusRestore[];
 };
 
+/** A named set of items that move / show / hide together (Phase 6). */
+export type SourceGroup = {
+  id: string;
+  name: string;
+  items: ItemId[];
+  /** ANDs with each member's own eye toggle. */
+  visible: boolean;
+};
+
+/** One source's per-scene mixer override (Phase 6). */
+export type SceneAudioOverride = {
+  source: SourceId;
+  volumeDb: number;
+  muted: boolean;
+};
+
 export type Scene = {
   id: SceneId;
   name: string;
   items: SceneItem[];
   focus?: FocusState | null;
+  /** Source groups (Phase 6). */
+  groups?: SourceGroup[];
+  /** Per-scene mixer overrides (Phase 6). */
+  audioOverrides?: SceneAudioOverride[];
+};
+
+/** The second output canvas (Phase 6): its own size + the scene it shows. */
+export type VerticalCanvas = {
+  width: number;
+  height: number;
+  /** The scene this canvas composes (independent of the program scene). */
+  scene: SceneId;
 };
 
 /** The whole model (the on-disk scene-collection format). */
@@ -529,6 +667,8 @@ export type Collection = {
   sources: Source[];
   scenes: Scene[];
   activeScene: SceneId;
+  /** The optional second (vertical) output canvas (Phase 6). */
+  vertical?: VerticalCanvas | null;
 };
 
 /** The `studio` event / `studio_get` payload. */

@@ -2,7 +2,10 @@
 //! re-encode, no quality change — through the labeled ffmpeg component.
 //! (mkv is the crash-tolerant recording default; mp4 is what editors and
 //! phones expect. Remux gives both without paying for a second encode.)
+//! Also the replay buffer's **concat-copy** (Phase 6): stitch the ring's
+//! TS segments into one playable file, again without re-encoding.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -87,9 +90,158 @@ pub fn remux_to_mp4(ffmpeg: &Ffmpeg, input: &Path) -> Result<PathBuf, String> {
     Ok(output)
 }
 
+/// One `file '…'` line for the concat demuxer's list, with the only escape
+/// it honors (a quote closes, `\'` re-opens: `'` → `'\''`).
+fn concat_list_line(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\'', "'\\''");
+    format!("file '{text}'\n")
+}
+
+/// Stitch `segments` (MPEG-TS, same codec parameters — the replay ring's
+/// output) into `out` with `-c copy`: no re-encode, sub-second even for
+/// minutes of buffer. The newest segment may still be mid-write; TS cuts
+/// cleanly so the copy simply takes what has been flushed.
+pub fn concat_copy(ffmpeg: &Ffmpeg, segments: &[PathBuf], out: &Path) -> Result<(), String> {
+    if segments.is_empty() {
+        return Err("the replay buffer is still empty — nothing to save yet".to_string());
+    }
+    let list_path = out.with_extension("concat.txt");
+    {
+        let mut list = std::fs::File::create(&list_path)
+            .map_err(|err| format!("could not write the concat list: {err}"))?;
+        for segment in segments {
+            list.write_all(concat_list_line(segment).as_bytes())
+                .map_err(|err| format!("could not write the concat list: {err}"))?;
+        }
+    }
+    let mut cmd = command(ffmpeg);
+    cmd.args([
+        "-hide_banner",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+    ])
+    .arg(&list_path);
+    cmd.args(["-map", "0", "-c", "copy"]).arg(out);
+    let result = run_with_timeout(cmd, Duration::from_secs(10 * 60));
+    let _ = std::fs::remove_file(&list_path);
+    let result = result?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(out);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "replay save failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
+/// The FFMETADATA chapter block for marker timestamps (ms). Each chapter
+/// runs to the next marker (the last to `total_ms`, or +1 s past itself).
+fn ffmetadata_chapters(markers_ms: &[u64], total_ms: Option<u64>) -> String {
+    let mut text = String::from(";FFMETADATA1\n");
+    for (index, &start) in markers_ms.iter().enumerate() {
+        let end = markers_ms
+            .get(index + 1)
+            .copied()
+            .or(total_ms.filter(|total| *total > start))
+            .unwrap_or(start + 1_000);
+        text.push_str(&format!(
+            "[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle=Marker {}\n",
+            index + 1
+        ));
+    }
+    text
+}
+
+/// Embed `markers_ms` as chapters into an **mkv** recording (TASK-610): a
+/// stream-copy remux with the chapter metadata attached, replacing the
+/// original file. Non-mkv containers get a sidecar (the app writes it) —
+/// mp4 chapter atoms are not worth a full rewrite of a fresh recording.
+pub fn write_mkv_chapters(
+    ffmpeg: &Ffmpeg,
+    input: &Path,
+    markers_ms: &[u64],
+    total_ms: Option<u64>,
+) -> Result<(), String> {
+    if markers_ms.is_empty() {
+        return Ok(());
+    }
+    if input.extension().and_then(|ext| ext.to_str()) != Some("mkv") {
+        return Err("chapters embed into mkv recordings".to_string());
+    }
+    let meta_path = input.with_extension("ffmeta.txt");
+    std::fs::write(&meta_path, ffmetadata_chapters(markers_ms, total_ms))
+        .map_err(|err| format!("could not write the chapter metadata: {err}"))?;
+    let tmp_path = input.with_extension("chapters.tmp.mkv");
+
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+        .arg(input);
+    cmd.args(["-f", "ffmetadata", "-i"]).arg(&meta_path);
+    cmd.args(["-map", "0", "-map_chapters", "1", "-c", "copy"])
+        .arg(&tmp_path);
+    let result = run_with_timeout(cmd, Duration::from_secs(10 * 60));
+    let _ = std::fs::remove_file(&meta_path);
+    let result = result?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&tmp_path);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "chapter embed failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    std::fs::rename(&tmp_path, input).map_err(|err| {
+        let _ = std::fs::remove_file(&tmp_path);
+        format!("could not replace the recording with its chaptered copy: {err}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_metadata_runs_each_marker_to_the_next() {
+        let text = ffmetadata_chapters(&[5_000, 12_000], Some(30_000));
+        assert!(text.starts_with(";FFMETADATA1"));
+        assert!(text.contains("START=5000\nEND=12000\ntitle=Marker 1"));
+        assert!(text.contains("START=12000\nEND=30000\ntitle=Marker 2"));
+        // Without a known total, the last chapter gets a nominal second.
+        let open_ended = ffmetadata_chapters(&[7_000], None);
+        assert!(open_ended.contains("START=7000\nEND=8000"));
+    }
+
+    #[test]
+    fn concat_list_lines_escape_quotes() {
+        assert_eq!(
+            concat_list_line(Path::new("C:/tmp/replay-000000001.ts")),
+            "file 'C:/tmp/replay-000000001.ts'\n"
+        );
+        assert_eq!(
+            concat_list_line(Path::new("/tmp/it's here.ts")),
+            "file '/tmp/it'\\''s here.ts'\n"
+        );
+    }
+
+    #[test]
+    fn concat_of_nothing_is_refused() {
+        let fake = Ffmpeg {
+            path: PathBuf::from("ffmpeg-not-real"),
+            version: "test".to_string(),
+        };
+        let err = concat_copy(&fake, &[], Path::new("out.mkv")).unwrap_err();
+        assert!(err.contains("empty"));
+    }
 
     #[test]
     fn sibling_names_avoid_collisions() {

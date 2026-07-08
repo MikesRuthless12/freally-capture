@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import {
+  recordingAddMarker,
+  studioSendReaction,
   recordingPause,
   recordingResume,
   recordingStart,
@@ -12,10 +14,12 @@ import type { RecordingStatus, Settings } from "../api/types";
 import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
+import { ReplayControls } from "../components/ReplayControls";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsOutput } from "./SettingsOutput";
+import { SettingsReplay } from "./SettingsReplay";
 import { SettingsStream } from "./SettingsStream";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 
@@ -34,7 +38,7 @@ export function ControlsDock({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<
-    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | null
+    "components" | "output" | "stream" | "hotkeys" | "workspace" | "recordings" | "replay" | null
   >(null);
 
   useEffect(() => {
@@ -138,6 +142,20 @@ export function ControlsDock({
         {active && (
           <button
             type="button"
+            disabled={busy || rec?.state !== "recording"}
+            onClick={() => {
+              recordingAddMarker().catch((err) => setActionError(String(err)));
+            }}
+            title="Drop a chapter marker at this moment — it lands in the RECORDING (mkv chapters, or a sidecar file). Platform-side stream markers need platform accounts, which this app never asks for."
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text hover:border-havoc-accent/50`}
+          >
+            ◈ Marker
+            {rec?.state === "recording" && rec.markers > 0 ? ` (${rec.markers})` : ""}
+          </button>
+        )}
+        {active && (
+          <button
+            type="button"
             disabled={busy}
             onClick={pauseResume}
             title={
@@ -159,10 +177,31 @@ export function ControlsDock({
           onNeedsComponents={() => setDialog("components")}
           onNeedsSettings={() => setDialog("stream")}
         />
+        <ReplayControls disabled={!settings} onNeedsComponents={() => setDialog("components")} />
+        <div
+          className="flex items-center gap-1"
+          role="group"
+          aria-label="Reactions (baked into the program)"
+          title="Float a reaction over the program — recorded AND streamed, so the replay shows the exact moment. Viewers in chat trigger these too (their reaction emoji float automatically); a flood only caps what's on screen."
+        >
+          {["❤", "🔥", "💯", "👏", "😂", "🎉"].map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => {
+                studioSendReaction(emoji).catch((err) => console.error("reaction failed:", err));
+              }}
+              aria-label={`React ${emoji}`}
+              className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-1 py-1 text-sm hover:border-havoc-accent/50"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           disabled
-          title="The virtual camera needs its own signed driver component (a DirectShow/MediaFoundation source other apps can open) — it ships as its own milestone right after 0.70.0"
+          title="The virtual camera needs its own signed driver component per OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO extension / Linux v4l2loopback) — it ships as its own milestone. The feed model is ready for it: program, vertical canvas, or a single source, with a paired virtual mic on Windows/Linux (macOS has no virtual-mic API — said honestly)."
           className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text`}
         >
           ⌁ Start Virtual Camera
@@ -202,8 +241,16 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("replay")}
+            title="Replay buffer length + quality presets"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⟲ Replay…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("hotkeys")}
-            title="Global hotkeys: record, Go Live, transition"
+            title="Global hotkeys: record, Go Live, transition, save replay"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
             ⌨ Keys…
@@ -248,6 +295,13 @@ export function ControlsDock({
       )}
       {dialog === "hotkeys" && (
         <SettingsHotkeys
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "replay" && (
+        <SettingsReplay
           settings={settings}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}

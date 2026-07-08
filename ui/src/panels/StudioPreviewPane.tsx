@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import { settingsSet, studioTransition } from "../api/commands";
 import type { Settings, TransitionKind } from "../api/types";
@@ -129,6 +130,67 @@ export function StudioPreviewPane({
           {transitioning ? "Transitioning…" : "Transition ⇄"}
         </button>
       </div>
+      {transition?.kind === "lumaImage" && (
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            value={transition.lumaImage}
+            onChange={(event) => saveTransition({ lumaImage: event.target.value })}
+            placeholder="grayscale wipe image (png/jpg)"
+            aria-label="Luma wipe image"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 font-mono text-[11px] text-havoc-text"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              void open({
+                multiple: false,
+                filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] }],
+              }).then((picked) => {
+                if (typeof picked === "string") saveTransition({ lumaImage: picked });
+              });
+            }}
+            className="shrink-0 rounded border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+          >
+            Browse…
+          </button>
+        </div>
+      )}
+      {transition?.kind === "stinger" && (
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            value={transition.stingerPath}
+            onChange={(event) => saveTransition({ stingerPath: event.target.value })}
+            placeholder="stinger video (ProRes 4444 .mov keeps its alpha)"
+            aria-label="Stinger video file"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 font-mono text-[11px] text-havoc-text"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              void open({
+                multiple: false,
+                filters: [{ name: "Video", extensions: ["mov", "mp4", "mkv", "webm", "avi"] }],
+              }).then((picked) => {
+                if (typeof picked === "string") saveTransition({ stingerPath: picked });
+              });
+            }}
+            className="shrink-0 rounded border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+          >
+            Browse…
+          </button>
+          <input
+            type="number"
+            min={0}
+            max={5000}
+            step={50}
+            value={transition.stingerCutMs}
+            onChange={(event) => saveTransition({ stingerCutMs: Number(event.target.value) })}
+            aria-label="Stinger cut point (ms)"
+            title="When the scene swap lands under the stinger (ms into the transition)"
+            className="w-20 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
+          />
+        </div>
+      )}
       {error && (
         <p role="alert" className="m-0 text-[11px] text-red-300">
           {error}

@@ -27,11 +27,13 @@ const inputClass =
 
 type PropertiesDialogProps = {
   source: Source;
+  /** The scenes a Nested Scene source can point at (cycle-checked on Apply). */
+  scenes?: Array<{ id: string; name: string }>;
   onClose: () => void;
 };
 
 /** Per-kind source settings + rename. Apply pushes to the engine live. */
-export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
+export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDialogProps) {
   const [name, setName] = useState(source.name);
   const [draft, setDraft] = useState<SourceSettings>(() => {
     // A Source is its settings plus identity (+ the audio strip) — peel
@@ -67,7 +69,7 @@ export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
           />
         </label>
 
-        <SettingsEditor draft={draft} onChange={setDraft} />
+        <SettingsEditor draft={draft} scenes={scenes} onChange={setDraft} />
 
         {error && (
           <p role="alert" className="m-0 text-xs text-red-400">
@@ -97,12 +99,158 @@ export function PropertiesDialog({ source, onClose }: PropertiesDialogProps) {
 
 function SettingsEditor({
   draft,
+  scenes,
   onChange,
 }: {
   draft: SourceSettings;
+  scenes: Array<{ id: string; name: string }>;
   onChange: (settings: SourceSettings) => void;
 }) {
   switch (draft.kind) {
+    case "chatOverlay":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            YouTube — channel / watch / live_chat URL (no key, no sign-in, ever)
+            <input
+              value={draft.youtube}
+              onChange={(event) => onChange({ ...draft, youtube: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Twitch — channel name (anonymous)
+            <input
+              value={draft.twitch}
+              onChange={(event) => onChange({ ...draft, twitch: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Kick — channel slug (public endpoint)
+            <input
+              value={draft.kick}
+              onChange={(event) => onChange({ ...draft, kick: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Width (px)
+              <input
+                type="number"
+                min={120}
+                max={3840}
+                value={draft.width}
+                onChange={(event) => onChange({ ...draft, width: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Lines
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={draft.maxLines}
+                onChange={(event) => onChange({ ...draft, maxLines: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Font (px)
+              <input
+                type="number"
+                min={10}
+                max={96}
+                value={draft.fontSize}
+                onChange={(event) => onChange({ ...draft, fontSize: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+          </div>
+        </div>
+      );
+    case "slideshow":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            Image files (one path per line, shown in order)
+            <textarea
+              value={draft.paths.join("\n")}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  paths: event.target.value
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                })
+              }
+              rows={5}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Per-slide (ms)
+              <input
+                type="number"
+                min={100}
+                value={draft.slideMs}
+                onChange={(event) => onChange({ ...draft, slideMs: Number(event.target.value) })}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              Crossfade (ms, 0 = cut)
+              <input
+                type="number"
+                min={0}
+                max={5000}
+                value={draft.transitionMs}
+                onChange={(event) =>
+                  onChange({ ...draft, transitionMs: Number(event.target.value) })
+                }
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.loop}
+              onChange={(event) => onChange({ ...draft, loop: event.target.checked })}
+            />
+            Loop (off = hold the last slide)
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.shuffle}
+              onChange={(event) => onChange({ ...draft, shuffle: event.target.checked })}
+            />
+            Shuffle each cycle
+          </label>
+        </div>
+      );
+    case "nestedScene":
+      return (
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          Scene this source composes (a scene that already contains this one is rejected)
+          <select
+            value={draft.scene}
+            onChange={(event) => onChange({ ...draft, scene: event.target.value })}
+            className={inputClass}
+          >
+            {scenes.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
     case "display":
     case "window":
       return <CaptureRepick draft={draft} onChange={onChange} />;

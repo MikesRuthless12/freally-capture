@@ -32,7 +32,7 @@ const CONTAINERS: { value: Container; label: string; wire: boolean }[] = [
   { value: "webm", label: "WebM (AV1 + Opus)", wire: true },
 ];
 
-const FPS_CHOICES = [24, 30, 50, 60];
+const FPS_CHOICES = [24, 30, 50, 60, 120, 144, 240];
 
 /** The codecs each wire container legally holds (mirrors recording.rs). */
 function containerAccepts(container: Container, codec: VideoCodec): boolean {
@@ -232,6 +232,31 @@ export function SettingsOutput({
             max={1440}
             onCommit={(value) => save({ splitMinutes: Math.round(value) })}
           />
+          <NumberField
+            label="Output width (0 = canvas; wire formats only)"
+            value={rec.outputWidth}
+            min={0}
+            max={16384}
+            step={2}
+            onCommit={(value) => save({ outputWidth: Math.round(value) })}
+          />
+          <NumberField
+            label="Output height (0 = canvas)"
+            value={rec.outputHeight}
+            min={0}
+            max={16384}
+            step={2}
+            onCommit={(value) => save({ outputHeight: Math.round(value) })}
+          />
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={rec.recordVertical}
+              onChange={(event) => save({ recordVertical: event.target.checked })}
+            />
+            Also record the vertical canvas (a parallel “… (vertical)” file; needs the 9:16 canvas
+            enabled)
+          </label>
           <div className="flex flex-col gap-1 text-[11px] text-havoc-muted">
             Audio tracks
             <div className="flex items-center gap-1" role="group" aria-label="Recorded tracks">
