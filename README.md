@@ -40,7 +40,10 @@ leaves your machine is the stream you chose to send.
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
 > telemetry**, and **no cloud restreaming we run** — your stream goes **direct to the platform**. The
-> only network actions are the **stream targets you configure**, an optional **live chat overlay** you
+> only network actions are the **stream targets you configure**, the opt-in **remote guests** session
+> you start (invite-only P2P WebRTC — camera/mic/screen flow **directly between peers**, encrypted in
+> transit; only the tiny connection handshake crosses a signaling broker, and joining is always an
+> explicit click), an optional **live chat overlay** you
 > point at a channel (public chat reads only — **never an API key, account, or sign-in**), an
 > optional **update check**, and the on-demand download of one clearly-labeled, non-bundled component:
 > **ffmpeg** (for the patent-encumbered wire codecs the platforms require). There are **no AI/ML

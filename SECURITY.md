@@ -31,7 +31,8 @@ remediate before any public disclosure.
 
 - **Local-first:** the core never transmits your captures or recordings. The outbound network actions
   are *limited and explicit* — the **stream targets you configure** (RTMP/RTMPS/SRT/WHIP, each direct
-  to its platform), the optional **live chat overlay** you point at a channel (public chat reads only —
+  to its platform), the opt-in **remote-guests session** (below), the optional **live chat overlay**
+  you point at a channel (public chat reads only —
   no account or key, the same requests a logged-out viewer's browser makes; the chat host is pinned to
   the platform's own domains), the optional **ffmpeg / model downloads**, and the optional
   **update check**. Secrets (stream keys, the WHIP bearer token) ride the publish URL / the
@@ -59,6 +60,18 @@ remediate before any public disclosure.
 - **Stream keys / service credentials:** stored **locally** in your profile (the OS config dir), masked
   in the UI, and sent **only** to the streaming service you are broadcasting to. They are never
   transmitted anywhere else and never logged.
+- **Remote guests (opt-in P2P):** no session = no connections. Invites are **opaque, expiring tokens**
+  (host-chosen TTL) and joining is always an **explicit click** — a `freally://` deep link never
+  auto-connects. Media (camera / mic / screen) flows **peer-to-peer over WebRTC, encrypted in transit
+  (DTLS-SRTP)**; only peer ids + session descriptions cross the public signaling broker, **never
+  media**, and there is no media server we run. Tokens and every incoming call/connection are treated
+  as **untrusted input** (validated, bounded); the host can **mute / remove / ban** a guest — a ban
+  adds the peer to a persisted denylist checked on every incoming connection **and rotates the session
+  id**, so previously shared links die. The optional **TURN relay is the user's own**
+  (`turn:`/`turns:` shape-validated); its credential is a redacted secret, stored locally, never
+  logged. Serverless honesty: single-use invites would need a server we don't run, so **expiry is the
+  real gate today** (said in-app), and the residual risks are documented in
+  `design/remote-guests-p2p.md`.
 - **WebSocket remote-control API:** **off by default**. When enabled it binds to **`127.0.0.1`** by
   default (LAN exposure is an explicit opt-in), is **password-authenticated**, validates every command,
   and **cannot read arbitrary files**. Disabled means the port is closed. Treat the password like any
