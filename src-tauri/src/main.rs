@@ -11,11 +11,14 @@
 //! 60 fps compose loop; the engine lives in the owned `fcap-*` crates.
 
 mod audio;
+mod bugreport;
 mod commands;
 mod docks;
+mod eula;
 mod events;
 mod hotkeys;
 mod native_preview;
+mod openfile;
 mod preview;
 mod profiles;
 mod reactions;
@@ -45,6 +48,11 @@ fn main() {
         println!("PANIC: {info}");
         default_panic_hook(info);
     }));
+    // Opt-in bug reporting: capture a SCRUBBED crash report locally so the
+    // next launch can offer to report it. Nothing is ever sent automatically
+    // (charter: no telemetry) — this only writes a local file. Chains the
+    // hook above (write → print → default backtrace).
+    bugreport::install_panic_hook();
 
     // Version banner on launch (visible in dev consoles and CI logs; the
     // release Windows build has no console by design).
@@ -71,16 +79,24 @@ fn main() {
     let mut builder = tauri::Builder::default();
     if !allow_multi {
         // Single instance FIRST (the plugins' documented order).
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            use tauri::Manager;
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::{Emitter, Manager};
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
+            }
+            // A second launch opening a .frec (double-click while running):
+            // forward the path so the UI offers to export it.
+            if let Some(frec) = openfile::frec_in_args(argv) {
+                openfile::store(frec.clone());
+                let _ = app.emit("open-frec", frec);
             }
         }));
     }
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -100,6 +116,8 @@ fn main() {
         .manage(AudioRuntime::new())
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
+        .manage(commands::cef::CefState::new())
+        .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
         .manage(replay::ReplayState::new())
@@ -124,6 +142,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
+            commands::integrations_status,
+            commands::game_capture_status,
+            eula::eula_status,
+            eula::eula_accept,
             commands::settings_get,
             commands::settings_set,
             commands::capture_list_sources,
@@ -132,6 +154,11 @@ fn main() {
             commands::video_device_formats,
             commands::open_privacy_settings,
             docks::browser_dock_open,
+            bugreport::bug_report_context,
+            bugreport::bug_report_submit,
+            bugreport::bug_report_clear_crash,
+            bugreport::bug_report_simulate,
+            bugreport::bug_report_test_crash,
             commands::studio::studio_get,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,
@@ -161,6 +188,8 @@ fn main() {
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,
+            commands::studio::studio_media_set_paused,
+            commands::studio::studio_media_paused,
             commands::studio::studio_add_filter,
             commands::studio::studio_remove_filter,
             commands::studio::studio_reorder_filter,
@@ -185,6 +214,7 @@ fn main() {
             profiles::collection_switch,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
+            commands::audio::app_audio_apps,
             commands::audio::audio_loopback_devices,
             commands::audio::studio_set_audio_volume,
             commands::audio::studio_set_audio_muted,
@@ -200,6 +230,10 @@ fn main() {
             commands::recording::encoders_list,
             commands::recording::ffmpeg_status,
             commands::recording::ffmpeg_install,
+            commands::cef::cef_status,
+            commands::cef::cef_install,
+            commands::cef::cef_cancel,
+            commands::cef::cef_remove,
             commands::recording::ffmpeg_cancel,
             commands::recording::ffmpeg_remove,
             commands::recording::recording_start,
@@ -210,6 +244,10 @@ fn main() {
             commands::recording::recording_status,
             commands::recording::recordings_list,
             commands::recording::recording_remux,
+            commands::recording::recording_export,
+            commands::recording::recording_export_cancel,
+            commands::recording::open_frec_export,
+            openfile::open_frec_pending,
             commands::native_preview_set_region,
             commands::native_preview_active,
             commands::native_preview_set_selection
@@ -248,6 +286,11 @@ fn main() {
                 {
                     let _ = app.deep_link().register_all();
                 }
+            }
+            // Opened with a .frec on the command line (cold start / OS
+            // double-click): stash it for the UI to offer an export.
+            if let Some(frec) = openfile::frec_in_args(std::env::args()) {
+                openfile::store(frec);
             }
             events::spawn_stats_emitter(app.handle().clone());
             // The compose loop: capture sessions + static sources → the

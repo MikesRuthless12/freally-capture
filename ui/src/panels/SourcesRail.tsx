@@ -3,15 +3,19 @@ import { open } from "@tauri-apps/plugin-dialog";
 import qrcode from "qrcode-generator";
 
 import {
+  appAudioApps,
   audioInputDevices,
   audioLoopbackDevices,
   captureListSources,
   captureWindowThumbnail,
+  gameCaptureStatus,
   openPrivacySettings,
   settingsGet,
   settingsSet,
   studioApplyLayout,
   studioCreateGroup,
+  studioMediaPaused,
+  studioMediaSetPaused,
   studioRenameSource,
   studioRetrySource,
   studioSetCenterView,
@@ -22,12 +26,14 @@ import {
   videoDevicesList,
 } from "../api/commands";
 import type {
+  AppAudioList,
   AudioDevice,
   AudioLevelsPayload,
   CaptureSource,
   Collection,
   Corner,
   CornerSlot,
+  GameCaptureStatus,
   ItemId,
   ProgramStatus,
   Scene,
@@ -93,6 +99,8 @@ type PickerMode =
   | "chatOverlay"
   | "audioInput"
   | "audioOutput"
+  | "appAudio"
+  | "gameCapture"
   | "existing";
 
 const KIND_BADGE: Record<string, string> = {
@@ -110,11 +118,13 @@ const KIND_BADGE: Record<string, string> = {
   chatOverlay: "Chat",
   audioInput: "Audio In",
   audioOutput: "Audio Out",
+  appAudio: "App Audio",
 };
 
 const ADD_MENU: Array<[PickerMode, string]> = [
   ["display", "Display Capture"],
   ["window", "Window Capture"],
+  ["gameCapture", "Game Capture (read first)"],
   ["webcam", "Video Capture Device"],
   ["image", "Image"],
   ["media", "Media (video/image file)"],
@@ -126,6 +136,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["chatOverlay", "Live Chat Overlay"],
   ["audioInput", "Audio Input Capture"],
   ["audioOutput", "Audio Output Capture"],
+  ["appAudio", "Application Audio (Windows)"],
   ["existing", "Existing source…"],
 ];
 
@@ -157,6 +168,27 @@ export function SourcesRail({
   const [groupPick, setGroupPick] = useState<ItemId[] | null>(null);
   const [showLayout, setShowLayout] = useState(false);
   const [renaming, setRenaming] = useState<{ source: SourceId; draft: string } | null>(null);
+  // Paused state of embedded Media sources (videos), keyed by source id — the
+  // streamer pauses/resumes a video live on the broadcast.
+  const [mediaPaused, setMediaPaused] = useState<Record<string, boolean>>({});
+  // Keep the pause buttons synced with the backend for the current Media
+  // sources (e.g. after a reload — a video may already be paused).
+  const mediaIdsKey = (collection?.sources ?? [])
+    .filter((source) => source.kind === "media")
+    .map((source) => source.id)
+    .join(",");
+  useEffect(() => {
+    if (!mediaIdsKey) return;
+    let alive = true;
+    for (const id of mediaIdsKey.split(",")) {
+      studioMediaPaused(id as SourceId)
+        .then((paused) => alive && setMediaPaused((prev) => ({ ...prev, [id]: paused })))
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [mediaIdsKey]);
 
   const items = scene?.items ?? [];
   const topFirst = [...items].reverse();
@@ -279,7 +311,10 @@ export function SourcesRail({
             // video source (incl. Media, which also has audio but is
             // video-primary) reports its pipeline state — errors, retry —
             // through `program`. Same status shape, one dot.
-            const audioOnly = source?.kind === "audioInput" || source?.kind === "audioOutput";
+            const audioOnly =
+              source?.kind === "audioInput" ||
+              source?.kind === "audioOutput" ||
+              source?.kind === "appAudio";
             const status = audioOnly ? audio?.sources[item.source] : program?.sources[item.source];
             const isSelected = item.id === selectedItem;
             const isRenaming = renaming?.source === item.source;
@@ -452,6 +487,32 @@ export function SourcesRail({
                       }`}
                     />
                   ) : null}
+                  {source?.kind === "media" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !mediaPaused[item.source];
+                        setMediaPaused((prev) => ({ ...prev, [item.source]: next }));
+                        studioMediaSetPaused(item.source, next).catch((err) =>
+                          console.error("media pause failed:", err),
+                        );
+                      }}
+                      title={
+                        mediaPaused[item.source]
+                          ? "Resume the video (live on the stream)"
+                          : "Pause the video — hold the frame + go silent, live on the stream"
+                      }
+                      aria-label={`${mediaPaused[item.source] ? "Resume" : "Pause"} ${source?.name ?? "video"}`}
+                      aria-pressed={Boolean(mediaPaused[item.source])}
+                      className={`shrink-0 rounded px-1 text-[11px] ${
+                        mediaPaused[item.source]
+                          ? "text-amber-300"
+                          : "text-havoc-muted hover:text-havoc-text"
+                      }`}
+                    >
+                      {mediaPaused[item.source] ? "▶" : "⏸"}
+                    </button>
+                  )}
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"
@@ -526,6 +587,13 @@ export function SourcesRail({
         <WebcamPicker onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "audioInput" || picker === "audioOutput" ? (
         <AudioPicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "appAudio" ? (
+        <AppAudioPicker onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "gameCapture" ? (
+        <GameCapturePicker
+          onClose={() => setPicker(null)}
+          onUseWindowCapture={() => setPicker("window")}
+        />
       ) : picker === "image" ? (
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "media" ? (
@@ -1332,6 +1400,167 @@ function AudioPicker({
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
 
+/**
+ * The App Audio picker (TASK-805): pick one running application to capture as
+ * its own mixer source. Windows lists apps making sound now (WASAPI process
+ * loopback); other OSes show the honest per-OS guidance instead of a fake
+ * toggle. A ⟳ refresh re-scans since apps come and go.
+ */
+function AppAudioPicker({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const [list, setList] = useState<AppAudioList | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setError(null);
+    appAudioApps()
+      .then(setList)
+      .catch((err) => setError(String(err)));
+  }, []);
+
+  useEffect(() => {
+    // Initial scan — set state only in the async callback (never synchronously
+    // inside the effect); the Refresh button uses `load` (sync setError is fine
+    // from an event handler).
+    let cancelled = false;
+    appAudioApps()
+      .then((result) => {
+        if (!cancelled) setList(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <PickerShell title="Add Application Audio" onClose={onClose}>
+      {error ? (
+        <p className="m-0 text-xs text-red-400">{error}</p>
+      ) : list === null ? (
+        <p className="m-0 text-xs text-havoc-muted">Looking for apps making sound…</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {list.supported && list.apps.length > 0 ? (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {list.apps.map((app) => (
+                <li key={app.pid}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onPick({ kind: "appAudio", pid: app.pid, exe: app.exe }, app.name)
+                    }
+                    className="flex w-full items-center justify-between gap-2 truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
+                  >
+                    <span className="truncate">{app.name}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-havoc-muted">
+                      {app.exe} · {app.pid}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
+              {list.supported
+                ? "No apps are making sound right now — start playback in the app, then refresh."
+                : list.guidance}
+            </p>
+          )}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={load}
+              className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+            >
+              ⟳ Refresh
+            </button>
+            {list.supported && (
+              <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                Captures exactly that app&apos;s audio — its own VU, fader, mute, filters, and
+                track.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </PickerShell>
+  );
+}
+
+/**
+ * Game Capture (TASK-801): honest, never-inject-silently. The injected GPU-API
+ * hook is a flagged milestone; this panel shows the anti-cheat/AV risk and
+ * routes the user to the working path (Window Capture, or the portal on
+ * Wayland). Nothing is injected from here.
+ */
+function GameCapturePicker({
+  onClose,
+  onUseWindowCapture,
+}: {
+  onClose: () => void;
+  onUseWindowCapture: () => void;
+}) {
+  const [status, setStatus] = useState<GameCaptureStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    gameCaptureStatus()
+      .then((s) => {
+        if (alive) setStatus(s);
+      })
+      .catch((err) => {
+        if (alive) setError(String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <PickerShell title="Game Capture" onClose={onClose}>
+      {error ? (
+        <p className="m-0 text-xs text-red-400">{error}</p>
+      ) : status === null ? (
+        <p className="m-0 text-xs text-havoc-muted">Checking…</p>
+      ) : (
+        <div className="flex flex-col gap-3 text-xs">
+          <p className="m-0 rounded-md border border-red-400/25 bg-red-400/5 p-2 leading-relaxed text-red-200/90">
+            {status.risk}
+          </p>
+          <p className="m-0 leading-relaxed text-havoc-muted">{status.guidance}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onUseWindowCapture}
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+            >
+              {status.fallback === "portal"
+                ? "Use Screen Capture (Portal)"
+                : "Use Window Capture instead"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </PickerShell>
+  );
+}
+
 function ImageForm({
   onClose,
   onPick,
@@ -2106,7 +2335,7 @@ function LayoutPicker({
   const sourceOf = (id: SourceId) => collection?.sources.find((source) => source.id === id);
   const visual = (scene?.items ?? []).filter((item) => {
     const kind = sourceOf(item.source)?.kind;
-    return kind !== "audioInput" && kind !== "audioOutput";
+    return kind !== "audioInput" && kind !== "audioOutput" && kind !== "appAudio";
   });
 
   const [choice, setChoice] = useState<Record<string, LayoutChoice>>(() => {

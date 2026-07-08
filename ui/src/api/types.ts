@@ -468,6 +468,7 @@ export type SourceSettings =
     }
   | { kind: "audioInput"; deviceId: string }
   | { kind: "audioOutput"; deviceId: string }
+  | { kind: "appAudio"; pid: number; exe: string }
   | {
       kind: "text";
       text: string;
@@ -486,7 +487,11 @@ export type SourceKindName = SourceSettings["kind"];
 /** Whether a source kind produces audio (and so carries `AudioSettings`). */
 export function kindHasAudio(kind: SourceKindName): boolean {
   return (
-    kind === "audioInput" || kind === "audioOutput" || kind === "media" || kind === "remoteGuest"
+    kind === "audioInput" ||
+    kind === "audioOutput" ||
+    kind === "appAudio" ||
+    kind === "media" ||
+    kind === "remoteGuest"
   );
 }
 
@@ -574,6 +579,45 @@ export type AudioDevice = {
 export type LoopbackDevices = {
   devices: AudioDevice[];
   guidance?: string;
+};
+
+/** One app currently making sound (the App Audio picker rows). */
+export type AppAudioApp = {
+  pid: number;
+  name: string;
+  exe: string;
+};
+
+/** The App Audio picker payload + the honest per-OS guidance. */
+export type AppAudioList = {
+  apps: AppAudioApp[];
+  supported: boolean;
+  guidance: string;
+};
+
+/** Optional-integration status: NDI (detected runtime) + VST (scoped). */
+export type IntegrationsStatus = {
+  ndiAvailable: boolean;
+  ndiVersion?: string | null;
+  ndiGuidance: string;
+  vstAvailable: boolean;
+  vstStatus: string;
+};
+
+/** First-run EULA gate payload. */
+export type EulaStatus = {
+  version: string;
+  text: string;
+  accepted: boolean;
+};
+
+/** Game-capture status: the honest anti-cheat/AV risk + the working fallback. */
+export type GameCaptureStatus = {
+  support: "hookPlanned" | "portalOnly" | "windowCaptureOnly";
+  hookPossible: boolean;
+  risk: string;
+  fallback: "windowCapture" | "portal";
+  guidance: string;
 };
 
 /** One source's live levels/status in the `audio` event. */
@@ -819,3 +863,39 @@ export type FfmpegStatus =
   | { state: "extracting" }
   | { state: "ready"; version: string; path: string }
   | { state: "error"; message: string; build: FfmpegBuild | null };
+
+/** The CEF (browser-source runtime) component status (mirrors `CefStatusDto`). */
+export type CefStatus =
+  | { state: "missing"; supported: boolean }
+  | { state: "resolving" }
+  | {
+      state: "downloading";
+      receivedBytes: number;
+      totalBytes: number | null;
+      bytesPerSec: number;
+    }
+  | { state: "verifying" }
+  | { state: "extracting" }
+  | { state: "ready"; version: string; path: string }
+  | { state: "error"; message: string; supported: boolean };
+
+/** The anonymous bug-report context (mirrors `BugReportContextDto`). */
+export type BugReportContext = {
+  appVersion: string;
+  os: string;
+  arch: string;
+  /** The anonymous system line always included in a report. */
+  diagnostics: string;
+  /** The scrubbed crash text from the previous run, if the app crashed. */
+  pendingCrash: string | null;
+};
+
+/**
+ * The `recording-export` event: a .frec → wire-container export's progress and
+ * terminal state (mirrors `ExportStatusDto` in commands/recording.rs).
+ */
+export type ExportStatus =
+  | { state: "exporting"; framesDone: number; framesTotal: number }
+  | { state: "done"; path: string }
+  | { state: "error"; message: string }
+  | { state: "cancelled" };

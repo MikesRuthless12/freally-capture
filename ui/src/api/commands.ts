@@ -8,17 +8,23 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddedItem,
+  AppAudioList,
   AudioDevice,
   AudioFilterId,
   AudioFilterKind,
   BlendMode,
+  BugReportContext,
   CaptureSource,
+  CefStatus,
   CornerSlot,
   EncoderCatalog,
+  EulaStatus,
   FfmpegStatus,
   FilterId,
   FilterKind,
+  GameCaptureStatus,
   Health,
+  IntegrationsStatus,
   ItemId,
   LoopbackDevices,
   MonitorMode,
@@ -444,6 +450,31 @@ export function audioLoopbackDevices(): Promise<LoopbackDevices> {
   return invoke<LoopbackDevices>("audio_loopback_devices");
 }
 
+/** Apps currently making sound (Windows) + the honest per-OS guidance. */
+export function appAudioApps(): Promise<AppAudioList> {
+  return invoke<AppAudioList>("app_audio_apps");
+}
+
+/** Optional-integration status: NDI (detected runtime) + VST (scoped). */
+export function integrationsStatus(): Promise<IntegrationsStatus> {
+  return invoke<IntegrationsStatus>("integrations_status");
+}
+
+/** Game-capture status: honest anti-cheat/AV risk + the working fallback. */
+export function gameCaptureStatus(): Promise<GameCaptureStatus> {
+  return invoke<GameCaptureStatus>("game_capture_status");
+}
+
+/** The EULA text + version + whether the current version is already accepted. */
+export function eulaStatus(): Promise<EulaStatus> {
+  return invoke<EulaStatus>("eula_status");
+}
+
+/** Record acceptance of the current EULA version (persisted). */
+export function eulaAccept(): Promise<void> {
+  return invoke("eula_accept");
+}
+
 export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {
   return invoke("studio_set_audio_volume", { sourceId, volumeDb });
 }
@@ -544,6 +575,26 @@ export function ffmpegRemove(): Promise<void> {
   return invoke("ffmpeg_remove");
 }
 
+/** The CEF (browser-source runtime) component status. */
+export function cefStatus(): Promise<CefStatus> {
+  return invoke<CefStatus>("cef_status");
+}
+
+/** Start the on-demand CEF fetch + verify (progress rides the `cef` event). */
+export function cefInstall(): Promise<void> {
+  return invoke("cef_install");
+}
+
+/** Cancel an in-flight CEF fetch (the partial download is removed). */
+export function cefCancel(): Promise<void> {
+  return invoke("cef_cancel");
+}
+
+/** Remove the installed CEF runtime. */
+export function cefRemove(): Promise<void> {
+  return invoke("cef_remove");
+}
+
 // ---------------------------------------------------------------------------
 // Native preview surface (the "OBS feel" path)
 // ---------------------------------------------------------------------------
@@ -618,4 +669,67 @@ export function recordingsList(): Promise<RecordingFile[]> {
 /** Remux an mkv recording to a sibling mp4 (stream copy, no re-encode). */
 export function recordingRemux(path: string): Promise<string> {
   return invoke<string>("recording_remux", { path });
+}
+
+/** Export a .frec recording to a sibling mp4/mkv/mov/webm (decode + re-encode
+ * through the ffmpeg component, so it plays in any player). Progress rides the
+ * `recording-export` event. */
+export function recordingExport(path: string, container: string): Promise<void> {
+  return invoke("recording_export", { path, container });
+}
+
+/** Cancel the running .frec export. */
+export function recordingExportCancel(): Promise<void> {
+  return invoke("recording_export_cancel");
+}
+
+/** A `.frec` the app was opened with (OS double-click), if any — one-shot. */
+export function openFrecPending(): Promise<string | null> {
+  return invoke<string | null>("open_frec_pending");
+}
+
+/** Pause or resume an embedded Media source (video) live on the stream. */
+export function studioMediaSetPaused(sourceId: SourceId, paused: boolean): Promise<void> {
+  return invoke("studio_media_set_paused", { sourceId, paused });
+}
+
+/** Whether an embedded Media source is currently paused. */
+export function studioMediaPaused(sourceId: SourceId): Promise<boolean> {
+  return invoke<boolean>("studio_media_paused", { sourceId });
+}
+
+/** Export a `.frec` the user opened via the OS to a sibling wire file. */
+export function openFrecExport(path: string, container: string): Promise<void> {
+  return invoke("open_frec_export", { path, container });
+}
+
+/** The anonymous bug-report context: app/OS info + any pending crash. */
+export function bugReportContext(): Promise<BugReportContext> {
+  return invoke<BugReportContext>("bug_report_context");
+}
+
+/** Open a pre-filled GitHub issue ("github") or email draft ("email") with
+ * the anonymous report — the user still clicks send. Nothing auto-sends. */
+export function bugReportSubmit(
+  target: "github" | "email",
+  description: string,
+  includeCrash: boolean,
+): Promise<void> {
+  return invoke("bug_report_submit", { target, description, includeCrash });
+}
+
+/** Dismiss + delete the pending crash report. */
+export function bugReportClearCrash(): Promise<void> {
+  return invoke("bug_report_clear_crash");
+}
+
+/** Write a harmless sample crash report to test the "we found a crash" flow. */
+export function bugReportSimulate(): Promise<void> {
+  return invoke("bug_report_simulate");
+}
+
+/** TEST ONLY: write a crash report and force-exit the app, so the full
+ * crash → relaunch → report loop can be exercised (relaunch to see it). */
+export function bugReportTestCrash(): Promise<void> {
+  return invoke("bug_report_test_crash");
 }

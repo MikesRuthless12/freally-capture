@@ -8,6 +8,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   AudioLevelsPayload,
+  CefStatus,
+  ExportStatus,
   FfmpegStatus,
   ProgramStatus,
   RecordingStatus,
@@ -63,7 +65,22 @@ export function onFfmpeg(handler: (status: FfmpegStatus) => void): Promise<Unlis
   return listen<FfmpegStatus>("ffmpeg", (event) => handler(event.payload));
 }
 
+/** Subscribe to the CEF (browser-source runtime) component's status changes. */
+export function onCef(handler: (status: CefStatus) => void): Promise<UnlistenFn> {
+  return listen<CefStatus>("cef", (event) => handler(event.payload));
+}
+
 /** Subscribe to recording state/progress (~2 Hz while a session runs). */
 export function onRecording(handler: (status: RecordingStatus) => void): Promise<UnlistenFn> {
   return listen<RecordingStatus>("recording", (event) => handler(event.payload));
+}
+
+/** Subscribe to .frec export progress (frames done/total + terminal state). */
+export function onRecordingExport(handler: (status: ExportStatus) => void): Promise<UnlistenFn> {
+  return listen<ExportStatus>("recording-export", (event) => handler(event.payload));
+}
+
+/** Subscribe to a .frec opened via the OS while the app is already running. */
+export function onOpenFrec(handler: (path: string) => void): Promise<UnlistenFn> {
+  return listen<string>("open-frec", (event) => handler(event.payload));
 }

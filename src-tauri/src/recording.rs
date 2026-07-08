@@ -502,7 +502,7 @@ fn markers_sidecar_text(markers_ms: &[u64]) -> String {
 /// Resolve "auto" (or validate an explicit encoder) against the verified
 /// catalog, honestly: an encoder this machine refused is an error, not a
 /// silent switch.
-fn resolve_encoder<R: Runtime>(
+pub(crate) fn resolve_encoder<R: Runtime>(
     app: &AppHandle<R>,
     settings: &RecordingSettings,
     container: Container,

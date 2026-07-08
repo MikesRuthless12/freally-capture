@@ -204,6 +204,18 @@ pub enum SourceSettings {
         #[serde(default)]
         device_id: String,
     },
+    /// One application's audio, captured as its own mixer source (Phase 8,
+    /// TASK-805). Windows-first via WASAPI process loopback; other OSes surface
+    /// the honest per-OS guidance instead of a fake toggle. Audio-only.
+    AppAudio {
+        /// The target process id (the capture key within a session).
+        #[serde(default)]
+        pid: u32,
+        /// The executable file name (e.g. `chrome.exe`) — a durable, human
+        /// label; the pid alone is not stable across relaunches.
+        #[serde(default)]
+        exe: String,
+    },
     /// An ordered set of images cycling on a timer (Phase 6): per-slide
     /// duration, an optional crossfade (equal-size slides only — different
     /// sizes hard-cut, honestly), loop or hold-last, optional shuffle.
@@ -311,6 +323,7 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "color",
             SourceSettings::AudioInput { .. } => "audioInput",
             SourceSettings::AudioOutput { .. } => "audioOutput",
+            SourceSettings::AppAudio { .. } => "appAudio",
             SourceSettings::NestedScene { .. } => "nestedScene",
             SourceSettings::Slideshow { .. } => "slideshow",
             SourceSettings::ChatOverlay { .. } => "chatOverlay",
@@ -331,6 +344,7 @@ impl SourceSettings {
             SourceSettings::Color { .. } => "Color",
             SourceSettings::AudioInput { .. } => "Audio Input Capture",
             SourceSettings::AudioOutput { .. } => "Audio Output Capture",
+            SourceSettings::AppAudio { .. } => "Application Audio",
             SourceSettings::NestedScene { .. } => "Nested Scene",
             SourceSettings::Slideshow { .. } => "Image Slideshow",
             SourceSettings::ChatOverlay { .. } => "Live Chat",
@@ -345,6 +359,7 @@ impl SourceSettings {
             self,
             SourceSettings::AudioInput { .. }
                 | SourceSettings::AudioOutput { .. }
+                | SourceSettings::AppAudio { .. }
                 | SourceSettings::Media { .. }
                 | SourceSettings::RemoteGuest { .. }
         )
@@ -355,7 +370,9 @@ impl SourceSettings {
     pub fn is_audio_only(&self) -> bool {
         matches!(
             self,
-            SourceSettings::AudioInput { .. } | SourceSettings::AudioOutput { .. }
+            SourceSettings::AudioInput { .. }
+                | SourceSettings::AudioOutput { .. }
+                | SourceSettings::AppAudio { .. }
         )
     }
 

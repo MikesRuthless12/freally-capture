@@ -33,6 +33,8 @@ fcap-sources = { path = "../crates/sources" }
 fcap-compositor = { path = "../crates/compositor" }
 fcap-scene = { path = "../crates/scene" }
 fcap-audio = { path = "../crates/audio" }
+fcap-appaudio = { path = "../crates/appaudio" }
+fcap-ndi = { path = "../crates/ndi" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
 fcap-script = { path = "../crates/script" }
@@ -40,6 +42,8 @@ fcap-preview = { path = "../crates/preview" }
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 # Linux only: read the Tauri window's X11 id (RawWindowHandle::Xlib) to parent

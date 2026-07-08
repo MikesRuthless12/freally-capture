@@ -20,6 +20,8 @@ members = [
     "crates/compositor", # OWNED wgpu GPU compositor: transforms, blend modes, filter chain, scene transitions
     "crates/scene",     # OWNED scene/source/filter data model (+ serde, scripting hooks)
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
+    "crates/appaudio",  # per-application audio capture (isolated WASAPI process-loopback unsafe; honest per-OS)
+    "crates/ndi",       # optional NDI output/input: runtime detection + typed interface (never bundled)
     "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
     "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Win/mac/Linux-X11, JPEG fallback)
@@ -29,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.90.0"
+version = "0.95.0"
 edition = "2021"
 rust-version = "1.80"
 authors = ["Mike Weaver <mythodikalone@gmail.com>"]
@@ -81,6 +83,7 @@ dispatch2 = "0.3"
 ashpd = { version = "0.13", features = ["screencast"] } # Linux: ScreenCast portal (tokio by default)
 pipewire = "0.10"       # Linux: consume the portal's PipeWire video stream
 x11rb = "0.13"          # Linux: the X11 capture path
+libloading = "0.8"      # runtime-probe optional native runtimes (NDI) without bundling
 x11-dl = "2"            # Linux: the native-preview X11 child window (fcap-preview)
 nokhwa = "0.10"         # webcam / capture card
 jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)
@@ -110,9 +113,11 @@ fluent = "0.16"
 # build on demand (never bundled), then drive it as a separate process.
 ureq = "2"                # HTTPS download (rustls + webpki roots, no system deps)
 sha2 = "0.10"             # SHA-256 verification of the fetched archive
+sha1 = "0.10"             # SHA-1 verification of the CEF archive (the CDN publishes sha1)
 zip = { version = "2", default-features = false, features = ["deflate"] } # gyan/riedl archives
-tar = "0.4"               # BtbN Linux archive (with lzma-rs for the xz layer)
+tar = "0.4"               # BtbN Linux archive (with lzma-rs for the xz layer) + CEF tar.bz2
 lzma-rs = "0.3"           # pure-Rust xz decode (Linux archive only)
+bzip2 = "0.4"             # bzip2 decode (CEF .tar.bz2, multi-stream); libbz2 C is vendored + compiled (no system lib)
 
 [profile.release]
 opt-level = 3

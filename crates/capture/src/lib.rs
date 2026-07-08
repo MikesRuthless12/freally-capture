@@ -36,6 +36,8 @@ mod win;
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 mod window_match;
 
+pub mod game;
+
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

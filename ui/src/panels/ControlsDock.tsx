@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import {
+  bugReportContext,
+  openFrecPending,
   recordingAddMarker,
   studioSendReaction,
   recordingPause,
@@ -9,14 +11,17 @@ import {
   recordingStatus,
   recordingStop,
 } from "../api/commands";
-import { onRecording } from "../api/events";
+import { onOpenFrec, onRecording } from "../api/events";
 import type { RecordingStatus, Settings } from "../api/types";
 import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
 import { BrowserDockDialog } from "./BrowserDock";
+import { BugReportDialog } from "./BugReport";
+import { UpdatesDialog } from "./Updates";
 import { ModelsDialog } from "./Models";
+import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
 import { ScriptsDialog } from "./ScriptsDialog";
 import { SettingsHotkeys } from "./SettingsHotkeys";
@@ -51,8 +56,45 @@ export function ControlsDock({
     | "remote"
     | "docks"
     | "scripts"
+    | "bug"
+    | "updates"
     | null
   >(null);
+
+  const [openedFrec, setOpenedFrec] = useState<string | null>(null);
+
+  // Auto-surface the bug-report dialog on startup when the app crashed on a
+  // previous run — this is the "relaunch → report" half of the loop.
+  useEffect(() => {
+    let alive = true;
+    bugReportContext()
+      .then((ctx) => {
+        if (alive && ctx.pendingCrash) setDialog("bug");
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // A .frec opened via the OS (cold start on load, or a second launch while
+  // running) → offer to export it (Capture records .frec; Player plays it).
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    openFrecPending()
+      .then((path) => {
+        if (alive && path) setOpenedFrec(path);
+      })
+      .catch(() => undefined);
+    onOpenFrec((path) => setOpenedFrec(path))
+      .then((fn) => (alive ? (unlisten = fn) : fn()))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -300,6 +342,22 @@ export function ControlsDock({
           >
             ▣ Profiles…
           </button>
+          <button
+            type="button"
+            onClick={() => setDialog("bug")}
+            title="Report a bug — anonymous, opt-in (nothing is sent automatically)"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            🐞 Report a bug…
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("updates")}
+            title="Check for updates — signed, verified, nothing downloads without a click"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⭳ Check for updates…
+          </button>
         </div>
         {shownError && (
           <p role="alert" className="m-0 text-[11px] leading-snug break-words text-red-300">
@@ -365,6 +423,9 @@ export function ControlsDock({
           onClose={() => setDialog(null)}
         />
       )}
+      {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
+      {dialog === "updates" && <UpdatesDialog onClose={() => setDialog(null)} />}
+      {openedFrec && <OpenedFrecDialog path={openedFrec} onClose={() => setOpenedFrec(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />
       )}

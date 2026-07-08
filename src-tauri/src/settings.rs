@@ -61,6 +61,10 @@ pub struct Settings {
     pub browser_docks: Vec<BrowserDockSettings>,
     /// Sandboxed Lua scripts (Phase 7).
     pub scripts: Vec<ScriptSettings>,
+    /// The EULA version the user accepted, if any (Phase 8). `None` (fresh
+    /// install) or a stale version → the app shows the acceptance gate before
+    /// it can be used.
+    pub accepted_eula_version: Option<String>,
 }
 
 impl Default for Settings {
@@ -79,6 +83,7 @@ impl Default for Settings {
             remote_control: RemoteControlSettings::default(),
             browser_docks: Vec::new(),
             scripts: Vec::new(),
+            accepted_eula_version: None,
         }
     }
 }
@@ -1006,6 +1011,7 @@ mod tests {
                 path: "C:/scripts/go-live.lua".to_owned(),
                 enabled: true,
             }],
+            accepted_eula_version: Some("2026-07-08".to_owned()),
         };
         store.set(next.clone()).expect("save settings");
 

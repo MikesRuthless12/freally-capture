@@ -12,10 +12,59 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rungs toward **1.0.0** are **Phase 8** (game capture + signed installers) and **Phase 9**
-> (accessibility / i18n / onboarding launch polish).
+> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish).
 
 _Nothing yet._
+
+## [0.95.0] — 2026-07-08 (Game capture, distribution & per-app audio — Phase 8)
+
+> Signed self-hosted auto-update, per-application audio capture, an NDI runtime seam, a game-capture
+> seam that flags the anti-cheat risk honestly, a first-run EULA gate, and video-in-stream for
+> reaction/critique — the Phase 8 "toward 1.0.0" surface, all local and off by default.
+
+### Added — Phase 8
+- **Signed self-hosted auto-updater** (TASK-803) — the app checks a signed `latest.json` on the
+  GitHub releases endpoint and verifies every download against a minisign public key baked into the
+  binary before applying it (an unsigned/tampered package is refused). **⭳ Check for updates…** in
+  the Controls dock — nothing downloads without a click; the app restarts to finish. The release
+  pipeline signs each artifact and composes `latest.json`; macOS Developer-ID + notarization is
+  wired and gated on secrets (paid-cert upgrade, no workflow change). See `design/updater-signing.md`.
+- **Per-application audio capture** (TASK-805) — capture one app's audio as its own mixer source.
+  Windows-first via WASAPI **process loopback** (`ActivateAudioInterfaceAsync` on the process-loopback
+  virtual device, Win10 2004+); the COM `unsafe` is isolated in the new `fcap-appaudio` crate so
+  `fcap-audio` stays `#![forbid(unsafe_code)]`. It gets a full mixer strip (VU, fader, mute,
+  monitoring, filters, track). Linux/macOS show the honest per-OS guidance. Sources ▸ **Application
+  Audio**.
+- **Game Capture seam + honest anti-cheat/AV flagging** (TASK-801) — "Game Capture" (injecting a
+  DX/GL/Vulkan hook) is an opt-in, **flagged milestone**: the app never injects silently and surfaces
+  the anti-cheat **ban risk** + AV risk before any hook. The working path today — **Window Capture**
+  (borderless/windowed) — is recommended per-OS (Wayland → the portal). Sources ▸ **Game Capture
+  (read first)**.
+- **NDI runtime seam** (TASK-804) — optional NDI output detects a user-installed NDI runtime (never
+  bundled) via the documented env vars + default dirs and link-probes it; the typed output flag is
+  gated on that detection. Frame-send binds to the free NDI SDK headers (named follow-on). Surfaced
+  read-only in Components ▸ **Optional integrations**.
+- **First-run EULA acceptance gate** — the studio doesn't render until the current EULA version is
+  accepted (scroll-to-read **I Agree** / **Decline & Quit**); acceptance is persisted and re-prompts
+  only when the EULA version changes. `EULA.md` is embedded at build time so the accepted text is
+  exactly what ships.
+- **Video in the stream (reaction/critique)** — embed a video into the scene and **pause/resume it
+  live** while talking over it, then remove it — the Media source's audio pauses and resumes in the
+  mix with the picture (⏸/▶ on media sources).
+- **In-app component downloads** — the on-demand ffmpeg download now shows an explicit
+  `98.35%`-style percentage beside its progress bar + cancel. A new **Browser Source runtime
+  (Chromium/CEF)** component downloads the ~100 MB CEF runtime the same honest way: it resolves the
+  newest stable build from the official CEF build index, **verifies the download against that
+  index's SHA-1 before unpacking** (no bundling, no hardcoded hash), and caches it per-user — with
+  the same %/bar/cancel UI. The browser *source* that renders through the runtime is its own
+  follow-on milestone; this ships the runtime download.
+
+### Scoped honestly (Phase 8)
+- **VST2/3** (TASK-804) — deferred behind a flag: the VST2 SDK is no longer licensed by Steinberg and
+  VST3 is GPLv3-or-proprietary, both conflicting with a $0/no-extra-license build. The owned DSP
+  filter set (denoise, gate, compressor, limiter, EQ, gain, ducking) is the shipped alternative.
+- **Game-capture GPU-hook injection** and **NDI frame-send** are the named follow-on milestones the
+  seams above are stable for.
 
 ## [0.90.0] — 2026-07-08 (Remote control, scripting & plugins — the extensibility surface)
 

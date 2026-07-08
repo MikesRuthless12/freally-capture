@@ -31,10 +31,20 @@
       "desktop": {
         "schemes": ["freally"]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxRjhGMTdEQjFFRURCMDcKUldRSDIrNnhmZkg0a1RZb05NQTRwNlFMUE1FQWRmRm0xS2UrWWJlQmJDcFdXT0syTGpPZmdNaDUK",
+      "endpoints": [
+        "https://github.com/MikesRuthless12/freally-capture/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["msi", "nsis", "app", "dmg", "appimage", "deb", "rpm"],
     "category": "Video",
     "shortDescription": "Local-first live-streaming & recording studio.",
@@ -49,6 +59,20 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "icons/frec.ico",
+      "icons/frec.icns",
+      "icons/frec/frec.png"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["frec"],
+        "name": "Freally Recording",
+        "description": "Freally Capture lossless recording (freally-video)",
+        "mimeType": "video/x-freally-frec",
+        "role": "Editor"
+      }
     ],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" }

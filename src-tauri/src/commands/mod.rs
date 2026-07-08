@@ -11,6 +11,7 @@ use fcap_capture::SourceKind;
 use fcap_sources::video_device;
 
 pub mod audio;
+pub mod cef;
 pub mod recording;
 pub mod studio;
 
@@ -62,6 +63,14 @@ pub fn health() -> Health {
                 version: fcap_audio::VERSION,
             },
             CrateHealth {
+                name: "fcap-appaudio",
+                version: fcap_appaudio::VERSION,
+            },
+            CrateHealth {
+                name: "fcap-ndi",
+                version: fcap_ndi::VERSION,
+            },
+            CrateHealth {
                 name: "fcap-encode",
                 version: fcap_encode::VERSION,
             },
@@ -71,6 +80,46 @@ pub fn health() -> Health {
             },
         ],
     }
+}
+
+/// Optional-integration status (TASK-804): NDI (detected user runtime) + VST
+/// (scoped, licensing-deferred). Read-only — the UI shows availability + the
+/// honest guidance; nothing is bundled.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationsStatus {
+    pub ndi_available: bool,
+    pub ndi_version: Option<String>,
+    pub ndi_guidance: String,
+    pub vst_available: bool,
+    pub vst_status: String,
+}
+
+/// Probe the optional NDI runtime + report the VST scope. NDI detection touches
+/// the filesystem + link-probes a library, so it runs off the UI thread.
+#[tauri::command]
+pub async fn integrations_status() -> IntegrationsStatus {
+    tauri::async_runtime::spawn_blocking(|| {
+        let ndi = fcap_ndi::detect();
+        let vst_status = match fcap_audio::vst::support() {
+            fcap_audio::vst::VstSupport::Unavailable(reason) => reason.to_string(),
+        };
+        IntegrationsStatus {
+            ndi_available: ndi.available,
+            ndi_version: ndi.version,
+            ndi_guidance: ndi.guidance,
+            vst_available: fcap_audio::vst::is_available(),
+            vst_status,
+        }
+    })
+    .await
+    .unwrap_or_else(|_| IntegrationsStatus {
+        ndi_available: false,
+        ndi_version: None,
+        ndi_guidance: fcap_ndi::guidance(),
+        vst_available: false,
+        vst_status: fcap_audio::vst::VST_STATUS.to_string(),
+    })
 }
 
 /// Read the current settings.
@@ -131,6 +180,40 @@ pub async fn capture_list_sources() -> Result<Vec<CaptureSourceDto>, String> {
     })
     .await
     .map_err(|err| format!("capture listing task failed: {err}"))?
+}
+
+/// Game-capture status (TASK-801): how game capture can work here + the honest
+/// anti-cheat/AV risk + the working fallback. Read-only; nothing injects.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCaptureStatusDto {
+    /// "hookPlanned" | "portalOnly" | "windowCaptureOnly"
+    pub support: &'static str,
+    pub hook_possible: bool,
+    pub risk: String,
+    /// "windowCapture" | "portal"
+    pub fallback: &'static str,
+    pub guidance: String,
+}
+
+#[tauri::command]
+pub fn game_capture_status() -> GameCaptureStatusDto {
+    use fcap_capture::game::{GameCaptureFallback, GameCaptureSupport};
+    let status = fcap_capture::game::status();
+    GameCaptureStatusDto {
+        support: match status.support {
+            GameCaptureSupport::HookPlanned => "hookPlanned",
+            GameCaptureSupport::PortalOnly => "portalOnly",
+            GameCaptureSupport::WindowCaptureOnly => "windowCaptureOnly",
+        },
+        hook_possible: status.hook_possible,
+        risk: status.risk,
+        fallback: match status.fallback {
+            GameCaptureFallback::WindowCapture => "windowCapture",
+            GameCaptureFallback::Portal => "portal",
+        },
+        guidance: status.guidance,
+    }
 }
 
 /// A one-shot JPEG thumbnail (`data:` URI) of the window `id`, for the picker's
@@ -339,6 +422,6 @@ mod tests {
         let report = health();
         assert!(report.core_ok);
         assert_eq!(report.app_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(report.crates.len(), 7, "all owned fcap-* crates are linked");
+        assert_eq!(report.crates.len(), 9, "all owned fcap-* crates are linked");
     }
 }

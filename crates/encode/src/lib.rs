@@ -15,8 +15,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cef;
 pub mod decode;
 pub mod encoder;
+pub mod export;
 pub mod ffmpeg;
 pub mod flz;
 pub mod freally_video;
@@ -26,6 +28,7 @@ pub mod recorder;
 pub mod remux;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
+pub use export::{export_frec, ExportProgress};
 pub use ffmpeg::{
     stream_support, FetchPhase, FetchProgress, Ffmpeg, FfmpegError, PinnedBuild, StreamSupport,
 };

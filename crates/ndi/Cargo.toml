@@ -1,0 +1,21 @@
+# fcap-ndi — optional NDI output/input (Phase 8, TASK-804).
+#
+# NDI is Vizrt's proprietary runtime; we never bundle it (licensing + size).
+# Instead this crate DETECTS a user-installed NDI runtime at load time and
+# exposes the typed output interface behind that flag. The `unsafe` is the
+# libloading probe of the runtime library, isolated here so the source/audio
+# crates stay `#![forbid(unsafe_code)]`.
+[package]
+name = "fcap-ndi"
+description = "Freally Capture — optional NDI output/input: user-runtime detection + a typed interface (never bundled)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+libloading = { workspace = true }
+thiserror = { workspace = true }
