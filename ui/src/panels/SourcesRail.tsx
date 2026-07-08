@@ -8,6 +8,7 @@ import {
   audioLoopbackDevices,
   captureListSources,
   captureWindowThumbnail,
+  gameCaptureStatus,
   openPrivacySettings,
   settingsGet,
   settingsSet,
@@ -32,6 +33,7 @@ import type {
   Collection,
   Corner,
   CornerSlot,
+  GameCaptureStatus,
   ItemId,
   ProgramStatus,
   Scene,
@@ -98,6 +100,7 @@ type PickerMode =
   | "audioInput"
   | "audioOutput"
   | "appAudio"
+  | "gameCapture"
   | "existing";
 
 const KIND_BADGE: Record<string, string> = {
@@ -121,6 +124,7 @@ const KIND_BADGE: Record<string, string> = {
 const ADD_MENU: Array<[PickerMode, string]> = [
   ["display", "Display Capture"],
   ["window", "Window Capture"],
+  ["gameCapture", "Game Capture (read first)"],
   ["webcam", "Video Capture Device"],
   ["image", "Image"],
   ["media", "Media (video/image file)"],
@@ -585,6 +589,11 @@ export function SourcesRail({
         <AudioPicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "appAudio" ? (
         <AppAudioPicker onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "gameCapture" ? (
+        <GameCapturePicker
+          onClose={() => setPicker(null)}
+          onUseWindowCapture={() => setPicker("window")}
+        />
       ) : picker === "image" ? (
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "media" ? (
@@ -1479,6 +1488,72 @@ function AppAudioPicker({
                 track.
               </p>
             )}
+          </div>
+        </div>
+      )}
+    </PickerShell>
+  );
+}
+
+/**
+ * Game Capture (TASK-801): honest, never-inject-silently. The injected GPU-API
+ * hook is a flagged milestone; this panel shows the anti-cheat/AV risk and
+ * routes the user to the working path (Window Capture, or the portal on
+ * Wayland). Nothing is injected from here.
+ */
+function GameCapturePicker({
+  onClose,
+  onUseWindowCapture,
+}: {
+  onClose: () => void;
+  onUseWindowCapture: () => void;
+}) {
+  const [status, setStatus] = useState<GameCaptureStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    gameCaptureStatus()
+      .then((s) => {
+        if (alive) setStatus(s);
+      })
+      .catch((err) => {
+        if (alive) setError(String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <PickerShell title="Game Capture" onClose={onClose}>
+      {error ? (
+        <p className="m-0 text-xs text-red-400">{error}</p>
+      ) : status === null ? (
+        <p className="m-0 text-xs text-havoc-muted">Checking…</p>
+      ) : (
+        <div className="flex flex-col gap-3 text-xs">
+          <p className="m-0 rounded-md border border-red-400/25 bg-red-400/5 p-2 leading-relaxed text-red-200/90">
+            {status.risk}
+          </p>
+          <p className="m-0 leading-relaxed text-havoc-muted">{status.guidance}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onUseWindowCapture}
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+            >
+              {status.fallback === "portal"
+                ? "Use Screen Capture (Portal)"
+                : "Use Window Capture instead"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

@@ -181,6 +181,40 @@ pub async fn capture_list_sources() -> Result<Vec<CaptureSourceDto>, String> {
     .map_err(|err| format!("capture listing task failed: {err}"))?
 }
 
+/// Game-capture status (TASK-801): how game capture can work here + the honest
+/// anti-cheat/AV risk + the working fallback. Read-only; nothing injects.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCaptureStatusDto {
+    /// "hookPlanned" | "portalOnly" | "windowCaptureOnly"
+    pub support: &'static str,
+    pub hook_possible: bool,
+    pub risk: String,
+    /// "windowCapture" | "portal"
+    pub fallback: &'static str,
+    pub guidance: String,
+}
+
+#[tauri::command]
+pub fn game_capture_status() -> GameCaptureStatusDto {
+    use fcap_capture::game::{GameCaptureFallback, GameCaptureSupport};
+    let status = fcap_capture::game::status();
+    GameCaptureStatusDto {
+        support: match status.support {
+            GameCaptureSupport::HookPlanned => "hookPlanned",
+            GameCaptureSupport::PortalOnly => "portalOnly",
+            GameCaptureSupport::WindowCaptureOnly => "windowCaptureOnly",
+        },
+        hook_possible: status.hook_possible,
+        risk: status.risk,
+        fallback: match status.fallback {
+            GameCaptureFallback::WindowCapture => "windowCapture",
+            GameCaptureFallback::Portal => "portal",
+        },
+        guidance: status.guidance,
+    }
+}
+
 /// A one-shot JPEG thumbnail (`data:` URI) of the window `id`, for the picker's
 /// live preview (the UI re-requests it on a timer). `Ok(None)` = no thumbnail
 /// available — a minimized / GPU-composited window, or a platform without it yet

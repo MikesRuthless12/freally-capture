@@ -604,6 +604,15 @@ export type IntegrationsStatus = {
   vstStatus: string;
 };
 
+/** Game-capture status: the honest anti-cheat/AV risk + the working fallback. */
+export type GameCaptureStatus = {
+  support: "hookPlanned" | "portalOnly" | "windowCaptureOnly";
+  hookPossible: boolean;
+  risk: string;
+  fallback: "windowCapture" | "portal";
+  guidance: string;
+};
+
 /** One source's live levels/status in the `audio` event. */
 export type AudioSourceLevels = {
   state: SourceRuntimeState;

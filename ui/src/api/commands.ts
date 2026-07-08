@@ -20,6 +20,7 @@ import type {
   FfmpegStatus,
   FilterId,
   FilterKind,
+  GameCaptureStatus,
   Health,
   IntegrationsStatus,
   ItemId,
@@ -455,6 +456,11 @@ export function appAudioApps(): Promise<AppAudioList> {
 /** Optional-integration status: NDI (detected runtime) + VST (scoped). */
 export function integrationsStatus(): Promise<IntegrationsStatus> {
   return invoke<IntegrationsStatus>("integrations_status");
+}
+
+/** Game-capture status: honest anti-cheat/AV risk + the working fallback. */
+export function gameCaptureStatus(): Promise<GameCaptureStatus> {
+  return invoke<GameCaptureStatus>("game_capture_status");
 }
 
 export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {
