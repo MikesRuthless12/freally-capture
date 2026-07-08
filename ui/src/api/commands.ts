@@ -21,6 +21,7 @@ import type {
   FilterId,
   FilterKind,
   Health,
+  IntegrationsStatus,
   ItemId,
   LoopbackDevices,
   MonitorMode,
@@ -449,6 +450,11 @@ export function audioLoopbackDevices(): Promise<LoopbackDevices> {
 /** Apps currently making sound (Windows) + the honest per-OS guidance. */
 export function appAudioApps(): Promise<AppAudioList> {
   return invoke<AppAudioList>("app_audio_apps");
+}
+
+/** Optional-integration status: NDI (detected runtime) + VST (scoped). */
+export function integrationsStatus(): Promise<IntegrationsStatus> {
+  return invoke<IntegrationsStatus>("integrations_status");
 }
 
 export function studioSetAudioVolume(sourceId: SourceId, volumeDb: number): Promise<void> {

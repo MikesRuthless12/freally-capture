@@ -1752,6 +1752,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fcap-ndi"
+version = "0.90.0"
+dependencies = [
+ "libloading 0.8.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "fcap-plugin"
 version = "0.90.0"
 dependencies = [
@@ -1991,6 +1999,7 @@ dependencies = [
  "fcap-capture",
  "fcap-compositor",
  "fcap-encode",
+ "fcap-ndi",
  "fcap-preview",
  "fcap-scene",
  "fcap-script",

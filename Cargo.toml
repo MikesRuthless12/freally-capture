@@ -21,6 +21,7 @@ members = [
     "crates/scene",     # OWNED scene/source/filter data model (+ serde, scripting hooks)
     "crates/audio",     # cpal audio graph: mixing, up-to-6 tracks, filters, ducking, LUFS, monitoring
     "crates/appaudio",  # per-application audio capture (isolated WASAPI process-loopback unsafe; honest per-OS)
+    "crates/ndi",       # optional NDI output/input: runtime detection + typed interface (never bundled)
     "crates/encode",    # hardware encoders + x264 fallback + owned freally-video + the ffmpeg wire-codec bridge (iface)
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
     "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Win/mac/Linux-X11, JPEG fallback)
@@ -82,6 +83,7 @@ dispatch2 = "0.3"
 ashpd = { version = "0.13", features = ["screencast"] } # Linux: ScreenCast portal (tokio by default)
 pipewire = "0.10"       # Linux: consume the portal's PipeWire video stream
 x11rb = "0.13"          # Linux: the X11 capture path
+libloading = "0.8"      # runtime-probe optional native runtimes (NDI) without bundling
 x11-dl = "2"            # Linux: the native-preview X11 child window (fcap-preview)
 nokhwa = "0.10"         # webcam / capture card
 jpeg-encoder = "0.7"    # preview-frame JPEG for the UI pipe (P1.3)

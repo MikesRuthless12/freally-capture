@@ -140,6 +140,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
+            commands::integrations_status,
             commands::settings_get,
             commands::settings_set,
             commands::capture_list_sources,

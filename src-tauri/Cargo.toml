@@ -34,6 +34,7 @@ fcap-compositor = { path = "../crates/compositor" }
 fcap-scene = { path = "../crates/scene" }
 fcap-audio = { path = "../crates/audio" }
 fcap-appaudio = { path = "../crates/appaudio" }
+fcap-ndi = { path = "../crates/ndi" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
 fcap-script = { path = "../crates/script" }

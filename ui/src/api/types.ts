@@ -595,6 +595,15 @@ export type AppAudioList = {
   guidance: string;
 };
 
+/** Optional-integration status: NDI (detected runtime) + VST (scoped). */
+export type IntegrationsStatus = {
+  ndiAvailable: boolean;
+  ndiVersion?: string | null;
+  ndiGuidance: string;
+  vstAvailable: boolean;
+  vstStatus: string;
+};
+
 /** One source's live levels/status in the `audio` event. */
 export type AudioSourceLevels = {
   state: SourceRuntimeState;

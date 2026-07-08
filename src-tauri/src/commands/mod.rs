@@ -62,6 +62,14 @@ pub fn health() -> Health {
                 version: fcap_audio::VERSION,
             },
             CrateHealth {
+                name: "fcap-appaudio",
+                version: fcap_appaudio::VERSION,
+            },
+            CrateHealth {
+                name: "fcap-ndi",
+                version: fcap_ndi::VERSION,
+            },
+            CrateHealth {
                 name: "fcap-encode",
                 version: fcap_encode::VERSION,
             },
@@ -71,6 +79,46 @@ pub fn health() -> Health {
             },
         ],
     }
+}
+
+/// Optional-integration status (TASK-804): NDI (detected user runtime) + VST
+/// (scoped, licensing-deferred). Read-only — the UI shows availability + the
+/// honest guidance; nothing is bundled.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationsStatus {
+    pub ndi_available: bool,
+    pub ndi_version: Option<String>,
+    pub ndi_guidance: String,
+    pub vst_available: bool,
+    pub vst_status: String,
+}
+
+/// Probe the optional NDI runtime + report the VST scope. NDI detection touches
+/// the filesystem + link-probes a library, so it runs off the UI thread.
+#[tauri::command]
+pub async fn integrations_status() -> IntegrationsStatus {
+    tauri::async_runtime::spawn_blocking(|| {
+        let ndi = fcap_ndi::detect();
+        let vst_status = match fcap_audio::vst::support() {
+            fcap_audio::vst::VstSupport::Unavailable(reason) => reason.to_string(),
+        };
+        IntegrationsStatus {
+            ndi_available: ndi.available,
+            ndi_version: ndi.version,
+            ndi_guidance: ndi.guidance,
+            vst_available: fcap_audio::vst::is_available(),
+            vst_status,
+        }
+    })
+    .await
+    .unwrap_or_else(|_| IntegrationsStatus {
+        ndi_available: false,
+        ndi_version: None,
+        ndi_guidance: fcap_ndi::guidance(),
+        vst_available: false,
+        vst_status: fcap_audio::vst::VST_STATUS.to_string(),
+    })
 }
 
 /// Read the current settings.
@@ -339,6 +387,6 @@ mod tests {
         let report = health();
         assert!(report.core_ok);
         assert_eq!(report.app_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(report.crates.len(), 7, "all owned fcap-* crates are linked");
+        assert_eq!(report.crates.len(), 9, "all owned fcap-* crates are linked");
     }
 }

@@ -27,6 +27,7 @@ pub mod media_hub;
 pub mod meter;
 pub mod monitor;
 pub mod resample;
+pub mod vst;
 
 pub use devices::{
     list_input_devices, list_loopback_devices, list_output_devices, AudioDeviceInfo,
