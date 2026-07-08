@@ -50,6 +50,20 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "icons/frec.ico",
+      "icons/frec.icns",
+      "icons/frec/frec.png"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["frec"],
+        "name": "Freally Recording",
+        "description": "Freally Capture lossless recording (freally-video)",
+        "mimeType": "video/x-freally-frec",
+        "role": "Editor"
+      }
+    ],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" }
     },
