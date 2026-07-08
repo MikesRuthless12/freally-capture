@@ -47,6 +47,12 @@ pub struct Settings {
     pub recording: RecordingSettings,
     /// Remote Guests networking (Phase R).
     pub remote: RemoteSettings,
+    /// Live-stream configuration (Phase 5).
+    pub stream: StreamSettings,
+    /// Studio Mode's commit transition (Phase 5).
+    pub transition: TransitionSettings,
+    /// Global action hotkeys (Phase 5).
+    pub hotkeys: HotkeySettings,
 }
 
 impl Default for Settings {
@@ -58,7 +64,171 @@ impl Default for Settings {
             mixer_layout: MixerLayout::default(),
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
+            stream: StreamSettings::default(),
+            transition: TransitionSettings::default(),
+            hotkeys: HotkeySettings::default(),
         }
+    }
+}
+
+/// Global action hotkeys (Phase 5). Each is an accelerator string
+/// (`"Ctrl+Shift+R"`, `"F13"`) or `None`. Per-source PTT/PTM live in the
+/// mixer's AudioSettings, not here.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HotkeySettings {
+    /// Toggle recording start/stop.
+    pub record: Option<String>,
+    /// Toggle Go Live / End Stream.
+    pub go_live: Option<String>,
+    /// Commit the Studio-Mode Preview → Program transition.
+    pub transition: Option<String>,
+}
+
+impl HotkeySettings {
+    pub fn validate(&self) -> Result<(), String> {
+        for key in [&self.record, &self.go_live, &self.transition]
+            .into_iter()
+            .flatten()
+        {
+            if key.trim().is_empty() {
+                continue;
+            }
+            if key.len() > 64 {
+                return Err("hotkey is too long".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How Studio Mode commits Preview → Program.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TransitionSettings {
+    pub kind: fcap_scene::TransitionKind,
+    pub duration_ms: u32,
+}
+
+impl Default for TransitionSettings {
+    fn default() -> Self {
+        Self {
+            kind: fcap_scene::TransitionKind::Fade,
+            duration_ms: 300,
+        }
+    }
+}
+
+impl TransitionSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(50..=5_000).contains(&self.duration_ms) {
+            return Err("transition duration out of range (50–5000 ms)".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// Live-stream configuration (Settings → Stream). The **stream key is a
+/// secret**: redacted from `Debug`, masked in the UI, never logged.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StreamSettings {
+    pub service: fcap_stream::StreamService,
+    /// Overrides the service's preset ingest when non-empty (regional or
+    /// custom `rtmp://`/`rtmps://`).
+    pub ingest_url: String,
+    /// SECRET.
+    pub stream_key: String,
+    /// ffmpeg encoder id, or "auto" = best detected H.264 encoder.
+    pub encoder_id: String,
+    /// CBR video bitrate — the streaming-side rate control is always CBR.
+    pub bitrate_kbps: u32,
+    pub audio_bitrate_kbps: u32,
+    pub keyframe_sec: f32,
+    pub fps: u32,
+    /// The mixer track that goes to the stream (1-based, like the UI dots).
+    pub track: u8,
+    /// TASK-508: start a local recording automatically on Go Live.
+    pub auto_record: bool,
+}
+
+impl Default for StreamSettings {
+    fn default() -> Self {
+        Self {
+            service: fcap_stream::StreamService::Twitch,
+            ingest_url: String::new(),
+            stream_key: String::new(),
+            encoder_id: "auto".to_owned(),
+            bitrate_kbps: 6_000,
+            audio_bitrate_kbps: 160,
+            keyframe_sec: 2.0,
+            fps: 60,
+            track: 1,
+            auto_record: false,
+        }
+    }
+}
+
+// Manual Debug so a debug-printed Settings can never leak the stream key.
+impl std::fmt::Debug for StreamSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamSettings")
+            .field("service", &self.service)
+            .field("ingest_url", &self.ingest_url)
+            .field(
+                "stream_key",
+                &if self.stream_key.is_empty() {
+                    ""
+                } else {
+                    "[redacted]"
+                },
+            )
+            .field("encoder_id", &self.encoder_id)
+            .field("bitrate_kbps", &self.bitrate_kbps)
+            .field("fps", &self.fps)
+            .field("track", &self.track)
+            .field("auto_record", &self.auto_record)
+            .finish()
+    }
+}
+
+impl StreamSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.ingest_url.is_empty()
+            && !self.ingest_url.starts_with("rtmp://")
+            && !self.ingest_url.starts_with("rtmps://")
+        {
+            return Err("the ingest URL must start with rtmp:// or rtmps://".to_owned());
+        }
+        for field in [&self.ingest_url, &self.stream_key] {
+            if field.len() > 512 || field.chars().any(char::is_control) {
+                return Err("invalid stream target".to_owned());
+            }
+        }
+        if self.encoder_id.len() > 64
+            || !self
+                .encoder_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err("invalid stream encoder id".to_owned());
+        }
+        if !(500..=60_000).contains(&self.bitrate_kbps) {
+            return Err("stream bitrate out of range (500–60000 kbps)".to_owned());
+        }
+        if !(32..=512).contains(&self.audio_bitrate_kbps) {
+            return Err("stream audio bitrate out of range (32–512 kbps)".to_owned());
+        }
+        if !(0.25..=10.0).contains(&self.keyframe_sec) {
+            return Err("stream keyframe interval out of range (0.25–10 s)".to_owned());
+        }
+        if !(1..=240).contains(&self.fps) {
+            return Err("stream fps out of range (1–240)".to_owned());
+        }
+        if !(1..=6).contains(&self.track) {
+            return Err("the stream track must be 1–6".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -229,6 +399,9 @@ impl Settings {
         }
         self.recording.validate()?;
         self.remote.validate()?;
+        self.stream.validate()?;
+        self.transition.validate()?;
+        self.hotkeys.validate()?;
         Ok(())
     }
 }
@@ -423,6 +596,22 @@ mod tests {
                 turn_username: "me".to_owned(),
                 turn_credential: "s3cret".to_owned(),
             },
+            stream: StreamSettings {
+                service: fcap_stream::StreamService::YouTube,
+                stream_key: "yt-key".to_owned(),
+                bitrate_kbps: 4_500,
+                auto_record: true,
+                ..StreamSettings::default()
+            },
+            transition: TransitionSettings {
+                kind: fcap_scene::TransitionKind::SlideLeft,
+                duration_ms: 500,
+            },
+            hotkeys: HotkeySettings {
+                record: Some("Ctrl+Shift+R".to_owned()),
+                go_live: None,
+                transition: Some("F13".to_owned()),
+            },
         };
         store.set(next.clone()).expect("save settings");
 
@@ -487,6 +676,57 @@ mod tests {
                 ..Settings::default()
             };
             assert!(settings.validate().is_err(), "should reject {bad_url:?}");
+        }
+    }
+
+    #[test]
+    fn debug_never_prints_the_stream_key() {
+        let settings = StreamSettings {
+            stream_key: "live_secret_key".to_owned(),
+            ..StreamSettings::default()
+        };
+        let printed = format!("{settings:?}");
+        assert!(
+            !printed.contains("live_secret_key"),
+            "key leaked: {printed}"
+        );
+        assert!(printed.contains("[redacted]"));
+    }
+
+    #[test]
+    fn validate_bounds_the_stream_settings() {
+        assert!(Settings::default().validate().is_ok());
+        for (bad, why) in [
+            (
+                StreamSettings {
+                    ingest_url: "http://nope".to_owned(),
+                    ..StreamSettings::default()
+                },
+                "scheme",
+            ),
+            (
+                StreamSettings {
+                    bitrate_kbps: 100,
+                    ..StreamSettings::default()
+                },
+                "bitrate",
+            ),
+            (
+                StreamSettings {
+                    track: 0,
+                    ..StreamSettings::default()
+                },
+                "track",
+            ),
+            (
+                StreamSettings {
+                    stream_key: "x\u{0007}".to_owned(),
+                    ..StreamSettings::default()
+                },
+                "control chars",
+            ),
+        ] {
+            assert!(bad.validate().is_err(), "should reject: {why}");
         }
     }
 

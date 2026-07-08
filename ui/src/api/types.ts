@@ -35,6 +35,99 @@ export type Settings = {
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */
   remote: RemoteSettings;
+  /** Live-stream configuration (Phase 5). */
+  stream: StreamSettings;
+  /** Studio Mode's commit transition (Phase 5). */
+  transition: TransitionSettings;
+  /** Global action hotkeys (Phase 5). */
+  hotkeys: HotkeySettings;
+};
+
+/** Global action hotkeys — accelerator strings ("Ctrl+Shift+R", "F13") or
+ * null. Per-source PTT/PTM live in the mixer's audio settings. */
+export type HotkeySettings = {
+  /** Toggle recording start/stop. */
+  record: string | null;
+  /** Toggle Go Live / End Stream. */
+  goLive: string | null;
+  /** Commit the Studio-Mode Preview → Program transition. */
+  transition: string | null;
+};
+
+/** Studio Mode's commit transition (Phase 5). Stinger lands with the Phase 6
+ * packs. */
+export type TransitionKind =
+  | "cut"
+  | "fade"
+  | "slideLeft"
+  | "slideRight"
+  | "slideUp"
+  | "slideDown"
+  | "swipeLeft"
+  | "swipeRight"
+  | "lumaLinear"
+  | "lumaRadial";
+
+export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
+  ["cut", "Cut"],
+  ["fade", "Fade"],
+  ["slideLeft", "Slide ←"],
+  ["slideRight", "Slide →"],
+  ["slideUp", "Slide ↑"],
+  ["slideDown", "Slide ↓"],
+  ["swipeLeft", "Swipe ←"],
+  ["swipeRight", "Swipe →"],
+  ["lumaLinear", "Luma wipe (linear)"],
+  ["lumaRadial", "Luma wipe (radial)"],
+];
+
+export type TransitionSettings = {
+  kind: TransitionKind;
+  durationMs: number;
+};
+
+/** The services the stream target picker offers. */
+export type StreamService = "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom";
+
+export const STREAM_SERVICES: Array<[StreamService, string]> = [
+  ["twitch", "Twitch"],
+  ["youTube", "YouTube"],
+  ["kick", "Kick"],
+  ["facebook", "Facebook"],
+  ["trovo", "Trovo"],
+  ["custom", "Custom (RTMP/RTMPS)"],
+];
+
+/** Live-stream configuration (mirrors `StreamSettings` in settings.rs).
+ * The stream key is a SECRET — masked in the UI, never logged. */
+export type StreamSettings = {
+  service: StreamService;
+  /** Overrides the service's preset ingest when non-empty. */
+  ingestUrl: string;
+  /** SECRET. */
+  streamKey: string;
+  /** ffmpeg encoder id, or "auto" = best detected H.264 encoder. */
+  encoderId: string;
+  /** CBR video bitrate. */
+  bitrateKbps: number;
+  audioBitrateKbps: number;
+  keyframeSec: number;
+  fps: number;
+  /** The mixer track that goes to the stream (1-based). */
+  track: number;
+  /** Start a local recording automatically on Go Live. */
+  autoRecord: boolean;
+};
+
+/** The `stream` event payload / `stream_status` result. */
+export type StreamStatus = {
+  /** "idle" | "live" | "reconnecting" | "failed" | "ended". */
+  state: "idle" | "live" | "reconnecting" | "failed" | "ended";
+  error?: string;
+  elapsedSec: number;
+  reconnects: number;
+  framesDropped: number;
+  service: string;
 };
 
 /** Remote Guests networking — the user's own **opt-in** TURN relay (never
@@ -113,9 +206,17 @@ export type RecordingStatus =
 
 /** The `stats` push-event payload (~2 Hz). */
 export type StatsPayload = {
+  /** Composed frames per second (the program render rate). */
   fps: number;
+  /** This process's CPU usage, percent of the whole machine. */
   cpu: number;
-  /** True until real sampling lands (P5.5) — the UI labels the data honestly. */
+  /** This process's resident memory, MiB. */
+  memoryMb: number;
+  /** Frames the capture pipeline dropped since the session began. */
+  dropped: number;
+  /** Mean GPU compose time per frame, milliseconds. */
+  renderMs: number;
+  /** True only in the brief pre-compose-loop startup window. */
   placeholder: boolean;
 };
 
@@ -434,6 +535,15 @@ export type Collection = {
 export type StudioDto = {
   revision: number;
   collection: Collection;
+  /** Studio Mode (Phase 5): present while enabled. */
+  studioMode?: StudioModeDto;
+};
+
+/** The Studio-Mode slice of the model (session state, never persisted). */
+export type StudioModeDto = {
+  previewScene: SceneId;
+  /** A Preview→Program blend is running right now. */
+  transitioning: boolean;
 };
 
 /** What `studio_add_item` created. */

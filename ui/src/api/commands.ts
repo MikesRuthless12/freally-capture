@@ -29,6 +29,7 @@ import type {
   Settings,
   SourceId,
   SourceSettings,
+  StreamStatus,
   StudioDto,
   Transform,
   VideoDevice,
@@ -49,6 +50,60 @@ export function settingsGet(): Promise<Settings> {
  * deep link — it fired before the webview's event listener existed). */
 export function remotePendingInvite(): Promise<string | null> {
   return invoke<string | null>("remote_pending_invite");
+}
+
+// ---------------------------------------------------------------------------
+// Live streaming (Phase 5)
+// ---------------------------------------------------------------------------
+
+/** Go Live with the configured target (Settings → Stream). */
+export function streamStart(): Promise<void> {
+  return invoke("stream_start");
+}
+
+/** End the stream (the local recording, if any, is untouched). */
+export function streamStop(): Promise<StreamStatus> {
+  return invoke<StreamStatus>("stream_stop");
+}
+
+/** The current stream status (the `stream` event pushes the same shape). */
+export function streamStatus(): Promise<StreamStatus> {
+  return invoke<StreamStatus>("stream_status");
+}
+
+// ---------------------------------------------------------------------------
+// Profiles + scene collections (Phase 5)
+// ---------------------------------------------------------------------------
+
+/** Named-snapshot listings: the active name + everything on disk. */
+export type NamedList = { active: string; names: string[] };
+
+export function profilesList(): Promise<NamedList> {
+  return invoke<NamedList>("profiles_list");
+}
+
+/** Save the current settings under `name` and make it the active profile. */
+export function profileCreate(name: string): Promise<NamedList> {
+  return invoke<NamedList>("profile_create", { name });
+}
+
+/** Switch profiles (the outgoing one saves first); returns the new settings. */
+export function profileSwitch(name: string): Promise<Settings> {
+  return invoke<Settings>("profile_switch", { name });
+}
+
+export function collectionsList(): Promise<NamedList> {
+  return invoke<NamedList>("collections_list");
+}
+
+/** Duplicate the current scenes under `name` and switch to that copy. */
+export function collectionCreate(name: string): Promise<NamedList> {
+  return invoke<NamedList>("collection_create", { name });
+}
+
+/** Switch scene collections (the active one saves first). */
+export function collectionSwitch(name: string): Promise<NamedList> {
+  return invoke<NamedList>("collection_switch", { name });
 }
 
 /** Replace and persist the settings. */
@@ -214,6 +269,21 @@ export function studioSetCenterView(sceneId: SceneId, itemId: ItemId | null): Pr
  */
 export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise<void> {
   return invoke("studio_set_focus", { sceneId, itemId });
+}
+
+/** Studio Mode on/off (on = a preview pane opens on the program scene). */
+export function studioSetStudioMode(on: boolean): Promise<void> {
+  return invoke("studio_set_studio_mode", { on });
+}
+
+/** Point the Studio-Mode preview pane at a scene. */
+export function studioSetPreviewScene(sceneId: SceneId): Promise<void> {
+  return invoke("studio_set_preview_scene", { sceneId });
+}
+
+/** Commit Preview → Program through the configured transition. */
+export function studioTransition(): Promise<void> {
+  return invoke("studio_transition");
 }
 
 export function studioRenameSource(sourceId: SourceId, name: string): Promise<void> {

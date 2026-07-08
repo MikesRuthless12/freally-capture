@@ -11,3 +11,5 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+fcap-encode = { path = "../encode" }
+serde = { workspace = true }

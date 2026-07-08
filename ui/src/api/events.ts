@@ -12,6 +12,7 @@ import type {
   ProgramStatus,
   RecordingStatus,
   StatsPayload,
+  StreamStatus,
   StudioDto,
 } from "./types";
 
@@ -24,6 +25,11 @@ export function onStats(handler: (stats: StatsPayload) => void): Promise<Unliste
  * is untrusted — parse it with the invite validator; never auto-join. */
 export function onRemoteInvite(handler: (url: string) => void): Promise<UnlistenFn> {
   return listen<string>("remote-invite", (event) => handler(event.payload));
+}
+
+/** Subscribe to live-stream status (~1 Hz while a session runs). */
+export function onStream(handler: (status: StreamStatus) => void): Promise<UnlistenFn> {
+  return listen<StreamStatus>("stream", (event) => handler(event.payload));
 }
 
 /** Subscribe to model changes — the full collection on every mutation. */

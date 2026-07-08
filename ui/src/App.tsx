@@ -12,6 +12,7 @@ import {
   studioReorderItem,
   studioSetFocus,
   studioSetItemLocked,
+  studioSetStudioMode,
   studioSetItemTransform,
   studioSetItemVisible,
 } from "./api/commands";
@@ -38,6 +39,7 @@ import { RemoteSessionBar } from "./panels/RemoteSessionBar";
 import { ScenesRail } from "./panels/ScenesRail";
 import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
+import { StudioPreviewPane } from "./panels/StudioPreviewPane";
 
 type OpenDialog =
   | { kind: "filters"; itemId: ItemId }
@@ -127,6 +129,7 @@ export default function App() {
   }, []);
 
   const collection = studio?.collection ?? null;
+  const studioMode = studio?.studioMode ?? null;
   const activeScene = useMemo(
     () => collection?.scenes.find((scene) => scene.id === collection.activeScene) ?? null,
     [collection],
@@ -296,6 +299,28 @@ export default function App() {
           )}
           <button
             type="button"
+            onClick={() =>
+              studioSetStudioMode(!studioMode).catch((err) =>
+                console.error("studio mode toggle failed:", err),
+              )
+            }
+            disabled={!collection}
+            title={
+              studioMode
+                ? "Leave Studio Mode"
+                : "Studio Mode — edit a preview scene, commit it to the program with a transition"
+            }
+            aria-pressed={studioMode !== null}
+            className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
+              studioMode
+                ? "border-emerald-400/60 bg-emerald-500/15 text-emerald-300"
+                : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
+            }`}
+          >
+            Studio Mode {studioMode ? "on" : "off"}
+          </button>
+          <button
+            type="button"
             onClick={toggleStatsDock}
             disabled={!settings}
             title={showStats ? "Hide the stats dock" : "Show the stats dock"}
@@ -317,15 +342,26 @@ export default function App() {
 
       <main className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-2">
-          <ScenesRail collection={collection} />
-          <PreviewPanel
-            collection={collection}
-            scene={activeScene}
-            program={program}
-            selectedItem={effectiveSelection}
-            onSelect={setSelectedItem}
-            onItemTransform={setItemTransform}
-          />
+          <ScenesRail collection={collection} previewScene={studioMode?.previewScene ?? null} />
+          <div className="flex min-h-0 min-w-0 gap-2">
+            {studioMode && (
+              <StudioPreviewPane
+                settings={settings}
+                onSettingsSaved={setSettings}
+                transitioning={studioMode.transitioning}
+              />
+            )}
+            <div className="flex min-h-0 min-w-0 flex-1 [&>section]:flex-1">
+              <PreviewPanel
+                collection={collection}
+                scene={activeScene}
+                program={program}
+                selectedItem={effectiveSelection}
+                onSelect={setSelectedItem}
+                onItemTransform={setItemTransform}
+              />
+            </div>
+          </div>
           <SourcesRail
             collection={collection}
             scene={activeScene}

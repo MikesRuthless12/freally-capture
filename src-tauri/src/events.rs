@@ -1,43 +1,104 @@
 //! Core → UI push events.
 //!
-//! P0.3 proves the event pipe with a placeholder `stats` emitter; real
-//! fps/CPU/GPU/encoder sampling lands with the stats dock work in Phase 5.
-//! Payload shapes are mirrored in `ui/src/api/types.ts` — keep in lockstep.
+//! The `stats` emitter reports the real render fps + dropped-frame count the
+//! studio loop measures, this process's CPU% and memory (via `sysinfo`), and
+//! the compositor adapter. Payload shapes are mirrored in
+//! `ui/src/api/types.ts` — keep in lockstep.
 
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use tauri::{AppHandle, Emitter, Manager};
+
+/// Live runtime numbers the studio render loop publishes for the stats dock.
+/// Read every ~500 ms by the emitter; a lock-free hand-off (no contention on
+/// the 60 fps loop).
+#[derive(Default)]
+pub struct RuntimeStats {
+    fps: AtomicU32,
+    dropped: AtomicU64,
+    render_micros: AtomicU64,
+    /// Set once the compose loop is actually running.
+    running: std::sync::atomic::AtomicBool,
+}
+
+impl RuntimeStats {
+    /// Publish the newest render numbers (called ~1 Hz from the studio loop).
+    pub fn publish(&self, fps: u32, dropped: u64, render_micros: u64) {
+        self.fps.store(fps, Ordering::Relaxed);
+        self.dropped.store(dropped, Ordering::Relaxed);
+        self.render_micros.store(render_micros, Ordering::Relaxed);
+        self.running.store(true, Ordering::Relaxed);
+    }
+}
 
 /// The `stats` event payload.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsPayload {
+    /// Composed frames per second (the program render rate).
     pub fps: f32,
+    /// This process's CPU usage, percent of one core-second.
     pub cpu: f32,
-    /// True until real sampling lands (P5.5) — the UI labels the data honestly.
+    /// This process's resident memory, MiB.
+    pub memory_mb: f32,
+    /// Frames the capture pipeline dropped since the session began.
+    pub dropped: u64,
+    /// Mean GPU compose time per frame, milliseconds.
+    pub render_ms: f32,
+    /// Now false — the numbers are real (kept so the UI can still flag a
+    /// pre-compose-loop startup window honestly).
     pub placeholder: bool,
 }
 
-/// Spawn the ~2 Hz stats emitter thread. The thread ends itself once the app
-/// shuts down and emitting fails.
+/// Spawn the ~2 Hz stats emitter thread. It samples this process's CPU/memory
+/// and folds in the studio loop's fps/dropped, then pushes `stats`. Ends
+/// itself once the app shuts down and emitting fails.
 pub fn spawn_stats_emitter(app: AppHandle) {
     thread::spawn(move || {
-        let mut tick: u32 = 0;
+        let pid = Pid::from_u32(std::process::id());
+        let mut system = System::new();
+        // CPU% needs two samples spaced by the refresh interval to be real.
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+        );
+        let cpu_count = system.physical_core_count().unwrap_or(1).max(1) as f32;
+
         loop {
-            // A gentle oscillation so the dock visibly ticks (placeholder!).
-            let phase = tick as f32 * 0.35;
+            thread::sleep(Duration::from_millis(500));
+            system.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[pid]),
+                true,
+                ProcessRefreshKind::nothing().with_cpu().with_memory(),
+            );
+            let (cpu, memory_mb) = match system.process(pid) {
+                // sysinfo reports CPU% summed across cores (0..100·N); scale
+                // to a single-machine 0..100 so the dock reads like Task Mgr.
+                Some(process) => (
+                    process.cpu_usage() / cpu_count,
+                    process.memory() as f32 / (1024.0 * 1024.0),
+                ),
+                None => (0.0, 0.0),
+            };
+
+            let stats = app.state::<RuntimeStats>();
+            let running = stats.running.load(Ordering::Relaxed);
             let payload = StatsPayload {
-                fps: 60.0 + phase.sin(),
-                cpu: 4.0 + (phase * 0.7).cos().abs() * 3.0,
-                placeholder: true,
+                fps: stats.fps.load(Ordering::Relaxed) as f32,
+                cpu,
+                memory_mb,
+                dropped: stats.dropped.load(Ordering::Relaxed),
+                render_ms: stats.render_micros.load(Ordering::Relaxed) as f32 / 1000.0,
+                placeholder: !running,
             };
             if app.emit("stats", &payload).is_err() {
                 break;
             }
-            tick = tick.wrapping_add(1);
-            thread::sleep(Duration::from_millis(500));
         }
     });
 }

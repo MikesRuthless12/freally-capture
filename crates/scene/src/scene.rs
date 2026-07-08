@@ -239,6 +239,26 @@ pub fn rects_overlap(a: NormRect, b: NormRect) -> bool {
     a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y
 }
 
+/// How Studio Mode commits Preview → Program (Phase 5). `Cut` is instant;
+/// the rest blend the two composed scenes on the GPU over a set duration.
+/// The stinger (a video overlay transition) arrives with the Phase 6 packs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransitionKind {
+    #[default]
+    Cut,
+    Fade,
+    SlideLeft,
+    SlideRight,
+    SlideUp,
+    SlideDown,
+    SwipeLeft,
+    SwipeRight,
+    /// Built-in luma patterns (custom luma images land with the Phase 6 packs).
+    LumaLinear,
+    LumaRadial,
+}
+
 /// One item's pre-focus placement, restored exactly when focus toggles off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
