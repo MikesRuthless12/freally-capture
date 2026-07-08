@@ -69,3 +69,14 @@ secrets.json
 
 # Local drill runbook (not shipped)
 Steps-Drills.md
+
+# Playwright UI visual-smoke: keep the harness (config/spec/mock), ignore outputs
+ui/e2e/screenshots/
+ui/e2e/.output/
+ui/test-results/
+ui/playwright-report/
+/playwright-report/
+/test-results/
+
+# Local QA working doc (not shipped)
+Live-To-Do-List.md

@@ -82,6 +82,32 @@ jobs:
       - run: npm run test:ui
       - run: npm run build
 
+  ui-gallery:
+    name: UI visual gallery (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - name: Build the UI
+        run: npm run build
+      - name: Screenshot every panel (mocked IPC)
+        run: npm run test:e2e
+      # Every feature panel, screenshotted — download from this run's artifacts.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-panel-gallery
+          path: ui/e2e/screenshots/*.png
+          if-no-files-found: error
+
   clippy-test:
     name: clippy + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

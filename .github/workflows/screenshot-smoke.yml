@@ -25,7 +25,7 @@ name: Screenshot smoke
 on:
   workflow_dispatch:
   push:
-    branches: [native-preview, native-preview-wgpu]
+    branches: [native-preview, native-preview-wgpu, phase-8-game-distribution]
 
 permissions:
   contents: read

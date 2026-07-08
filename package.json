@@ -13,7 +13,8 @@
     "format": "npm run format --workspace ui",
     "format:check": "npm run format:check --workspace ui",
     "typecheck": "npm run typecheck --workspace ui",
-    "test:ui": "npm run test --workspace ui"
+    "test:ui": "npm run test --workspace ui",
+    "test:e2e": "npm run test:e2e --workspace ui"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

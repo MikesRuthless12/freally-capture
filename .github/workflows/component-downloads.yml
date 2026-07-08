@@ -1,0 +1,55 @@
+# Live component-download proof on all three OSes.
+#
+# Runs the #[ignore]d end-to-end tests that actually fetch the optional
+# components over the network, verify the checksum, and extract them:
+#   - ffmpeg: download (~100 MB) → SHA-256 verify → extract → `ffmpeg -version`
+#     → smoke-encode the runner's available encoders (software x264 always).
+#   - CEF:    resolve newest stable from the CDN index → download (~150-300 MB)
+#     → SHA-1 verify → extract the multi-stream .tar.bz2 → assert libcef present.
+#
+# Heavy (big downloads), so it runs on demand + when the encode crate or this
+# workflow changes — not on every push.
+name: Component downloads (live)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, phase-8-game-distribution]
+    paths:
+      - "crates/encode/**"
+      - ".github/workflows/component-downloads.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-downloads-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  downloads:
+    name: ffmpeg + CEF download (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/linux-deps
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: ffmpeg + CEF end-to-end download, verify, extract
+        run: >
+          cargo test -p fcap-encode --release --
+          --ignored --nocapture --test-threads=1
+          ffmpeg_end_to_end_install_and_verify
+          cef_end_to_end_download
