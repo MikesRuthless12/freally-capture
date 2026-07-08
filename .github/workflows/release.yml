@@ -84,9 +84,24 @@ jobs:
 
       - name: Tauri build (release, ${{ matrix.target.bundles }})
         env:
-          # Ad-hoc codesign on macOS — free; Gatekeeper shows right-click →
-          # Open on first launch. Paid notarization is a Phase 8 upgrade.
-          APPLE_SIGNING_IDENTITY: "-"
+          # Updater signing (TASK-803). When the TAURI_SIGNING_PRIVATE_KEY secret
+          # is set, the bundler emits a detached minisign `.sig` beside each
+          # updater artifact; the app verifies it against the public key baked
+          # into tauri.conf.json before applying an update. Unset → no `.sig`
+          # files are produced and the updater stays dormant (the installers
+          # still build). The key generated here has no password (empty secret).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS signing: falls back to ad-hoc ("-") — free; Gatekeeper shows
+          # right-click → Open on first launch. Set the APPLE_* secrets (a paid
+          # Developer ID cert) to switch to full Developer-ID signing +
+          # notarization with no further workflow change. Dormant until then.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build --target ${{ matrix.target.rust-target }} --bundles ${{ matrix.target.bundles }}
 
       - name: Stage installers
@@ -105,6 +120,46 @@ jobs:
           path: release-staging/*
           if-no-files-found: error
 
+      # Updater artifacts (TASK-803): the signed update package for THIS platform
+      # plus a `latest.json` fragment (platform → {signature, url}). Only emitted
+      # when the build was signed (TAURI_SIGNING_PRIVATE_KEY set → a `.sig` exists).
+      # Names are prefixed + space-free so both the uploaded asset and the URL in
+      # latest.json are the same unambiguous string — no dependence on how GitHub
+      # rewrites asset names.
+      - name: Stage updater artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p updater-staging
+          BUNDLE="target/${{ matrix.target.rust-target }}/release/bundle"
+          SIG="$(find "$BUNDLE" -name '*.sig' | head -1 || true)"
+          if [ -z "$SIG" ]; then
+            echo "No .sig found (TAURI_SIGNING_PRIVATE_KEY unset) — updater artifacts skipped."
+            exit 0
+          fi
+          ART="${SIG%.sig}"
+          case "${{ matrix.target.label }}" in
+            linux-x86_64)   PLAT=linux-x86_64 ;;
+            macos-aarch64)  PLAT=darwin-aarch64 ;;
+            macos-x86_64)   PLAT=darwin-x86_64 ;;
+            windows-x86_64) PLAT=windows-x86_64 ;;
+            *) echo "unknown matrix label"; exit 1 ;;
+          esac
+          SAFE="update-${PLAT}-$(basename "$ART" | tr ' ' '.')"
+          cp "$ART" "updater-staging/$SAFE"
+          TAG="${{ inputs.tag || github.ref_name }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${SAFE}"
+          jq -n --arg plat "$PLAT" --arg sig "$(cat "$SIG")" --arg url "$URL" \
+            '{($plat): {signature: $sig, url: $url}}' > "updater-staging/fragment-${PLAT}.json"
+          echo "Staged updater artifact for $PLAT:"
+          ls -la updater-staging
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: updater-${{ matrix.target.label }}
+          path: updater-staging/*
+          if-no-files-found: ignore
+
   release:
     name: Draft GitHub Release
     needs: build
@@ -117,6 +172,30 @@ jobs:
         with:
           path: all-bundles
           merge-multiple: true
+
+      # Compose the updater manifest from the per-platform fragments (TASK-803).
+      # Skipped cleanly when the build wasn't signed (no fragments) — the release
+      # still ships every installer; only the updater endpoint is absent.
+      - name: Compose latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FRAGS=(all-bundles/fragment-*.json)
+          if [ ${#FRAGS[@]} -eq 0 ]; then
+            echo "No updater fragments — build was unsigned; latest.json skipped."
+            exit 0
+          fi
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          PUBDATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          PLATFORMS="$(jq -s 'add' "${FRAGS[@]}")"
+          jq -n --arg v "$VERSION" --arg d "$PUBDATE" --argjson p "$PLATFORMS" \
+            '{version: $v, notes: "See the release notes for this version.", pub_date: $d, platforms: $p}' \
+            > all-bundles/latest.json
+          rm -f "${FRAGS[@]}"
+          echo "latest.json:"
+          cat all-bundles/latest.json
 
       - name: Draft the release with all installers
         uses: softprops/action-gh-release@v2

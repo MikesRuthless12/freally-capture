@@ -19,6 +19,7 @@ import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
 import { BrowserDockDialog } from "./BrowserDock";
 import { BugReportDialog } from "./BugReport";
+import { UpdatesDialog } from "./Updates";
 import { ModelsDialog } from "./Models";
 import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
@@ -56,6 +57,7 @@ export function ControlsDock({
     | "docks"
     | "scripts"
     | "bug"
+    | "updates"
     | null
   >(null);
 
@@ -348,6 +350,14 @@ export function ControlsDock({
           >
             🐞 Report a bug…
           </button>
+          <button
+            type="button"
+            onClick={() => setDialog("updates")}
+            title="Check for updates — signed, verified, nothing downloads without a click"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⭳ Check for updates…
+          </button>
         </div>
         {shownError && (
           <p role="alert" className="m-0 text-[11px] leading-snug break-words text-red-300">
@@ -414,6 +424,7 @@ export function ControlsDock({
         />
       )}
       {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
+      {dialog === "updates" && <UpdatesDialog onClose={() => setDialog(null)} />}
       {openedFrec && <OpenedFrecDialog path={openedFrec} onClose={() => setOpenedFrec(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />

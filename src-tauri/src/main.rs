@@ -94,6 +94,8 @@ fn main() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // PTT/PTM global shortcuts (the full hotkey map lands in Phase 5).
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

@@ -63,3 +63,6 @@ Thumbs.db
 # local user config / stream keys must never be committed
 /local
 secrets.json
+
+# Tauri updater signing key (private — never commit; public key lives in tauri.conf.json)
+.tauri/
