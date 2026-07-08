@@ -20,8 +20,60 @@
     </header>
 
     <main>
-      <!-- 0.70.0 — streaming + Studio MVP (first public) -->
+      <!-- 0.90.0 — remote control, scripting & plugins -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.90.0</span>
+            <span class="date">Jul 8, 2026 · Remote control, scripting &amp; plugins</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases">Releases</a>
+        </div>
+
+        <h2>0.90.0 — Remote control, scripting &amp; plugins (the extensibility surface)</h2>
+        <p class="summary">
+          Drive the studio from a Stream Deck, react to going live with a script, embed a chat dock,
+          and extend the app with a plugin — all <strong>local and off by default</strong>.
+        </p>
+        <ul class="features">
+          <li><strong>WebSocket remote-control API</strong> — a password-protected socket a Stream Deck / Companion-style controller connects to: switch scenes, run the transition, start/stop the stream and recording, save replays, set mutes/volumes. Off by default, this-machine-only unless you opt into LAN, and the password never crosses the wire (challenge–response). It can't read files.</li>
+          <li><strong>Browser docks</strong> — open a chat popout, alerts page, or Companion web buttons as their own window beside the studio. The docked page renders and gets no access to the app.</li>
+          <li><strong>Sandboxed Lua scripting</strong> — <code>.lua</code> scripts that react to go-live / scene / recording events and drive the same commands as the remote API. No file or OS access; a script error can't touch your stream or recording.</li>
+          <li><strong>Plugin SDK</strong> — documented Source/Filter contracts + a sample plugin, so the community can add sources and filters without touching core.</li>
+          <li>Plus the <strong>web join page</strong> for phone guests (scan the invite QR, join from a browser — no install) and a Windows native-preview + cursor-capture polish pass.</li>
+        </ul>
+        <p class="note">
+          The true <strong>browser source</strong> (a full Chromium engine) and the <strong>virtual
+          camera</strong> (a signed OS driver) each follow as their own on-demand-component milestones.
+        </p>
+      </article>
+
+      <!-- 0.85.0 — streaming depth -->
+      <article class="release">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.85.0</span>
+            <span class="date">Jul 7, 2026 · Streaming depth</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases">Releases</a>
+        </div>
+
+        <h2>0.85.0 — Streaming depth (multistream / SRT / WHIP + scene/source/encoder depth)</h2>
+        <p class="summary">
+          The magic moment — go live to Twitch <strong>and</strong> YouTube at once while recording a
+          separate local copy and saving a 30-second replay, with a vertical 9:16 output, nested
+          scenes, and a live chat overlay that needs <strong>no API key or sign-in, ever</strong>.
+        </p>
+        <ul class="features">
+          <li><strong>Simultaneous multistream</strong> to several targets, direct to each platform (no restream server) — matching targets share one hardware encode, a failed target splits to its own reconnecting lane, per-target health + bitrate in the stats dock.</li>
+          <li><strong>SRT and WHIP</strong> alongside RTMP/RTMPS (honestly probed for support); a rolling <strong>replay buffer</strong> with presets and a save hotkey that never interrupts the stream or recording.</li>
+          <li><strong>Vertical / multi-canvas</strong> 9:16 output recorded &amp; streamed independently; <strong>nested scenes</strong>, source groups, per-scene audio; stinger + luma transition packs; color-key / luma-key / render-delay filters; high-FPS / 4K / Rec.709 / downscale encoder depth; recording chapter markers.</li>
+          <li><strong>Live chat overlay</strong> (YouTube / Twitch / Kick — no key or sign-in) and <strong>floating reactions</strong> baked into the program.</li>
+        </ul>
+      </article>
+
+      <!-- 0.70.0 — streaming + Studio MVP (first public) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.70.0</span>

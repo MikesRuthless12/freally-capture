@@ -73,9 +73,20 @@ remediate before any public disclosure.
   real gate today** (said in-app), and the residual risks are documented in
   `design/remote-guests-p2p.md`.
 - **WebSocket remote-control API:** **off by default**. When enabled it binds to **`127.0.0.1`** by
-  default (LAN exposure is an explicit opt-in), is **password-authenticated**, validates every command,
-  and **cannot read arbitrary files**. Disabled means the port is closed. Treat the password like any
-  credential; prefer loopback-only unless you specifically need LAN control.
+  default (LAN exposure is an explicit opt-in), is **password-authenticated** via a **challenge–response
+  handshake so the password never crosses the wire** (per-connection random challenge + salt, SHA-256,
+  constant-time compare), validates every command against a **fixed allowlist**, and **cannot read
+  arbitrary files** (no command takes a path). Inbound messages are size-capped and unauthenticated
+  sockets are dropped after a short deadline. Disabled means the port is closed. Treat the password like
+  any credential; prefer loopback-only unless you specifically need LAN control.
+- **Browser docks:** a dock is a user-entered **http(s)** URL opened as its **own window**, **outside the
+  app's IPC capability set** — the docked page renders and gets **no access to the app** (never an iframe
+  inside the studio webview, so the strict app CSP is untouched). URLs are scheme-gated and bounded.
+- **Lua scripting:** scripts run in a **sandboxed Lua 5.4 state** with **no `io`/`os`/`require`** and the
+  chunk loaders (`load`/`loadstring`/`dofile`/`loadfile`/`string.dump`) removed — closing the Lua-bytecode
+  VM-escape vector, so a script cannot reach the filesystem or run native code. The only doors out are
+  logging and the **same command allowlist the remote API exposes** — a script can do what a controller
+  can, nothing more.
 - **ffmpeg download (on demand, not bundled):** the patent-encumbered wire codecs are provided by
   **ffmpeg**, **fetched on demand** over **TLS** (rustls) from a **per-OS pinned URL** — a hardcoded
   literal, no path-traversal input — to a per-user cache; the download is streamed to a temp path.

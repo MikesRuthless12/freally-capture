@@ -12,10 +12,33 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rung is **1.0.0** (Phases 7–9): the WebSocket remote-control API + scripting/plugins,
-> game capture + signed installers, and the accessibility/i18n/onboarding launch polish.
+> The next rungs toward **1.0.0** are **Phase 8** (game capture + signed installers) and **Phase 9**
+> (accessibility / i18n / onboarding launch polish).
 
-### Added
+_Nothing yet._
+
+## [0.90.0] — 2026-07-08 (Remote control, scripting & plugins — the extensibility surface)
+
+> Drive the studio from a Stream Deck, react to go-live with a script, embed a chat dock, and extend
+> the app with a plugin — the Phase 7 extensibility surface, all **local and off by default**.
+
+### Added — extensibility (Phase 7)
+- **WebSocket remote-control API** (TASK-701) — a password-protected WebSocket a Stream Deck /
+  Companion-style controller connects to: switch scenes, run the transition, start/stop the stream
+  and recording, save replays, set mutes/volumes — the same actions as the UI, nothing more (it
+  cannot read files). **Off by default**; binds `127.0.0.1` unless LAN is explicitly enabled;
+  disabled means the port is closed. Auth is challenge–response — the password never crosses the
+  wire. Settings → Controls → **⌁ Remote…**.
+- **Browser docks** (TASK-702) — open a chat popout, alerts page, or Companion web buttons as their
+  own window beside the studio (http/https only; the dock has no access to the app, it just
+  renders). Controls → **⧉ Docks…**.
+- **Sandbox Lua scripting** (TASK-703) — `.lua` scripts that react to studio events (go-live, scene
+  change, recording state) and drive the same command surface as the remote API. The sandbox has
+  **no file or OS access** (no `io`/`os`/`require`, and the bytecode loaders are closed); a script
+  error is contained. `scripts/sample.lua` shows the API. Controls → **⚡ Scripts…**.
+- **Plugin SDK** (TASK-704) — documented `Source`/`Filter` contracts + a registry seam, so a plugin
+  crate can add a source or filter **without touching core**. `plugins/checkerboard` is the complete
+  sample; `design/plugin-sdk.md` is the guide.
 - **Web join page for phone guests** (TASK-R3) — the invite QR now opens
   `docs/join.html` on the Pages site: the guest end of a remote-guests session running in a plain
   browser (camera + mic, explicit-click join, self-mute under the two-gate model, host talkback +
@@ -36,6 +59,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   network surface honestly (expiring invites, explicit-click join, P2P DTLS-SRTP media, the
   broker carries only the handshake, optional user-owned TURN, moderation + ban semantics), and
   `THIRD-PARTY-NOTICES.md` gained the missing PeerJS + qrcode-generator entries.
+
+### Security
+- **Lua sandbox hardening** — the scripting sandbox now closes the base-library `load`/`loadstring`
+  and `string.dump`, not just `dofile`/`loadfile`. Lua 5.4's `load` defaults to accepting **binary
+  bytecode**, whose loader is unverified — a crafted bytecode chunk is a native-code VM escape that
+  would bypass the no-io/no-os sandbox entirely. Caught by this phase's security review before
+  release; a regression test asserts all three are gone.
 
 ## [0.85.0] — 2026-07-07 (Streaming depth: multistream / SRT / WHIP + scene/source/encoder depth)
 

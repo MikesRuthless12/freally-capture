@@ -44,7 +44,7 @@ works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-par
 | [PeerJS](https://peerjs.com) | remote-guests WebRTC session brokering (bundled in the UI; a copy is served at `docs/vendor/peerjs.min.js` for the web join page) | MIT |
 | [`qrcode-generator`](https://www.npmjs.com/package/qrcode-generator) | the invite-link QR code (zero-dep, drawn as SVG) | MIT |
 | [`tungstenite`](https://crates.io/crates/tungstenite) | WebSocket remote-control API | MIT OR Apache-2.0 |
-| [`mlua`](https://crates.io/crates/mlua) (Lua) | scripting (later phase) | MIT |
+| [`mlua`](https://crates.io/crates/mlua) + vendored **Lua 5.4** | sandboxed scripting (no io/os/require; bytecode loaders closed) | MIT (mlua) / MIT (Lua, © Lua.org/PUC-Rio) |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |
 | [`tauri-plugin-global-shortcut`](https://crates.io/crates/tauri-plugin-global-shortcut) | audio push-to-talk / push-to-mute global shortcuts (the full hotkey map lands in Phase 5) | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
