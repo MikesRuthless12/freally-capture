@@ -15,6 +15,28 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > The next rung is **1.0.0** (Phases 7–9): the WebSocket remote-control API + scripting/plugins,
 > game capture + signed installers, and the accessibility/i18n/onboarding launch polish.
 
+### Added
+- **Web join page for phone guests** (TASK-R3) — the invite QR now opens
+  `docs/join.html` on the Pages site: the guest end of a remote-guests session running in a plain
+  browser (camera + mic, explicit-click join, self-mute under the two-gate model, host talkback +
+  host-view, screen share where the browser supports it, auto-rejoin with backoff) — no install,
+  no CDN (PeerJS vendored). The copyable `freally://` link still opens the app directly.
+
+### Fixed
+- **Native preview (Windows)** — the render thread's first surface build is now serialized with
+  UI-thread DirectComposition commits under the overlay lock (a narrow blank-preview race when a
+  resize landed exactly as the surface was born), and the native selection box now reuses the
+  compositor's own crop chain-size fold instead of a hand-rolled copy (TASK-NP7).
+- **Window capture** — the cursor pump no longer synthesizes undrawn ~60 fps frames while the
+  cursor moves somewhere that is *not* over the captured window (another window occluding it, or
+  anywhere else on the desktop). Found by the new process-per-test live harness
+  (`scripts/live-capture-tests.ps1`, TASK-NP9), which also sidesteps the WinRT/D3D teardown race
+  that could crash multi-test live runs.
+- **Charter docs** — README / PRIVACY / SECURITY now describe the opt-in remote-guests P2P
+  network surface honestly (expiring invites, explicit-click join, P2P DTLS-SRTP media, the
+  broker carries only the handshake, optional user-owned TURN, moderation + ban semantics), and
+  `THIRD-PARTY-NOTICES.md` gained the missing PeerJS + qrcode-generator entries.
+
 ## [0.85.0] — 2026-07-07 (Streaming depth: multistream / SRT / WHIP + scene/source/encoder depth)
 
 > **The magic moment** — go live to Twitch **and** YouTube at once while recording a separate

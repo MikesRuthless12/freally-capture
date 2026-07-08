@@ -35,7 +35,9 @@ leaves your machine is the stream you chose to send.
 > **re-binds to the same window across a restart**, and errored captures **auto-recover**. Streaming
 > lands next (0.70.0). The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
 > go-to-market plan) is **maintained privately** and is not published here.
-> **Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.**
+> **Installers for every release are on the
+> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.85.0 (the
+> studio + streaming depth) is the latest.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
