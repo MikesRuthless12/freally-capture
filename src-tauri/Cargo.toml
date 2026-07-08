@@ -34,6 +34,7 @@ fcap-scene = { path = "../crates/scene" }
 fcap-audio = { path = "../crates/audio" }
 fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
+fcap-script = { path = "../crates/script" }
 fcap-preview = { path = "../crates/preview" }
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

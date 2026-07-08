@@ -23,6 +23,7 @@ mod recording;
 mod remote;
 mod remote_api;
 mod replay;
+mod scripting;
 mod settings;
 mod stream;
 mod studio;
@@ -270,6 +271,9 @@ fn main() {
             // The WebSocket remote-control API (Phase 7) — off by default;
             // the manager starts/stops the server as settings change.
             remote_api::spawn_manager(app.handle().clone());
+            // Sandboxed Lua scripts (Phase 7) — loaded from settings, same
+            // command allowlist as the remote API.
+            scripting::spawn_manager(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");
             // The native preview child window (Windows). Created here on the
             // main thread; the studio thread presents the GPU surface onto it.

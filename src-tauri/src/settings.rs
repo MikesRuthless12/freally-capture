@@ -59,6 +59,8 @@ pub struct Settings {
     pub remote_control: RemoteControlSettings,
     /// Browser docks — named URLs opened as dock windows (Phase 7).
     pub browser_docks: Vec<BrowserDockSettings>,
+    /// Sandboxed Lua scripts (Phase 7).
+    pub scripts: Vec<ScriptSettings>,
 }
 
 impl Default for Settings {
@@ -76,7 +78,28 @@ impl Default for Settings {
             hotkeys: HotkeySettings::default(),
             remote_control: RemoteControlSettings::default(),
             browser_docks: Vec::new(),
+            scripts: Vec::new(),
         }
+    }
+}
+
+/// One sandboxed Lua script (TASK-703): a user-chosen `.lua` file, loaded
+/// while enabled. The sandbox has no io/os/require — a script can only call
+/// the same command surface the remote API exposes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ScriptSettings {
+    pub path: String,
+    pub enabled: bool,
+}
+
+impl ScriptSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.path.is_empty() || self.path.len() > 1024 || self.path.chars().any(char::is_control)
+        {
+            return Err("invalid script path".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -739,6 +762,12 @@ impl Settings {
         for dock in &self.browser_docks {
             dock.validate()?;
         }
+        if self.scripts.len() > 16 {
+            return Err("too many scripts (16 max)".to_owned());
+        }
+        for script in &self.scripts {
+            script.validate()?;
+        }
         Ok(())
     }
 }
@@ -975,6 +1004,10 @@ mod tests {
             browser_docks: vec![BrowserDockSettings {
                 name: "Twitch Chat".to_owned(),
                 url: "https://www.twitch.tv/popout/someone/chat".to_owned(),
+            }],
+            scripts: vec![ScriptSettings {
+                path: "C:/scripts/go-live.lua".to_owned(),
+                enabled: true,
             }],
         };
         store.set(next.clone()).expect("save settings");

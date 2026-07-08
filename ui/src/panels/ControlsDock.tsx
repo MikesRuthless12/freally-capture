@@ -18,6 +18,7 @@ import { ReplayControls } from "../components/ReplayControls";
 import { BrowserDockDialog } from "./BrowserDock";
 import { ModelsDialog } from "./Models";
 import { RecordingsDialog } from "./Recordings";
+import { ScriptsDialog } from "./ScriptsDialog";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsRemote } from "./SettingsRemote";
 import { SettingsOutput } from "./SettingsOutput";
@@ -49,6 +50,7 @@ export function ControlsDock({
     | "replay"
     | "remote"
     | "docks"
+    | "scripts"
     | null
   >(null);
 
@@ -268,6 +270,14 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("scripts")}
+            title="Sandboxed Lua scripts: react to go-live/scene/recording events, drive the studio"
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            ⚡ Scripts…
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("docks")}
             title="Browser docks: open a chat popout, alerts page, or Companion buttons as a window beside the studio"
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
@@ -343,6 +353,13 @@ export function ControlsDock({
       )}
       {dialog === "docks" && (
         <BrowserDockDialog
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "scripts" && (
+        <ScriptsDialog
           settings={settings}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}

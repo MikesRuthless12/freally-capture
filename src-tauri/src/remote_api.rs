@@ -49,7 +49,7 @@ impl RemoteHandler for AppHandler {
 /// The fixed command allowlist. Everything routes through the same
 /// functions the UI/hotkeys use, so validation and side effects stay
 /// identical no matter who asks.
-fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result<Value, String> {
+pub(crate) fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result<Value, String> {
     match command {
         "getStatus" => Ok(status_value(app)),
         "listScenes" => Ok(scenes_value(app)),
@@ -227,7 +227,7 @@ fn scenes_value(app: &AppHandle) -> Value {
 }
 
 /// The compact snapshot pushed as the `state` event whenever it changes.
-fn coarse_state(app: &AppHandle) -> Value {
+pub(crate) fn coarse_state(app: &AppHandle) -> Value {
     let snapshot = app.state::<StudioState>().snapshot();
     let stream = crate::stream::stream_status(app.state());
     let recording = match app.state::<crate::recording::RecordingState>().status() {

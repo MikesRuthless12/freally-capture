@@ -47,12 +47,20 @@ export type Settings = {
   remoteControl: RemoteControlSettings;
   /** Browser docks — named URLs opened as dock windows (Phase 7). */
   browserDocks: BrowserDockSettings[];
+  /** Sandboxed Lua scripts (Phase 7). */
+  scripts: ScriptSettings[];
 };
 
 /** One browser dock: a named URL opened as its own dock window. */
 export type BrowserDockSettings = {
   name: string;
   url: string;
+};
+
+/** One sandboxed Lua script: a .lua file path, loaded while enabled. */
+export type ScriptSettings = {
+  path: string;
+  enabled: boolean;
 };
 
 /** The WebSocket remote-control API (mirrors `RemoteControlSettings` in
