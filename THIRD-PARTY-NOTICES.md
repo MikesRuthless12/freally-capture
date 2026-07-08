@@ -50,6 +50,8 @@ works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-par
 | [`tauri-plugin-updater`](https://crates.io/crates/tauri-plugin-updater) + [`tauri-plugin-process`](https://crates.io/crates/tauri-plugin-process) | signed self-hosted auto-update (verifies a minisign signature before applying) + relaunch (Phase 8) | MIT OR Apache-2.0 |
 | [`windows-core`](https://crates.io/crates/windows-core) *(Windows only)* | the `#[implement]` COM glue for the WASAPI process-loopback per-app audio capture | MIT OR Apache-2.0 |
 | [`libloading`](https://crates.io/crates/libloading) | link-probe an optional **user-installed** NDI runtime at load time (never bundled; we only confirm it links) | ISC |
+| [`sha1`](https://crates.io/crates/sha1) | SHA-1 verification of the on-demand **CEF** browser-source runtime against the CDN-published hash | MIT OR Apache-2.0 |
+| [`bzip2-rs`](https://crates.io/crates/bzip2-rs) | pure-Rust bzip2 decode of the CEF `.tar.bz2` (no system libs) | MIT OR Apache-2.0 |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |
 | [`fluent`](https://crates.io/crates/fluent) / `fluent-bundle` | i18n catalogs (18 locales) | Apache-2.0 OR MIT |

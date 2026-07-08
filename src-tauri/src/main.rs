@@ -116,6 +116,7 @@ fn main() {
         .manage(AudioRuntime::new())
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
+        .manage(commands::cef::CefState::new())
         .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
         .manage(stream::StreamBridgeState::new())
@@ -229,6 +230,10 @@ fn main() {
             commands::recording::encoders_list,
             commands::recording::ffmpeg_status,
             commands::recording::ffmpeg_install,
+            commands::cef::cef_status,
+            commands::cef::cef_install,
+            commands::cef::cef_cancel,
+            commands::cef::cef_remove,
             commands::recording::ffmpeg_cancel,
             commands::recording::ffmpeg_remove,
             commands::recording::recording_start,

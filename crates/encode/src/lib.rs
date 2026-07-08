@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cef;
 pub mod decode;
 pub mod encoder;
 pub mod export;

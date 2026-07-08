@@ -52,7 +52,12 @@ _Nothing yet._
   live** while talking over it, then remove it — the Media source's audio pauses and resumes in the
   mix with the picture (⏸/▶ on media sources).
 - **In-app component downloads** — the on-demand ffmpeg download now shows an explicit
-  `98.35%`-style percentage beside its progress bar + cancel.
+  `98.35%`-style percentage beside its progress bar + cancel. A new **Browser Source runtime
+  (Chromium/CEF)** component downloads the ~100 MB CEF runtime the same honest way: it resolves the
+  newest stable build from the official CEF build index, **verifies the download against that
+  index's SHA-1 before unpacking** (no bundling, no hardcoded hash), and caches it per-user — with
+  the same %/bar/cancel UI. The browser *source* that renders through the runtime is its own
+  follow-on milestone; this ships the runtime download.
 
 ### Scoped honestly (Phase 8)
 - **VST2/3** (TASK-804) — deferred behind a flag: the VST2 SDK is no longer licensed by Steinberg and

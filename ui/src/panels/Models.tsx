@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 
 import {
+  cefCancel,
+  cefInstall,
+  cefRemove,
+  cefStatus,
   ffmpegCancel,
   ffmpegInstall,
   ffmpegRemove,
   ffmpegStatus,
   integrationsStatus,
 } from "../api/commands";
-import { onFfmpeg } from "../api/events";
-import type { FfmpegStatus, IntegrationsStatus } from "../api/types";
+import { onCef, onFfmpeg } from "../api/events";
+import type { CefStatus, FfmpegStatus, IntegrationsStatus } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 
 function formatMb(bytes: number): string {
@@ -203,9 +207,172 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
           failed checksum aborts the install — the app refuses to run bytes it cannot vouch for.
         </p>
 
+        <CefSection />
+
         <IntegrationsSection />
       </div>
     </PickerShell>
+  );
+}
+
+/**
+ * The optional **CEF (browser-source runtime)** component — same on-demand,
+ * verified, never-bundled model as ffmpeg. Resolves the newest stable build
+ * from the CEF CDN, verifies its SHA-1, extracts it. The browser SOURCE that
+ * renders through it is the follow-on milestone; this ships the download.
+ */
+function CefSection() {
+  const [status, setStatus] = useState<CefStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    cefStatus()
+      .then((s) => {
+        if (alive) setStatus(s);
+      })
+      .catch(() => undefined);
+    onCef((s) => {
+      if (alive) setStatus(s);
+    })
+      .then((fn) => (alive ? (unlisten = fn) : fn()))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
+
+  const run = (fn: () => Promise<void>) => {
+    setBusy(true);
+    setActionError(null);
+    fn()
+      .catch((err) => setActionError(String(err)))
+      .finally(() => setBusy(false));
+  };
+
+  const dl =
+    status?.state === "downloading"
+      ? (() => {
+          const total = status.totalBytes ?? 0;
+          return total > 0 ? Math.min(100, (status.receivedBytes / total) * 100) : null;
+        })()
+      : null;
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="m-0 text-xs font-semibold">Browser Source runtime — Chromium (CEF)</h4>
+        <span className="shrink-0 rounded bg-havoc-accent/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-havoc-accent uppercase">
+          Third-party · not bundled
+        </span>
+      </div>
+      <p className="mt-2 mb-0 leading-relaxed text-havoc-muted">
+        Browser sources render web pages (alerts, widgets, overlays) through{" "}
+        <span className="text-havoc-text">Chromium Embedded Framework</span> — a ~100&nbsp;MB
+        runtime this app never ships with. It downloads on demand from the official CEF build index,
+        is
+        <span className="text-havoc-text">
+          {" "}
+          verified against that index&apos;s SHA-1 before anything is unpacked
+        </span>
+        , and is cached per-user. The browser <em>source</em> that renders through it arrives with
+        its own milestone; this installs the runtime it needs.
+      </p>
+
+      <div className="mt-2">
+        {status === null && <p className="m-0 text-havoc-muted">Checking…</p>}
+
+        {status?.state === "missing" &&
+          (status.supported ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(cefInstall)}
+              className="rounded-lg border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
+            >
+              Download &amp; install
+            </button>
+          ) : (
+            <p className="m-0 text-havoc-muted">
+              CEF publishes no build for this platform — browser sources are unavailable here.
+            </p>
+          ))}
+
+        {status?.state === "resolving" && (
+          <p className="m-0 text-havoc-muted">Resolving the latest stable build…</p>
+        )}
+
+        {status?.state === "downloading" && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <span>Downloading…</span>
+              <span className="text-havoc-muted">
+                {dl !== null && <span className="font-mono text-havoc-text">{dl.toFixed(2)}%</span>}{" "}
+                · {formatMb(status.receivedBytes)}
+                {status.totalBytes ? ` of ${formatMb(status.totalBytes)}` : ""} ·{" "}
+                {formatRate(status.bytesPerSec)}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-havoc-accent to-havoc-accent-2 transition-[width]"
+                style={{ width: dl !== null ? `${dl.toFixed(2)}%` : "100%" }}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(cefCancel)}
+              className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {status?.state === "verifying" && (
+          <p className="m-0">Verifying the download against the index SHA-1…</p>
+        )}
+        {status?.state === "extracting" && <p className="m-0">Unpacking the runtime…</p>}
+
+        {status?.state === "ready" && (
+          <div className="flex flex-col gap-2">
+            <p className="m-0 text-emerald-300">
+              Installed — CEF <span className="font-mono">{status.version}</span>.
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(cefRemove)}
+              className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        )}
+
+        {status?.state === "error" && (
+          <div className="flex flex-col gap-2">
+            <p className="m-0 text-red-300">{status.message}</p>
+            {status.supported && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(cefInstall)}
+                className="self-start rounded-lg border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+
+        {actionError && <p className="mt-2 mb-0 text-red-300">{actionError}</p>}
+      </div>
+    </section>
   );
 }
 

@@ -651,6 +651,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bzip2-rs"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beeb59e7e4c811ab37cc73680c798c7a5da77fc9989c62b09138e31ee740f735"
+dependencies = [
+ "crc32fast",
+ "tinyvec",
+]
+
+[[package]]
 name = "cairo-rs"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1738,10 +1748,12 @@ dependencies = [
 name = "fcap-encode"
 version = "0.95.0"
 dependencies = [
+ "bzip2-rs",
  "directories",
  "lzma-rs",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "tar",
  "thiserror 2.0.18",

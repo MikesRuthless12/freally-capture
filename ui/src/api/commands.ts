@@ -15,6 +15,7 @@ import type {
   BlendMode,
   BugReportContext,
   CaptureSource,
+  CefStatus,
   CornerSlot,
   EncoderCatalog,
   EulaStatus,
@@ -572,6 +573,26 @@ export function ffmpegCancel(): Promise<void> {
 /** Remove the installed component. */
 export function ffmpegRemove(): Promise<void> {
   return invoke("ffmpeg_remove");
+}
+
+/** The CEF (browser-source runtime) component status. */
+export function cefStatus(): Promise<CefStatus> {
+  return invoke<CefStatus>("cef_status");
+}
+
+/** Start the on-demand CEF fetch + verify (progress rides the `cef` event). */
+export function cefInstall(): Promise<void> {
+  return invoke("cef_install");
+}
+
+/** Cancel an in-flight CEF fetch (the partial download is removed). */
+export function cefCancel(): Promise<void> {
+  return invoke("cef_cancel");
+}
+
+/** Remove the installed CEF runtime. */
+export function cefRemove(): Promise<void> {
+  return invoke("cef_remove");
 }
 
 // ---------------------------------------------------------------------------

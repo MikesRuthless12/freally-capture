@@ -864,6 +864,21 @@ export type FfmpegStatus =
   | { state: "ready"; version: string; path: string }
   | { state: "error"; message: string; build: FfmpegBuild | null };
 
+/** The CEF (browser-source runtime) component status (mirrors `CefStatusDto`). */
+export type CefStatus =
+  | { state: "missing"; supported: boolean }
+  | { state: "resolving" }
+  | {
+      state: "downloading";
+      receivedBytes: number;
+      totalBytes: number | null;
+      bytesPerSec: number;
+    }
+  | { state: "verifying" }
+  | { state: "extracting" }
+  | { state: "ready"; version: string; path: string }
+  | { state: "error"; message: string; supported: boolean };
+
 /** The anonymous bug-report context (mirrors `BugReportContextDto`). */
 export type BugReportContext = {
   appVersion: string;

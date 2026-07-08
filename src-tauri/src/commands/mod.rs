@@ -11,6 +11,7 @@ use fcap_capture::SourceKind;
 use fcap_sources::video_device;
 
 pub mod audio;
+pub mod cef;
 pub mod recording;
 pub mod studio;
 
