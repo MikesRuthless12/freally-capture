@@ -47,6 +47,9 @@ works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-par
 | [`mlua`](https://crates.io/crates/mlua) + vendored **Lua 5.4** | sandboxed scripting (no io/os/require; bytecode loaders closed) | MIT (mlua) / MIT (Lua, © Lua.org/PUC-Rio) |
 | [`global-hotkey`](https://crates.io/crates/global-hotkey) | system-wide hotkeys | Apache-2.0 OR MIT |
 | [`tauri-plugin-global-shortcut`](https://crates.io/crates/tauri-plugin-global-shortcut) | audio push-to-talk / push-to-mute global shortcuts (the full hotkey map lands in Phase 5) | MIT OR Apache-2.0 |
+| [`tauri-plugin-updater`](https://crates.io/crates/tauri-plugin-updater) + [`tauri-plugin-process`](https://crates.io/crates/tauri-plugin-process) | signed self-hosted auto-update (verifies a minisign signature before applying) + relaunch (Phase 8) | MIT OR Apache-2.0 |
+| [`windows-core`](https://crates.io/crates/windows-core) *(Windows only)* | the `#[implement]` COM glue for the WASAPI process-loopback per-app audio capture | MIT OR Apache-2.0 |
+| [`libloading`](https://crates.io/crates/libloading) | link-probe an optional **user-installed** NDI runtime at load time (never bundled; we only confirm it links) | ISC |
 | [`directories`](https://crates.io/crates/directories) | OS config/data paths | MIT OR Apache-2.0 |
 | [`serde`](https://serde.rs) / [`serde_json`](https://crates.io/crates/serde_json) | scene/profile (de)serialization | MIT OR Apache-2.0 |
 | [`fluent`](https://crates.io/crates/fluent) / `fluent-bundle` | i18n catalogs (18 locales) | Apache-2.0 OR MIT |
