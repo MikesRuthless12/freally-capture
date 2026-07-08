@@ -24,6 +24,8 @@ members = [
     "crates/stream",    # RTMP/RTMPS/SRT/WHIP muxers, multistream, reconnect, virtual camera, replay buffer, WS remote API
     "crates/preview",   # native preview child window (the "OBS feel" GPU surface host; Win/mac/Linux-X11, JPEG fallback)
     "crates/script",    # sandboxed Lua scripting: react to studio events, drive the command surface
+    "crates/plugin",    # the plugin SDK: documented Source/Filter contracts + the registry seam
+    "plugins/checkerboard", # the sample plugin: adds a source + a filter without touching core
 ]
 
 [workspace.package]

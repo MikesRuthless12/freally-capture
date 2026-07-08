@@ -1743,6 +1743,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "fcap-plugin"
+version = "0.85.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "fcap-plugin-checkerboard"
+version = "0.85.0"
+dependencies = [
+ "fcap-plugin",
+ "serde_json",
+]
+
+[[package]]
 name = "fcap-preview"
 version = "0.85.0"
 dependencies = [
