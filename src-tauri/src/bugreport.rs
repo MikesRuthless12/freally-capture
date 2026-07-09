@@ -36,12 +36,16 @@
 //! profiles. There is deliberately **no button and no IPC command** for this — a
 //! "crash the app" control has no business shipping in a live studio.
 //!
-//! Per-OS honesty: the message box is native on Windows (`MessageBoxW`) and
-//! macOS (`NSAlert`). On Linux `rfd` shells out to **zenity**; where zenity is
-//! not installed the dialog cannot open and `rfd` reports `Cancel`, which is
-//! indistinguishable from the user declining — so the studio simply stays
-//! closed. The crash report is still on disk either way, and the next launch
-//! surfaces it, so the worst case is exactly the old manual-relaunch behaviour.
+//! The message box is native on every OS: `MessageBoxW` on Windows, `NSAlert` on
+//! macOS, and GTK3 on Linux. `rfd` is pinned to `default-features = false,
+//! features = ["gtk3"]` to match `tauri-plugin-dialog` — cargo unions features
+//! across the graph, and rfd's build script aborts outright if both `gtk3` and
+//! `xdg-portal` end up enabled. Taking rfd's defaults also pulled a second
+//! ashpd/wayland stack in, whose `quick-xml 0.39` carries an unpatched advisory.
+//! If the dialog cannot open at all, `rfd` reports `Cancel` — indistinguishable
+//! from the user declining — so the studio simply stays closed. The crash report
+//! is on disk either way and the next launch surfaces it, making the worst case
+//! exactly the old manual-relaunch behaviour.
 
 use std::path::PathBuf;
 

@@ -49,7 +49,14 @@ sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 # helper process *after* the studio has died — so it cannot use Tauri's dialog
 # plugin (there is no app left to host it). Already in the tree via
 # tauri-plugin-dialog; naming it here only makes the direct use explicit.
-rfd = "0.16"
+#
+# `gtk3` only, and never the default features. `tauri-plugin-dialog` selects
+# `rfd/gtk3`, and cargo unions features across the graph — so taking rfd's
+# defaults (`xdg-portal`, `wayland`, `async-std`) makes its build script abort
+# with "You can't enable both `gtk3` and `xdg-portal` features at once" on Linux,
+# and drags in a parallel ashpd/wayland stack whose `quick-xml 0.39` carries an
+# unpatched advisory. Matching the plugin's choice adds zero new dependencies.
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 
 # Linux only: read the Tauri window's X11 id (RawWindowHandle::Xlib) to parent
 # the native-preview child window. Matches Tauri's raw-window-handle 0.6.
