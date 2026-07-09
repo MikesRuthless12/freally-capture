@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { initLocale, useT } from "./i18n/t";
+
 import {
   eulaStatus,
   health,
@@ -54,6 +56,8 @@ type OpenDialog =
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
 export default function App() {
+  // Subscribes this tree to language changes; `t` is the same function either way.
+  const t = useT();
   const [core, setCore] = useState<Health | null>(null);
   const [coreError, setCoreError] = useState(false);
   // First-run EULA gate: `null` while loading, then the status. Until the
@@ -94,6 +98,10 @@ export default function App() {
     settingsGet()
       .then((loaded) => {
         if (!cancelled) {
+          // Before the first paint that uses a string: `"auto"` follows the OS,
+          // an explicit tag wins. Also stamps <html lang/dir>, which is what
+          // actually flips the layout for Arabic.
+          initLocale(loaded.language);
           setSettings(loaded);
           setSettingsSettled(true);
         }
@@ -342,7 +350,7 @@ export default function App() {
                 : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
             }`}
           >
-            Studio Mode {studioMode ? "on" : "off"}
+            {t("studio-mode")} {studioMode ? t("toggle-on") : t("toggle-off")}
           </button>
           <button
             type="button"
@@ -356,16 +364,16 @@ export default function App() {
                 : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
             }`}
           >
-            9:16 {collection?.vertical ? "on" : "off"}
+            9:16 {collection?.vertical ? t("toggle-on") : t("toggle-off")}
           </button>
           <button
             type="button"
             onClick={toggleStatsDock}
             disabled={!settings}
-            title={showStats ? "Hide the stats dock" : "Show the stats dock"}
+            title={showStats ? t("hide-stats-dock") : t("show-stats-dock")}
             className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
           >
-            Stats {showStats ? "on" : "off"}
+            {t("stats")} {showStats ? t("toggle-on") : t("toggle-off")}
           </button>
           <span className="text-xs text-havoc-muted">
             {core

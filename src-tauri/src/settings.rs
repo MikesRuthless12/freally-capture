@@ -29,13 +29,21 @@ pub enum MixerLayout {
     Vertical,
 }
 
+/// `Settings::language` sentinel: follow the operating system's preferred
+/// languages instead of a fixed choice. Fresh installs start here, so a Japanese
+/// user does not have to find a picker to stop reading English. Kept in step
+/// with `AUTO_LOCALE` in `ui/src/i18n/locales.ts`.
+pub const AUTO_LANGUAGE: &str = "auto";
+
 /// User-facing settings. Every field defaults (`serde(default)`) so missing
 /// keys never brick the app, and unknown keys from newer builds are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    /// UI language (BCP-47). The language picker + full 18-language i18n land
-    /// in Phase 9; the field exists from day one for forward compatibility.
+    /// UI language: a BCP-47 tag the user chose, or [`AUTO_LANGUAGE`] to follow
+    /// the operating system. The frontend resolves it against the OS preference
+    /// list — see `ui/src/i18n/locales.ts`. `validate` rejects an empty tag, so
+    /// "follow the system" is a word rather than `""`.
     pub language: String,
     /// Whether the stats dock is shown.
     pub show_stats_dock: bool,
@@ -70,7 +78,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            language: "en".to_owned(),
+            language: AUTO_LANGUAGE.to_owned(),
             show_stats_dock: true,
             monitor_device: None,
             mixer_layout: MixerLayout::default(),
@@ -1291,6 +1299,16 @@ mod tests {
         let printed = format!("{settings:?}");
         assert!(!printed.contains("hunter2"), "credential leaked: {printed}");
         assert!(printed.contains("[redacted]"));
+    }
+
+    /// A fresh install must follow the OS, not force English on a Japanese user.
+    /// `validate` rejects an empty tag, so the sentinel has to be a word — and it
+    /// has to survive `validate`, or the first `settings_set` would be refused.
+    #[test]
+    fn a_fresh_install_defaults_to_following_the_system_language() {
+        let settings = Settings::default();
+        assert_eq!(settings.language, AUTO_LANGUAGE);
+        assert!(settings.validate().is_ok(), "the sentinel must validate");
     }
 
     #[test]
