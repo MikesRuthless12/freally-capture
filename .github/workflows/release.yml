@@ -253,14 +253,22 @@ jobs:
           # The section between `## [<version>] …` and the next `## ` heading.
           # Matched literally, never as a regex: a version's dots are wildcards and
           # `[0.95.0]` would parse as a character class, silently matching nothing.
-          # Blank leading/trailing lines trimmed; bounded so latest.json stays small
-          # (the dialog scrolls, but the manifest is fetched on every launch).
+          # Blank leading/trailing lines trimmed.
           NOTES="$(awk -v ver="$VERSION" '
             BEGIN { needle = "## [" ver "]" }
             index($0, needle) == 1 { inside = 1; next }
             inside && substr($0, 1, 3) == "## " { exit }
             inside { print }
-          ' CHANGELOG.md | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac | head -c 8000)"
+          ' CHANGELOG.md | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac)"
+
+          # Bound it so latest.json stays small — the manifest is fetched on every
+          # launch, and the dialog scrolls anyway. Trimmed with a shell expansion
+          # rather than `| head -c`: head closes the pipe early, which SIGPIPEs the
+          # upstream `tac` and, under `pipefail`, aborts the whole release with 141.
+          # `iconv -c` then drops any partial UTF-8 sequence the cut may have left,
+          # because jq refuses to encode invalid UTF-8 and would fail the job.
+          NOTES="${NOTES:0:8000}"
+          NOTES="$(printf '%s' "$NOTES" | iconv -f utf-8 -t utf-8 -c)"
 
           if [ -z "${NOTES//[[:space:]]/}" ]; then
             echo "::warning::No CHANGELOG.md section for ${VERSION} — falling back to a generic note."

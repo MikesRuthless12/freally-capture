@@ -12,8 +12,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish).
-> 1.0.0 now also gates on the 26 CAP-M must-haves, run as three themed batches.
+> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish),
+> tagged **0.96.0**. 1.0.0 then also gates on the 26 CAP-M must-haves, run as three themed batches
+> (0.97.0 / 0.98.0 / 0.99.0).
+
+_Nothing yet._
+
+## [0.95.1] — 2026-07-09 (Crash reporting, EULA persistence & dialog fixes)
+
+> Six bugs found while drilling the bug-report flow on real hardware — two of which would have shipped
+> in 1.0.0 — plus the crash-reporting and updater work those drills demanded. A crash now tells you it
+> happened and brings the studio back with the report already open.
 
 ### Fixed
 - **A crash now tells you it happened, and brings the studio back.** A dying app cannot show its own
