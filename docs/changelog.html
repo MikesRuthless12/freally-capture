@@ -20,8 +20,41 @@
     </header>
 
     <main>
-      <!-- 0.95.0 — game capture, distribution & per-app audio -->
+      <!-- 0.95.1 — crash reporting, EULA persistence & dialog fixes -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.95.1</span>
+            <span class="date">Jul 9, 2026 · Crash reporting, EULA persistence &amp; dialog fixes</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.95.1">Download</a>
+        </div>
+
+        <h2>0.95.1 — Crash reporting, EULA persistence &amp; dialog fixes</h2>
+        <p class="summary">
+          Six bugs found while drilling the bug-report flow on real hardware — two of which would
+          have shipped in 1.0.0 — plus the crash-reporting and updater work those drills demanded.
+          A crash now tells you it happened and brings the studio back with the report already open.
+        </p>
+        <ul class="features">
+          <li><strong>A crash tells you, and brings the studio back</strong> — a dying app cannot show its own error window, so the panic hook spawns the same executable as a tiny helper, which shows a native “stopped unexpectedly” dialog, waits for the crashed process to exit, and relaunches. The reopened studio surfaces the scrubbed report automatically.</li>
+          <li><strong>Accepting the EULA no longer un-accepts itself</strong> — changing any setting in the same session you accepted wrote a stale <code>null</code> back over your acceptance, and the gate returned on the next launch. Acceptance is now write-protected at the store.</li>
+          <li><strong>Dialogs no longer render off-screen</strong> — a <code>backdrop-blur</code> on the dock panels made them the containing block for <code>position: fixed</code>, so 16 of 19 dialogs centred inside their dock instead of the window, with their buttons out of reach. <em>Check for updates</em> was one of them.</li>
+          <li><strong>Emailed crash reports work</strong> — URL length was counted in characters, but percent-encoding inflates a 3-byte character ninefold, so a real backtrace produced a URL past Windows' limit, where it opens a blank window and reports nothing. The whole URL is bounded now.</li>
+          <li><strong>Compose in Gmail</strong> — beside the mail-client button. Plain https, no API key, nothing auto-sent.</li>
+          <li><strong>Update prompt at launch</strong> — the studio checks once per launch and shows the new version with its real release notes in a read-only field, with an explicit yes/no. A pending crash report takes precedence; an offline check stays silent.</li>
+          <li><strong>Dropdown menus close when you click away</strong> — the Sources <strong>+</strong> menu and both <em>Add filter</em> menus. Escape closes the innermost surface only.</li>
+          <li><strong>Windows installer</strong> — updates now run the NSIS wizard with a <em>Run Freally Capture</em> checkbox on the Finish page, and the installer carries the app icon instead of NSIS's stock one.</li>
+        </ul>
+        <p class="note">
+          The <em>Force a test crash</em> button is gone: a control that crashes the app has no place
+          in a live studio. Also fixed: a shell-injection sink in the release workflow, where a tag
+          name was spliced into a shell script before bash parsed it.
+        </p>
+      </article>
+
+      <!-- 0.95.0 — game capture, distribution & per-app audio -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.95.0</span>
