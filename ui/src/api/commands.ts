@@ -708,10 +708,11 @@ export function bugReportContext(): Promise<BugReportContext> {
   return invoke<BugReportContext>("bug_report_context");
 }
 
-/** Open a pre-filled GitHub issue ("github") or email draft ("email") with
- * the anonymous report — the user still clicks send. Nothing auto-sends. */
+/** Open a pre-filled GitHub issue ("github"), Gmail web compose ("gmail"), or
+ * the OS mail client ("email") with the anonymous report — the user still
+ * clicks send. Nothing auto-sends. */
 export function bugReportSubmit(
-  target: "github" | "email",
+  target: "github" | "gmail" | "email",
   description: string,
   includeCrash: boolean,
 ): Promise<void> {
@@ -721,15 +722,4 @@ export function bugReportSubmit(
 /** Dismiss + delete the pending crash report. */
 export function bugReportClearCrash(): Promise<void> {
   return invoke("bug_report_clear_crash");
-}
-
-/** Write a harmless sample crash report to test the "we found a crash" flow. */
-export function bugReportSimulate(): Promise<void> {
-  return invoke("bug_report_simulate");
-}
-
-/** TEST ONLY: write a crash report and force-exit the app, so the full
- * crash → relaunch → report loop can be exercised (relaunch to see it). */
-export function bugReportTestCrash(): Promise<void> {
-  return invoke("bug_report_test_crash");
 }

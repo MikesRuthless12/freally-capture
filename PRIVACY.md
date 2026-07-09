@@ -58,12 +58,19 @@ Freally Capture works **fully offline** for building scenes, composing, recordin
   streaming platforms and some exports require), fetched from its third-party
   distributor. The Software contains **no AI/ML features and downloads no
   models**;
-- **an optional update check**.
+- **an update check**. Once per launch, and again whenever you open *Check for
+  updates…*, the Software fetches a single small file (`latest.json`) from its
+  **GitHub releases page** to see whether a newer version exists. This is the one
+  request the Software makes without you asking. It is a plain download: **nothing
+  about you, your machine, or your content is sent** — no version, no identifier,
+  no usage data. GitHub, like any web server, sees the IP address and user-agent
+  of the request itself. Nothing is downloaded or installed unless you answer the
+  prompt.
 
-These downloads transfer the component **to** your machine; they are initiated by
-your action, and **no personal data or content is sent** as part of them beyond
-the standard network request needed to fetch the file. The streaming services and
-third-party distributors have their own privacy practices.
+Apart from that update check, these transfers move data **to** your machine and are
+initiated by your action, and **no personal data or content is sent** as part of
+them beyond the standard network request needed to fetch the file. The streaming
+services and third-party distributors have their own privacy practices.
 
 ## Stream keys and service credentials
 Your stream keys are stored **locally** on your device, shown masked in the

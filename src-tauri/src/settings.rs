@@ -832,10 +832,30 @@ impl SettingsStore {
     }
 
     /// Replace the settings and persist them atomically.
+    ///
+    /// EULA acceptance is deliberately **not** replaceable through here: it is a
+    /// machine-level fact, not a user-editable preference. Two callers would
+    /// otherwise silently reset it and re-show the gate on the next launch —
+    /// `settings_set`, because the UI's payload omits the field and
+    /// `serde(default)` turns that into `None`; and `profile_switch`, because a
+    /// profile snapshotted before acceptance carries `None`. Only
+    /// [`Self::accept_eula`] may write it.
     pub fn set(&self, next: Settings) -> io::Result<()> {
         {
             let mut guard = self.lock();
+            let accepted = guard.accepted_eula_version.clone();
             *guard = next;
+            guard.accepted_eula_version = accepted;
+        }
+        self.persist()
+    }
+
+    /// Record acceptance of `version` — the only path allowed to write the EULA
+    /// field. Idempotent.
+    pub fn accept_eula(&self, version: &str) -> io::Result<()> {
+        {
+            let mut guard = self.lock();
+            guard.accepted_eula_version = Some(version.to_owned());
         }
         self.persist()
     }
@@ -1013,10 +1033,70 @@ mod tests {
             }],
             accepted_eula_version: Some("2026-07-08".to_owned()),
         };
+        // `set` never writes the EULA field (see its docs) — accept first so the
+        // round-trip below compares the whole struct.
+        store.accept_eula("2026-07-08").expect("accept eula");
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
         assert_eq!(reloaded.get(), next);
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The UI's settings payload omits `acceptedEulaVersion`, so `serde(default)`
+    /// hands `settings_set` a `None`. Saving any dialog must not re-arm the EULA
+    /// gate on the next launch.
+    #[test]
+    fn set_cannot_clear_an_accepted_eula() {
+        let path = temp_path("eula-set");
+        let store = SettingsStore::load_from(path.clone());
+        store.accept_eula("2026-07-08").expect("accept eula");
+
+        // Exactly what `settings_set` receives from the UI: the field absent.
+        let from_ui: Settings =
+            serde_json::from_str(r#"{"language":"fr"}"#).expect("UI payload parses");
+        assert_eq!(from_ui.accepted_eula_version, None);
+        store.set(from_ui).expect("save settings");
+
+        assert_eq!(
+            store.get().language,
+            "fr",
+            "the rest of the payload applies"
+        );
+        assert_eq!(
+            store.get().accepted_eula_version.as_deref(),
+            Some("2026-07-08"),
+            "acceptance must survive a settings save"
+        );
+        // And it survives a restart.
+        let reloaded = SettingsStore::load_from(path.clone());
+        assert_eq!(
+            reloaded.get().accepted_eula_version.as_deref(),
+            Some("2026-07-08"),
+            "acceptance must survive a relaunch"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// A profile snapshotted before acceptance carries `None`; switching to it
+    /// must not re-arm the gate either.
+    #[test]
+    fn profile_load_cannot_clear_an_accepted_eula() {
+        let path = temp_path("eula-profile");
+        let store = SettingsStore::load_from(path.clone());
+        store.accept_eula("2026-07-08").expect("accept eula");
+
+        let stale_profile = Settings {
+            accepted_eula_version: None,
+            ..Settings::default()
+        };
+        store.set(stale_profile).expect("load profile");
+
+        assert_eq!(
+            store.get().accepted_eula_version.as_deref(),
+            Some("2026-07-08"),
+            "acceptance must survive a profile switch"
+        );
         let _ = fs::remove_file(&path);
     }
 

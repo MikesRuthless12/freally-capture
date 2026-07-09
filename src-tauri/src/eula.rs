@@ -42,12 +42,15 @@ pub fn eula_status(store: State<'_, SettingsStore>) -> EulaStatus {
 }
 
 /// Record acceptance of the current EULA version (persisted). Idempotent.
+///
+/// Goes through [`SettingsStore::accept_eula`] rather than a read-modify-write
+/// of the whole [`crate::settings::Settings`]: acceptance must survive every
+/// later `settings_set` and profile switch, which replace the rest of the
+/// struct wholesale.
 #[tauri::command]
 pub fn eula_accept(store: State<'_, SettingsStore>) -> Result<(), String> {
-    let mut settings = store.get();
-    settings.accepted_eula_version = Some(EULA_VERSION.to_string());
     store
-        .set(settings)
+        .accept_eula(EULA_VERSION)
         .map_err(|err| format!("could not record EULA acceptance: {err}"))
 }
 

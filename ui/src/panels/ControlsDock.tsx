@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { check } from "@tauri-apps/plugin-updater";
+
 import {
   bugReportContext,
   openFrecPending,
@@ -64,12 +66,26 @@ export function ControlsDock({
   const [openedFrec, setOpenedFrec] = useState<string | null>(null);
 
   // Auto-surface the bug-report dialog on startup when the app crashed on a
-  // previous run — this is the "relaunch → report" half of the loop.
+  // previous run — this is the "relaunch → report" half of the loop. If there is
+  // no crash to report, check once for a new version instead and surface it, so
+  // a user learns about an update without going looking for it. A crash always
+  // wins the one dialog slot; the update keeps until next launch.
+  //
+  // The check is a single GET of the signed `latest.json`; nothing downloads
+  // without the user answering. This runs after the EULA gate, because the whole
+  // studio (and therefore this dock) is blocked behind it.
   useEffect(() => {
     let alive = true;
     bugReportContext()
-      .then((ctx) => {
-        if (alive && ctx.pendingCrash) setDialog("bug");
+      .then(async (ctx) => {
+        if (!alive) return;
+        if (ctx.pendingCrash) {
+          setDialog("bug");
+          return;
+        }
+        // Offline, rate-limited, or no release yet: stay silent, never nag.
+        const update = await check().catch(() => null);
+        if (alive && update) setDialog("updates");
       })
       .catch(() => undefined);
     return () => {
