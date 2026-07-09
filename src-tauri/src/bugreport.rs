@@ -66,7 +66,12 @@ const GMAIL_COMPOSE: &str = "https://mail.google.com/mail/?view=cm&fs=1";
 /// blank window, no error. "Copy report" always carries the untruncated text.
 const MAX_GITHUB_ENCODED: usize = 6000;
 const MAX_GMAIL_ENCODED: usize = 6000;
-const MAX_MAILTO_ENCODED: usize = 1500;
+/// The whole `mailto:` URL — scheme, address, subject and body together — stays
+/// under this. ShellExecute practically dies near 2048; leave a margin.
+const MAX_MAILTO_URL: usize = 1900;
+/// …of which the subject may claim at most this much, so a pathological subject
+/// can never starve the body of every byte.
+const MAX_MAILTO_SUBJECT_ENCODED: usize = 300;
 /// Argv flag that turns this executable into the post-crash notice helper:
 /// `freally-capture --crash-notice <pid-of-the-process-that-died>`.
 const CRASH_NOTICE_FLAG: &str = "--crash-notice";
@@ -154,7 +159,15 @@ pub fn install_panic_hook() {
 /// pid. It outlives us: it waits for this process to disappear, then relaunches
 /// the studio. Best-effort — a failure here just means no error window, and the
 /// crash report is still on disk for the next manual launch.
+///
+/// At most once per process. `panic = "abort"` does not stop the world instantly,
+/// so two threads can panic close enough together to run the hook twice — which
+/// would put two "stopped unexpectedly" dialogs on screen for one crash.
 fn spawn_crash_notice() {
+    static SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if SPAWNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -165,6 +178,13 @@ fn spawn_crash_notice() {
 }
 
 /// Is `pid` still in the process table?
+///
+/// Identity is the raw pid, so a pid the OS has already recycled onto an
+/// unrelated process reads as "still alive". The cost is bounded and benign: at
+/// worst [`wait_for_exit`] burns its full timeout before relaunching anyway.
+/// Checking start-time as well would need the parent's start-time captured at
+/// spawn — i.e. a `sysinfo` process scan inside the panic hook, which is exactly
+/// where doing less work is worth more than being exact.
 fn process_alive(pid: u32) -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pid = Pid::from_u32(pid);
@@ -186,6 +206,14 @@ fn wait_for_exit(pid: u32) {
         }
         std::thread::sleep(EXIT_WAIT);
     }
+}
+
+/// With no pid to watch there is nothing to poll, so wait a fixed interval
+/// instead of relaunching immediately. Relaunching while the corpse still holds
+/// the single-instance lock forwards the new launch into the dying app, which
+/// then exits — leaving the user with no studio at all.
+fn wait_blind() {
+    std::thread::sleep(EXIT_WAIT * 8);
 }
 
 /// If argv says we are the `--crash-notice <pid>` helper, run that whole flow
@@ -219,8 +247,11 @@ pub fn run_crash_notice(args: &[String]) -> bool {
 
     // The crashed process holds the single-instance lock until the OS reaps it.
     // Relaunching first would forward into the corpse and exit.
-    if let Some(pid) = dead_pid {
-        wait_for_exit(pid);
+    match dead_pid {
+        Some(pid) => wait_for_exit(pid),
+        // A malformed or absent pid must not mean "skip the wait" — that is the
+        // very race this helper exists to lose gracefully.
+        None => wait_blind(),
     }
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::process::Command::new(exe).spawn();
@@ -318,11 +349,28 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// crash excerpt can reach ~7800 encoded, well past what `mailto:` survives.
 /// Always cuts on a character boundary, never mid-escape.
 fn encode_bounded(s: &str, max_encoded: usize) -> String {
+    encode_bounded_with(
+        s,
+        max_encoded,
+        "\n… (truncated — use “Copy report” for the full text)",
+    )
+}
+
+/// [`encode_bounded`] without the truncation note — for fields where a trailing
+/// sentence would be absurd, like a subject line.
+fn encode_capped(s: &str, max_encoded: usize) -> String {
+    encode_bounded_with(s, max_encoded, "")
+}
+
+/// Percent-encode `s` so the result never exceeds `max_encoded` bytes, appending
+/// `note` (itself encoded, and reserved out of the budget) when anything was cut.
+/// Whole encoded characters only — never half of a `%E2%80%94`.
+fn encode_bounded_with(s: &str, max_encoded: usize, note: &str) -> String {
     let full = urlencode(s);
     if full.len() <= max_encoded {
         return full;
     }
-    let note = urlencode("\n… (truncated — use “Copy report” for the full text)");
+    let note = urlencode(note);
     let budget = max_encoded.saturating_sub(note.len());
     let mut out = String::with_capacity(max_encoded);
     let mut buf = [0u8; 4];
@@ -348,12 +396,20 @@ pub fn github_url(title: &str, body: &str) -> String {
 }
 
 /// A pre-filled `mailto:` URL (the user's own mail client sends it).
+///
+/// The bound is on the **whole URL**, not on the body alone. Bounding only the
+/// body left the scheme, the address and the subject uncounted — and a subject is
+/// user text: `error_summary` caps it at 80 characters, but 80 CJK characters
+/// encode to 720 bytes and 80 emoji to 960. A non-English report could therefore
+/// still cross the ~2048 mark where Windows' ShellExecute opens a blank window
+/// and reports no error, which is the exact failure this bound exists to prevent.
 pub fn mailto_url(subject: &str, body: &str) -> String {
-    format!(
-        "mailto:{REPORT_EMAIL}?subject={}&body={}",
-        urlencode(&truncate_chars(subject, 200)),
-        encode_bounded(body, MAX_MAILTO_ENCODED),
-    )
+    let head = format!(
+        "mailto:{REPORT_EMAIL}?subject={}&body=",
+        encode_capped(&truncate_chars(subject, 200), MAX_MAILTO_SUBJECT_ENCODED),
+    );
+    let budget = MAX_MAILTO_URL.saturating_sub(head.len());
+    format!("{head}{}", encode_bounded(body, budget))
 }
 
 /// A pre-filled Gmail web-compose URL. Unlike `mailto:` this never depends on a
@@ -640,6 +696,44 @@ mod tests {
             "github url must be bounded, was {}",
             gh.len()
         );
+    }
+
+    /// The bound is on the whole URL. A subject is user text, and 80 CJK
+    /// characters encode to 720 bytes — bounding only the body let the total
+    /// cross 2048, where Windows opens a blank window and reports nothing.
+    #[test]
+    fn a_multibyte_subject_cannot_push_the_mailto_url_over_the_limit() {
+        // `error_summary` caps a subject at 80 chars; these are 3 bytes each.
+        let subject = format!("[Freally Capture] {}", "崩".repeat(80));
+        let body = "—".repeat(2_000);
+        assert!(urlencode(&subject).len() > 700, "premise: subject inflates");
+
+        let mail = mailto_url(&subject, &body);
+        assert!(
+            mail.len() <= MAX_MAILTO_URL,
+            "whole mailto url must be bounded, was {}",
+            mail.len()
+        );
+        assert!(mail.starts_with("mailto:mythodikalone@gmail.com?subject="));
+        assert!(mail.contains("&body="), "a body must survive the subject");
+    }
+
+    /// Even an absurd subject leaves room for a body.
+    #[test]
+    fn the_subject_cannot_starve_the_body() {
+        let mail = mailto_url(&"🔥".repeat(200), "it broke");
+        assert!(mail.len() <= MAX_MAILTO_URL);
+        let body = mail.split("&body=").nth(1).expect("a body part exists");
+        assert!(!body.is_empty(), "body must not be empty");
+    }
+
+    /// A subject carries no "… (truncated)" sentence — that belongs in a body.
+    #[test]
+    fn encode_capped_truncates_without_a_note() {
+        let out = encode_capped(&"a".repeat(500), 10);
+        assert_eq!(out, "a".repeat(10));
+        assert!(!out.contains("truncated"));
+        assert_eq!(encode_capped("short", 100), "short");
     }
 
     /// Truncation must never cut a `%E2%80%94` escape in half.

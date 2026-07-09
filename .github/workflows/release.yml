@@ -170,6 +170,13 @@ jobs:
       # rewrites asset names.
       - name: Stage updater artifacts
         shell: bash
+        # A tag name is attacker-influenced text. Interpolating `${{ … }}` into a
+        # `run:` block splices it into the shell *source* before bash parses it —
+        # ref names forbid spaces but allow `"`, `;`, `$` and backticks, and
+        # `${IFS}` supplies the space. Bind it to an env var instead, so it is
+        # only ever data.
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p updater-staging
@@ -199,7 +206,6 @@ jobs:
           ART="${SIG%.sig}"
           SAFE="update-${PLAT}-$(basename "$ART" | tr ' ' '.')"
           cp "$ART" "updater-staging/$SAFE"
-          TAG="${{ inputs.tag || github.ref_name }}"
           URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${SAFE}"
           jq -n --arg plat "$PLAT" --arg sig "$(cat "$SIG")" --arg url "$URL" \
             '{($plat): {signature: $sig, url: $url}}' > "updater-staging/fragment-${PLAT}.json"
@@ -221,7 +227,13 @@ jobs:
       contents: write
     steps:
       # Needed for CHANGELOG.md, which supplies the updater's release notes.
+      # `persist-credentials: false` — this job holds `contents: write`, and the
+      # default checkout leaves the GITHUB_TOKEN in `.git/config`, which would
+      # hand any script-injection in a later step a ready path to push. Nothing
+      # here pushes; it only reads a file.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
@@ -237,6 +249,10 @@ jobs:
       # "see the release notes" line the user cannot see from inside the app.
       - name: Compose latest.json
         shell: bash
+        # The tag reaches the script as data, never as shell source. See the note
+        # on "Stage updater artifacts".
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -245,7 +261,6 @@ jobs:
             echo "No updater fragments — build was unsigned; latest.json skipped."
             exit 0
           fi
-          TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           PUBDATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           PLATFORMS="$(jq -s 'add' "${FRAGS[@]}")"

