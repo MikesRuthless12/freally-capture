@@ -174,19 +174,29 @@ jobs:
           set -euo pipefail
           mkdir -p updater-staging
           BUNDLE="target/${{ matrix.target.rust-target }}/release/bundle"
-          SIG="$(find "$BUNDLE" -name '*.sig' | head -1 || true)"
-          if [ -z "$SIG" ]; then
+          if [ -z "$(find "$BUNDLE" -name '*.sig' -print -quit)" ]; then
             echo "No .sig found (TAURI_SIGNING_PRIVATE_KEY unset) — updater artifacts skipped."
             exit 0
           fi
-          ART="${SIG%.sig}"
+          # The bundler signs every format it built (linux: AppImage + deb + rpm,
+          # windows: NSIS + MSI), and the updater picks how to install from the
+          # file's extension. So name the one format the download links serve —
+          # picking whichever `find` happened to list first would hand AppImage
+          # users an .rpm.
           case "${{ matrix.target.label }}" in
-            linux-x86_64)   PLAT=linux-x86_64 ;;
-            macos-aarch64)  PLAT=darwin-aarch64 ;;
-            macos-x86_64)   PLAT=darwin-x86_64 ;;
-            windows-x86_64) PLAT=windows-x86_64 ;;
+            linux-x86_64)   PLAT=linux-x86_64;   PATTERN='*.AppImage.sig' ;;
+            macos-aarch64)  PLAT=darwin-aarch64; PATTERN='*.app.tar.gz.sig' ;;
+            macos-x86_64)   PLAT=darwin-x86_64;  PATTERN='*.app.tar.gz.sig' ;;
+            windows-x86_64) PLAT=windows-x86_64; PATTERN='*-setup.exe.sig' ;;
             *) echo "unknown matrix label"; exit 1 ;;
           esac
+          SIG="$(find "$BUNDLE" -name "$PATTERN" -print -quit)"
+          if [ -z "$SIG" ]; then
+            echo "Build is signed, but no artifact matches $PATTERN under $BUNDLE. Signed artifacts:"
+            find "$BUNDLE" -name '*.sig'
+            exit 1
+          fi
+          ART="${SIG%.sig}"
           SAFE="update-${PLAT}-$(basename "$ART" | tr ' ' '.')"
           cp "$ART" "updater-staging/$SAFE"
           TAG="${{ inputs.tag || github.ref_name }}"
