@@ -105,26 +105,32 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          # Re-export to later steps only when non-empty. Heredoc form so a
+          # Re-export one variable to the later steps. Heredoc form so a
           # multi-line base64 certificate survives intact.
           forward() {
-            local value="${!1:-}"
-            if [ -n "$value" ]; then
-              printf '%s<<__FCAP_EOF__\n%s\n__FCAP_EOF__\n' "$1" "$value" >> "$GITHUB_ENV"
-            fi
+            printf '%s<<__FCAP_EOF__\n%s\n__FCAP_EOF__\n' "$1" "${!1:-}" >> "$GITHUB_ENV"
           }
-          if [ -n "${APPLE_CERTIFICATE:-}" ] \
-            && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] \
-            && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "Developer-ID certificate configured — signing and notarizing."
-            forward APPLE_SIGNING_IDENTITY
+
+          if [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            echo "Apple certificate configured — importing it for Developer-ID signing."
             forward APPLE_CERTIFICATE
+            # Paired with the certificate even when empty: the bundler passes it
+            # to `security import -P`, and a password-less .p12 is legal.
             forward APPLE_CERTIFICATE_PASSWORD
-            forward APPLE_ID
-            forward APPLE_PASSWORD
-            forward APPLE_TEAM_ID
+            # Notarization wants all three; the bundler fails loudly on a
+            # partial set rather than shipping something un-notarized.
+            for var in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -n "${!var:-}" ]; then forward "$var"; fi
+            done
           else
-            echo "No Developer-ID certificate — using free ad-hoc signing."
+            echo "No Apple certificate — using free ad-hoc signing."
+          fi
+
+          # Honour a configured identity, else ad-hoc ("-"). Mirrors the
+          # `secrets.APPLE_SIGNING_IDENTITY || '-'` default this step replaced.
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            forward APPLE_SIGNING_IDENTITY
+          else
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
           fi
 
