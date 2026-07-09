@@ -82,6 +82,52 @@ jobs:
 
       - run: npm ci
 
+      # macOS signing: falls back to ad-hoc ("-") — free; Gatekeeper shows
+      # right-click → Open on first launch. Set the APPLE_* secrets (a paid
+      # Developer ID cert) to switch to full Developer-ID signing +
+      # notarization with no further workflow change. Dormant until then.
+      #
+      # The bundler decides to import a certificate on the *presence* of
+      # APPLE_CERTIFICATE, not on it holding a value — and an unconfigured repo
+      # secret expands to "", which still sets the variable. Passing the secrets
+      # straight into the build step therefore made every macOS build run
+      # `security import` on an empty certificate and fail. So export them here,
+      # and only when a certificate is really configured.
+      - name: Configure macOS signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # Re-export to later steps only when non-empty. Heredoc form so a
+          # multi-line base64 certificate survives intact.
+          forward() {
+            local value="${!1:-}"
+            if [ -n "$value" ]; then
+              printf '%s<<__FCAP_EOF__\n%s\n__FCAP_EOF__\n' "$1" "$value" >> "$GITHUB_ENV"
+            fi
+          }
+          if [ -n "${APPLE_CERTIFICATE:-}" ] \
+            && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] \
+            && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "Developer-ID certificate configured — signing and notarizing."
+            forward APPLE_SIGNING_IDENTITY
+            forward APPLE_CERTIFICATE
+            forward APPLE_CERTIFICATE_PASSWORD
+            forward APPLE_ID
+            forward APPLE_PASSWORD
+            forward APPLE_TEAM_ID
+          else
+            echo "No Developer-ID certificate — using free ad-hoc signing."
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+
       - name: Tauri build (release, ${{ matrix.target.bundles }})
         env:
           # Updater signing (TASK-803). When the TAURI_SIGNING_PRIVATE_KEY secret
@@ -92,16 +138,6 @@ jobs:
           # still build). The key generated here has no password (empty secret).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS signing: falls back to ad-hoc ("-") — free; Gatekeeper shows
-          # right-click → Open on first launch. Set the APPLE_* secrets (a paid
-          # Developer ID cert) to switch to full Developer-ID signing +
-          # notarization with no further workflow change. Dormant until then.
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build --target ${{ matrix.target.rust-target }} --bundles ${{ matrix.target.bundles }}
 
       - name: Stage installers
