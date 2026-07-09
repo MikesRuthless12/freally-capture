@@ -9,6 +9,7 @@ import {
 import { onRecordingExport } from "../api/events";
 import type { ExportStatus, RecordingFile } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
@@ -26,6 +27,7 @@ function formatWhen(ms: number): string {
  * play in any player, with a live percentage, a progress bar, and Cancel.
  */
 export function RecordingsDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [files, setFiles] = useState<RecordingFile[] | null>(null);
   const [remuxing, setRemuxing] = useState<string | null>(null);
   const [exportingPath, setExportingPath] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
       if (status.state === "done") {
         setExportingPath(null);
         setProgress(null);
-        setNotice(`Exported to ${status.path}`);
+        setNotice(t("recordings-exported-to", { path: status.path }));
         refresh();
       } else if (status.state === "error") {
         setExportingPath(null);
@@ -66,7 +68,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
       } else if (status.state === "cancelled") {
         setExportingPath(null);
         setProgress(null);
-        setNotice("Export cancelled.");
+        setNotice(t("recordings-export-cancelled"));
       }
     })
       .then((fn) => {
@@ -78,7 +80,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
       alive = false;
       unlisten?.();
     };
-  }, [refresh]);
+  }, [refresh, t]);
 
   const remux = async (path: string) => {
     setRemuxing(path);
@@ -86,7 +88,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
     setNotice(null);
     try {
       const output = await recordingRemux(path);
-      setNotice(`Remuxed to ${output}`);
+      setNotice(t("recordings-remuxed-to", { path: output }));
       refresh();
     } catch (err) {
       setError(String(err));
@@ -115,14 +117,10 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
       : null;
 
   return (
-    <PickerShell title="Recordings" onClose={onClose} wide>
+    <PickerShell title={t("recordings-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-2 text-xs text-havoc-text">
-        {files === null && <p className="m-0 text-havoc-muted">Reading the folder…</p>}
-        {files?.length === 0 && (
-          <p className="m-0 text-havoc-muted">
-            No recordings yet — Start Recording writes into the folder set in Output.
-          </p>
-        )}
+        {files === null && <p className="m-0 text-havoc-muted">{t("recordings-loading")}</p>}
+        {files?.length === 0 && <p className="m-0 text-havoc-muted">{t("recordings-empty")}</p>}
         {(files ?? []).map((file) => (
           <div
             key={file.path}
@@ -134,7 +132,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
               </p>
               <p className="m-0 text-[10px] text-havoc-muted">
                 {formatSize(file.sizeBytes)} · {formatWhen(file.modifiedMs)}
-                {file.ext === "frec" && " · owned lossless (freally-video)"}
+                {file.ext === "frec" && ` · ${t("recordings-frec-label")}`}
               </p>
             </div>
             {file.ext === "mkv" && (
@@ -142,10 +140,10 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 disabled={remuxing !== null || exportingPath !== null}
                 onClick={() => remux(file.path)}
-                title="Rewrap as mp4 — stream copy, no re-encode, no quality change (needs the FFmpeg component)"
+                title={t("recordings-remux-title")}
                 className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
               >
-                {remuxing === file.path ? "Remuxing…" : "Remux to MP4"}
+                {remuxing === file.path ? t("recordings-remuxing") : t("recordings-remux-to-mp4")}
               </button>
             )}
             {file.ext === "frec" && (
@@ -154,16 +152,18 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                   type="button"
                   disabled={exportingPath !== null || remuxing !== null}
                   onClick={() => startExport(file.path, "mp4")}
-                  title="Decode the owned .frec and re-encode to MP4 (H.264/AAC) so it plays in any player — needs the FFmpeg component"
+                  title={t("recordings-export-mp4-title")}
                   className="rounded-md border border-havoc-accent/40 bg-havoc-accent/10 px-2 py-1 text-[11px] text-havoc-text transition-colors enabled:hover:border-havoc-accent/70 disabled:opacity-50"
                 >
-                  {exportingPath === file.path ? "Exporting…" : "Export → MP4"}
+                  {exportingPath === file.path
+                    ? t("recordings-exporting")
+                    : t("recordings-export-mp4")}
                 </button>
                 <button
                   type="button"
                   disabled={exportingPath !== null || remuxing !== null}
                   onClick={() => startExport(file.path, "mkv")}
-                  title="Decode the owned .frec and re-encode to MKV so it plays in any player"
+                  title={t("recordings-export-mkv-title")}
                   className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
                 >
                   MKV
@@ -176,11 +176,11 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
         {exportingPath && (
           <div className="flex flex-col gap-1.5 rounded-lg border border-havoc-accent/30 bg-havoc-accent/[0.06] px-2.5 py-2">
             <div className="flex items-baseline justify-between">
-              <span>Exporting…</span>
+              <span>{t("recordings-exporting")}</span>
               <span className="font-mono text-havoc-muted">
-                {pct !== null ? `${pct.toFixed(2)}%` : "starting…"}
+                {pct !== null ? `${pct.toFixed(2)}%` : t("recordings-starting")}
                 {progress?.state === "exporting" && progress.framesTotal > 0
-                  ? ` · ${progress.framesDone} / ${progress.framesTotal} frames`
+                  ? ` · ${t("recordings-frames", { done: progress.framesDone, total: progress.framesTotal })}`
                   : ""}
               </span>
             </div>
@@ -195,7 +195,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
               onClick={() => recordingExportCancel().catch(() => undefined)}
               className="self-start rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-havoc-muted transition-colors hover:text-havoc-text"
             >
-              Cancel
+              {t("recordings-cancel")}
             </button>
           </div>
         )}

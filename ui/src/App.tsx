@@ -291,7 +291,7 @@ export default function App() {
     settingsSet(next).catch((err) => {
       // Roll back so the UI never claims a state the disk doesn't have.
       setSettings(previous);
-      setSaveError("Couldn't save settings — the change won't survive a restart.");
+      setSaveError(t("app-save-error"));
       console.error("could not persist settings:", err);
     });
   };
@@ -338,11 +338,7 @@ export default function App() {
               )
             }
             disabled={!collection}
-            title={
-              studioMode
-                ? "Leave Studio Mode"
-                : "Studio Mode — edit a preview scene, commit it to the program with a transition"
-            }
+            title={studioMode ? t("studio-mode-leave") : t("studio-mode-enter-title")}
             aria-pressed={studioMode !== null}
             className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
               studioMode
@@ -356,7 +352,7 @@ export default function App() {
             type="button"
             onClick={() => setDialog({ kind: "vertical" })}
             disabled={!collection}
-            title="The second (vertical 9:16) output canvas — recordable and streamable independently"
+            title={t("vertical-canvas-title")}
             aria-pressed={Boolean(collection?.vertical)}
             className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
               collection?.vertical
@@ -377,10 +373,12 @@ export default function App() {
           </button>
           <span className="text-xs text-havoc-muted">
             {core
-              ? `v${core.appVersion} · core ${core.coreOk ? "OK" : "ERROR"}`
+              ? `${t("app-version", { version: core.appVersion })} · ${
+                  core.coreOk ? t("core-ok") : t("core-error")
+                }`
               : coreError
-                ? "core unreachable (browser mode)"
-                : "connecting to core…"}
+                ? t("core-unreachable")
+                : t("connecting-to-core")}
           </span>
         </div>
       </header>
@@ -453,7 +451,8 @@ export default function App() {
           sceneId={activeScene.id}
           item={dialogItem}
           sourceName={
-            collection?.sources.find((source) => source.id === dialogItem.source)?.name ?? "Source"
+            collection?.sources.find((source) => source.id === dialogItem.source)?.name ??
+            t("filters-source-fallback")
           }
           onClose={() => setDialog(null)}
         />

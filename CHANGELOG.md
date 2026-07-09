@@ -16,6 +16,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > tagged **0.96.0**. 1.0.0 then also gates on the 26 CAP-M must-haves, run as three themed batches
 > (0.97.0 / 0.98.0 / 0.99.0).
 
+### Added
+- **The studio speaks 18 languages** (TASK-902) — `ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk
+  vi zh-CN`, from a Fluent catalog of **905 keys**. A fresh install follows the operating system's
+  language; an explicit choice wins. Arabic drives `<html dir="rtl">`. English is layered beneath
+  every locale, so a key a translator has not reached renders in English rather than as a raw id.
+  `npm run i18n:lint` fails CI on a missing key, an orphaned key, a duplicate, or a `t("…")` that
+  names nothing.
+
 ### Fixed
 - **`.frec` recordings now carry their own Explorer icon.** Tauri's `fileAssociations` schema has no
   `icon` field and its NSIS template hardcodes the association's `DefaultIcon` to the app executable,

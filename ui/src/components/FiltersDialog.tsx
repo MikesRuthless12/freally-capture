@@ -21,20 +21,26 @@ import type {
 } from "../api/types";
 import { BLEND_MODES } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
+import { useT } from "../i18n/t";
 import { PickerShell } from "./PickerShell";
 
-const FILTER_NAMES: Record<FilterTypeName, string> = {
-  chromaKey: "Chroma Key",
-  colorKey: "Color Key",
-  lumaKey: "Luma Key",
-  renderDelay: "Render Delay",
-  colorCorrection: "Color Correction",
-  lut: "Apply LUT",
-  blur: "Blur",
-  mask: "Image Mask",
-  sharpen: "Sharpen",
-  scroll: "Scroll",
-  crop: "Crop",
+/**
+ * `type -> i18n key`. Resolved with `t(...)` at RENDER time, never here: a
+ * module-level `t()` runs at import, before `initLocale`, and would freeze
+ * every name to English for the life of the process.
+ */
+const FILTER_NAME_KEYS: Record<FilterTypeName, string> = {
+  chromaKey: "filters-name-chroma-key",
+  colorKey: "filters-name-color-key",
+  lumaKey: "filters-name-luma-key",
+  renderDelay: "filters-name-render-delay",
+  colorCorrection: "filters-name-color-correction",
+  lut: "filters-name-lut",
+  blur: "filters-name-blur",
+  mask: "filters-name-mask",
+  sharpen: "filters-name-sharpen",
+  scroll: "filters-name-scroll",
+  crop: "filters-name-crop",
 };
 
 const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
@@ -81,6 +87,7 @@ const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`
 
 /** Per-item blend mode + the ordered filter chain with live parameters. */
 export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDialogProps) {
+  const t = useT();
   const [addOpen, setAddOpen] = useState(false);
   // Wraps the trigger *and* the menu — see `useDismiss`.
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -91,10 +98,10 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
   };
 
   return (
-    <PickerShell title={`Filters — ${sourceName}`} onClose={onClose} wide>
+    <PickerShell title={t("filters-title", { name: sourceName })} onClose={onClose} wide>
       <div className="flex flex-col gap-3">
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-          Blend mode
+          {t("filters-blend-mode")}
           <select
             value={item.blend}
             onChange={(event) =>
@@ -114,7 +121,7 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
 
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
-            Filter chain (top runs first)
+            {t("filters-chain-header")}
           </span>
           <div className="relative" ref={addMenuRef}>
             <button
@@ -124,12 +131,12 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
               aria-expanded={addOpen}
               className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              + Add filter
+              {t("filters-add")}
             </button>
             {addOpen && (
               <div
                 role="menu"
-                aria-label="Add a filter"
+                aria-label={t("filters-add-menu")}
                 className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
                 {(Object.keys(FILTER_DEFAULTS) as FilterTypeName[]).map((type) => (
@@ -145,7 +152,7 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
                     }}
                     className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
                   >
-                    {FILTER_NAMES[type]}
+                    {t(FILTER_NAME_KEYS[type])}
                   </button>
                 ))}
               </div>
@@ -154,9 +161,7 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
         </div>
 
         {item.filters.length === 0 ? (
-          <p className="m-0 text-xs text-havoc-muted">
-            No filters yet — chroma key a webcam, color-correct a capture, or scroll a ticker.
-          </p>
+          <p className="m-0 text-xs text-havoc-muted">{t("filters-empty")}</p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {item.filters.map((filter, index) => (
@@ -173,10 +178,10 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
                         event.target.checked,
                       ).catch(fail("filter toggle"))
                     }
-                    aria-label={`Enable ${FILTER_NAMES[filter.type]}`}
+                    aria-label={t("filters-enable", { name: t(FILTER_NAME_KEYS[filter.type]) })}
                   />
                   <span className="flex-1 text-xs font-semibold text-havoc-text">
-                    {FILTER_NAMES[filter.type]}
+                    {t(FILTER_NAME_KEYS[filter.type])}
                   </span>
                   <button
                     type="button"
@@ -186,8 +191,8 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
                         fail("filter reorder"),
                       )
                     }
-                    title="Run earlier"
-                    aria-label={`Move ${FILTER_NAMES[filter.type]} up`}
+                    title={t("filters-run-earlier")}
+                    aria-label={t("filters-move-up", { name: t(FILTER_NAME_KEYS[filter.type]) })}
                     className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                   >
                     ▲
@@ -200,8 +205,8 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
                         fail("filter reorder"),
                       )
                     }
-                    title="Run later"
-                    aria-label={`Move ${FILTER_NAMES[filter.type]} down`}
+                    title={t("filters-run-later")}
+                    aria-label={t("filters-move-down", { name: t(FILTER_NAME_KEYS[filter.type]) })}
                     className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                   >
                     ▼
@@ -211,8 +216,8 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
                     onClick={() =>
                       studioRemoveFilter(sceneId, item.id, filter.id).catch(fail("filter remove"))
                     }
-                    title="Remove filter"
-                    aria-label={`Remove ${FILTER_NAMES[filter.type]}`}
+                    title={t("filters-remove-title")}
+                    aria-label={t("filters-remove", { name: t(FILTER_NAME_KEYS[filter.type]) })}
                     className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
                   >
                     ×
@@ -327,9 +332,10 @@ function CropRow({
   values: { left: number; top: number; right: number; bottom: number };
   onChange: (values: { left: number; top: number; right: number; bottom: number }) => void;
 }) {
+  const t = useT();
   const field = (key: "left" | "top" | "right" | "bottom") => (
     <label key={key} className="flex flex-1 flex-col gap-0.5 text-[10px] text-havoc-muted">
-      {key}
+      {t(`filters-crop-${key}`)}
       <input
         type="number"
         min={0}
@@ -337,7 +343,9 @@ function CropRow({
         onChange={(event) =>
           onChange({ ...values, [key]: Math.max(0, Number(event.target.value) || 0) })
         }
-        aria-label={`crop ${key}`}
+        // The side must be the *translated* word, not the raw key — otherwise a
+        // Japanese screen reader announces "クロップ left".
+        aria-label={t("filters-crop-aria", { side: t(`filters-crop-${key}`) })}
         className="rounded-md border border-white/10 bg-havoc-panel px-1.5 py-1 text-xs text-havoc-text"
       />
     </label>
@@ -354,17 +362,18 @@ function FilterParams({
   filter: Filter;
   onChange: (kind: FilterKind) => void;
 }) {
+  const t = useT();
   switch (filter.type) {
     case "colorKey":
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <ColorRow
-            label="Key color (any color, RGB distance)"
+            label={t("filters-key-color-rgb")}
             value={filter.key}
             onChange={(key) => onChange({ ...filter, key })}
           />
           <Slider
-            label="Similarity"
+            label={t("filters-similarity")}
             value={filter.similarity}
             min={0}
             max={1}
@@ -372,7 +381,7 @@ function FilterParams({
             onChange={(similarity) => onChange({ ...filter, similarity })}
           />
           <Slider
-            label="Smoothness"
+            label={t("filters-smoothness")}
             value={filter.smoothness}
             min={0}
             max={1}
@@ -385,7 +394,7 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Luma min (darker keys out)"
+            label={t("filters-luma-min")}
             value={filter.lumaMin}
             min={0}
             max={1}
@@ -393,7 +402,7 @@ function FilterParams({
             onChange={(lumaMin) => onChange({ ...filter, lumaMin })}
           />
           <Slider
-            label="Luma max (brighter keys out)"
+            label={t("filters-luma-max")}
             value={filter.lumaMax}
             min={0}
             max={1}
@@ -401,7 +410,7 @@ function FilterParams({
             onChange={(lumaMax) => onChange({ ...filter, lumaMax })}
           />
           <Slider
-            label="Smoothness"
+            label={t("filters-smoothness")}
             value={filter.smoothness}
             min={0}
             max={1}
@@ -414,7 +423,7 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Delay (ms — video only, e.g. to sync with audio; capped at 500)"
+            label={t("filters-delay")}
             value={filter.delayMs}
             min={0}
             max={500}
@@ -427,12 +436,12 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <ColorRow
-            label="Key color"
+            label={t("filters-key-color")}
             value={filter.key}
             onChange={(key) => onChange({ ...filter, key })}
           />
           <Slider
-            label="Similarity"
+            label={t("filters-similarity")}
             value={filter.similarity}
             min={0}
             max={1}
@@ -440,7 +449,7 @@ function FilterParams({
             onChange={(similarity) => onChange({ ...filter, similarity })}
           />
           <Slider
-            label="Smoothness"
+            label={t("filters-smoothness")}
             value={filter.smoothness}
             min={0}
             max={1}
@@ -448,7 +457,7 @@ function FilterParams({
             onChange={(smoothness) => onChange({ ...filter, smoothness })}
           />
           <Slider
-            label="Spill"
+            label={t("filters-spill")}
             value={filter.spill}
             min={0}
             max={1}
@@ -461,7 +470,7 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Gamma"
+            label={t("filters-gamma")}
             value={filter.gamma}
             min={-3}
             max={3}
@@ -469,7 +478,7 @@ function FilterParams({
             onChange={(gamma) => onChange({ ...filter, gamma })}
           />
           <Slider
-            label="Brightness"
+            label={t("filters-brightness")}
             value={filter.brightness}
             min={-1}
             max={1}
@@ -477,7 +486,7 @@ function FilterParams({
             onChange={(brightness) => onChange({ ...filter, brightness })}
           />
           <Slider
-            label="Contrast"
+            label={t("filters-contrast")}
             value={filter.contrast}
             min={-1}
             max={1}
@@ -485,7 +494,7 @@ function FilterParams({
             onChange={(contrast) => onChange({ ...filter, contrast })}
           />
           <Slider
-            label="Saturation"
+            label={t("filters-saturation")}
             value={filter.saturation}
             min={0}
             max={4}
@@ -493,7 +502,7 @@ function FilterParams({
             onChange={(saturation) => onChange({ ...filter, saturation })}
           />
           <Slider
-            label="Hue shift"
+            label={t("filters-hue-shift")}
             value={filter.hueShift}
             min={-180}
             max={180}
@@ -501,7 +510,7 @@ function FilterParams({
             onChange={(hueShift) => onChange({ ...filter, hueShift })}
           />
           <Slider
-            label="Opacity"
+            label={t("filters-opacity")}
             value={filter.opacity}
             min={0}
             max={1}
@@ -514,13 +523,13 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <PathRow
-            label=".cube file"
+            label={t("filters-cube-file")}
             value={filter.path}
             placeholder="C:\luts\warm.cube"
             onCommit={(path) => onChange({ ...filter, path })}
           />
           <Slider
-            label="Amount"
+            label={t("filters-amount")}
             value={filter.amount}
             min={0}
             max={1}
@@ -533,7 +542,7 @@ function FilterParams({
       return (
         <div className="mt-2">
           <Slider
-            label="Radius"
+            label={t("filters-radius")}
             value={filter.radius}
             min={0}
             max={64}
@@ -546,13 +555,13 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <PathRow
-            label="Mask image"
+            label={t("filters-mask-image")}
             value={filter.path}
             placeholder="C:\masks\rounded.png"
             onCommit={(path) => onChange({ ...filter, path })}
           />
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <span className="w-24 shrink-0">Mode</span>
+            <span className="w-24 shrink-0">{t("filters-mask-mode")}</span>
             <select
               value={filter.mode}
               onChange={(event) =>
@@ -560,8 +569,8 @@ function FilterParams({
               }
               className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
             >
-              <option value="alpha">alpha</option>
-              <option value="luma">luma</option>
+              <option value="alpha">{t("filters-mask-alpha")}</option>
+              <option value="luma">{t("filters-mask-luma")}</option>
             </select>
             <label className="flex items-center gap-1">
               <input
@@ -569,7 +578,7 @@ function FilterParams({
                 checked={filter.invert}
                 onChange={(event) => onChange({ ...filter, invert: event.target.checked })}
               />
-              invert
+              {t("filters-mask-invert")}
             </label>
           </label>
         </div>
@@ -578,7 +587,7 @@ function FilterParams({
       return (
         <div className="mt-2">
           <Slider
-            label="Amount"
+            label={t("filters-amount")}
             value={filter.amount}
             min={0}
             max={2}
@@ -591,7 +600,7 @@ function FilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Speed X (px/s)"
+            label={t("filters-speed-x")}
             value={filter.speedX}
             min={-500}
             max={500}
@@ -599,7 +608,7 @@ function FilterParams({
             onChange={(speedX) => onChange({ ...filter, speedX })}
           />
           <Slider
-            label="Speed Y (px/s)"
+            label={t("filters-speed-y")}
             value={filter.speedY}
             min={-500}
             max={500}

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
 import { pushModal } from "../lib/modal";
+import { useT } from "../i18n/t";
 
 /**
  * A centered modal shell shared by the add-source pickers and dialogs.
@@ -28,6 +29,7 @@ export function PickerShell({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const t = useT();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -58,8 +60,8 @@ export function PickerShell({
               <button
                 type="button"
                 onClick={onRefresh}
-                aria-label="Refresh"
-                title="Refresh the list"
+                aria-label={t("pickershell-refresh-aria")}
+                title={t("pickershell-refresh-title")}
                 className="rounded px-1.5 text-sm text-havoc-muted hover:text-havoc-text"
               >
                 ↻
@@ -68,7 +70,7 @@ export function PickerShell({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={t("pickershell-close")}
               className="rounded px-1.5 text-sm text-havoc-muted hover:text-havoc-text"
             >
               ×

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { settingsSet } from "../api/commands";
 import type { ScriptSettings, Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -23,6 +24,7 @@ export function ScriptsDialog({
   onSaved: (next: Settings) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [scripts, setScripts] = useState<ScriptSettings[]>(settings?.scripts ?? []);
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function ScriptsDialog({
     setError(null);
     const trimmed = path.trim();
     if (!trimmed.toLowerCase().endsWith(".lua")) {
-      setError("Point at a .lua file.");
+      setError(t("scripts-error-not-lua"));
       return;
     }
     persist([...scripts, { path: trimmed, enabled: true }]);
@@ -49,13 +51,10 @@ export function ScriptsDialog({
   };
 
   return (
-    <PickerShell title="Scripts (Lua)" onClose={onClose}>
+    <PickerShell title={t("scripts-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         {scripts.length === 0 && (
-          <p className="m-0 text-[11px] text-havoc-muted">
-            No scripts yet — add a .lua file. See scripts/sample.lua for the API: react to
-            go-live/scene/recording events and drive the same commands as the remote API.
-          </p>
+          <p className="m-0 text-[11px] text-havoc-muted">{t("scripts-empty")}</p>
         )}
         {scripts.map((script, index) => (
           <div key={`${script.path}-${index}`} className="flex items-center gap-2">
@@ -70,7 +69,7 @@ export function ScriptsDialog({
                     ),
                   )
                 }
-                aria-label={`Enable ${script.path}`}
+                aria-label={t("scripts-enable", { path: script.path })}
               />
               <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-havoc-muted">
                 {script.path}
@@ -79,7 +78,7 @@ export function ScriptsDialog({
             <button
               type="button"
               onClick={() => persist(scripts.filter((_, i) => i !== index))}
-              aria-label={`Remove ${script.path}`}
+              aria-label={t("scripts-remove", { path: script.path })}
               className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-red-400/50 hover:text-red-300"
             >
               ✕
@@ -92,7 +91,7 @@ export function ScriptsDialog({
               value={path}
               onChange={(event) => setPath(event.target.value)}
               placeholder="C:\\path\\to\\script.lua"
-              aria-label="Script path"
+              aria-label={t("scripts-path-label")}
               className={`${inputClass} min-w-0 flex-1`}
             />
             <button
@@ -100,14 +99,10 @@ export function ScriptsDialog({
               onClick={add}
               className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
             >
-              Add
+              {t("scripts-add")}
             </button>
           </div>
-          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-            Scripts run sandboxed — no file or OS access; they can only call the same studio
-            commands as the remote API (switch scenes, transition, record/stream/replay, mutes). A
-            script error is logged and contained. Changes apply within a second.
-          </p>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("scripts-note")}</p>
         </div>
         {error && (
           <p role="alert" className="m-0 text-[11px] text-red-300">

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { STREAM_SERVICES, TRANSITION_KINDS } from "../api/types";
 import { bundleFor, catalogSource, loadedLocales } from "../i18n/bundle";
 import {
   AUTO_LOCALE,
@@ -125,6 +126,80 @@ describe("direction", () => {
     setLocale("ja");
     expect(document.documentElement.getAttribute("lang")).toBe("ja");
     expect(document.documentElement.getAttribute("dir")).toBe("ltr");
+  });
+});
+
+/**
+ * Lookup tables hold catalog keys, and their call sites render `t(labelKey)` —
+ * a *variable*. The i18n lint only scans literal `t("…")` calls, so a table that
+ * still holds English silently renders English in every locale (`t("15 min")`
+ * falls back to `"15 min"`), and a typo ships a raw id on screen. Every gate
+ * stays green. This test is the only thing standing there.
+ *
+ * Two tables shipped broken exactly this way and a code review caught them —
+ * `INVITE_TTLS` and `SLOT_OPTIONS`, whose translated keys sat orphaned in all
+ * 18 catalogs. Anything shaped like `[value, key]` belongs in this list.
+ */
+describe("label tables", () => {
+  const source = bundleFor(SOURCE_LOCALE);
+
+  const TABLES: Array<[string, ReadonlyArray<readonly [unknown, string]>]> = [
+    ["TRANSITION_KINDS", TRANSITION_KINDS],
+    ["STREAM_SERVICES", STREAM_SERVICES],
+  ];
+
+  it.each(TABLES)("every %s key exists in en.ftl", (name, table) => {
+    expect(table.length, `${name} is empty`).toBeGreaterThan(0);
+    for (const [value, key] of table) {
+      expect(source.getMessage(key)?.value, `${name}: ${String(value)} -> ${key}`).toBeDefined();
+    }
+  });
+
+  it.each(TABLES)("%s holds keys, not English", (name, table) => {
+    for (const [, key] of table) {
+      expect(key, `${name}: "${key}" looks like English, not a key`).toMatch(/^[a-z0-9-]+$/);
+    }
+  });
+
+  /**
+   * A catalog key nothing references is either a lookup table that still holds
+   * English (the bug above) or dead weight nobody will ever delete. Neither the
+   * lint nor `tsc` can see this: the lint only follows literal `t("…")`, and a
+   * table of strings type-checks whatever it holds.
+   *
+   * Keys built with a template literal — `` t(`filters-crop-${side}`) `` — are
+   * matched by their prefix, which is the same escape hatch the lint uses.
+   */
+  it("no key in en.ftl is orphaned", () => {
+    const keys = catalogSource(SOURCE_LOCALE)
+      .split(/\r?\n/)
+      .filter((line) => line.trim() && !line.trimStart().startsWith("#"))
+      .map((line) => line.slice(0, line.indexOf("=")).trim())
+      .filter(Boolean);
+
+    // Vite inlines the sources; no `node:fs`, so this runs anywhere vitest does.
+    const modules = import.meta.glob("../**/*.{ts,tsx}", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>;
+
+    const haystack = Object.entries(modules)
+      .filter(([path]) => !path.includes("/i18n/") && !path.includes("/__tests__/"))
+      .map(([, text]) => text)
+      .join("\n");
+
+    // `t(`some-prefix-${x}`)` → keys starting with `some-prefix-` are referenced.
+    const dynamicPrefixes = [...haystack.matchAll(/t\(\s*`([a-z0-9-]+-)\$\{/g)].map((m) => m[1]);
+
+    const orphans = keys.filter(
+      (key) =>
+        !haystack.includes(`"${key}"`) && !dynamicPrefixes.some((prefix) => key.startsWith(prefix)),
+    );
+
+    expect(orphans, `orphaned keys — nothing renders these:\n  ${orphans.join("\n  ")}`).toEqual(
+      [],
+    );
   });
 });
 

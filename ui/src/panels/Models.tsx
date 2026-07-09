@@ -14,6 +14,7 @@ import {
 import { onCef, onFfmpeg } from "../api/events";
 import type { CefStatus, FfmpegStatus, IntegrationsStatus } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 function formatMb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -31,6 +32,7 @@ function formatRate(bytesPerSec: number): string {
  * owned freally-video path never needs it.
  */
 export function ModelsDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [status, setStatus] = useState<FfmpegStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -69,47 +71,31 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
     status && (status.state === "missing" || status.state === "error") ? status.build : null;
 
   return (
-    <PickerShell title="Components" onClose={onClose} wide>
+    <PickerShell title={t("models-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <section className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
           <div className="flex items-baseline justify-between gap-2">
-            <h4 className="m-0 text-xs font-semibold">FFmpeg — wire codecs</h4>
+            <h4 className="m-0 text-xs font-semibold">{t("models-ffmpeg-heading")}</h4>
             <span className="shrink-0 rounded bg-havoc-accent/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-havoc-accent uppercase">
-              Third-party · not bundled
+              {t("models-badge-third-party")}
             </span>
           </div>
-          <p className="mt-2 mb-0 leading-relaxed text-havoc-muted">
-            Freally Capture&apos;s own engine records lossless{" "}
-            <span className="text-havoc-text">freally-video (.frec)</span> with nothing extra.
-            Recording the wire formats platforms and players expect — H.264/AAC (and HEVC/AV1) in
-            mp4/mkv/mov/webm — uses <span className="text-havoc-text">FFmpeg</span>, a separate tool
-            this app never ships with: those codecs are patent-encumbered, so it stays optional and
-            clearly labeled. It is downloaded on demand from the pinned build below,
-            <span className="text-havoc-text"> SHA-256-verified before first use</span>, cached
-            per-user, and driven as a separate process. Its license (LGPL/GPL) is its own — see
-            THIRD-PARTY-NOTICES.
-          </p>
+          <p className="mt-2 mb-0 leading-relaxed text-havoc-muted">{t("models-ffmpeg-desc")}</p>
         </section>
 
         <section className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-          {status === null && <p className="m-0 text-havoc-muted">Checking…</p>}
+          {status === null && <p className="m-0 text-havoc-muted">{t("models-checking")}</p>}
 
           {status?.state === "missing" && (
             <div className="flex flex-col gap-2">
               <p className="m-0 text-havoc-muted">
-                {build ? (
-                  <>
-                    Not installed. Available: FFmpeg{" "}
-                    <span className="text-havoc-text">{build.version}</span> from{" "}
-                    <span className="text-havoc-text">{build.source}</span> (
-                    {formatMb(build.sizeBytes)} download).
-                  </>
-                ) : (
-                  <>
-                    No FFmpeg build is pinned for this platform yet — wire-codec recording is
-                    unavailable here. Lossless freally-video recording is unaffected.
-                  </>
-                )}
+                {build
+                  ? t("models-ffmpeg-not-installed", {
+                      version: build.version,
+                      source: build.source,
+                      size: formatMb(build.sizeBytes),
+                    })
+                  : t("models-ffmpeg-none-pinned")}
               </p>
               {build && (
                 <button
@@ -118,7 +104,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                   onClick={() => run(ffmpegInstall)}
                   className="self-start rounded-lg border border-havoc-accent/40 bg-gradient-to-r from-havoc-accent/20 to-havoc-accent-2/20 px-3 py-1.5 font-medium text-havoc-text transition-colors hover:border-havoc-accent/70 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Download &amp; verify ({formatMb(build.sizeBytes)})
+                  {t("models-ffmpeg-download-verify", { size: formatMb(build.sizeBytes) })}
                 </button>
               )}
             </div>
@@ -131,14 +117,16 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
               return (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span>Downloading…</span>
+                    <span>{t("models-downloading")}</span>
                     <span className="text-havoc-muted">
                       {pct !== null && (
                         <span className="font-mono text-havoc-text">{pct.toFixed(2)}%</span>
                       )}{" "}
                       · {formatMb(status.receivedBytes)}
-                      {status.totalBytes ? ` of ${formatMb(status.totalBytes)}` : ""} ·{" "}
-                      {formatRate(status.bytesPerSec)}
+                      {status.totalBytes
+                        ? ` ${t("models-download-of")} ${formatMb(status.totalBytes)}`
+                        : ""}{" "}
+                      · {formatRate(status.bytesPerSec)}
                     </span>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -153,23 +141,20 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                     onClick={() => run(ffmpegCancel)}
                     className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
                   >
-                    Cancel
+                    {t("models-cancel")}
                   </button>
                 </div>
               );
             })()}
 
-          {status?.state === "verifying" && (
-            <p className="m-0">Verifying the download against the pinned SHA-256…</p>
-          )}
-          {status?.state === "extracting" && <p className="m-0">Unpacking…</p>}
+          {status?.state === "verifying" && <p className="m-0">{t("models-ffmpeg-verifying")}</p>}
+          {status?.state === "extracting" && <p className="m-0">{t("models-ffmpeg-extracting")}</p>}
 
           {status?.state === "ready" && (
             <div className="flex flex-col gap-2">
               <p className="m-0">
                 <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-400" />
-                Installed &amp; verified —{" "}
-                <span className="text-havoc-muted">{status.version}</span>
+                {t("models-ffmpeg-ready", { version: status.version })}
               </p>
               <p className="m-0 text-[10px] break-all text-havoc-muted">{status.path}</p>
               <button
@@ -178,7 +163,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                 onClick={() => run(ffmpegRemove)}
                 className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
               >
-                Remove
+                {t("models-remove")}
               </button>
             </div>
           )}
@@ -193,7 +178,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                   onClick={() => run(ffmpegInstall)}
                   className="self-start rounded-lg border border-havoc-accent/40 bg-gradient-to-r from-havoc-accent/20 to-havoc-accent-2/20 px-3 py-1.5 font-medium text-havoc-text transition-colors hover:border-havoc-accent/70 disabled:opacity-50"
                 >
-                  Retry download
+                  {t("models-ffmpeg-retry")}
                 </button>
               )}
             </div>
@@ -203,8 +188,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <p className="m-0 text-[10px] leading-relaxed text-havoc-muted">
-          The download is the only network action on this panel and never starts on its own. A
-          failed checksum aborts the install — the app refuses to run bytes it cannot vouch for.
+          {t("models-network-note")}
         </p>
 
         <CefSection />
@@ -222,6 +206,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
  * renders through it is the follow-on milestone; this ships the download.
  */
 function CefSection() {
+  const t = useT();
   const [status, setStatus] = useState<CefStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -264,26 +249,15 @@ function CefSection() {
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h4 className="m-0 text-xs font-semibold">Browser Source runtime — Chromium (CEF)</h4>
+        <h4 className="m-0 text-xs font-semibold">{t("models-cef-heading")}</h4>
         <span className="shrink-0 rounded bg-havoc-accent/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-havoc-accent uppercase">
-          Third-party · not bundled
+          {t("models-badge-third-party")}
         </span>
       </div>
-      <p className="mt-2 mb-0 leading-relaxed text-havoc-muted">
-        Browser sources render web pages (alerts, widgets, overlays) through{" "}
-        <span className="text-havoc-text">Chromium Embedded Framework</span> — a ~100&nbsp;MB
-        runtime this app never ships with. It downloads on demand from the official CEF build index,
-        is
-        <span className="text-havoc-text">
-          {" "}
-          verified against that index&apos;s SHA-1 before anything is unpacked
-        </span>
-        , and is cached per-user. The browser <em>source</em> that renders through it arrives with
-        its own milestone; this installs the runtime it needs.
-      </p>
+      <p className="mt-2 mb-0 leading-relaxed text-havoc-muted">{t("models-cef-desc")}</p>
 
       <div className="mt-2">
-        {status === null && <p className="m-0 text-havoc-muted">Checking…</p>}
+        {status === null && <p className="m-0 text-havoc-muted">{t("models-checking")}</p>}
 
         {status?.state === "missing" &&
           (status.supported ? (
@@ -293,27 +267,27 @@ function CefSection() {
               onClick={() => run(cefInstall)}
               className="rounded-lg border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
             >
-              Download &amp; install
+              {t("models-cef-download-install")}
             </button>
           ) : (
-            <p className="m-0 text-havoc-muted">
-              CEF publishes no build for this platform — browser sources are unavailable here.
-            </p>
+            <p className="m-0 text-havoc-muted">{t("models-cef-unsupported")}</p>
           ))}
 
         {status?.state === "resolving" && (
-          <p className="m-0 text-havoc-muted">Resolving the latest stable build…</p>
+          <p className="m-0 text-havoc-muted">{t("models-cef-resolving")}</p>
         )}
 
         {status?.state === "downloading" && (
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between gap-2">
-              <span>Downloading…</span>
+              <span>{t("models-downloading")}</span>
               <span className="text-havoc-muted">
                 {dl !== null && <span className="font-mono text-havoc-text">{dl.toFixed(2)}%</span>}{" "}
                 · {formatMb(status.receivedBytes)}
-                {status.totalBytes ? ` of ${formatMb(status.totalBytes)}` : ""} ·{" "}
-                {formatRate(status.bytesPerSec)}
+                {status.totalBytes
+                  ? ` ${t("models-download-of")} ${formatMb(status.totalBytes)}`
+                  : ""}{" "}
+                · {formatRate(status.bytesPerSec)}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -328,20 +302,18 @@ function CefSection() {
               onClick={() => run(cefCancel)}
               className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
             >
-              Cancel
+              {t("models-cancel")}
             </button>
           </div>
         )}
 
-        {status?.state === "verifying" && (
-          <p className="m-0">Verifying the download against the index SHA-1…</p>
-        )}
-        {status?.state === "extracting" && <p className="m-0">Unpacking the runtime…</p>}
+        {status?.state === "verifying" && <p className="m-0">{t("models-cef-verifying")}</p>}
+        {status?.state === "extracting" && <p className="m-0">{t("models-cef-extracting")}</p>}
 
         {status?.state === "ready" && (
           <div className="flex flex-col gap-2">
             <p className="m-0 text-emerald-300">
-              Installed — CEF <span className="font-mono">{status.version}</span>.
+              {t("models-cef-ready", { version: status.version })}
             </p>
             <button
               type="button"
@@ -349,7 +321,7 @@ function CefSection() {
               onClick={() => run(cefRemove)}
               className="self-start rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-havoc-muted transition-colors hover:text-havoc-text disabled:opacity-50"
             >
-              Remove
+              {t("models-remove")}
             </button>
           </div>
         )}
@@ -364,7 +336,7 @@ function CefSection() {
                 onClick={() => run(cefInstall)}
                 className="self-start rounded-lg border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
               >
-                Retry
+                {t("models-cef-retry")}
               </button>
             )}
           </div>
@@ -383,6 +355,7 @@ function CefSection() {
  * UI thread; nothing here bundles or downloads anything.
  */
 function IntegrationsSection() {
+  const t = useT();
   const [status, setStatus] = useState<IntegrationsStatus | null>(null);
 
   useEffect(() => {
@@ -400,13 +373,13 @@ function IntegrationsSection() {
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h4 className="m-0 text-xs font-semibold">Optional integrations</h4>
+        <h4 className="m-0 text-xs font-semibold">{t("models-integrations-heading")}</h4>
         <span className="shrink-0 rounded bg-havoc-accent/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-havoc-accent uppercase">
-          Never bundled
+          {t("models-badge-never-bundled")}
         </span>
       </div>
       {status === null ? (
-        <p className="mt-2 mb-0 text-havoc-muted">Checking…</p>
+        <p className="mt-2 mb-0 text-havoc-muted">{t("models-checking")}</p>
       ) : (
         <div className="mt-2 flex flex-col gap-2">
           <div className="flex flex-col gap-0.5">
@@ -414,11 +387,12 @@ function IntegrationsSection() {
               <span className="font-semibold text-havoc-text">NDI</span>
               {status.ndiAvailable ? (
                 <span className="rounded bg-emerald-400/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
-                  Detected{status.ndiVersion ? ` · ${status.ndiVersion}` : ""}
+                  {t("models-ndi-detected")}
+                  {status.ndiVersion ? ` · ${status.ndiVersion}` : ""}
                 </span>
               ) : (
                 <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-havoc-muted">
-                  Not installed
+                  {t("models-ndi-not-installed")}
                 </span>
               )}
             </div>
@@ -430,7 +404,7 @@ function IntegrationsSection() {
             <div className="flex items-baseline gap-2">
               <span className="font-semibold text-havoc-text">VST2/3</span>
               <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-havoc-muted">
-                {status.vstAvailable ? "Available" : "Not available"}
+                {status.vstAvailable ? t("models-vst-available") : t("models-vst-not-available")}
               </span>
             </div>
             <p className="m-0 leading-relaxed text-havoc-muted">{status.vstStatus}</p>

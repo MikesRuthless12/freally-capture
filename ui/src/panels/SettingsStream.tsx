@@ -11,6 +11,7 @@ import type {
 import { STREAM_SERVICES } from "../api/types";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -50,6 +51,7 @@ export function SettingsStream({
   onClose: () => void;
   onOpenComponents: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<StreamSettings | null>(settings?.stream ?? null);
   const [encoders, setEncoders] = useState<EncoderDesc[] | null>(null);
   const [shownKeys, setShownKeys] = useState<Record<number, boolean>>({});
@@ -96,7 +98,7 @@ export function SettingsStream({
   };
 
   return (
-    <PickerShell title="Settings — Stream" onClose={onClose} wide>
+    <PickerShell title={t("stream-title")} onClose={onClose} wide>
       <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-1 text-xs text-havoc-text">
         {draft.targets.map((target, index) => (
           <fieldset
@@ -108,23 +110,23 @@ export function SettingsStream({
                 type="checkbox"
                 checked={target.enabled}
                 onChange={(event) => patchTarget(index, { enabled: event.target.checked })}
-                aria-label={`Target ${index + 1} enabled`}
+                aria-label={t("stream-target-enabled", { index: index + 1 })}
               />
-              Target {index + 1}
+              {t("stream-target", { index: index + 1 })}
               {draft.targets.length > 1 && (
                 <button
                   type="button"
                   onClick={() => removeTarget(index)}
                   className="rounded border border-white/10 px-1.5 text-[10px] text-havoc-muted hover:border-red-400/50 hover:text-red-300"
                 >
-                  Remove
+                  {t("stream-remove")}
                 </button>
               )}
             </legend>
 
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Service
+                {t("stream-service")}
                 <select
                   value={target.service}
                   onChange={(event) =>
@@ -132,15 +134,15 @@ export function SettingsStream({
                   }
                   className={inputClass}
                 >
-                  {STREAM_SERVICES.map(([value, label]) => (
+                  {STREAM_SERVICES.map(([value, labelKey]) => (
                     <option key={value} value={value}>
-                      {label}
+                      {t(labelKey)}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Canvas
+                {t("stream-canvas")}
                 <select
                   value={target.canvas}
                   onChange={(event) =>
@@ -148,8 +150,8 @@ export function SettingsStream({
                   }
                   className={inputClass}
                 >
-                  <option value="main">Main (program)</option>
-                  <option value="vertical">Vertical (9:16 — enable it in the studio)</option>
+                  <option value="main">{t("stream-canvas-main")}</option>
+                  <option value="vertical">{t("stream-canvas-vertical")}</option>
                 </select>
               </label>
             </div>
@@ -160,14 +162,14 @@ export function SettingsStream({
               target.ingestUrl) && (
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
                 {target.service === "srt"
-                  ? "SRT ingest URL"
+                  ? t("stream-ingest-srt")
                   : target.service === "whip"
-                    ? "WHIP endpoint URL"
-                    : "Ingest URL"}{" "}
+                    ? t("stream-ingest-whip")
+                    : t("stream-ingest-url")}{" "}
                 {target.service !== "custom" &&
                   target.service !== "srt" &&
                   target.service !== "whip" &&
-                  "(override — empty = the service preset)"}
+                  t("stream-ingest-override")}
                 <input
                   value={target.ingestUrl}
                   onChange={(event) => patchTarget(index, { ingestUrl: event.target.value })}
@@ -185,19 +187,19 @@ export function SettingsStream({
 
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
               {target.service === "srt"
-                ? "streamid (optional — appended as ?streamid=…; treated as a secret)"
+                ? t("stream-key-srt")
                 : target.service === "whip"
-                  ? "Bearer token (optional — sent as the Authorization header; a secret)"
-                  : `Stream key (from your ${
-                      target.service === "custom" ? "server" : "creator dashboard"
-                    } — treated as a secret)`}
+                  ? t("stream-key-whip")
+                  : target.service === "custom"
+                    ? t("stream-key-custom")
+                    : t("stream-key-service")}
               <div className="flex gap-2">
                 <input
                   type={shownKeys[index] ? "text" : "password"}
                   value={target.streamKey}
                   onChange={(event) => patchTarget(index, { streamKey: event.target.value })}
                   autoComplete="off"
-                  aria-label={`Stream key ${index + 1}`}
+                  aria-label={t("stream-key-aria", { index: index + 1 })}
                   className={`${inputClass} min-w-0 flex-1 font-mono`}
                 />
                 <button
@@ -206,23 +208,23 @@ export function SettingsStream({
                   aria-pressed={Boolean(shownKeys[index])}
                   className="shrink-0 rounded-md border border-white/10 px-2.5 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
                 >
-                  {shownKeys[index] ? "Hide" : "Show"}
+                  {shownKeys[index] ? t("stream-key-hide") : t("stream-key-show")}
                 </button>
               </div>
             </label>
 
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Encoder (H.264 — what RTMP, SRT and WHIP all carry)
+              {t("stream-encoder")}
               <select
                 value={target.encoderId}
                 onChange={(event) => patchTarget(index, { encoderId: event.target.value })}
                 className={inputClass}
               >
-                <option value="auto">Auto — the best detected H.264 encoder</option>
+                <option value="auto">{t("stream-encoder-auto")}</option>
                 {(encoders ?? []).map((desc) => (
                   <option key={desc.id} value={desc.id} disabled={desc.verified === false}>
                     {desc.label}
-                    {desc.verified === false ? " (unavailable here)" : ""}
+                    {desc.verified === false ? ` ${t("stream-encoder-unavailable")}` : ""}
                   </option>
                 ))}
               </select>
@@ -230,7 +232,7 @@ export function SettingsStream({
 
             <div className="grid grid-cols-2 gap-2">
               <NumberField
-                label="Video bitrate (kbps, CBR)"
+                label={t("stream-video-bitrate")}
                 value={target.bitrateKbps}
                 min={500}
                 max={60000}
@@ -238,7 +240,7 @@ export function SettingsStream({
                 onCommit={(value) => patchTarget(index, { bitrateKbps: Math.round(value) })}
               />
               <NumberField
-                label="Audio bitrate (kbps)"
+                label={t("stream-audio-bitrate")}
                 value={target.audioBitrateKbps}
                 min={32}
                 max={512}
@@ -246,14 +248,14 @@ export function SettingsStream({
                 onCommit={(value) => patchTarget(index, { audioBitrateKbps: Math.round(value) })}
               />
               <NumberField
-                label="FPS"
+                label={t("stream-fps")}
                 value={target.fps}
                 min={1}
                 max={240}
                 onCommit={(value) => patchTarget(index, { fps: Math.round(value) })}
               />
               <NumberField
-                label="Keyframe interval (s)"
+                label={t("stream-keyframe")}
                 value={target.keyframeSec}
                 min={0.25}
                 max={10}
@@ -261,14 +263,14 @@ export function SettingsStream({
                 onCommit={(value) => patchTarget(index, { keyframeSec: value })}
               />
               <NumberField
-                label="Audio track (1–6)"
+                label={t("stream-audio-track")}
                 value={target.track}
                 min={1}
                 max={6}
                 onCommit={(value) => patchTarget(index, { track: Math.round(value) })}
               />
               <NumberField
-                label="Output width (0 = canvas)"
+                label={t("stream-output-width")}
                 value={target.outputWidth}
                 min={0}
                 max={16384}
@@ -276,7 +278,7 @@ export function SettingsStream({
                 onCommit={(value) => patchTarget(index, { outputWidth: Math.round(value) })}
               />
               <NumberField
-                label="Output height (0 = canvas)"
+                label={t("stream-output-height")}
                 value={target.outputHeight}
                 min={0}
                 max={16384}
@@ -293,14 +295,11 @@ export function SettingsStream({
             onClick={addTarget}
             className="self-start rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
           >
-            + Add target
+            {t("stream-add-target")}
           </button>
         )}
 
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Go Live publishes to every enabled target at once, direct to each platform. Targets with
-          identical encoder settings share a single encode.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("stream-go-live-note")}</p>
 
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
           <input
@@ -308,19 +307,19 @@ export function SettingsStream({
             checked={draft.autoRecord}
             onChange={(event) => setDraft({ ...draft, autoRecord: event.target.checked })}
           />
-          Start recording when I go live (the recording still stops independently)
+          {t("stream-auto-record")}
         </label>
 
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Streaming wire codecs run through the labeled on-demand ffmpeg component —{" "}
+          {t("stream-ffmpeg-note-before")}{" "}
           <button
             type="button"
             onClick={onOpenComponents}
             className="underline hover:text-havoc-text"
           >
-            manage it here
+            {t("stream-ffmpeg-note-link")}
           </button>
-          . The local recording keeps running no matter what the stream does.
+          {t("stream-ffmpeg-note-after")}
         </p>
 
         {error && (
@@ -334,14 +333,14 @@ export function SettingsStream({
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
-            Cancel
+            {t("stream-cancel")}
           </button>
           <button
             type="button"
             onClick={save}
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
-            Save
+            {t("stream-save")}
           </button>
         </div>
       </div>

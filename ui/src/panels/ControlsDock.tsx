@@ -19,6 +19,7 @@ import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
 import { ReplayControls } from "../components/ReplayControls";
+import { useT } from "../i18n/t";
 import { BrowserDockDialog } from "./BrowserDock";
 import { BugReportDialog } from "./BugReport";
 import { UpdatesDialog } from "./Updates";
@@ -44,6 +45,7 @@ export function ControlsDock({
   settings: Settings | null;
   onSettingsSaved: (next: Settings) => void;
 }) {
+  const t = useT();
   const [rec, setRec] = useState<RecordingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -176,16 +178,14 @@ export function ControlsDock({
   const shownError = actionError ?? sessionError;
 
   return (
-    <Panel title="Controls">
+    <Panel title={t("controls-title")}>
       <div className="flex flex-col gap-2">
         <button
           type="button"
           disabled={busy || finalizing || !settings}
           onClick={startStop}
           title={
-            active
-              ? "Stop and finalize the recording"
-              : "Record the program feed with the Settings → Output configuration"
+            active ? t("controls-start-stop-title-stop") : t("controls-start-stop-title-start")
           }
           className={`${buttonBase} ${
             active
@@ -194,10 +194,10 @@ export function ControlsDock({
           }`}
         >
           {finalizing ? (
-            "◌ Finalizing…"
+            t("controls-finalizing")
           ) : active && rec ? (
             <span className="flex items-center justify-between gap-2">
-              <span>■ Stop Recording</span>
+              <span>{t("controls-stop-recording")}</span>
               <RecDot
                 paused={rec.state === "paused"}
                 durationSec={
@@ -207,7 +207,7 @@ export function ControlsDock({
               />
             </span>
           ) : (
-            "● Start Recording"
+            t("controls-start-recording")
           )}
         </button>
         {active && (
@@ -217,10 +217,10 @@ export function ControlsDock({
             onClick={() => {
               recordingAddMarker().catch((err) => setActionError(String(err)));
             }}
-            title="Drop a chapter marker at this moment — it lands in the RECORDING (mkv chapters, or a sidecar file). Platform-side stream markers need platform accounts, which this app never asks for."
+            title={t("controls-marker-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text hover:border-havoc-accent/50`}
           >
-            ◈ Marker
+            {t("controls-marker")}
             {rec?.state === "recording" && rec.markers > 0 ? ` (${rec.markers})` : ""}
           </button>
         )}
@@ -231,8 +231,8 @@ export function ControlsDock({
             onClick={pauseResume}
             title={
               rec?.state === "paused"
-                ? "Resume — the file continues as one contiguous timeline"
-                : "Pause — no frames are written; resuming continues the same playable file"
+                ? t("controls-pause-title-resume")
+                : t("controls-pause-title-pause")
             }
             className={`${buttonBase} ${
               rec?.state === "paused"
@@ -240,7 +240,9 @@ export function ControlsDock({
                 : "border-white/10 bg-white/[0.04] text-havoc-text hover:border-amber-400/50"
             }`}
           >
-            {rec?.state === "paused" ? "▶ Resume Recording" : "⏸ Pause Recording"}
+            {rec?.state === "paused"
+              ? t("controls-resume-recording")
+              : t("controls-pause-recording")}
           </button>
         )}
         <LiveButton
@@ -252,8 +254,8 @@ export function ControlsDock({
         <div
           className="flex items-center gap-1"
           role="group"
-          aria-label="Reactions (baked into the program)"
-          title="Float a reaction over the program — recorded AND streamed, so the replay shows the exact moment. Viewers in chat trigger these too (their reaction emoji float automatically); a flood only caps what's on screen."
+          aria-label={t("controls-reactions-label")}
+          title={t("controls-reactions-title")}
         >
           {["❤", "🔥", "💯", "👏", "😂", "🎉"].map((emoji) => (
             <button
@@ -262,7 +264,7 @@ export function ControlsDock({
               onClick={() => {
                 studioSendReaction(emoji).catch((err) => console.error("reaction failed:", err));
               }}
-              aria-label={`React ${emoji}`}
+              aria-label={t("controls-react", { emoji })}
               className="flex-1 rounded-md border border-white/10 bg-white/[0.04] px-1 py-1 text-sm hover:border-havoc-accent/50"
             >
               {emoji}
@@ -272,107 +274,107 @@ export function ControlsDock({
         <button
           type="button"
           disabled
-          title="The virtual camera needs its own signed driver component per OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO extension / Linux v4l2loopback) — it ships as its own milestone. The feed model is ready for it: program, vertical canvas, or a single source, with a paired virtual mic on Windows/Linux (macOS has no virtual-mic API — said honestly)."
+          title={t("controls-virtual-camera-title")}
           className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text`}
         >
-          ⌁ Start Virtual Camera
+          {t("controls-virtual-camera")}
         </button>
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setDialog("recordings")}
-            title="Finished recordings + the remux-to-mp4 action"
+            title={t("controls-files-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ▤ Files…
+            {t("controls-files")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("output")}
-            title="Recording format, encoder, folder, tracks, and splitting"
+            title={t("controls-output-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⚙ Output…
+            {t("controls-output")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("stream")}
-            title="Go Live target: service, stream key, encoder, bitrate"
+            title={t("controls-stream-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⦿ Stream…
+            {t("controls-stream")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("components")}
-            title="The on-demand ffmpeg wire-codec component (clearly labeled, never bundled)"
+            title={t("controls-codecs-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⬡ Codecs…
+            {t("controls-codecs")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("replay")}
-            title="Replay buffer length + quality presets"
+            title={t("controls-replay-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⟲ Replay…
+            {t("controls-replay")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("hotkeys")}
-            title="Global hotkeys: record, Go Live, transition, save replay"
+            title={t("controls-keys-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⌨ Keys…
+            {t("controls-keys")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("scripts")}
-            title="Sandboxed Lua scripts: react to go-live/scene/recording events, drive the studio"
+            title={t("controls-scripts-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⚡ Scripts…
+            {t("controls-scripts")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("docks")}
-            title="Browser docks: open a chat popout, alerts page, or Companion buttons as a window beside the studio"
+            title={t("controls-docks-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⧉ Docks…
+            {t("controls-docks")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("remote")}
-            title="WebSocket remote API for Stream Deck / Companion controllers (off by default)"
+            title={t("controls-remote-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⌁ Remote…
+            {t("controls-remote")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("workspace")}
-            title="Profiles (settings) + scene collections — switchable snapshots"
+            title={t("controls-profiles-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ▣ Profiles…
+            {t("controls-profiles")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("bug")}
-            title="Report a bug — anonymous, opt-in (nothing is sent automatically)"
+            title={t("controls-bug-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            🐞 Report a bug…
+            {t("controls-bug")}
           </button>
           <button
             type="button"
             onClick={() => setDialog("updates")}
-            title="Check for updates — signed, verified, nothing downloads without a click"
+            title={t("controls-updates-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
           >
-            ⭳ Check for updates…
+            {t("controls-updates")}
           </button>
         </div>
         {shownError && (
@@ -382,7 +384,7 @@ export function ControlsDock({
         )}
         {rec?.state === "idle" && rec.lastPaths.length > 0 && !shownError && (
           <p title={rec.lastPaths.join("\n")} className="m-0 truncate text-[10px] text-havoc-muted">
-            Saved: {rec.lastPaths[rec.lastPaths.length - 1]}
+            {t("controls-saved", { path: rec.lastPaths[rec.lastPaths.length - 1] })}
           </p>
         )}
       </div>

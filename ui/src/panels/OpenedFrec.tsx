@@ -4,6 +4,7 @@ import { openFrecExport } from "../api/commands";
 import { onRecordingExport } from "../api/events";
 import type { ExportStatus } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 /**
  * Shown when Freally Capture is opened with a `.frec` (OS double-click).
@@ -13,6 +14,7 @@ import { PickerShell } from "../components/PickerShell";
  * event, same as the Recordings dialog).
  */
 export function OpenedFrecDialog({ path, onClose }: { path: string; onClose: () => void }) {
+  const t = useT();
   const name = path.split(/[/\\]/).pop() ?? path;
   const [progress, setProgress] = useState<ExportStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,26 +53,23 @@ export function OpenedFrecDialog({ path, onClose }: { path: string; onClose: () 
       : null;
 
   return (
-    <PickerShell title="Open .frec recording" onClose={onClose} wide>
+    <PickerShell title={t("openfrec-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <p className="m-0">
           <span className="font-mono text-[11px] text-havoc-text">{name}</span>
         </p>
-        <p className="m-0 text-[11px] leading-snug text-havoc-muted">
-          Freally Capture <strong>records</strong> the owned lossless <code>.frec</code> format — it
-          doesn&apos;t play it. <strong>Freally Player</strong> will play <code>.frec</code>{" "}
-          directly when it&apos;s released. For now, <strong>export it to MP4/MKV</strong> and it
-          plays in any player (VLC, your OS player, anything).
-        </p>
+        <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("openfrec-desc")}</p>
 
         {done ? (
-          <p className="m-0 text-[11px] break-all text-emerald-300">Exported to {done}</p>
+          <p className="m-0 text-[11px] break-all text-emerald-300">
+            {t("openfrec-exported-to", { path: done })}
+          </p>
         ) : progress ? (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between">
-              <span>Exporting…</span>
+              <span>{t("openfrec-exporting")}</span>
               <span className="font-mono text-havoc-muted">
-                {pct !== null ? `${pct.toFixed(2)}%` : "starting…"}
+                {pct !== null ? `${pct.toFixed(2)}%` : t("openfrec-starting")}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -87,14 +86,14 @@ export function OpenedFrecDialog({ path, onClose }: { path: string; onClose: () 
               onClick={() => doExport("mp4")}
               className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
             >
-              Export → MP4
+              {t("openfrec-export-mp4")}
             </button>
             <button
               type="button"
               onClick={() => doExport("mkv")}
               className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              Export → MKV
+              {t("openfrec-export-mkv")}
             </button>
           </div>
         )}

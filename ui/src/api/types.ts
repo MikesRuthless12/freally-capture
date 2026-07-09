@@ -133,22 +133,31 @@ export type TransitionKind =
   | "lumaImage"
   | "stinger";
 
+/**
+ * `[value, i18n key]` — the second element is a catalog key, not English. Call
+ * sites render `t(key)`. These labels reach a `<select>`, so leaving them as
+ * English literals here would have quietly excluded them from translation while
+ * the parity lint stayed green.
+ *
+ * `ui/src/__tests__/i18n.test.ts` asserts every key below exists in `en.ftl` —
+ * the lint cannot, because `t(key)` on a variable is invisible to it.
+ */
 export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
-  ["cut", "Cut"],
-  ["fade", "Fade"],
-  ["slideLeft", "Slide ←"],
-  ["slideRight", "Slide →"],
-  ["slideUp", "Slide ↑"],
-  ["slideDown", "Slide ↓"],
-  ["swipeLeft", "Swipe ←"],
-  ["swipeRight", "Swipe →"],
-  ["lumaLinear", "Luma wipe (linear)"],
-  ["lumaRadial", "Luma wipe (radial)"],
-  ["lumaHorizontal", "Luma wipe (horizontal)"],
-  ["lumaDiamond", "Luma wipe (diamond)"],
-  ["lumaClock", "Luma wipe (clock)"],
-  ["lumaImage", "Image wipe (custom)"],
-  ["stinger", "Stinger (video)"],
+  ["cut", "transition-kind-cut"],
+  ["fade", "transition-kind-fade"],
+  ["slideLeft", "transition-kind-slide-left"],
+  ["slideRight", "transition-kind-slide-right"],
+  ["slideUp", "transition-kind-slide-up"],
+  ["slideDown", "transition-kind-slide-down"],
+  ["swipeLeft", "transition-kind-swipe-left"],
+  ["swipeRight", "transition-kind-swipe-right"],
+  ["lumaLinear", "transition-kind-luma-linear"],
+  ["lumaRadial", "transition-kind-luma-radial"],
+  ["lumaHorizontal", "transition-kind-luma-horizontal"],
+  ["lumaDiamond", "transition-kind-luma-diamond"],
+  ["lumaClock", "transition-kind-luma-clock"],
+  ["lumaImage", "transition-kind-image"],
+  ["stinger", "transition-kind-stinger"],
 ];
 
 export type TransitionSettings = {
@@ -167,15 +176,21 @@ export type TransitionSettings = {
 export type StreamService =
   "twitch" | "youTube" | "kick" | "facebook" | "trovo" | "custom" | "srt" | "whip";
 
+/**
+ * `[value, i18n key]` — see [`TRANSITION_KINDS`]. The brand names round-trip
+ * through the catalog unchanged so that every locale carries every key (parity),
+ * but `Custom (RTMP/RTMPS)`, `SRT (self-hosted)` and `WHIP (WebRTC)` each hide a
+ * translatable word behind a protocol name.
+ */
 export const STREAM_SERVICES: Array<[StreamService, string]> = [
-  ["twitch", "Twitch"],
-  ["youTube", "YouTube"],
-  ["kick", "Kick"],
-  ["facebook", "Facebook"],
-  ["trovo", "Trovo"],
-  ["custom", "Custom (RTMP/RTMPS)"],
-  ["srt", "SRT (self-hosted)"],
-  ["whip", "WHIP (WebRTC)"],
+  ["twitch", "stream-service-twitch"],
+  ["youTube", "stream-service-youtube"],
+  ["kick", "stream-service-kick"],
+  ["facebook", "stream-service-facebook"],
+  ["trovo", "stream-service-trovo"],
+  ["custom", "stream-service-custom"],
+  ["srt", "stream-service-srt"],
+  ["whip", "stream-service-whip"],
 ];
 
 /** One stream target (mirrors `StreamTargetSettings` in settings.rs).

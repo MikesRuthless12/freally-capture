@@ -5,6 +5,7 @@ import { studioSetVertical } from "../api/commands";
 import type { StudioDto } from "../api/types";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -25,6 +26,7 @@ export function VerticalCanvasDialog({
   studio: StudioDto | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const current = studio?.collection.vertical ?? null;
   const scenes = studio?.collection.scenes ?? [];
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export function VerticalCanvasDialog({
   };
 
   return (
-    <PickerShell title="Vertical canvas (9:16)" onClose={onClose}>
+    <PickerShell title={t("vertical-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
           <input
@@ -101,13 +103,13 @@ export function VerticalCanvasDialog({
               )
             }
           />
-          Enable the second canvas — recordable and streamable independently of the program
+          {t("vertical-enable")}
         </label>
 
         {current && (
           <>
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Scene this canvas composes
+              {t("vertical-scene-label")}
               <select
                 value={current.scene}
                 disabled={busy}
@@ -124,7 +126,7 @@ export function VerticalCanvasDialog({
 
             <div className="grid grid-cols-2 gap-2">
               <NumberField
-                label="Width"
+                label={t("vertical-width")}
                 value={current.width}
                 min={16}
                 max={16384}
@@ -132,7 +134,7 @@ export function VerticalCanvasDialog({
                 onCommit={(value) => void apply({ ...current, width: Math.round(value) })}
               />
               <NumberField
-                label="Height"
+                label={t("vertical-height")}
                 value={current.height}
                 min={16}
                 max={16384}
@@ -144,16 +146,12 @@ export function VerticalCanvasDialog({
             <div className="flex justify-center rounded-lg border border-white/10 bg-black/40 p-2">
               <img
                 ref={imgRef}
-                alt="Vertical canvas preview"
+                alt={t("vertical-preview-alt")}
                 className="max-h-64 max-w-full object-contain"
               />
             </div>
 
-            <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-              Item positions are pixel-true across canvases: select this scene in the Scenes rail to
-              arrange it while this preview shows the vertical result. Stream targets pick this
-              canvas in ⦿ Stream…; Settings → Output can record it alongside the main file.
-            </p>
+            <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("vertical-note")}</p>
           </>
         )}
 
@@ -168,7 +166,7 @@ export function VerticalCanvasDialog({
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
-            Close
+            {t("vertical-close")}
           </button>
         </div>
       </div>

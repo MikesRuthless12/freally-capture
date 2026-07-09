@@ -4,22 +4,23 @@ import { settingsSet } from "../api/commands";
 import type { ReplaySettings, Settings } from "../api/types";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const chipBase =
   "rounded-md border px-2 py-1 text-[11px] transition-colors hover:border-havoc-accent/60";
 
 const LENGTH_PRESETS: Array<[string, number]> = [
-  ["15 s", 15],
-  ["30 s", 30],
-  ["1 min", 60],
-  ["2 min", 120],
-  ["5 min", 300],
+  ["replay-length-15s", 15],
+  ["replay-length-30s", 30],
+  ["replay-length-1min", 60],
+  ["replay-length-2min", 120],
+  ["replay-length-5min", 300],
 ];
 
 const QUALITY_PRESETS: Array<[string, number]> = [
-  ["Low (3 Mbps)", 3000],
-  ["Standard (6 Mbps)", 6000],
-  ["High (12 Mbps)", 12000],
+  ["replay-quality-low", 3000],
+  ["replay-quality-standard", 6000],
+  ["replay-quality-high", 12000],
 ];
 
 /**
@@ -35,6 +36,7 @@ export function SettingsReplay({
   onSaved: (next: Settings) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<ReplaySettings | null>(settings?.replay ?? null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,10 +56,10 @@ export function SettingsReplay({
   };
 
   return (
-    <PickerShell title="Settings — Replay Buffer" onClose={onClose}>
+    <PickerShell title={t("replay-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <div className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Length presets
+          {t("replay-length-presets")}
           <div className="flex flex-wrap gap-1.5">
             {LENGTH_PRESETS.map(([label, seconds]) => (
               <button
@@ -71,14 +73,14 @@ export function SettingsReplay({
                     : "border-white/10 text-havoc-muted"
                 }`}
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
         </div>
 
         <div className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Quality presets
+          {t("replay-quality-presets")}
           <div className="flex flex-wrap gap-1.5">
             {QUALITY_PRESETS.map(([label, bitrateKbps]) => (
               <button
@@ -92,7 +94,7 @@ export function SettingsReplay({
                     : "border-white/10 text-havoc-muted"
                 }`}
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
@@ -100,7 +102,7 @@ export function SettingsReplay({
 
         <div className="grid grid-cols-2 gap-2">
           <NumberField
-            label="Length (seconds)"
+            label={t("replay-length-seconds")}
             value={draft.seconds}
             min={5}
             max={300}
@@ -108,7 +110,7 @@ export function SettingsReplay({
             onCommit={(value) => patch({ seconds: Math.round(value) })}
           />
           <NumberField
-            label="Video bitrate (kbps)"
+            label={t("replay-video-bitrate")}
             value={draft.bitrateKbps}
             min={500}
             max={60000}
@@ -116,14 +118,14 @@ export function SettingsReplay({
             onCommit={(value) => patch({ bitrateKbps: Math.round(value) })}
           />
           <NumberField
-            label="FPS"
+            label={t("replay-fps")}
             value={draft.fps}
             min={1}
             max={240}
             onCommit={(value) => patch({ fps: Math.round(value) })}
           />
           <NumberField
-            label="Audio track (1–6)"
+            label={t("replay-audio-track")}
             value={draft.track}
             min={1}
             max={6}
@@ -132,10 +134,9 @@ export function SettingsReplay({
         </div>
 
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          While armed, the buffer runs its own lightweight encode into a bounded on-disk ring —
-          about {Math.round((draft.seconds * (draft.bitrateKbps + draft.audioBitrateKbps)) / 8000)}{" "}
-          MB at these settings. Saving stitches the ring without re-encoding and never touches the
-          stream or the recording. Changes apply the next time you arm.
+          {t("replay-note", {
+            mb: Math.round((draft.seconds * (draft.bitrateKbps + draft.audioBitrateKbps)) / 8000),
+          })}
         </p>
 
         {error && (
@@ -149,14 +150,14 @@ export function SettingsReplay({
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
-            Cancel
+            {t("replay-cancel")}
           </button>
           <button
             type="button"
             onClick={save}
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
-            Save
+            {t("replay-save")}
           </button>
         </div>
       </div>
