@@ -20,8 +20,44 @@
     </header>
 
     <main>
-      <!-- 0.90.0 — remote control, scripting & plugins -->
+      <!-- 0.95.0 — game capture, distribution & per-app audio -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.95.0</span>
+            <span class="date">Jul 9, 2026 · Game capture, distribution &amp; per-app audio</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.95.0">Download</a>
+        </div>
+
+        <h2>0.95.0 — Game capture, distribution &amp; per-app audio (Phase 8)</h2>
+        <p class="summary">
+          Signed self-hosted auto-update, per-application audio capture, an NDI runtime seam, a
+          game-capture seam that flags the anti-cheat risk honestly, and a first-run EULA gate — the
+          “toward 1.0.0” surface, all <strong>local and off by default</strong>. This is also the
+          release that publishes the extensibility surface built in 0.90.0.
+        </p>
+        <ul class="features">
+          <li><strong>Signed self-hosted auto-updater</strong> — the app checks a signed <code>latest.json</code> on the GitHub releases endpoint and verifies every download against a minisign public key baked into the binary before applying it; an unsigned or tampered package is refused. <strong>⭳ Check for updates…</strong> lives in the Controls dock — nothing downloads without a click.</li>
+          <li><strong>Per-application audio capture</strong> — capture one app's audio as its own mixer source, Windows-first via WASAPI <strong>process loopback</strong> (Win10 2004+). It gets a full mixer strip: VU, fader, mute, monitoring, filters, track. The COM <code>unsafe</code> is isolated in its own crate so the audio engine stays <code>#![forbid(unsafe_code)]</code>. Linux/macOS show honest per-OS guidance.</li>
+          <li><strong>Game Capture seam, flagged honestly</strong> — injecting a DX/GL/Vulkan hook is an opt-in, flagged milestone: the app never injects silently and surfaces the anti-cheat <strong>ban risk</strong> before any hook. The working path today — <strong>Window Capture</strong> (borderless/windowed) — is recommended per-OS.</li>
+          <li><strong>NDI runtime seam</strong> — optional NDI output detects a user-installed NDI runtime (never bundled) and link-probes it; the output flag is gated on that detection.</li>
+          <li><strong>First-run EULA gate</strong> — the studio doesn't render until the current EULA version is accepted; <code>EULA.md</code> is embedded at build time, so the accepted text is exactly what ships.</li>
+          <li><strong>Video in the stream</strong> — embed a video into the scene and <strong>pause/resume it live</strong> while talking over it; the media source's audio pauses and resumes in the mix with the picture.</li>
+          <li><strong>In-app component downloads</strong> — the on-demand ffmpeg download shows an explicit percentage beside its bar. A new <strong>Browser Source runtime (Chromium/CEF)</strong> component downloads the ~100 MB runtime the same honest way: it resolves the newest stable build from the official CEF index and <strong>verifies the download against that index's SHA-1 before unpacking</strong> — no bundling, no hardcoded hash.</li>
+        </ul>
+        <p class="note">
+          <strong>Scoped honestly:</strong> VST2/3 hosting is deferred behind a flag — the VST2 SDK is no
+          longer licensed by Steinberg and VST3 is GPLv3-or-proprietary, both conflicting with a
+          $0/no-extra-license build; the owned DSP filter set is the shipped alternative.
+          <strong>Game-capture GPU hooking</strong>, <strong>NDI frame-send</strong>, and the
+          <strong>browser source</strong> that renders through the downloaded runtime are the named
+          follow-on milestones these seams are stable for.
+        </p>
+      </article>
+
+      <!-- 0.90.0 — remote control, scripting & plugins -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.90.0</span>
@@ -345,26 +381,42 @@
             <span class="soon">Done — Jul 6, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.70.0</span>
+            <span class="badge">0.70.0</span>
             <div>
               <strong>Studio MVP — first public</strong>
-              <p>Single-target streaming + reconnect, Studio Mode + transitions, the virtual camera, hotkeys, profiles, and the stats dock.</p>
+              <p>Single-target streaming + reconnect, Studio Mode + transitions, hotkeys, profiles, and the stats dock. The virtual camera follows as its own signed-driver milestone.</p>
             </div>
-            <span class="soon">First public</span>
+            <span class="soon">Done — Jul 6, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.85.0</span>
+            <span class="badge">0.85.0</span>
             <div>
               <strong>Multistream / SRT / WHIP + scene/source/encoder depth</strong>
               <p>Simultaneous multistream to many targets, SRT/WHIP, vertical/multi-canvas, replay presets, nested scenes + source groups, and high-FPS/4K encoder depth.</p>
             </div>
-            <span class="soon">Coming soon</span>
+            <span class="soon">Done — Jul 8, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.90.0</span>
+            <div>
+              <strong>Remote control, scripting &amp; plugins</strong>
+              <p>The WebSocket remote-control API, browser docks, sandboxed Lua scripting, and a plugin SDK — all local and off by default.</p>
+            </div>
+            <span class="soon">Done — shipped in 0.95.0</span>
+          </li>
+          <li>
+            <span class="badge">0.95.0</span>
+            <div>
+              <strong>Game capture, distribution &amp; per-app audio</strong>
+              <p>Signed self-hosted auto-update, per-application audio capture, an NDI runtime seam, a first-run EULA gate, and a Game Capture seam that flags the anti-cheat risk instead of injecting silently.</p>
+            </div>
+            <span class="soon">Done — Jul 9, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">1.0.0</span>
             <div>
-              <strong>Remote API, scripting, game capture &amp; launch</strong>
-              <p>WebSocket remote API + browser docks, Lua/JS scripting + plugins, game capture, signed installers, full localization (18 languages), and accessibility.</p>
+              <strong>Game-capture hooking &amp; launch</strong>
+              <p>Game-capture GPU hooking (DX/GL/Vulkan), the virtual camera, a true browser source, notarized macOS installers, full localization (18 languages), and accessibility.</p>
             </div>
             <span class="soon">Coming soon</span>
           </li>
