@@ -16,7 +16,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > tagged **0.96.0**. 1.0.0 then also gates on the 26 CAP-M must-haves, run as three themed batches
 > (0.97.0 / 0.98.0 / 0.99.0).
 
-_Nothing yet._
+### Fixed
+- **`.frec` recordings now carry their own Explorer icon.** Tauri's `fileAssociations` schema has no
+  `icon` field and its NSIS template hardcodes the association's `DefaultIcon` to the app executable,
+  so every recording showed the studio's icon while `icons/frec.ico` sat unused in the install
+  directory. A `NSIS_HOOK_POSTINSTALL` hook rewrites the ProgId's `DefaultIcon` after the association
+  is written, and signals `SHCNE_ASSOCCHANGED` so Explorer repaints without a sign-out. *(Windows;
+  the macOS `.icns` and the MSI bundle still show the app icon — separate follow-ons.)* Note the
+  association is registered by the **installer**, so a `.frec` shows the generic icon until Freally
+  Capture is installed rather than run from a build directory.
 
 ## [0.95.1] — 2026-07-09 (Crash reporting, EULA persistence & dialog fixes)
 
