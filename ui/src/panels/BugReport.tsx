@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  bugReportClearCrash,
-  bugReportContext,
-  bugReportSimulate,
-  bugReportSubmit,
-  bugReportTestCrash,
-} from "../api/commands";
+import { bugReportClearCrash, bugReportContext, bugReportSubmit } from "../api/commands";
 import type { BugReportContext } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 
@@ -33,25 +27,26 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
 
   useEffect(load, []);
 
+  // Mirrors `compose_body(.., BodyStyle::Plain)` in `bugreport.rs`. The GitHub
+  // target sends the same content as Markdown (`###` headings, fenced
+  // diagnostics); only the syntax differs, never the information.
   const preview = useMemo(() => {
     if (!ctx) return "";
     const parts = [
-      "### What happened",
+      "WHAT HAPPENED",
       description.trim() || "(no description provided)",
       "",
-      "### Anonymous diagnostics (no personal data)",
-      "```",
+      "ANONYMOUS DIAGNOSTICS (no personal data)",
       `From: Freally Capture`,
       ctx.diagnostics.trimEnd(),
     ];
     if (includeCrash && ctx.pendingCrash) {
       parts.push("", "--- crash excerpt ---", ctx.pendingCrash.trimEnd());
     }
-    parts.push("```");
     return parts.join("\n");
   }, [ctx, description, includeCrash]);
 
-  const submit = (target: "github" | "email") => {
+  const submit = (target: "github" | "gmail" | "email") => {
     setError(null);
     bugReportSubmit(target, description, includeCrash && !!ctx?.pendingCrash).catch((err) =>
       setError(String(err)),
@@ -134,7 +129,16 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
+            onClick={() => submit("gmail")}
+            title="Opens Gmail's compose window in your browser, pre-filled. Signed out? Google shows its login screen first."
+            className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+          >
+            Compose in Gmail
+          </button>
+          <button
+            type="button"
             onClick={() => submit("email")}
+            title="Opens a draft in whatever mail app this PC uses by default (Outlook, Thunderbird, Mail…)"
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
             Send email
@@ -162,40 +166,6 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
             {error}
           </p>
         )}
-
-        <div className="flex flex-col gap-1 border-t border-white/5 pt-2">
-          <span className="text-[10px] tracking-wide text-havoc-muted uppercase">Testing</span>
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                bugReportSimulate()
-                  .then(load)
-                  .catch(() => undefined)
-              }
-              className="text-[10px] text-havoc-muted underline decoration-dotted hover:text-havoc-text"
-              title="Writes a harmless sample crash report right now so you can preview + send it — no crash, no relaunch"
-            >
-              Simulate a crash report (no exit)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "This writes a TEST crash report and then EXITS the app. Relaunch it to see the crash-report prompt appear automatically. Continue?",
-                  )
-                ) {
-                  bugReportTestCrash().catch(() => undefined);
-                }
-              }}
-              className="text-[10px] text-amber-300/80 underline decoration-dotted hover:text-amber-200"
-              title="Writes a TEST crash report and force-exits the app — relaunch to see the full crash → report loop"
-            >
-              Force a test crash + exit (relaunch to see the report)
-            </button>
-          </div>
-        </div>
       </div>
     </PickerShell>
   );

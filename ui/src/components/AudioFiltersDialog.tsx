@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { useDismiss } from "../lib/useDismiss";
 
 import {
   studioAddAudioFilter,
@@ -73,6 +75,9 @@ type AudioFiltersDialogProps = {
  */
 export function AudioFiltersDialog({ source, collection, onClose }: AudioFiltersDialogProps) {
   const [addOpen, setAddOpen] = useState(false);
+  // Wraps the trigger *and* the menu — see `useDismiss`.
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(addOpen, addMenuRef, () => setAddOpen(false));
   const filters = source.audio?.filters ?? [];
 
   // Ducking triggers: every *other* audio source in the collection.
@@ -92,7 +97,7 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
           <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
             Filter chain (top runs first, before the fader)
           </span>
-          <div className="relative">
+          <div className="relative" ref={addMenuRef}>
             <button
               type="button"
               onClick={() => setAddOpen((open) => !open)}

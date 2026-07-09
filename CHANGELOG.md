@@ -13,8 +13,50 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 ## [Unreleased]
 
 > The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish).
+> 1.0.0 now also gates on the 26 CAP-M must-haves, run as three themed batches.
 
-_Nothing yet._
+### Fixed
+- **A crash now tells you it happened, and brings the studio back.** A dying app cannot show its own
+  error window, so the panic hook spawns the same executable as a tiny Tauri-free helper
+  (`--crash-notice <pid>`), which shows a native "Freally Capture stopped unexpectedly" dialog, waits
+  for the crashed process to leave the process table, and relaunches. The reopened studio surfaces
+  the scrubbed report automatically. The wait is load-bearing: relaunching while the corpse still
+  holds the single-instance lock folds the new launch into the dying app and leaves no studio at all.
+- **Accepting the EULA no longer un-accepts itself.** `App.tsx` reads settings *and* the EULA status
+  at mount, so the settings snapshot predates acceptance; changing any setting in that same session
+  wrote the stale `acceptedEulaVersion: null` back over it and the gate returned on the next launch.
+  A profile saved before acceptance did the same. `SettingsStore::set()` now preserves the field and
+  `accept_eula()` is its only writer.
+- **Dialogs were trapped inside their dock.** `Panel`'s `backdrop-blur` makes it the containing block
+  for `position: fixed`, so `PickerShell`'s overlay centred itself inside the dock's box rather than
+  the window — 16 of 19 dialogs, including *Check for updates*, rendered partly off-screen with their
+  buttons unreachable. `PickerShell` now portals to `document.body`.
+- **Emailed crash reports silently opened nothing.** URL length was bounded by character count, but
+  percent-encoding inflates a 3-byte character ninefold — a real backtrace produced a ~7800-character
+  `mailto:`, past the ~2048 Windows ShellExecute limit, which opens a blank window and reports no
+  error. Bounds are now enforced on the encoded length, and truncation never splits an escape.
+- **Dropdown menus stayed open when you clicked away.** The Sources rail's **+** menu and both
+  *Add filter* menus now close on an outside click or Escape. Escape closes the innermost thing only,
+  so a menu inside a dialog takes one press to dismiss and a second to close the dialog.
+
+### Added
+- **Compose in Gmail** alongside the existing mail-client button — plain https, no API key, nothing
+  auto-sent; a signed-out user meets Google's login screen and returns to the pre-filled draft.
+- **Crash reports carry the time they happened**, in the user's local clock with its UTC offset and in
+  UTC. The offset is weakly identifying and is documented as the one deliberate exception to the
+  report's "no personal identifiers" rule; the user reads the exact text before sending.
+- **The studio checks for updates once at launch** and surfaces the new version, its number, and this
+  file's release notes in a read-only field, with an explicit yes/no. A pending crash report always
+  wins the dialog slot; the update waits for the next launch. Offline or rate-limited checks stay
+  silent. `latest.json` now carries the version's `CHANGELOG.md` section as its `notes`.
+- Windows updates now run the NSIS wizard (`installMode: basicUi`) so the Finish page offers **Run
+  Freally Capture** and a desktop-shortcut checkbox, instead of restarting silently. The installer
+  also carries the app icon (`nsis.installerIcon`) rather than NSIS's stock one.
+
+### Removed
+- The **Testing** section of the bug-report dialog (*Simulate a crash report*, *Force a test crash*)
+  and its two IPC commands. A "crash the app" control has no business shipping in a live studio; the
+  loop is drilled with the `--test-crash` launch flag, which has no button and no command behind it.
 
 ## [0.95.0] — 2026-07-08 (Game capture, distribution & per-app audio — Phase 8)
 

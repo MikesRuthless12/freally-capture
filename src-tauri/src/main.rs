@@ -38,6 +38,17 @@ use studio::StudioState;
 use tauri::Manager;
 
 fn main() {
+    // `--crash-notice <pid>`: we are the tiny helper a dying studio spawned, not
+    // the studio. Show the native error window, relaunch if the user says yes,
+    // and leave. Must come before everything else — the helper never builds a
+    // Tauri app, so it never trips the single-instance guard.
+    let args: Vec<String> = std::env::args().collect();
+    if bugreport::run_crash_notice(&args) {
+        return;
+    }
+    // `--test-crash`: drill the crash loop on the shipped exe. No UI, no command.
+    bugreport::arm_test_crash(&args);
+
     // Surface wgpu's `log` diagnostics when RUST_LOG is set (silent otherwise),
     // and loudly print any panic — main *or* worker thread — to stdout before
     // the (`panic = "abort"`) exit, so an init failure lands in the logs instead
@@ -157,8 +168,6 @@ fn main() {
             bugreport::bug_report_context,
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,
-            bugreport::bug_report_simulate,
-            bugreport::bug_report_test_crash,
             commands::studio::studio_get,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,

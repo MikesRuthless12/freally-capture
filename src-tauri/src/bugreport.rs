@@ -8,11 +8,44 @@
 //! clicks. Diagnostics carry the app version + OS/arch and (optionally) a
 //! crash excerpt with the home path + username redacted; never file contents,
 //! stream keys, or personal data.
+//!
+//! One deliberate exception: a crash excerpt is stamped with **when** it
+//! happened, in both the machine's local time (with its UTC offset) and UTC.
+//! The offset narrows the reporter to a timezone, which is weakly identifying —
+//! it is included because a crash reported days later is otherwise impossible to
+//! order or correlate, and because the user reads the exact text before it is
+//! sent anywhere. Nothing finer-grained (locale, hostname, IP) is collected.
+//!
+//! # The crash loop
+//!
+//! A dying studio cannot show its own error window — the webview is going away
+//! with it. So the panic hook spawns **this same executable** as a tiny
+//! Tauri-free helper (`--crash-notice <pid>`), then lets the process die. The
+//! helper shows a native "stopped unexpectedly" message box, waits for the
+//! crashed process to actually exit, and relaunches the studio. The relaunched
+//! app finds the crash file and auto-opens the report dialog (see
+//! `ControlsDock.tsx`, which surfaces it on a pending crash).
+//!
+//! The notice fires **only when a panic is guaranteed to be fatal** — release
+//! builds set `panic = "abort"`. Under `unwind` (debug) a worker-thread panic
+//! leaves the app running, and a "restart?" box would be a lie; there the hook
+//! keeps its old behaviour of writing the file and nothing else.
+//!
+//! To drill the loop on demand, launch with `--test-crash` (see
+//! [`arm_test_crash`]): it exits explicitly, so it behaves the same in both
+//! profiles. There is deliberately **no button and no IPC command** for this — a
+//! "crash the app" control has no business shipping in a live studio.
+//!
+//! Per-OS honesty: the message box is native on Windows (`MessageBoxW`) and
+//! macOS (`NSAlert`). On Linux `rfd` shells out to **zenity**; where zenity is
+//! not installed the dialog cannot open and `rfd` reports `Cancel`, which is
+//! indistinguishable from the user declining — so the studio simply stays
+//! closed. The crash report is still on disk either way, and the next launch
+//! surfaces it, so the worst case is exactly the old manual-relaunch behaviour.
 
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime};
 
 /// This app's name — put in the subject line + body so a report that lands in
 /// the shared inbox is instantly attributable to the right Havoc app.
@@ -21,10 +54,31 @@ const APP_NAME: &str = "Freally Capture";
 const GITHUB_NEW_ISSUE: &str = "https://github.com/MikesRuthless12/freally-capture/issues/new";
 /// Where an emailed report goes (the user's own mail client sends it).
 const REPORT_EMAIL: &str = "mythodikalone@gmail.com";
-/// Keep pre-filled URLs under browser/mailer length limits — a long report
-/// gets its tail trimmed in the URL; "Copy report" carries the full text.
-const MAX_GITHUB_BODY: usize = 6000;
-const MAX_MAILTO_BODY: usize = 1800;
+/// Gmail's web compose window. Plain https — no API key, no token, and nothing
+/// is sent until the user clicks Send. A signed-out user lands on Google's login
+/// screen and is returned to the pre-filled draft afterwards. Offered *alongside*
+/// `mailto:`, which stays the path for anyone not using Gmail.
+const GMAIL_COMPOSE: &str = "https://mail.google.com/mail/?view=cm&fs=1";
+/// Bounds on the **percent-encoded** body. A character cap cannot bound a URL:
+/// one 3-byte character (`—`, `“`) encodes to nine. Browsers take ~32 k, so the
+/// https targets are generous; `mailto:` rides Windows' ShellExecute, which in
+/// practice truncates near 2048 characters and then opens nothing at all — a
+/// blank window, no error. "Copy report" always carries the untruncated text.
+const MAX_GITHUB_ENCODED: usize = 6000;
+const MAX_GMAIL_ENCODED: usize = 6000;
+const MAX_MAILTO_ENCODED: usize = 1500;
+/// Argv flag that turns this executable into the post-crash notice helper:
+/// `freally-capture --crash-notice <pid-of-the-process-that-died>`.
+const CRASH_NOTICE_FLAG: &str = "--crash-notice";
+/// Argv flag that crashes the studio on purpose a few seconds after launch, to
+/// drill the crash loop. Deliberately not a button and not an IPC command — a
+/// "crash the app" control has no business shipping in a live studio.
+const TEST_CRASH_FLAG: &str = "--test-crash";
+/// How long the helper will wait for the crashed process to leave the process
+/// table before relaunching. The single-instance guard would otherwise fold the
+/// relaunch into the dying app and we'd end up with no studio at all.
+const EXIT_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+const EXIT_WAIT_TRIES: u32 = 40; // ≤ 10 s, then relaunch anyway
 
 fn crash_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("com", "Freally", "Freally Capture")
@@ -84,8 +138,111 @@ pub fn install_panic_hook() {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let raw = format!("Panic at {location}\nMessage: {message}\n\nBacktrace:\n{backtrace}\n");
         write_crash(&scrub(&raw));
+        // Only when this panic is certain to kill the process. Release builds
+        // set `panic = "abort"`; under unwind, a worker thread can panic while
+        // the studio keeps running, and an error box offering to restart would
+        // be wrong. `--test-crash` exits by hand, so the drill still works in
+        // debug.
+        if cfg!(panic = "abort") {
+            spawn_crash_notice();
+        }
         previous(info);
     }));
+}
+
+/// Spawn this same executable as the `--crash-notice` helper and hand it our
+/// pid. It outlives us: it waits for this process to disappear, then relaunches
+/// the studio. Best-effort — a failure here just means no error window, and the
+/// crash report is still on disk for the next manual launch.
+fn spawn_crash_notice() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let _ = std::process::Command::new(exe)
+        .arg(CRASH_NOTICE_FLAG)
+        .arg(std::process::id().to_string())
+        .spawn();
+}
+
+/// Is `pid` still in the process table?
+fn process_alive(pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system.process(pid).is_some()
+}
+
+/// Block until the crashed process is gone (bounded — we relaunch regardless
+/// rather than strand the user with no studio).
+fn wait_for_exit(pid: u32) {
+    for _ in 0..EXIT_WAIT_TRIES {
+        if !process_alive(pid) {
+            return;
+        }
+        std::thread::sleep(EXIT_WAIT);
+    }
+}
+
+/// If argv says we are the `--crash-notice <pid>` helper, run that whole flow
+/// and return `true` so `main` exits without ever building a Tauri app (which
+/// would also trip the single-instance guard). Otherwise return `false` and let
+/// the studio boot normally.
+pub fn run_crash_notice(args: &[String]) -> bool {
+    let Some(flag_at) = args.iter().position(|arg| arg == CRASH_NOTICE_FLAG) else {
+        return false;
+    };
+    let dead_pid = args
+        .get(flag_at + 1)
+        .and_then(|arg| arg.parse::<u32>().ok());
+
+    let answer = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Freally Capture stopped unexpectedly")
+        .set_description(
+            "The studio hit an unexpected error and had to close.\n\n\
+             A crash report was saved on this machine. Nothing has been sent \
+             anywhere. If you restart, you can read the exact report and choose \
+             to send it as a GitHub issue or by email.\n\n\
+             Restart Freally Capture now?",
+        )
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show();
+
+    if answer != rfd::MessageDialogResult::Yes {
+        return true;
+    }
+
+    // The crashed process holds the single-instance lock until the OS reaps it.
+    // Relaunching first would forward into the corpse and exit.
+    if let Some(pid) = dead_pid {
+        wait_for_exit(pid);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).spawn();
+    }
+    true
+}
+
+/// When the crash happened, written into the report itself — the file's own
+/// mtime does not survive being pasted into an issue or an email, and a crash
+/// is often reported days later.
+///
+/// Both clocks are given: the user's wall clock (so *they* recognise the
+/// moment) and UTC (so the maintainer can order reports from anywhere without
+/// doing timezone arithmetic). The `%z` offset is the one piece of weakly
+/// identifying data in the report — see the note on [`scrub`].
+fn crash_time_line() -> String {
+    let now = chrono::Local::now();
+    format!(
+        "Crashed: {} (UTC {})",
+        now.format("%Y-%m-%d %H:%M:%S %z"),
+        now.with_timezone(&chrono::Utc).format("%Y-%m-%d %H:%M:%S"),
+    )
 }
 
 fn write_crash(scrubbed: &str) {
@@ -97,7 +254,8 @@ fn write_crash(scrubbed: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let _ = std::fs::write(dir.join(format!("crash-{ts}.txt")), scrubbed);
+    let stamped = format!("{}\n{scrubbed}", crash_time_line());
+    let _ = std::fs::write(dir.join(format!("crash-{ts}.txt")), stamped);
 }
 
 /// The newest pending crash report (already scrubbed), if any.
@@ -154,13 +312,38 @@ fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+/// Percent-encode `s`, stopping before the **encoded** form outgrows
+/// `max_encoded`. Truncating by character count cannot bound a URL, because a
+/// single 3-byte character expands to nine encoded ones — an 1800-character
+/// crash excerpt can reach ~7800 encoded, well past what `mailto:` survives.
+/// Always cuts on a character boundary, never mid-escape.
+fn encode_bounded(s: &str, max_encoded: usize) -> String {
+    let full = urlencode(s);
+    if full.len() <= max_encoded {
+        return full;
+    }
+    let note = urlencode("\n… (truncated — use “Copy report” for the full text)");
+    let budget = max_encoded.saturating_sub(note.len());
+    let mut out = String::with_capacity(max_encoded);
+    let mut buf = [0u8; 4];
+    for ch in s.chars() {
+        let piece = urlencode(ch.encode_utf8(&mut buf));
+        if out.len() + piece.len() > budget {
+            break;
+        }
+        out.push_str(&piece);
+    }
+    out.push_str(&note);
+    out
+}
+
 /// A pre-filled GitHub "new issue" URL (the user submits it while signed in —
 /// no token, no server).
 pub fn github_url(title: &str, body: &str) -> String {
     format!(
         "{GITHUB_NEW_ISSUE}?labels=bug&title={}&body={}",
         urlencode(&truncate_chars(title, 200)),
-        urlencode(&truncate_chars(body, MAX_GITHUB_BODY)),
+        encode_bounded(body, MAX_GITHUB_ENCODED),
     )
 }
 
@@ -169,7 +352,20 @@ pub fn mailto_url(subject: &str, body: &str) -> String {
     format!(
         "mailto:{REPORT_EMAIL}?subject={}&body={}",
         urlencode(&truncate_chars(subject, 200)),
-        urlencode(&truncate_chars(body, MAX_MAILTO_BODY)),
+        encode_bounded(body, MAX_MAILTO_ENCODED),
+    )
+}
+
+/// A pre-filled Gmail web-compose URL. Unlike `mailto:` this never depends on a
+/// registered mail handler — the browser opens Google's composer with the
+/// recipient, subject and body filled in, and Google's login screen first if the
+/// user is signed out. Nothing sends without the user's click.
+pub fn gmail_url(subject: &str, body: &str) -> String {
+    format!(
+        "{GMAIL_COMPOSE}&to={}&su={}&body={}",
+        urlencode(REPORT_EMAIL),
+        urlencode(&truncate_chars(subject, 200)),
+        encode_bounded(body, MAX_GMAIL_ENCODED),
     )
 }
 
@@ -246,23 +442,45 @@ fn subject(crash: Option<&str>, description: &str) -> String {
     format!("[{APP_NAME}] {}", error_summary(crash, description))
 }
 
+/// How the report body is rendered. The content is identical either way — only
+/// the syntax around it changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyStyle {
+    /// GitHub renders it: `###` headings and a fenced diagnostics block.
+    Markdown,
+    /// Mail clients do not — they show `###` and ``` as literal noise.
+    Plain,
+}
+
 /// Build the full report body from the user's note + diagnostics (+ crash).
-fn compose_body(description: &str, crash: Option<&str>) -> String {
+fn compose_body(description: &str, crash: Option<&str>, style: BodyStyle) -> String {
+    let markdown = style == BodyStyle::Markdown;
     let mut body = String::new();
-    body.push_str("### What happened\n");
+
+    body.push_str(if markdown {
+        "### What happened\n"
+    } else {
+        "WHAT HAPPENED\n"
+    });
     body.push_str(if description.trim().is_empty() {
         "(no description provided)"
     } else {
         description.trim()
     });
-    body.push_str("\n\n### Anonymous diagnostics (no personal data)\n```\n");
+
+    body.push_str(if markdown {
+        "\n\n### Anonymous diagnostics (no personal data)\n```\n"
+    } else {
+        "\n\nANONYMOUS DIAGNOSTICS (no personal data)\n"
+    });
     body.push_str(&format!("From: {APP_NAME}\n"));
     body.push_str(&diagnostics());
     if let Some(crash) = crash {
         body.push_str("\n--- crash excerpt ---\n");
         body.push_str(crash);
     }
-    body.push_str("\n```\n");
+    body.push_str(if markdown { "\n```\n" } else { "\n" });
+
     // Belt-and-suspenders: scrub the whole assembled body once more.
     scrub(&body)
 }
@@ -295,8 +513,8 @@ pub fn bug_report_context() -> BugReportContextDto {
 
 /// Submit a report: build the anonymous body from the user's note (+ the crash
 /// excerpt if `include_crash`) and open it via `target` = `"github"` |
-/// `"email"`. This only opens a pre-filled page/mail draft — the user still
-/// clicks send. Nothing leaves the machine automatically.
+/// `"gmail"` | `"email"`. This only opens a pre-filled page/mail draft — the
+/// user still clicks send. Nothing leaves the machine automatically.
 #[tauri::command]
 pub fn bug_report_submit(
     target: String,
@@ -306,10 +524,21 @@ pub fn bug_report_submit(
     let crash = if include_crash { pending_crash() } else { None };
     // Subject: [Freally Capture] <what went wrong> — the app + the error.
     let subject = subject(crash.as_deref(), &description);
-    let body = compose_body(&description, crash.as_deref());
+    let crash = crash.as_deref();
+    // GitHub renders Markdown; a mail client shows it as literal `###` noise.
     let url = match target.as_str() {
-        "github" => github_url(&subject, &body),
-        "email" => mailto_url(&subject, &body),
+        "github" => github_url(
+            &subject,
+            &compose_body(&description, crash, BodyStyle::Markdown),
+        ),
+        "gmail" => gmail_url(
+            &subject,
+            &compose_body(&description, crash, BodyStyle::Plain),
+        ),
+        "email" => mailto_url(
+            &subject,
+            &compose_body(&description, crash, BodyStyle::Plain),
+        ),
         other => return Err(format!("unknown report target: {other}")),
     };
     open_url(&url)
@@ -321,35 +550,28 @@ pub fn bug_report_clear_crash() {
     clear_crashes();
 }
 
-/// Write a harmless sample crash report so the "we found a crash — report it?"
-/// flow can be **tested** without actually crashing the app. The UI exposes
-/// this behind a small "simulate a crash report" affordance.
-#[tauri::command]
-pub fn bug_report_simulate<R: Runtime>(app: AppHandle<R>) {
-    write_crash(&scrub(
-        "Panic at src/example.rs:42\nMessage: this is a SAMPLE crash report for testing the \
-         opt-in bug-report flow — no real crash occurred.\n\nBacktrace:\n(sample)\n",
-    ));
-    // Nudge the UI to re-check for a pending crash.
-    let _ = app.emit("bug-report-crash-detected", ());
-}
-
-/// TEST ONLY: write a crash report, then **force-exit the whole app** so the
-/// full crash → relaunch → report loop can be exercised. The next launch
-/// auto-surfaces the report. Uses a delayed `exit(101)` (a panic-like code)
-/// rather than a real panic so it exits identically in dev (unwind) and
-/// release (abort); the delay lets the IPC reply + a warning reach the UI
-/// first. Relaunching is the user's one manual step (robust — no fragile
-/// self-restart / single-instance race).
-#[tauri::command]
-pub fn bug_report_test_crash<R: Runtime>(app: AppHandle<R>) {
-    write_crash(&scrub(
-        "Panic at src/testcrash.rs:1\nMessage: TEST CRASH — triggered from “Report a bug”; no \
-         real fault occurred. Relaunch the app to see the crash-report prompt.\n\nBacktrace:\n(test)\n",
-    ));
-    let _ = app.emit("bug-report-test-exit", ());
+/// `--test-crash`: let the studio start normally, then kill it a few seconds in,
+/// so the whole crash → error window → restart → report loop can be drilled the
+/// way a user would actually meet it. The relaunch carries no arguments, so it
+/// comes back clean rather than crashing again.
+///
+/// This is a **drill hook, not a feature**: no button, no IPC command, nothing a
+/// user can reach by clicking. `exit(101)` (a panic-like code) rather than a real
+/// `panic!` makes it behave identically under debug's `unwind` and release's
+/// `abort`, so the shipped exe drills exactly as it ships. See the bug-report
+/// drill in `Live-To-Do-List.md`.
+pub fn arm_test_crash(args: &[String]) {
+    if !args.iter().any(|arg| arg == TEST_CRASH_FLAG) {
+        return;
+    }
+    eprintln!("{TEST_CRASH_FLAG}: this process will crash on purpose in 5 seconds");
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        write_crash(&scrub(
+            "Panic at src/testcrash.rs:1\nMessage: TEST CRASH — triggered by --test-crash; no \
+             real fault occurred.\n\nBacktrace:\n(test)\n",
+        ));
+        spawn_crash_notice();
         std::process::exit(101);
     });
 }
@@ -392,6 +614,91 @@ mod tests {
         assert!(mail.len() < 4_000, "mailto url must be bounded");
     }
 
+    /// The bound must hold on the *encoded* length. Multi-byte characters expand
+    /// 9x, so a character-count cap let a real crash excerpt push the `mailto:`
+    /// URL past ~2048 — where Windows silently opens a blank window.
+    #[test]
+    fn multibyte_bodies_cannot_blow_past_the_mailto_url_limit() {
+        // Every char is 3 bytes → 9 encoded chars each. 2000 chars → ~18k encoded.
+        let body = "—".repeat(2_000);
+        assert_eq!(body.chars().count(), 2_000);
+        assert!(
+            urlencode(&body).len() > 17_000,
+            "premise: encoding inflates 9x"
+        );
+
+        let mail = mailto_url("Bug report", &body);
+        assert!(
+            mail.len() < 2_048,
+            "mailto url must stay under the ShellExecute limit, was {}",
+            mail.len()
+        );
+
+        let gh = github_url("Bug report", &body);
+        assert!(
+            gh.len() < 10_000,
+            "github url must be bounded, was {}",
+            gh.len()
+        );
+    }
+
+    /// Truncation must never cut a `%E2%80%94` escape in half.
+    #[test]
+    fn encode_bounded_never_splits_an_escape() {
+        for budget in [0, 1, 5, 9, 10, 17, 100, 500] {
+            let out = encode_bounded(&"—".repeat(50), budget);
+            let escapes = out.matches('%').count();
+            // Every '%' must be followed by two hex digits.
+            let bytes = out.as_bytes();
+            let mut seen = 0;
+            for (i, b) in bytes.iter().enumerate() {
+                if *b == b'%' {
+                    seen += 1;
+                    assert!(i + 2 < bytes.len(), "dangling escape at budget {budget}");
+                    assert!(bytes[i + 1].is_ascii_hexdigit(), "bad escape at {budget}");
+                    assert!(bytes[i + 2].is_ascii_hexdigit(), "bad escape at {budget}");
+                }
+            }
+            assert_eq!(seen, escapes);
+        }
+    }
+
+    #[test]
+    fn gmail_url_composes_to_the_report_address() {
+        let gm = gmail_url("[Freally Capture] boom", "it broke");
+        assert!(gm.starts_with("https://mail.google.com/mail/?view=cm&fs=1"));
+        // Recipient, subject and body are pre-filled; no token, no API key.
+        assert!(gm.contains("&to=mythodikalone%40gmail.com"));
+        assert!(gm.contains("&su=%5BFreally%20Capture%5D%20boom"));
+        assert!(gm.contains("&body=it%20broke"));
+        assert!(!gm.contains("key="), "no API key ever rides this URL");
+
+        // And it is bounded like the rest.
+        let gm_long = gmail_url("Bug report", &"—".repeat(2_000));
+        assert!(gm_long.len() < 10_000, "gmail url must be bounded");
+    }
+
+    /// A normal launch — including one carrying a `.frec` path or a `freally://`
+    /// deep link — must never be mistaken for the crash-notice helper, or the
+    /// studio would show an error box instead of booting.
+    #[test]
+    fn run_crash_notice_ignores_a_normal_launch() {
+        let normal = ["freally-capture.exe".to_string()];
+        assert!(!run_crash_notice(&normal));
+
+        let with_file = [
+            "freally-capture.exe".to_string(),
+            "C:/clips/take.frec".to_string(),
+        ];
+        assert!(!run_crash_notice(&with_file));
+
+        let with_deep_link = [
+            "freally-capture.exe".to_string(),
+            "freally://join/abc".to_string(),
+        ];
+        assert!(!run_crash_notice(&with_deep_link));
+    }
+
     #[test]
     fn open_url_refuses_non_http_mailto() {
         assert!(open_url("file:///etc/passwd").is_err());
@@ -401,11 +708,35 @@ mod tests {
 
     #[test]
     fn compose_body_is_scrubbed_and_labeled() {
-        let body = compose_body("it broke", Some("crash text"));
-        assert!(body.contains("What happened"));
-        assert!(body.contains("Anonymous diagnostics"));
-        assert!(body.contains("Freally Capture"));
-        assert!(body.contains("From: Freally Capture"));
+        for style in [BodyStyle::Markdown, BodyStyle::Plain] {
+            let body = compose_body("it broke", Some("crash text"), style);
+            assert!(body.to_lowercase().contains("what happened"));
+            assert!(body.to_lowercase().contains("anonymous diagnostics"));
+            assert!(body.contains("From: Freally Capture"));
+            assert!(body.contains("crash text"));
+        }
+    }
+
+    /// GitHub renders Markdown; a mail client would show `###` and ``` as
+    /// literal noise. Same information, different syntax.
+    #[test]
+    fn only_the_github_body_carries_markdown() {
+        let md = compose_body("it broke", None, BodyStyle::Markdown);
+        assert!(md.contains("### What happened"));
+        assert!(md.contains("```"));
+
+        let plain = compose_body("it broke", None, BodyStyle::Plain);
+        assert!(plain.contains("WHAT HAPPENED"));
+        assert!(!plain.contains('#'), "no markdown headings in a mail body");
+        assert!(!plain.contains("```"), "no code fences in a mail body");
+
+        // The payload itself is identical — only the wrapper changed.
+        for needle in ["it broke", "From: Freally Capture", "OS: "] {
+            assert!(
+                md.contains(needle) && plain.contains(needle),
+                "{needle} must survive"
+            );
+        }
     }
 
     #[test]

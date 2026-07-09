@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { useDismiss } from "../lib/useDismiss";
 
 import {
   studioAddFilter,
@@ -80,6 +82,9 @@ const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`
 /** Per-item blend mode + the ordered filter chain with live parameters. */
 export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDialogProps) {
   const [addOpen, setAddOpen] = useState(false);
+  // Wraps the trigger *and* the menu — see `useDismiss`.
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(addOpen, addMenuRef, () => setAddOpen(false));
 
   const update = (filter: Filter, kind: FilterKind) => {
     studioUpdateFilter(sceneId, item.id, filter.id, kind).catch(fail("filter update"));
@@ -111,7 +116,7 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
           <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
             Filter chain (top runs first)
           </span>
-          <div className="relative">
+          <div className="relative" ref={addMenuRef}>
             <button
               type="button"
               onClick={() => setAddOpen((open) => !open)}

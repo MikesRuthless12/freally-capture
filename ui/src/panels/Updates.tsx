@@ -53,6 +53,12 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
+  // On Windows this never returns: after verifying the package the plugin
+  // `ShellExecuteW`s the NSIS installer and calls `std::process::exit(0)` so the
+  // old binary is not locked while it is replaced (`/P /R` = passive install,
+  // then relaunch). The "installed" phase and its `relaunch()` below are
+  // therefore reachable only on macOS and Linux, where the bundle is swapped in
+  // place and the app must restart itself.
   const install = useCallback(async (update: Update) => {
     let downloaded = 0;
     let total = 0;
@@ -99,20 +105,33 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
               .
             </p>
             {phase.update.body ? (
-              <pre className="m-0 max-h-40 overflow-auto rounded-md border border-white/10 bg-black/30 p-2 text-[11px] leading-snug whitespace-pre-wrap text-havoc-muted">
-                {phase.update.body}
-              </pre>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="release-notes"
+                  className="text-[10px] tracking-wide text-havoc-muted uppercase"
+                >
+                  Version {phase.update.version} — Release notes
+                </label>
+                <textarea
+                  id="release-notes"
+                  readOnly
+                  value={phase.update.body}
+                  rows={10}
+                  className="m-0 resize-none rounded-md border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-[10px] leading-snug text-havoc-muted outline-none focus:border-havoc-accent/60"
+                />
+              </div>
             ) : null}
             <p className="m-0 text-[11px] leading-snug text-havoc-muted">
-              The download is verified against the bundled signing key before it&apos;s applied. The
-              app restarts to finish.
+              Do you want to update now? The download is verified against the bundled signing key
+              before it&apos;s applied. Freally Capture closes, the installer runs, and the new
+              version reopens by itself.
             </p>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => install(phase.update)} className={primaryBtn}>
-                Download &amp; install
+                Yes, update now
               </button>
               <button type="button" onClick={onClose} className={secondaryBtn}>
-                Later
+                No, not now
               </button>
             </div>
           </>

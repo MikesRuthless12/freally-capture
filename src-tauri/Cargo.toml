@@ -45,6 +45,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+# The post-crash "stopped unexpectedly" message box, shown by the `--crash-notice`
+# helper process *after* the studio has died — so it cannot use Tauri's dialog
+# plugin (there is no app left to host it). Already in the tree via
+# tauri-plugin-dialog; naming it here only makes the direct use explicit.
+rfd = "0.16"
 
 # Linux only: read the Tauri window's X11 id (RawWindowHandle::Xlib) to parent
 # the native-preview child window. Matches Tauri's raw-window-handle 0.6.

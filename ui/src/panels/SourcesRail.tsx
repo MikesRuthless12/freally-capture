@@ -49,6 +49,7 @@ import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
+import { useDismiss } from "../lib/useDismiss";
 import {
   spikeGetState,
   spikeHost,
@@ -162,6 +163,10 @@ export function SourcesRail({
   onOpenProperties,
 }: SourcesRailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // Wraps the + button *and* its menu, so clicking the button dismisses via its
+  // own toggle rather than via the outside-click handler (which would re-open it).
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(menuOpen, addMenuRef, () => setMenuOpen(false));
   const [picker, setPicker] = useState<PickerMode | null>(null);
   // Grouping (TASK-605): while non-null, rows show pick-boxes; "Create
   // group" bundles the picked items so they move/show/hide together.
@@ -255,7 +260,7 @@ export function SourcesRail({
           >
             ▦
           </button>
-          <div className="relative">
+          <div className="relative" ref={addMenuRef}>
             <button
               type="button"
               disabled={!scene}
