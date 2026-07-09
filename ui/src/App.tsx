@@ -312,10 +312,10 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
-      <header className="flex shrink-0 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
-        <span className="bg-gradient-to-r from-havoc-accent to-havoc-accent-2 bg-clip-text text-sm font-bold tracking-wide text-transparent">
-          Freally Capture
-        </span>
+      {/* No app title here — the OS titlebar already says "Freally Capture".
+          `justify-end` (not `justify-between`) keeps the controls on the right
+          now that nothing balances them on the left. */}
+      <header className="flex shrink-0 items-center justify-end rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
         <div className="flex items-center gap-3">
           {saveError && (
             <span role="alert" className="text-xs text-amber-400">

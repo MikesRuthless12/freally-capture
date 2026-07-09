@@ -1760,7 +1760,7 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fcap-appaudio"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "thiserror 2.0.18",
  "windows 0.58.0",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-audio"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "cpal",
  "fcap-scene",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-capture"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "ashpd 0.13.12",
  "block2",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-compositor"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "bytemuck",
  "fcap-capture",
@@ -1815,7 +1815,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-encode"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "bzip2",
  "directories",
@@ -1834,7 +1834,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-ndi"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "libloading 0.8.9",
  "thiserror 2.0.18",
@@ -1842,14 +1842,14 @@ dependencies = [
 
 [[package]]
 name = "fcap-plugin"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "fcap-plugin-checkerboard"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "fcap-plugin",
  "serde_json",
@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-preview"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "objc2",
  "objc2-core-foundation",
@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-scene"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-script"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "mlua",
  "serde_json",
@@ -1889,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-sources"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "chrono",
  "fcap-audio",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-stream"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "fcap-encode",
  "serde",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "freally-capture"
-version = "0.95.0"
+version = "0.95.1"
 dependencies = [
  "chrono",
  "directories",
