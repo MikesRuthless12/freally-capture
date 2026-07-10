@@ -12,19 +12,83 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rung toward **1.0.0** is **Phase 9** (accessibility / i18n / onboarding launch polish),
-> tagged **0.96.0**. 1.0.0 then also gates on the 26 CAP-M must-haves, run as three themed batches
+> The next rungs toward **1.0.0** are the 26 CAP-M must-haves, run as three themed batches
 > (0.97.0 / 0.98.0 / 0.99.0).
+
+## [0.96.0] — 2026-07-10 (Accessibility, 18 languages, onboarding & themes)
+
+> Phase 9: the launch polish. The studio now speaks eighteen languages, is fully operable from the
+> keyboard and audible to a screen reader, configures itself on first run, and can be themed light.
+>
+> Two of the bugs below would have shipped in 1.0.0 and are worth naming, because both were invisible
+> in review and both are now enforced by a lint or a test rather than by memory. The light theme was
+> only half-repaired — dark mode looks perfect whether or not a surface has a light override, so
+> white-on-white controls pass code review every time. And upgrading from 0.95.1 would have re-run
+> the first-run wizard, whose starter template drops a second display capture onto the scene an
+> existing user had already arranged.
 
 ### Added
 - **The studio speaks 18 languages** (TASK-902) — `ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk
-  vi zh-CN`, from a Fluent catalog of **905 keys**. A fresh install follows the operating system's
+  vi zh-CN`, from a Fluent catalog of **989 keys**. A fresh install follows the operating system's
   language; an explicit choice wins. Arabic drives `<html dir="rtl">`. English is layered beneath
   every locale, so a key a translator has not reached renders in English rather than as a raw id.
   `npm run i18n:lint` fails CI on a missing key, an orphaned key, a duplicate, or a `t("…")` that
   names nothing.
 
+  A parity lint proves the 18 catalogs agree *with each other*; it says nothing about whether the
+  app's strings are in them. Three further gates close that gap: a test that every entry of a label
+  table resolves, a scan for keys nothing references, and a scan for `t()` called at module scope —
+  which would freeze a string to whatever language was loaded at import and never re-translate it.
+
+- **A first-run wizard that configures the machine it is actually running on** (TASK-903, TASK-905).
+  It enumerates the GPUs and physical cores, ranks the available hardware encoders, and proposes an
+  encoder, canvas, fps and bitrate *with the reason stated in the user's language*. An encoder the
+  driver has already refused is skipped rather than recommended. Accepting is one click; so is
+  keeping your settings. Skipping counts as finishing — the wizard never returns.
+
+- **A command palette** on `Ctrl`/`Cmd`+`K` (TASK-904), matching on subsequences, so `ssc` finds
+  "Start Screen Capture".
+
+- **One Settings modal and an About page** (TASK-906, TASK-907) — language, theme, and the stats dock
+  in one place; version, build metadata, licences and the bug reporter in the other.
+
+- **Light and custom themes.** The accent colour is a CSS custom property validated as `#rrggbb` on
+  both sides of the IPC boundary, because a string written into a stylesheet is an injection sink.
+
+- **The studio is now navigable without a mouse or a monitor** (TASK-901). Every keyboard stop draws
+  a visible focus ring; dialogs trap `Tab` and hand focus back where they took it; `aria-modal` is
+  now backed by a real trap rather than a promise. Going live, recording, reconnecting, and losing a
+  second of video to dropped frames are announced to screen readers through an `aria-live` region.
+  The OS "reduce motion" setting is honoured.
+
 ### Fixed
+- **Upgrading no longer re-runs the first-run wizard.** `completedOnboarding` is new, and a missing
+  key defaults to `false`, so every existing install would have been greeted by a wizard whose
+  starter template adds a *second* display capture on top of the scene the user had already arranged.
+  Settings files are now migrated on load: one that predates the field but has already accepted an
+  EULA has plainly been run before. Keyed on the field being *absent*, not falsy — someone who quits
+  halfway through the wizard wrote `false` on purpose and must see it again.
+
+- **The light theme no longer renders white-on-white.** Panels are drawn with translucent *white*
+  over near-black, and a CSS variable cannot reach inside a `bg-white/10` utility class, so the light
+  theme re-tints those class names with translucent black. Six were missed: the mixer mute/gate
+  chips, the REC badge, download progress-bar tracks, status chips, the stats-dock "ended" dot, and
+  the EULA blockquote rule. `npm run theme:lint` now fails CI on any white-alpha utility that has no
+  light override and no allow-list entry saying why it may stay white.
+
+- **Choosing an accent colour no longer throws a light-theme user into the dark.** The swatch forced
+  the theme to Custom so that it "worked" from any mode, but Custom is dark-based — one nudge of the
+  colour silently discarded Light. The swatch is disabled outside Custom instead.
+
+- **Screen readers no longer announce a frame-drop burst on every reconnect.** The dropped-frame
+  count is cumulative and keeps climbing through an outage, so the first status tick back on air
+  compared against the pre-outage baseline and announced the whole outage as a fresh burst — on top
+  of the "reconnecting" and "live" announcements the listener had already heard.
+
+- **A failed settings save no longer discards an unrelated setting.** The rollback restored the whole
+  settings snapshot captured when the dialog rendered, so a save that failed could undo a *different*
+  setting that had succeeded in the meantime. The store is re-read instead.
+
 - **`.frec` recordings now carry their own Explorer icon.** Tauri's `fileAssociations` schema has no
   `icon` field and its NSIS template hardcodes the association's `DefaultIcon` to the app executable,
   so every recording showed the studio's icon while `icons/frec.ico` sat unused in the install
