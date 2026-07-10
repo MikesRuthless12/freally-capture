@@ -20,8 +20,43 @@
     </header>
 
     <main>
-      <!-- 0.95.1 — crash reporting, EULA persistence & dialog fixes -->
+      <!-- 0.96.0 — accessibility, 18 languages, onboarding & themes -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.96.0</span>
+            <span class="date">Jul 10, 2026 · Accessibility, 18 languages, onboarding &amp; themes</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.96.0">Download</a>
+        </div>
+
+        <h2>0.96.0 — Accessibility, 18 languages, onboarding &amp; themes</h2>
+        <p class="summary">
+          The launch polish. The studio now speaks eighteen languages, is fully operable from the
+          keyboard and audible to a screen reader, configures itself on first run, and can be themed
+          light. Two of the bugs fixed below would have shipped in 1.0.0, and both were invisible in
+          review — each is now caught by a lint or a test rather than by memory.
+        </p>
+        <ul class="features">
+          <li><strong>The studio speaks 18 languages</strong> — <code>ar de en es fr hi id it ja ko nl pl pt-BR ru tr uk vi zh-CN</code>, from a catalog of 989 strings. A fresh install follows your operating system’s language; an explicit choice wins. Arabic drives a right-to-left layout. English is layered beneath every locale, so a string a translator has not reached yet reads in English rather than as a raw identifier.</li>
+          <li><strong>Operable without a mouse, audible without a monitor</strong> — every keyboard stop draws a visible focus ring, dialogs trap Tab and hand focus back where they took it, and going live, recording, reconnecting, and losing a second of video to dropped frames are announced to screen readers. The system “reduce motion” setting is honoured.</li>
+          <li><strong>A first-run wizard that configures the machine it is actually running on</strong> — it enumerates your GPUs and physical cores, ranks the available hardware encoders, and proposes an encoder, canvas, frame rate, and bitrate with the reason stated in your own language. An encoder your driver has already refused is skipped rather than recommended. Skipping counts as finishing: the wizard never returns uninvited.</li>
+          <li><strong>A command palette</strong> on <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>K</kbd>, matching on subsequences, so <code>ssc</code> finds “Start Screen Capture”.</li>
+          <li><strong>One Settings modal and an About page</strong> — language, theme, and the stats dock in one place; version, build metadata, licences, and the bug reporter in the other.</li>
+          <li><strong>Light and custom themes.</strong> The accent colour is validated as a plain hex triple on both sides of the boundary, because a string written into a stylesheet is an injection surface.</li>
+          <li><strong>.frec recordings carry their own icon</strong> in Windows Explorer, rather than the studio’s.</li>
+        </ul>
+        <ul class="features">
+          <li><strong>Fixed: upgrading re-ran the first-run wizard.</strong> The new “onboarding complete” flag defaults to false, so every existing install would have been greeted by a wizard whose starter template adds a <em>second</em> display capture on top of the scene you had already arranged. Settings files are now migrated on load: one that predates the flag but has already accepted the licence has plainly been run before.</li>
+          <li><strong>Fixed: the light theme rendered parts of the studio white-on-white.</strong> Panels are drawn with translucent white over near-black, and a colour variable cannot reach inside a utility class — so the light theme re-tints those classes with translucent black. Six were missed, including download progress-bar tracks and the mixer’s mute and gate chips. A lint now fails the build on any that has no light override.</li>
+          <li><strong>Fixed: choosing an accent colour threw a light-theme user into the dark.</strong></li>
+          <li><strong>Fixed: screen readers announced a frame-drop burst on every reconnect</strong> — the dropped-frame count is cumulative and kept climbing through the outage, so the first moment back on air reported the whole outage as new.</li>
+          <li><strong>Fixed: a failed settings save could discard an unrelated setting</strong> that had succeeded in the meantime.</li>
+        </ul>
+      </article>
+
+      <!-- 0.95.1 — crash reporting, EULA persistence & dialog fixes -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.95.1</span>
