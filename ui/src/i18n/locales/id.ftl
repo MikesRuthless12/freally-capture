@@ -1149,3 +1149,16 @@ settings-open-remote = API remote…
 settings-open-about = Tentang…
 controls-settings = ⚙ Pengaturan…
 controls-settings-title = Bahasa, tampilan, dan preferensi seluruh aplikasi
+# --- command palette (TASK-904) ---
+palette-title = Palet perintah
+palette-search = Cari scene, sumber, dan aksi
+palette-placeholder = Cari scene, sumber, aksi…
+palette-no-results = Tidak ada yang cocok dengan “{ $query }”
+palette-hint = ↑ ↓ untuk berpindah · Enter untuk menjalankan · Esc untuk menutup
+palette-group-scenes = Scene
+palette-group-sources = Sumber
+palette-group-actions = Aksi
+palette-transition = Transisi Pratinjau → Program
+palette-save-replay = Simpan replay
+palette-add-marker = Jatuhkan penanda bab
+palette-vertical-canvas = Kanvas vertikal (9:16)…

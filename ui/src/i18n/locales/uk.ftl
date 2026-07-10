@@ -1113,3 +1113,17 @@ settings-open-remote = Віддалений API…
 settings-open-about = Про застосунок…
 controls-settings = ⚙ Налаштування…
 controls-settings-title = Мова, вигляд та загальні налаштування застосунку
+
+# --- command palette (TASK-904) ---
+palette-title = Палітра команд
+palette-search = Пошук сцен, джерел і дій
+palette-placeholder = Пошук сцен, джерел, дій…
+palette-no-results = Нічого не відповідає “{ $query }”
+palette-hint = ↑ ↓ для переміщення · Enter для запуску · Esc для закриття
+palette-group-scenes = Сцена
+palette-group-sources = Джерело
+palette-group-actions = Дія
+palette-transition = Перехід «Попередній перегляд» → «Програма»
+palette-save-replay = Зберегти повтор
+palette-add-marker = Поставити маркер розділу
+palette-vertical-canvas = Вертикальне полотно (9:16)…

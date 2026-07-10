@@ -1126,3 +1126,17 @@ settings-open-remote = Remote-API…
 settings-open-about = Über…
 controls-settings = ⚙ Einstellungen…
 controls-settings-title = Sprache, Darstellung und die app-weiten Einstellungen
+
+# --- command palette (TASK-904) ---
+palette-title = Befehlspalette
+palette-search = Szenen, Quellen und Aktionen durchsuchen
+palette-placeholder = Szenen, Quellen, Aktionen durchsuchen…
+palette-no-results = Nichts passt zu “{ $query }”
+palette-hint = ↑ ↓ zum Navigieren · Enter zum Ausführen · Esc zum Schließen
+palette-group-scenes = Szene
+palette-group-sources = Quelle
+palette-group-actions = Aktion
+palette-transition = Übergang Vorschau → Programm
+palette-save-replay = Wiederholung speichern
+palette-add-marker = Kapitelmarker setzen
+palette-vertical-canvas = Vertikale (9:16) Leinwand…

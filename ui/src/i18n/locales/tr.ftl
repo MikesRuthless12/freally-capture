@@ -1149,3 +1149,17 @@ settings-open-remote = Uzak API…
 settings-open-about = Hakkında…
 controls-settings = ⚙ Ayarlar…
 controls-settings-title = Dil, görünüm ve uygulama genelindeki tercihler
+
+# --- command palette (TASK-904) ---
+palette-title = Komut paleti
+palette-search = Sahneleri, kaynakları ve eylemleri ara
+palette-placeholder = Sahneleri, kaynakları, eylemleri ara…
+palette-no-results = “{ $query }” ile eşleşen bir şey yok
+palette-hint = ↑ ↓ taşımak için · Enter çalıştırmak için · Esc kapatmak için
+palette-group-scenes = Sahne
+palette-group-sources = Kaynak
+palette-group-actions = Eylem
+palette-transition = Önizleme → Program geçişi
+palette-save-replay = Tekrarı kaydet
+palette-add-marker = Bölüm işaretçisi bırak
+palette-vertical-canvas = Dikey (9:16) tuval…

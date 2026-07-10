@@ -1149,3 +1149,17 @@ settings-open-remote = Remote-API…
 settings-open-about = Over…
 controls-settings = ⚙ Instellingen…
 controls-settings-title = Taal, weergave en de app-brede voorkeuren
+
+# --- command palette (TASK-904) ---
+palette-title = Opdrachtenpalet
+palette-search = Zoek scènes, bronnen en acties
+palette-placeholder = Zoek scènes, bronnen, acties…
+palette-no-results = Niets komt overeen met “{ $query }”
+palette-hint = ↑ ↓ om te verplaatsen · Enter om uit te voeren · Esc om te sluiten
+palette-group-scenes = Scène
+palette-group-sources = Bron
+palette-group-actions = Actie
+palette-transition = Overgang Voorbeeld → Programma
+palette-save-replay = Replay opslaan
+palette-add-marker = Zet een hoofdstukmarkering
+palette-vertical-canvas = Verticaal (9:16) canvas…

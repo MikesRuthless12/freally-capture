@@ -1113,3 +1113,17 @@ settings-open-remote = الواجهة البرمجية عن بُعد…
 settings-open-about = حول…
 controls-settings = ⚙ الإعدادات…
 controls-settings-title = اللغة والمظهر والتفضيلات على مستوى التطبيق
+
+# --- command palette (TASK-904) ---
+palette-title = لوحة الأوامر
+palette-search = البحث في المشاهد والمصادر والإجراءات
+palette-placeholder = ابحث في المشاهد والمصادر والإجراءات…
+palette-no-results = لا شيء يطابق “{ $query }”
+palette-hint = ↑ ↓ للتنقّل · Enter للتشغيل · Esc للإغلاق
+palette-group-scenes = مشهد
+palette-group-sources = مصدر
+palette-group-actions = إجراء
+palette-transition = انتقال المعاينة → البرنامج
+palette-save-replay = حفظ الإعادة
+palette-add-marker = وضع علامة فصل
+palette-vertical-canvas = اللوحة العمودية (9:16)…

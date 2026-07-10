@@ -1132,3 +1132,17 @@ settings-open-remote = 远程 API…
 settings-open-about = 关于…
 controls-settings = ⚙ 设置…
 controls-settings-title = 语言、外观和全应用范围的偏好设置
+
+# --- command palette (TASK-904) ---
+palette-title = 命令面板
+palette-search = 搜索场景、来源和操作
+palette-placeholder = 搜索场景、来源、操作…
+palette-no-results = 没有与“{ $query }”匹配的内容
+palette-hint = ↑ ↓ 移动 · Enter 执行 · Esc 关闭
+palette-group-scenes = 场景
+palette-group-sources = 来源
+palette-group-actions = 操作
+palette-transition = 转场 预览 → 节目
+palette-save-replay = 保存重放
+palette-add-marker = 打入章节标记
+palette-vertical-canvas = 竖屏（9:16）画布…

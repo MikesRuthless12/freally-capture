@@ -1126,3 +1126,17 @@ settings-open-remote = API từ xa…
 settings-open-about = Giới thiệu…
 controls-settings = ⚙ Cài đặt…
 controls-settings-title = Ngôn ngữ, giao diện và các tùy chọn toàn ứng dụng
+
+# --- command palette (TASK-904) ---
+palette-title = Bảng lệnh
+palette-search = Tìm cảnh, nguồn và hành động
+palette-placeholder = Tìm cảnh, nguồn, hành động…
+palette-no-results = Không có gì khớp với “{ $query }”
+palette-hint = ↑ ↓ để di chuyển · Enter để chạy · Esc để đóng
+palette-group-scenes = Cảnh
+palette-group-sources = Nguồn
+palette-group-actions = Hành động
+palette-transition = Chuyển cảnh Xem trước → Chương trình
+palette-save-replay = Lưu phát lại
+palette-add-marker = Thả một marker chương
+palette-vertical-canvas = Khung hình dọc (9:16)…

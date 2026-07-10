@@ -19,6 +19,10 @@ import {
   studioSetStudioMode,
   studioSetItemTransform,
   studioSetItemVisible,
+  studioSelectScene,
+  studioTransition,
+  replaySave,
+  recordingAddMarker,
 } from "./api/commands";
 import { onAudio, onProgram, onRemoteInvite, onStudio } from "./api/events";
 import type {
@@ -34,6 +38,8 @@ import type {
   Transform,
 } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
+import { CommandPalette } from "./components/CommandPalette";
+import type { Command } from "./lib/commands";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
 import { spikeSetJoinPrefill } from "./remote/spike";
@@ -75,6 +81,7 @@ export default function App() {
   const [audio, setAudio] = useState<AudioLevelsPayload | null>(null);
   const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Ignore stale event echoes while a drag streams newer transforms.
   const localRevision = useRef(0);
 
@@ -176,6 +183,83 @@ export default function App() {
       ? selectedItem
       : null;
 
+  /**
+   * What the palette can reach (TASK-904). Scenes and sources come from the live
+   * collection, so the list is always the studio's truth rather than a snapshot.
+   * Labels are translated here — the palette never calls `t` on caller strings.
+   */
+  const paletteCommands = useMemo<Command[]>(() => {
+    const list: Command[] = [];
+
+    for (const scene of collection?.scenes ?? []) {
+      list.push({
+        id: `scene-${scene.id}`,
+        group: t("palette-group-scenes"),
+        label: scene.name,
+        keywords: "scene switch",
+        run: () => {
+          studioSelectScene(scene.id).catch((err) => console.error("scene switch failed:", err));
+        },
+      });
+    }
+
+    for (const item of activeScene?.items ?? []) {
+      const source = collection?.sources.find((candidate) => candidate.id === item.source);
+      list.push({
+        id: `item-${item.id}`,
+        group: t("palette-group-sources"),
+        label: source?.name ?? item.id,
+        keywords: "source select",
+        run: () => setSelectedItem(item.id),
+      });
+    }
+
+    list.push(
+      {
+        id: "action-studio-mode",
+        group: t("palette-group-actions"),
+        label: studioMode ? t("studio-mode-leave") : t("studio-mode"),
+        run: () => {
+          studioSetStudioMode(!studioMode).catch((err) =>
+            console.error("studio mode toggle failed:", err),
+          );
+        },
+      },
+      {
+        id: "action-transition",
+        group: t("palette-group-actions"),
+        label: t("palette-transition"),
+        run: () => {
+          studioTransition().catch((err) => console.error("transition failed:", err));
+        },
+      },
+      {
+        id: "action-save-replay",
+        group: t("palette-group-actions"),
+        label: t("palette-save-replay"),
+        run: () => {
+          replaySave().catch((err) => console.error("save replay failed:", err));
+        },
+      },
+      {
+        id: "action-add-marker",
+        group: t("palette-group-actions"),
+        label: t("palette-add-marker"),
+        run: () => {
+          recordingAddMarker().catch((err) => console.error("add marker failed:", err));
+        },
+      },
+      {
+        id: "action-vertical",
+        group: t("palette-group-actions"),
+        label: t("palette-vertical-canvas"),
+        run: () => setDialog({ kind: "vertical" }),
+      },
+    );
+
+    return list;
+  }, [collection, activeScene, studioMode, t]);
+
   // Highlight Speaker keyboard toggle: "F" focuses the selected item (fills
   // the canvas) or, when a focus is active, restores the layout — never while
   // typing in a field.
@@ -197,6 +281,21 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeScene, effectiveSelection]);
+
+  // Ctrl/Cmd-K opens the palette (TASK-904). Unlike the "F" shortcut this DOES
+  // fire while a field has focus — that is the point of a command palette — so
+  // it only guards against the browser's own find-in-page binding.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "k" && event.key !== "K") return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const addItem = useCallback(
     (settings: SourceSettings, name?: string) => {
@@ -330,6 +429,9 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      {paletteOpen && (
+        <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
+      )}
       {/* No app title here — the OS titlebar already says "Freally Capture".
           `justify-end` (not `justify-between`) keeps the controls on the right
           now that nothing balances them on the left. */}

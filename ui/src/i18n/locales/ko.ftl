@@ -1126,3 +1126,17 @@ settings-open-remote = 원격 API…
 settings-open-about = 정보…
 controls-settings = ⚙ 설정…
 controls-settings-title = 언어, 모양 및 앱 전체 환경설정
+
+# --- command palette (TASK-904) ---
+palette-title = 명령 팔레트
+palette-search = 장면, 소스, 작업 검색
+palette-placeholder = 장면, 소스, 작업 검색…
+palette-no-results = “{ $query }”와 일치하는 항목이 없습니다
+palette-hint = ↑ ↓ 이동 · Enter 실행 · Esc 닫기
+palette-group-scenes = 장면
+palette-group-sources = 소스
+palette-group-actions = 작업
+palette-transition = 미리 보기 → 프로그램 전환
+palette-save-replay = 리플레이 저장
+palette-add-marker = 챕터 마커 남기기
+palette-vertical-canvas = 세로 (9:16) 캔버스…
