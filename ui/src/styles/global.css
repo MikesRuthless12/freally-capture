@@ -38,3 +38,105 @@ input,
 textarea {
   user-select: text;
 }
+
+/*
+ * Accessibility (TASK-901).
+ *
+ * A visible focus ring on every keyboard stop. `:focus-visible` — not `:focus` —
+ * so the ring appears for Tab and never for a mouse click. Tailwind's reset
+ * removes the UA outline, and without this a keyboard user cannot see where they
+ * are: the studio is fully operable and completely unnavigable.
+ *
+ * Two accent-derived colours are used so the ring stays visible in the light and
+ * custom themes, which override `--color-havoc-accent` at runtime.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-havoc-accent);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* The native preview surface is a child window; an outline on it does nothing. */
+canvas:focus-visible {
+  outline: none;
+}
+
+/*
+ * Respect the OS "reduce motion" setting. Vestibular disorders are aggravated by
+ * exactly the transitions this app uses on hover and on dialog open. Transitions
+ * are reduced to near-zero rather than `none`, because `transitionend` listeners
+ * would otherwise never fire and a component waiting on one would hang.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Light theme surface repair.
+ *
+ * Every panel, dock and dialog is drawn with translucent *white* over a near-
+ * black background — `bg-white/[0.03]`, `border-white/10`. Swap the background
+ * for a near-white and all of it vanishes: panels blend into the page and every
+ * border disappears. The theme provider can set colour variables, but it cannot
+ * reach a hard-coded `rgb(255 255 255 / 3%)` baked into a utility class.
+ *
+ * So the light theme re-tints those exact utilities with translucent *black*.
+ * This is coupled to the class names the components use, and the coupling is
+ * invisible: a new `bg-white/[0.05]` in a component silently renders white-on-
+ * white. `light-theme.test.ts` enforces it — every white-alpha utility in `src`
+ * must be re-tinted below or allow-listed as deliberately-on-dark.
+ *
+ * The durable fix is a `--surface` variable the components spend instead of a
+ * literal; that is a wider refactor than TASK-906 (172 `border-white/10` call
+ * sites), and it is written down here rather than left to be discovered.
+ *
+ * Note the two naming schemes. A bare `bg-white/5` emits `.bg-white\/5`, but a
+ * `hover:bg-white/5` emits `.hover\:bg-white\/5:hover` — a *different selector*.
+ * Overriding the bare class does nothing for the hover variant, which is why
+ * the hover rules below are spelled out separately.
+ */
+:root[data-theme="light"] .bg-white\/\[0\.02\] {
+  background-color: rgb(0 0 0 / 0.02);
+}
+:root[data-theme="light"] .bg-white\/\[0\.03\] {
+  background-color: rgb(0 0 0 / 0.03);
+}
+:root[data-theme="light"] .bg-white\/\[0\.04\] {
+  background-color: rgb(0 0 0 / 0.04);
+}
+/* Mixer mute/gate chips, the REC badge, progress-bar tracks, status chips. */
+:root[data-theme="light"] .bg-white\/10 {
+  background-color: rgb(0 0 0 / 0.1);
+}
+/* The "ended" target dot in the stats dock. */
+:root[data-theme="light"] .bg-white\/30 {
+  background-color: rgb(0 0 0 / 0.3);
+}
+:root[data-theme="light"] .border-white\/5 {
+  border-color: rgb(0 0 0 / 0.08);
+}
+:root[data-theme="light"] .border-white\/10 {
+  border-color: rgb(0 0 0 / 0.14);
+}
+/* Mixer filter chips; the EULA blockquote rule. */
+:root[data-theme="light"] .border-white\/15 {
+  border-color: rgb(0 0 0 / 0.2);
+}
+/* Hover variants are their own selectors — see the note above. */
+:root[data-theme="light"] .hover\:bg-white\/5:hover {
+  background-color: rgb(0 0 0 / 0.05);
+}
+:root[data-theme="light"] .hover\:border-white\/40:hover {
+  border-color: rgb(0 0 0 / 0.45);
+}
+/* The preview letterboxes to pure black; keep it black in both themes. */
+:root[data-theme="light"] .bg-black\/60 {
+  background-color: rgb(0 0 0 / 0.4);
+}

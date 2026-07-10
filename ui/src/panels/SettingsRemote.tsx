@@ -3,6 +3,7 @@ import { useState } from "react";
 import { settingsSet } from "../api/commands";
 import type { RemoteControlSettings, Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -22,6 +23,7 @@ export function SettingsRemote({
   onSaved: (next: Settings) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<RemoteControlSettings | null>(settings?.remoteControl ?? null);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export function SettingsRemote({
   const save = () => {
     setError(null);
     if (draft.enabled && !draft.password.trim()) {
-      setError("A password is required to enable the remote API.");
+      setError(t("remote-password-required"));
       return;
     }
     const next = { ...settings, remoteControl: draft };
@@ -44,7 +46,7 @@ export function SettingsRemote({
   };
 
   return (
-    <PickerShell title="Settings — Remote Control" onClose={onClose}>
+    <PickerShell title={t("remote-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <label className="flex items-center gap-2 text-[12px]">
           <input
@@ -52,16 +54,16 @@ export function SettingsRemote({
             checked={draft.enabled}
             onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
           />
-          Enable the WebSocket remote API
+          {t("remote-enable")}
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Password (required — controllers authenticate with it)
+          {t("remote-password")}
           <div className="flex gap-2">
             <input
               type={showPassword ? "text" : "password"}
               value={draft.password}
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
-              placeholder="a password for your controllers"
+              placeholder={t("remote-password-placeholder")}
               className={`${inputClass} min-w-0 flex-1`}
             />
             <button
@@ -69,13 +71,13 @@ export function SettingsRemote({
               onClick={() => setShowPassword((shown) => !shown)}
               className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              {showPassword ? "Hide" : "Show"}
+              {showPassword ? t("remote-password-hide") : t("remote-password-show")}
             </button>
           </div>
         </label>
         <div className="flex items-end gap-3">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Port
+            {t("remote-port")}
             <input
               type="number"
               min={1024}
@@ -93,16 +95,10 @@ export function SettingsRemote({
               checked={draft.lan}
               onChange={(event) => setDraft({ ...draft, lan: event.target.checked })}
             />
-            Allow LAN connections (default is this machine only)
+            {t("remote-allow-lan")}
           </label>
         </div>
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Off = the port is closed. On = a password-protected WebSocket on 127.0.0.1 (or your LAN
-          when opted in) that can switch scenes, run the transition, start/stop the stream and
-          recording, save replays, and set mutes/volumes — the same actions as the UI, nothing more.
-          It cannot read files. Treat the password like any credential; prefer this-machine-only
-          unless you specifically control from another device.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("remote-note")}</p>
         {error && (
           <p role="alert" className="m-0 text-[11px] text-red-300">
             {error}
@@ -114,14 +110,14 @@ export function SettingsRemote({
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
-            Cancel
+            {t("remote-cancel")}
           </button>
           <button
             type="button"
             onClick={save}
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
-            Save
+            {t("remote-save")}
           </button>
         </div>
       </div>

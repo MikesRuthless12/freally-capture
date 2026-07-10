@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { isModalOpen, modalSubscribe } from "../lib/modal";
+import { useT } from "../i18n/t";
 
 import {
   nativePreviewActive,
@@ -86,6 +87,7 @@ export function PreviewPanel({
   onSelect,
   onItemTransform,
 }: PreviewPanelProps) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
@@ -485,7 +487,7 @@ export function PreviewPanel({
 
   return (
     <section
-      aria-label="Program preview"
+      aria-label={t("preview-program-label")}
       className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/60"
     >
       <div ref={containerRef} className="relative min-h-0 flex-1">
@@ -495,7 +497,7 @@ export function PreviewPanel({
               <canvas
                 ref={canvasRef}
                 role="img"
-                aria-label="Program output"
+                aria-label={t("preview-program-output")}
                 className="absolute"
                 style={{
                   left: box.left,
@@ -507,7 +509,7 @@ export function PreviewPanel({
             )}
             <svg
               role="application"
-              aria-label="Canvas editor"
+              aria-label={t("preview-canvas-editor")}
               className="absolute touch-none"
               style={{
                 left: box.left,
@@ -580,32 +582,33 @@ export function PreviewPanel({
             className="pointer-events-none absolute z-10 rounded-md border border-white/10 bg-black/75 px-2 py-1 font-mono text-[10px] leading-tight text-havoc-text"
             style={{ left: box.left + 8, top: box.top + 8 }}
             role="status"
-            aria-label="Pixels to the frame edges"
+            aria-label={t("preview-px-to-edge-label")}
           >
-            px to edge&ensp;L {dragReadout.left} · T {dragReadout.top} · R {dragReadout.right} · B{" "}
-            {dragReadout.bottom}
+            {t("preview-px-to-edge", {
+              left: dragReadout.left,
+              top: dragReadout.top,
+              right: dragReadout.right,
+              bottom: dragReadout.bottom,
+            })}
           </div>
         )}
         {!running || emptyScene ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
             <div className="flex max-w-md flex-col items-center gap-2 text-center">
               <span className="bg-gradient-to-r from-havoc-accent to-havoc-accent-2 bg-clip-text text-sm font-semibold tracking-widest text-transparent uppercase">
-                Program
+                {t("preview-program-heading")}
               </span>
               {program?.state === "noGpu" ? (
                 <p className="m-0 text-xs text-red-400" role="alert">
-                  No usable GPU adapter was found — the compositor can’t run on this machine.
+                  {t("preview-no-gpu")}
                   <span className="mt-1 block text-havoc-muted">{program.adapter}</span>
                 </p>
               ) : !running ? (
                 <p className="m-0 text-xs text-havoc-muted" role="status">
-                  Starting the compositor…
+                  {t("preview-starting-compositor")}
                 </p>
               ) : (
-                <p className="m-0 text-xs text-havoc-muted">
-                  This scene is empty — add a source in Sources, then drag, scale, and rotate it
-                  right here on the canvas.
-                </p>
+                <p className="m-0 text-xs text-havoc-muted">{t("preview-empty-scene")}</p>
               )}
             </div>
           </div>
@@ -617,8 +620,12 @@ export function PreviewPanel({
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
             {program.width}×{program.height}
           </span>
-          <span>{program.fps} fps</span>
-          {program.dropped > 0 && <span className="text-amber-300">{program.dropped} dropped</span>}
+          <span>{t("preview-fps", { fps: program.fps })}</span>
+          {program.dropped > 0 && (
+            <span className="text-amber-300">
+              {t("preview-dropped", { dropped: program.dropped })}
+            </span>
+          )}
           <span className="ml-auto max-w-64 truncate" title={program.adapter}>
             {program.adapter}
           </span>

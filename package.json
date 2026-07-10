@@ -1,10 +1,12 @@
 {
   "name": "freally-capture-workspace",
   "private": true,
-  "version": "0.95.1",
+  "version": "0.96.0",
   "description": "Freally Capture — npm workspace root (React/Vite UI + Tauri CLI).",
   "license": "SEE LICENSE IN LICENSE",
-  "workspaces": ["ui"],
+  "workspaces": [
+    "ui"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace ui",
     "build": "npm run build --workspace ui",
@@ -14,7 +16,9 @@
     "format:check": "npm run format:check --workspace ui",
     "typecheck": "npm run typecheck --workspace ui",
     "test:ui": "npm run test --workspace ui",
-    "test:e2e": "npm run test:e2e --workspace ui"
+    "test:e2e": "npm run test:e2e --workspace ui",
+    "i18n:lint": "npm run i18n:lint --workspace ui",
+    "theme:lint": "npm run theme:lint --workspace ui"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

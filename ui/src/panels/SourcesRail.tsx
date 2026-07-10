@@ -45,6 +45,7 @@ import type {
   VideoFormat,
 } from "../api/types";
 import { CORNERS } from "../api/types";
+import { useT } from "../i18n/t";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
@@ -104,41 +105,44 @@ type PickerMode =
   | "gameCapture"
   | "existing";
 
+// Values are i18n keys, resolved with `t(...)` at each render site so a
+// language switch repaints them.
 const KIND_BADGE: Record<string, string> = {
-  display: "Display",
-  window: "Window",
-  portal: "Portal",
-  videoDevice: "Camera",
-  image: "Image",
-  media: "Media",
-  remoteGuest: "Guest",
-  color: "Color",
-  text: "Text",
-  nestedScene: "Scene",
-  slideshow: "Slides",
-  chatOverlay: "Chat",
-  audioInput: "Audio In",
-  audioOutput: "Audio Out",
-  appAudio: "App Audio",
+  display: "sources-badge-display",
+  window: "sources-badge-window",
+  portal: "sources-badge-portal",
+  videoDevice: "sources-badge-camera",
+  image: "sources-badge-image",
+  media: "sources-badge-media",
+  remoteGuest: "sources-badge-guest",
+  color: "sources-badge-color",
+  text: "sources-badge-text",
+  nestedScene: "sources-badge-scene",
+  slideshow: "sources-badge-slides",
+  chatOverlay: "sources-badge-chat",
+  audioInput: "sources-badge-audio-in",
+  audioOutput: "sources-badge-audio-out",
+  appAudio: "sources-badge-app-audio",
 };
 
+// Values are i18n keys (see KIND_BADGE).
 const ADD_MENU: Array<[PickerMode, string]> = [
-  ["display", "Display Capture"],
-  ["window", "Window Capture"],
-  ["gameCapture", "Game Capture (read first)"],
-  ["webcam", "Video Capture Device"],
-  ["image", "Image"],
-  ["media", "Media (video/image file)"],
-  ["remoteGuest", "Remote Guest (P2P spike)"],
-  ["color", "Color"],
-  ["text", "Text"],
-  ["nestedScene", "Nested Scene"],
-  ["slideshow", "Image Slideshow"],
-  ["chatOverlay", "Live Chat Overlay"],
-  ["audioInput", "Audio Input Capture"],
-  ["audioOutput", "Audio Output Capture"],
-  ["appAudio", "Application Audio (Windows)"],
-  ["existing", "Existing source…"],
+  ["display", "sources-add-display"],
+  ["window", "sources-add-window"],
+  ["gameCapture", "sources-add-game"],
+  ["webcam", "sources-add-webcam"],
+  ["image", "sources-add-image"],
+  ["media", "sources-add-media"],
+  ["remoteGuest", "sources-add-remote-guest"],
+  ["color", "sources-add-color"],
+  ["text", "sources-add-text"],
+  ["nestedScene", "sources-add-nested-scene"],
+  ["slideshow", "sources-add-slideshow"],
+  ["chatOverlay", "sources-add-chat-overlay"],
+  ["audioInput", "sources-add-audio-input"],
+  ["audioOutput", "sources-add-audio-output"],
+  ["appAudio", "sources-add-app-audio"],
+  ["existing", "sources-add-existing"],
 ];
 
 /**
@@ -162,6 +166,7 @@ export function SourcesRail({
   onOpenFilters,
   onOpenProperties,
 }: SourcesRailProps) {
+  const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
   // Wraps the + button *and* its menu, so clicking the button dismisses via its
   // own toggle rather than via the outside-click handler (which would re-open it).
@@ -232,15 +237,15 @@ export function SourcesRail({
 
   return (
     <Panel
-      title="Sources"
+      title={t("sources-panel-title")}
       actions={
         <div className="flex items-center gap-1">
           <button
             type="button"
             disabled={!scene}
             onClick={() => setGroupPick((picking) => (picking === null ? [] : null))}
-            title="Group sources — pick two or more items, then Create group; grouped items move and show/hide together"
-            aria-label="Group sources"
+            title={t("sources-group-title")}
+            aria-label={t("sources-group-aria")}
             aria-pressed={groupPick !== null}
             className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-60 ${
               groupPick !== null
@@ -254,8 +259,8 @@ export function SourcesRail({
             type="button"
             disabled={!scene}
             onClick={() => setShowLayout(true)}
-            title="Arrange: screen + corners"
-            aria-label="Arrange: screen + corners"
+            title={t("sources-arrange")}
+            aria-label={t("sources-arrange")}
             className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
           >
             ▦
@@ -265,8 +270,8 @@ export function SourcesRail({
               type="button"
               disabled={!scene}
               onClick={() => setMenuOpen((open) => !open)}
-              title="Add a source"
-              aria-label="Add a source"
+              title={t("sources-add-source")}
+              aria-label={t("sources-add-source")}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
@@ -276,7 +281,7 @@ export function SourcesRail({
             {menuOpen && (
               <div
                 role="menu"
-                aria-label="Add a source"
+                aria-label={t("sources-add-source")}
                 className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
                 {ADD_MENU.map(([mode, label]) => (
@@ -287,13 +292,11 @@ export function SourcesRail({
                     onClick={() => openPicker(mode)}
                     className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
                   >
-                    {label}
+                    {t(label)}
                   </button>
                 ))}
                 <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                  Browser Source ships as its own on-demand component milestone (a ~180 MB Chromium
-                  engine — never bundled). Today: capture a real browser window with Window Capture
-                  + a chroma/color key, or open chat/alerts as a Dock (Controls → Docks).
+                  {t("sources-browser-source-note")}
                 </p>
               </div>
             )}
@@ -302,11 +305,7 @@ export function SourcesRail({
       }
     >
       {topFirst.length === 0 ? (
-        <EmptyHint>
-          No sources in this scene — add a Display Capture, Window, Webcam, Image, Color, or Text
-          with “+”. Drag, scale, and rotate them on the canvas; right side buttons reorder the
-          stack.
-        </EmptyHint>
+        <EmptyHint>{t("sources-empty")}</EmptyHint>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
           {topFirst.map((item) => {
@@ -339,8 +338,14 @@ export function SourcesRail({
                       type="checkbox"
                       checked={groupPick.includes(item.id)}
                       disabled={Boolean(itemGroup)}
-                      title={itemGroup ? `Already in ${itemGroup.name}` : "Pick for the new group"}
-                      aria-label={`Pick ${source?.name ?? "source"} for the new group`}
+                      title={
+                        itemGroup
+                          ? t("sources-already-in-group", { name: itemGroup.name })
+                          : t("sources-pick-for-new-group")
+                      }
+                      aria-label={t("sources-pick-item-for-group", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       onChange={(event) =>
                         setGroupPick((picked) =>
                           picked === null
@@ -355,8 +360,16 @@ export function SourcesRail({
                   <button
                     type="button"
                     onClick={() => onSetVisible(item.id, !item.visible)}
-                    title={item.visible ? "Hide" : "Show"}
-                    aria-label={`${item.visible ? "Hide" : "Show"} ${source?.name ?? "source"}`}
+                    title={item.visible ? t("sources-hide") : t("sources-show")}
+                    aria-label={
+                      item.visible
+                        ? t("sources-hide-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })
+                        : t("sources-show-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })
+                    }
                     aria-pressed={item.visible}
                     className={`shrink-0 rounded px-1 text-xs ${
                       item.visible ? "text-havoc-text" : "text-havoc-muted opacity-50"
@@ -372,12 +385,16 @@ export function SourcesRail({
                         console.error("focus toggle failed:", err),
                       );
                     }}
-                    title={
+                    title={isFocused ? t("sources-unfocus-title") : t("sources-focus-title")}
+                    aria-label={
                       isFocused
-                        ? "Unfocus — restore the layout"
-                        : "Focus — fill the canvas (Highlight Speaker)"
+                        ? t("sources-unfocus-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })
+                        : t("sources-focus-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })
                     }
-                    aria-label={`${isFocused ? "Unfocus" : "Focus"} ${source?.name ?? "source"}`}
                     aria-pressed={isFocused}
                     className={`shrink-0 rounded px-1 text-xs ${
                       isFocused
@@ -396,8 +413,10 @@ export function SourcesRail({
                           console.error("center view failed:", err),
                         );
                       }}
-                      title="Center — make this the shared center view (cams move to the rail)"
-                      aria-label={`Center ${source?.name ?? "source"}`}
+                      title={t("sources-center-title")}
+                      aria-label={t("sources-center-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
                     >
                       ◉
@@ -415,7 +434,9 @@ export function SourcesRail({
                         if (event.key === "Enter") commitRename();
                         if (event.key === "Escape") setRenaming(null);
                       }}
-                      aria-label={`Rename ${source?.name ?? "source"}`}
+                      aria-label={t("sources-rename-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="min-w-0 flex-1 rounded border border-havoc-accent/50 bg-transparent px-1 text-xs text-havoc-text outline-none"
                     />
                   ) : (
@@ -429,17 +450,19 @@ export function SourcesRail({
                       className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-havoc-text"
                     >
                       <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
-                        {KIND_BADGE[source?.kind ?? ""] ?? "?"}
+                        {t(KIND_BADGE[source?.kind ?? ""] ?? "sources-kind-unknown")}
                       </span>
                       {itemGroup && (
                         <span
-                          title={`In group ${itemGroup.name}`}
+                          title={t("sources-in-group", { name: itemGroup.name })}
                           className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
                         >
                           ⊞
                         </span>
                       )}
-                      <span className="truncate">{source?.name ?? "(missing source)"}</span>
+                      <span className="truncate">
+                        {source?.name ?? t("sources-missing-source")}
+                      </span>
                     </button>
                   )}
                   {status && status.state === "error" ? (
@@ -451,12 +474,16 @@ export function SourcesRail({
                             console.error("source retry failed:", err),
                           )
                         }
-                        title={`Retry — ${status.errorMessage ?? "error"}`}
-                        aria-label={`Retry ${source?.name ?? "source"}`}
+                        title={t("sources-retry-error", {
+                          message: status.errorMessage ?? t("sources-fallback-error"),
+                        })}
+                        aria-label={t("sources-retry-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
                         className="flex items-center gap-1 rounded px-1 text-[10px] text-red-400 hover:text-red-300"
                       >
                         <span
-                          aria-label="status: error"
+                          aria-label={t("sources-status-error")}
                           className="h-1.5 w-1.5 rounded-full bg-red-400"
                         />
                         ↻
@@ -469,11 +496,13 @@ export function SourcesRail({
                               source?.kind === "videoDevice" ? "camera" : "screenRecording",
                             )
                           }
-                          title="Open the macOS privacy settings for this permission"
-                          aria-label={`Open privacy settings for ${source?.name ?? "source"}`}
+                          title={t("sources-open-privacy-title")}
+                          aria-label={t("sources-open-privacy-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })}
                           className="rounded border border-red-400/40 px-1 text-[9px] text-red-300 hover:border-red-300"
                         >
-                          settings
+                          {t("sources-privacy-settings-button")}
                         </button>
                       )}
                     </span>
@@ -481,12 +510,12 @@ export function SourcesRail({
                     <span
                       title={
                         status.state !== "live"
-                          ? "starting…"
+                          ? t("sources-status-starting")
                           : "width" in status && status.width
                             ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
-                            : "live"
+                            : t("sources-status-live")
                       }
-                      aria-label={`status: ${status.state}`}
+                      aria-label={t("sources-status-aria", { state: status.state })}
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                         status.state === "live" ? "bg-emerald-400" : "bg-amber-300"
                       }`}
@@ -504,10 +533,18 @@ export function SourcesRail({
                       }}
                       title={
                         mediaPaused[item.source]
-                          ? "Resume the video (live on the stream)"
-                          : "Pause the video — hold the frame + go silent, live on the stream"
+                          ? t("sources-media-resume-title")
+                          : t("sources-media-pause-title")
                       }
-                      aria-label={`${mediaPaused[item.source] ? "Resume" : "Pause"} ${source?.name ?? "video"}`}
+                      aria-label={
+                        mediaPaused[item.source]
+                          ? t("sources-media-resume-item", {
+                              name: source?.name ?? t("sources-fallback-video"),
+                            })
+                          : t("sources-media-pause-item", {
+                              name: source?.name ?? t("sources-fallback-video"),
+                            })
+                      }
                       aria-pressed={Boolean(mediaPaused[item.source])}
                       className={`shrink-0 rounded px-1 text-[11px] ${
                         mediaPaused[item.source]
@@ -522,8 +559,16 @@ export function SourcesRail({
                     <button
                       type="button"
                       onClick={() => onSetLocked(item.id, !item.locked)}
-                      title={item.locked ? "Unlock" : "Lock"}
-                      aria-label={`${item.locked ? "Unlock" : "Lock"} ${source?.name ?? "source"}`}
+                      title={item.locked ? t("sources-unlock") : t("sources-lock")}
+                      aria-label={
+                        item.locked
+                          ? t("sources-unlock-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                          : t("sources-lock-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                      }
                       aria-pressed={item.locked}
                       className={`rounded px-1 text-[10px] ${
                         item.locked ? "text-amber-300" : "text-havoc-muted hover:text-havoc-text"
@@ -535,8 +580,10 @@ export function SourcesRail({
                       type="button"
                       disabled={modelIndex === items.length - 1}
                       onClick={() => onMove(item.id, modelIndex + 1)}
-                      title="Raise in the stack"
-                      aria-label={`Raise ${source?.name ?? "source"}`}
+                      title={t("sources-raise-title")}
+                      aria-label={t("sources-raise-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                     >
                       ▲
@@ -545,8 +592,10 @@ export function SourcesRail({
                       type="button"
                       disabled={modelIndex === 0}
                       onClick={() => onMove(item.id, modelIndex - 1)}
-                      title="Lower in the stack"
-                      aria-label={`Lower ${source?.name ?? "source"}`}
+                      title={t("sources-lower-title")}
+                      aria-label={t("sources-lower-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                     >
                       ▼
@@ -554,8 +603,10 @@ export function SourcesRail({
                     <button
                       type="button"
                       onClick={() => onOpenFilters(item.id)}
-                      title="Filters & blend"
-                      aria-label={`Filters for ${source?.name ?? "source"}`}
+                      title={t("sources-filters-title")}
+                      aria-label={t("sources-filters-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
                     >
                       ƒ
@@ -563,8 +614,10 @@ export function SourcesRail({
                     <button
                       type="button"
                       onClick={() => onOpenProperties(item.source)}
-                      title="Properties"
-                      aria-label={`Properties of ${source?.name ?? "source"}`}
+                      title={t("sources-properties-title")}
+                      aria-label={t("sources-properties-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
                     >
                       ⚙
@@ -572,8 +625,10 @@ export function SourcesRail({
                     <button
                       type="button"
                       onClick={() => onRemove(item.id)}
-                      title="Remove from this scene"
-                      aria-label={`Remove ${source?.name ?? "source"}`}
+                      title={t("sources-remove-title")}
+                      aria-label={t("sources-remove-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
                       className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
                     >
                       ×
@@ -638,19 +693,22 @@ export function SourcesRail({
             onClick={createGroup}
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2 py-1 text-[11px] font-semibold text-havoc-text disabled:opacity-50"
           >
-            Create group ({groupPick.length})
+            {t("sources-create-group", { count: groupPick.length })}
           </button>
           <button
             type="button"
             onClick={() => setGroupPick(null)}
             className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
           >
-            Cancel
+            {t("sources-cancel")}
           </button>
         </div>
       )}
       {groups.length > 0 && (
-        <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0" aria-label="Source groups">
+        <ul
+          className="m-0 mt-2 flex list-none flex-col gap-1 p-0"
+          aria-label={t("sources-groups-aria")}
+        >
           {groups.map((group) => (
             <li
               key={group.id}
@@ -664,7 +722,7 @@ export function SourcesRail({
                     console.error("group visibility failed:", err),
                   );
                 }}
-                title={group.visible ? "Hide the group" : "Show the group"}
+                title={group.visible ? t("sources-hide-group") : t("sources-show-group")}
                 aria-pressed={group.visible}
                 className={`shrink-0 rounded px-1 ${
                   group.visible ? "text-havoc-text" : "text-havoc-muted opacity-50"
@@ -674,7 +732,10 @@ export function SourcesRail({
               </button>
               <span className="min-w-0 flex-1 truncate text-havoc-text">
                 ⊞ {group.name}
-                <span className="text-havoc-muted"> · {group.items.length} items</span>
+                <span className="text-havoc-muted">
+                  {" "}
+                  {t("sources-item-count", { count: group.items.length })}
+                </span>
               </span>
               <button
                 type="button"
@@ -684,8 +745,8 @@ export function SourcesRail({
                     console.error("ungroup failed:", err),
                   );
                 }}
-                title="Ungroup — the items stay where they are"
-                aria-label={`Ungroup ${group.name}`}
+                title={t("sources-ungroup-title")}
+                aria-label={t("sources-ungroup-item", { name: group.name })}
                 className="shrink-0 rounded px-1 text-havoc-muted hover:text-red-300"
               >
                 ✕
@@ -716,6 +777,7 @@ function ChatOverlayForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [youtube, setYoutube] = useState("");
   const [twitch, setTwitch] = useState("");
   const [kick, setKick] = useState("");
@@ -724,41 +786,36 @@ function ChatOverlayForm({
   const any = Boolean(youtube.trim() || twitch.trim() || kick.trim());
 
   return (
-    <PickerShell title="Add a Live Chat Overlay" onClose={onClose}>
+    <PickerShell title={t("sources-chat-title")} onClose={onClose}>
       <div className="flex flex-col gap-2 text-xs text-havoc-text">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          YouTube — channel, watch, or live_chat URL (no key, no sign-in)
+          {t("sources-chat-youtube-label")}
           <input
             value={youtube}
             onChange={(event) => setYoutube(event.target.value)}
-            placeholder="https://www.youtube.com/@yourchannel  ·  or a watch?v= URL"
+            placeholder={t("sources-chat-youtube-placeholder")}
             className={`${fieldClass} font-mono`}
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Twitch — channel name (read anonymously, no account)
+          {t("sources-chat-twitch-label")}
           <input
             value={twitch}
             onChange={(event) => setTwitch(event.target.value)}
-            placeholder="yourchannel"
+            placeholder={t("sources-chat-twitch-placeholder")}
             className={`${fieldClass} font-mono`}
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Kick — channel slug (public endpoint, best-effort)
+          {t("sources-chat-kick-label")}
           <input
             value={kick}
             onChange={(event) => setKick(event.target.value)}
-            placeholder="yourchannel"
+            placeholder={t("sources-chat-kick-placeholder")}
             className={`${fieldClass} font-mono`}
           />
         </label>
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Messages appear with a running h:mm:ss AM/PM timestamp on a transparent background
-          (default top-right; drag it anywhere). A chat flood only ages old lines out — it can never
-          stall the stream or the recording. Facebook chat needs your own Graph token and is not
-          implemented yet — it is never required and never gates the platforms above.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-chat-note")}</p>
         <button
           type="button"
           disabled={!any}
@@ -773,12 +830,12 @@ function ChatOverlayForm({
                 maxLines: 12,
                 fontSize: 22,
               },
-              "Live Chat",
+              t("sources-chat-default-name"),
             )
           }
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Add chat overlay
+          {t("sources-chat-add")}
         </button>
       </div>
     </PickerShell>
@@ -795,6 +852,7 @@ function SlideshowForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [paths, setPaths] = useState<string[]>([]);
   const [slideMs, setSlideMs] = useState(5000);
   const [transitionMs, setTransitionMs] = useState(300);
@@ -814,10 +872,10 @@ function SlideshowForm({
   };
 
   return (
-    <PickerShell title="Add an Image Slideshow" onClose={onClose}>
+    <PickerShell title={t("sources-slideshow-title")} onClose={onClose}>
       <div className="flex flex-col gap-2 text-xs text-havoc-text">
         {paths.length === 0 ? (
-          <EmptyHint>No images yet — Browse adds them in order.</EmptyHint>
+          <EmptyHint>{t("sources-slideshow-empty")}</EmptyHint>
         ) : (
           <ul className="m-0 flex max-h-40 list-none flex-col gap-1 overflow-y-auto p-0">
             {paths.map((path, index) => (
@@ -831,7 +889,7 @@ function SlideshowForm({
                 <button
                   type="button"
                   onClick={() => setPaths(paths.filter((_, at) => at !== index))}
-                  aria-label={`Remove slide ${index + 1}`}
+                  aria-label={t("sources-slideshow-remove-slide", { number: index + 1 })}
                   className="shrink-0 rounded px-1 text-havoc-muted hover:text-red-300"
                 >
                   ✕
@@ -845,11 +903,11 @@ function SlideshowForm({
           onClick={browse}
           className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
         >
-          Browse images…
+          {t("sources-slideshow-browse")}
         </button>
         <div className="grid grid-cols-2 gap-2">
           <NumberField
-            label="Per-slide (ms)"
+            label={t("sources-slideshow-per-slide-label")}
             value={slideMs}
             min={100}
             max={600000}
@@ -857,7 +915,7 @@ function SlideshowForm({
             onCommit={(value) => setSlideMs(Math.round(value))}
           />
           <NumberField
-            label="Crossfade (ms, 0 = cut)"
+            label={t("sources-slideshow-crossfade-label")}
             value={transitionMs}
             min={0}
             max={5000}
@@ -867,15 +925,14 @@ function SlideshowForm({
         </div>
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
           <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
-          Loop (off = hold the last slide)
+          {t("sources-slideshow-loop-label")}
         </label>
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
           <input type="checkbox" checked={shuffle} onChange={(e) => setShuffle(e.target.checked)} />
-          Shuffle each cycle
+          {t("sources-slideshow-shuffle-label")}
         </label>
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          The crossfade blends equal-sized images; different sizes hard-cut at the boundary (no
-          silent rescale).
+          {t("sources-slideshow-note")}
         </p>
         <button
           type="button"
@@ -883,7 +940,7 @@ function SlideshowForm({
           onClick={() => onPick({ kind: "slideshow", paths, slideMs, transitionMs, loop, shuffle })}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Add slideshow ({paths.length})
+          {t("sources-slideshow-add", { count: paths.length })}
         </button>
       </div>
     </PickerShell>
@@ -904,11 +961,12 @@ function NestedSceneForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const candidates = (collection?.scenes ?? []).filter((entry) => entry.id !== currentScene);
   return (
-    <PickerShell title="Add a Nested Scene" onClose={onClose}>
+    <PickerShell title={t("sources-nested-title")} onClose={onClose}>
       {candidates.length === 0 ? (
-        <EmptyHint>No other scene to nest — add a second scene first.</EmptyHint>
+        <EmptyHint>{t("sources-nested-empty")}</EmptyHint>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {candidates.map((entry) => (
@@ -916,21 +974,25 @@ function NestedSceneForm({
               <button
                 type="button"
                 onClick={() =>
-                  onPick({ kind: "nestedScene", scene: entry.id }, `Scene: ${entry.name}`)
+                  onPick(
+                    { kind: "nestedScene", scene: entry.id },
+                    t("sources-nested-scene-name", { name: entry.name }),
+                  )
                 }
                 className="w-full rounded-lg border border-white/10 bg-white/[0.02] px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
               >
                 {entry.name}
-                <span className="text-havoc-muted"> · {entry.items.length} items</span>
+                <span className="text-havoc-muted">
+                  {" "}
+                  {t("sources-item-count", { count: entry.items.length })}
+                </span>
               </button>
             </li>
           ))}
         </ul>
       )}
       <p className="m-0 mt-2 text-[10px] leading-snug text-havoc-muted">
-        The nested scene renders live at the program canvas size and follows its own edits;
-        transforms, filters, and blend apply to it like any source. Its audio sources join the mix
-        while a scene showing it is the program.
+        {t("sources-nested-note")}
       </p>
     </PickerShell>
   );
@@ -945,6 +1007,7 @@ function CapturePicker({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [entries, setEntries] = useState<CaptureSource[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadedRef = useRef(false);
@@ -973,7 +1036,8 @@ function CapturePicker({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const title = mode === "display" ? "Add a Display Capture" : "Add a Window Capture";
+  const title =
+    mode === "display" ? t("sources-capture-display-title") : t("sources-capture-window-title");
   const hasPortal = entries?.some((s) => s.kind === "portal") ?? false;
   // Window mode shows a live thumbnail grid; everything else (displays, and the
   // Wayland portal entry in either mode) stays a text row.
@@ -988,10 +1052,12 @@ function CapturePicker({
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : entries === null ? (
-        <p className="m-0 text-xs text-havoc-muted">Looking for sources…</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-capture-looking")}</p>
       ) : entries.length === 0 ? (
         <p className="m-0 text-xs text-havoc-muted">
-          Nothing to capture here — no {mode === "display" ? "displays" : "windows"} were found.
+          {mode === "display"
+            ? t("sources-capture-none-displays")
+            : t("sources-capture-none-windows")}
         </p>
       ) : (
         <>
@@ -1044,14 +1110,12 @@ function CapturePicker({
           )}
           {hasPortal && (
             <p className="mt-2 mb-0 text-[11px] leading-relaxed text-havoc-muted">
-              On Wayland, the system dialog picks the screen or window — apps can’t capture globally
-              there, so that’s the honest (and only) path.
+              {t("sources-capture-portal-note")}
             </p>
           )}
           {mode === "window" && windowTiles.length > 0 && (
             <p className="mt-2 mb-0 text-[10px] leading-snug text-havoc-muted">
-              Previews update live. A minimized window shows its last frame (or none) until you
-              restore it.
+              {t("sources-capture-window-note")}
             </p>
           )}
         </>
@@ -1074,6 +1138,7 @@ function WindowThumbTile({
   index: number;
   onPick: () => void;
 }) {
+  const t = useT();
   const [thumb, setThumb] = useState<string | null>(null);
   const [tried, setTried] = useState(false);
 
@@ -1122,7 +1187,9 @@ function WindowThumbTile({
         {thumb ? (
           <img src={thumb} alt="" className="h-full w-full object-contain" />
         ) : (
-          <span className="text-[10px] text-havoc-muted">{tried ? "no preview" : "loading…"}</span>
+          <span className="text-[10px] text-havoc-muted">
+            {tried ? t("sources-thumb-no-preview") : t("sources-thumb-loading")}
+          </span>
         )}
       </div>
       <span className="truncate px-1.5 py-1 text-[11px] text-havoc-text">{entry.label}</span>
@@ -1137,6 +1204,7 @@ function WebcamPicker({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [devices, setDevices] = useState<VideoDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<VideoDevice | null>(null);
@@ -1215,13 +1283,13 @@ function WebcamPicker({
   };
 
   return (
-    <PickerShell title="Add a Video Capture Device" onClose={onClose}>
+    <PickerShell title={t("sources-webcam-title")} onClose={onClose}>
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : devices === null ? (
-        <p className="m-0 text-xs text-havoc-muted">Looking for cameras…</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-webcam-looking")}</p>
       ) : devices.length === 0 ? (
-        <p className="m-0 text-xs text-havoc-muted">No cameras or capture cards were found.</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-webcam-none")}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -1245,14 +1313,16 @@ function WebcamPicker({
           {selected && (
             <>
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Format
+                {t("sources-webcam-format-label")}
                 <select
                   ref={formatRef}
                   defaultValue={-1}
                   className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
                 >
                   <option value={-1}>
-                    {formats === null ? "Auto (loading formats…)" : "Auto (highest resolution)"}
+                    {formats === null
+                      ? t("sources-webcam-format-auto-loading")
+                      : t("sources-webcam-format-auto")}
                   </option>
                   {(formats ?? []).map((format, index) => (
                     <option
@@ -1266,13 +1336,15 @@ function WebcamPicker({
               </label>
               {cardPresets.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] text-havoc-muted">Card presets:</span>
+                  <span className="text-[10px] text-havoc-muted">
+                    {t("sources-webcam-card-presets-label")}
+                  </span>
                   {cardPresets.map(([label, index]) => (
                     <button
                       key={label}
                       type="button"
                       onClick={() => applyPreset(index)}
-                      title={`Select the ${label} mode this card advertises`}
+                      title={t("sources-webcam-preset-title", { label })}
                       className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-havoc-muted hover:border-havoc-accent/60 hover:text-havoc-text"
                     >
                       {label}
@@ -1285,7 +1357,7 @@ function WebcamPicker({
                 onClick={add}
                 className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
               >
-                Add camera
+                {t("sources-webcam-add")}
               </button>
             </>
           )}
@@ -1304,6 +1376,7 @@ function AudioPicker({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [devices, setDevices] = useState<AudioDevice[] | null>(null);
   const [guidance, setGuidance] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1335,7 +1408,7 @@ function AudioPicker({
     };
   }, [isLoopback]);
 
-  const title = isLoopback ? "Add an Audio Output Capture" : "Add an Audio Input Capture";
+  const title = isLoopback ? t("sources-audio-output-title") : t("sources-audio-input-title");
   // Windows loopback (no guidance) can capture the default output; elsewhere
   // an explicit monitor/virtual device pick is the honest requirement.
   const offerDefault = !isLoopback || (devices !== null && guidance === null);
@@ -1344,7 +1417,7 @@ function AudioPicker({
       ? [
           {
             id: "",
-            name: isLoopback ? "Default output (what you hear)" : "Default input",
+            name: isLoopback ? t("sources-audio-default-output") : t("sources-audio-default-input"),
           },
         ]
       : []),
@@ -1356,14 +1429,12 @@ function AudioPicker({
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : devices === null ? (
-        <p className="m-0 text-xs text-havoc-muted">Looking for audio devices…</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-audio-looking")}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {entries.length === 0 ? (
             <p className="m-0 text-xs text-havoc-muted">
-              {isLoopback
-                ? "No desktop-audio capture device was found here."
-                : "No microphones or line-ins were found."}
+              {isLoopback ? t("sources-audio-none-output") : t("sources-audio-none-input")}
             </p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -1392,8 +1463,7 @@ function AudioPicker({
           )}
           {!isLoopback && (
             <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-              Mixer strips get a VU meter, fader, mute, monitoring, filters (denoise, gate,
-              compressor…), and track assignment. Everything stays on this machine.
+              {t("sources-audio-input-note")}
             </p>
           )}
         </div>
@@ -1418,6 +1488,7 @@ function AppAudioPicker({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [list, setList] = useState<AppAudioList | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1446,11 +1517,11 @@ function AppAudioPicker({
   }, []);
 
   return (
-    <PickerShell title="Add Application Audio" onClose={onClose}>
+    <PickerShell title={t("sources-appaudio-title")} onClose={onClose}>
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : list === null ? (
-        <p className="m-0 text-xs text-havoc-muted">Looking for apps making sound…</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-appaudio-looking")}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {list.supported && list.apps.length > 0 ? (
@@ -1474,9 +1545,7 @@ function AppAudioPicker({
             </ul>
           ) : (
             <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
-              {list.supported
-                ? "No apps are making sound right now — start playback in the app, then refresh."
-                : list.guidance}
+              {list.supported ? t("sources-appaudio-none") : list.guidance}
             </p>
           )}
           <div className="flex items-center justify-between">
@@ -1485,12 +1554,11 @@ function AppAudioPicker({
               onClick={load}
               className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              ⟳ Refresh
+              {t("sources-appaudio-refresh")}
             </button>
             {list.supported && (
               <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-                Captures exactly that app&apos;s audio — its own VU, fader, mute, filters, and
-                track.
+                {t("sources-appaudio-note")}
               </p>
             )}
           </div>
@@ -1513,6 +1581,7 @@ function GameCapturePicker({
   onClose: () => void;
   onUseWindowCapture: () => void;
 }) {
+  const t = useT();
   const [status, setStatus] = useState<GameCaptureStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1531,11 +1600,11 @@ function GameCapturePicker({
   }, []);
 
   return (
-    <PickerShell title="Game Capture" onClose={onClose}>
+    <PickerShell title={t("sources-game-title")} onClose={onClose}>
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : status === null ? (
-        <p className="m-0 text-xs text-havoc-muted">Checking…</p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-game-checking")}</p>
       ) : (
         <div className="flex flex-col gap-3 text-xs">
           <p className="m-0 rounded-md border border-red-400/25 bg-red-400/5 p-2 leading-relaxed text-red-200/90">
@@ -1549,15 +1618,15 @@ function GameCapturePicker({
               className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
             >
               {status.fallback === "portal"
-                ? "Use Screen Capture (Portal)"
-                : "Use Window Capture instead"}
+                ? t("sources-game-use-portal")
+                : t("sources-game-use-window")}
             </button>
             <button
               type="button"
               onClick={onClose}
               className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              Cancel
+              {t("sources-cancel")}
             </button>
           </div>
         </div>
@@ -1573,6 +1642,7 @@ function ImageForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [path, setPath] = useState("");
   const browse = () =>
     pickFile([{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }]).then(
@@ -1581,10 +1651,10 @@ function ImageForm({
       },
     );
   return (
-    <PickerShell title="Add an Image" onClose={onClose}>
+    <PickerShell title={t("sources-image-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Image file (PNG, JPEG, BMP, GIF, WebP…)
+          {t("sources-image-file-label")}
           <PathField
             value={path}
             onChange={setPath}
@@ -1598,7 +1668,7 @@ function ImageForm({
           onClick={() => onPick({ kind: "image", path: path.trim() })}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Add image
+          {t("sources-image-add")}
         </button>
       </div>
     </PickerShell>
@@ -1631,6 +1701,7 @@ function PathField({
   onBrowse: () => void;
   placeholder: string;
 }) {
+  const t = useT();
   return (
     <div className="flex gap-2">
       <input
@@ -1644,7 +1715,7 @@ function PathField({
         onClick={onBrowse}
         className="shrink-0 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
       >
-        Browse…
+        {t("sources-browse")}
       </button>
     </div>
   );
@@ -1657,6 +1728,7 @@ function MediaForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [path, setPath] = useState("");
   const [loop, setLoop] = useState(false);
   const browse = () =>
@@ -1666,10 +1738,10 @@ function MediaForm({
       if (picked) setPath(picked);
     });
   return (
-    <PickerShell title="Add Media" onClose={onClose}>
+    <PickerShell title={t("sources-media-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Media file (mp4, mkv, webm, mov, .frec, or an image)
+          {t("sources-media-file-label")}
           <PathField
             value={path}
             onChange={setPath}
@@ -1683,31 +1755,28 @@ function MediaForm({
             checked={loop}
             onChange={(event) => setLoop(event.target.checked)}
           />
-          Loop (restart from the top at the end)
+          {t("sources-media-loop-label")}
         </label>
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          .frec plays through the owned freally-video codec — nothing to download. The wire formats
-          (mp4/mkv/webm/…) decode through the on-demand FFmpeg component; its audio lands in the
-          mixer as its own strip.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-media-note")}</p>
         <button
           type="button"
           disabled={!path.trim()}
           onClick={() => onPick({ kind: "media", path: path.trim(), loop, hwDecode: true })}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Add media
+          {t("sources-media-add")}
         </button>
       </div>
     </PickerShell>
   );
 }
 
+/** `[minutes, i18n key]` — the call site renders `t(key)`. */
 const INVITE_TTLS: Array<[number, string]> = [
-  [15, "15 min"],
-  [30, "30 min"],
-  [60, "1 hour"],
-  [1440, "1 day"],
+  [15, "sources-ttl-15min"],
+  [30, "sources-ttl-30min"],
+  [60, "sources-ttl-1hour"],
+  [1440, "sources-ttl-1day"],
 ];
 
 /**
@@ -1720,6 +1789,7 @@ const INVITE_TTLS: Array<[number, string]> = [
  * controls (mute, stop) sit on the main-UI session bar.
  */
 function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () => void }) {
+  const t = useT();
   const session = useSyncExternalStore(spikeSubscribe, spikeGetState);
   const [hostId, setHostId] = useState("");
   const [ttl, setTtl] = useState(30);
@@ -1750,7 +1820,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);
       })
-      .catch(() => setFormError("couldn't copy — select the link and copy manually"));
+      .catch(() => setFormError(t("sources-remote-copy-failed")));
   };
   const join = () => {
     const target = joinTargetFromInput(hostId, Date.now());
@@ -1759,15 +1829,17 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
       return;
     }
     setFormError(null);
-    spikeJoin(target.peerId).catch((err) => setFormError(`join failed: ${err}`));
+    spikeJoin(target.peerId).catch((err) =>
+      setFormError(t("sources-remote-join-failed", { error: String(err) })),
+    );
   };
 
   return (
-    <PickerShell title="Remote Guest (P2P spike)" onClose={onClose}>
+    <PickerShell title={t("sources-remote-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <div className="flex flex-col gap-1.5">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-            Host — invite a guest
+            {t("sources-remote-host-heading")}
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -1775,19 +1847,19 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
               onClick={startHosting}
               className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
             >
-              Start hosting
+              {t("sources-remote-start-hosting")}
             </button>
             <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
-              Expires
+              {t("sources-remote-expires-label")}
               <select
                 value={ttl}
                 onChange={(event) => changeTtl(Number(event.target.value))}
-                aria-label="Invite expiry"
+                aria-label={t("sources-remote-invite-expiry-aria")}
                 className="rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
               >
                 {INVITE_TTLS.map(([minutes, label]) => (
                   <option key={minutes} value={minutes}>
-                    {label}
+                    {t(label)}
                   </option>
                 ))}
               </select>
@@ -1800,7 +1872,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                   readOnly
                   value={link}
                   onFocus={(event) => event.target.select()}
-                  aria-label="Invite link"
+                  aria-label={t("sources-remote-invite-link-aria")}
                   className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
                 />
                 <button
@@ -1808,18 +1880,16 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                   onClick={copyLink}
                   className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
                 >
-                  {copied ? "Copied ✓" : "Copy"}
+                  {copied ? t("sources-remote-copied") : t("sources-remote-copy")}
                 </button>
               </div>
               <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-                Share this link (Discord / text / email). It carries your session and expires as
-                set. The guest opens it and joins with their webcam.
+                {t("sources-remote-share-note")}
               </p>
               <div className="flex items-center gap-2">
                 <InviteQr link={qrLink ?? link} />
                 <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-                  Scan on a phone to join straight from the browser — camera + mic, no install. The
-                  copyable freally:// link above opens in Freally Capture on a machine that has it.
+                  {t("sources-remote-qr-note")}
                 </p>
               </div>
             </>
@@ -1829,7 +1899,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
         <TurnRelaySection />
         <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
           <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-            Guest — join with an invite
+            {t("sources-remote-guest-heading")}
           </p>
           <div className="flex gap-2">
             <input
@@ -1838,8 +1908,8 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                 setHostId(event.target.value);
                 setFormError(null);
               }}
-              placeholder="paste the invite link"
-              aria-label="Invite link or session id"
+              placeholder={t("sources-remote-paste-placeholder")}
+              aria-label={t("sources-remote-invite-input-aria")}
               className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[11px] text-havoc-text"
             />
             <button
@@ -1848,14 +1918,13 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
               onClick={join}
               className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-60"
             >
-              Join with webcam
+              {t("sources-remote-join")}
             </button>
           </div>
         </div>
         {session.active && (
           <p className="m-0 border-t border-white/5 pt-2 text-[10px] leading-snug text-havoc-muted">
-            The live session controls (mute, end) stay on the bar at the top of the main window —
-            you can close this dialog.
+            {t("sources-remote-session-note")}
           </p>
         )}
         <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2">
@@ -1874,7 +1943,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
             }}
             className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
           >
-            Stop session
+            {t("sources-remote-stop-session")}
           </button>
         </div>
       </div>
@@ -1885,6 +1954,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
 /** The invite link as a QR code (TASK-R3) — vendored zero-dep encoder, drawn
  * as a plain SVG path (no innerHTML, CSP-safe). */
 function InviteQr({ link }: { link: string }) {
+  const t = useT();
   const rendered = useMemo(() => {
     try {
       const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
@@ -1907,7 +1977,7 @@ function InviteQr({ link }: { link: string }) {
     <svg
       viewBox={`0 0 ${rendered.count} ${rendered.count}`}
       role="img"
-      aria-label="Invite link QR code"
+      aria-label={t("sources-invite-qr-aria")}
       className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
     >
       <path d={rendered.path} fill="#000" />
@@ -1928,6 +1998,7 @@ function RemoteDevicePickers({
   micId: string | null;
   speakerId: string | null;
 }) {
+  const t = useT();
   const [devices, setDevices] = useState<RemoteAudioDevices>({ inputs: [], outputs: [] });
   const [testNote, setTestNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -1965,8 +2036,7 @@ function RemoteDevicePickers({
         testStopRef.current?.(); // a switch mid-test replaces the loop
         testStopRef.current = stop;
         setTesting(true);
-        if (sink !== "ok")
-          setTestNote("output routing unavailable — playing on the default device");
+        if (sink !== "ok") setTestNote(t("sources-devices-output-unavailable"));
         // The permission grant unlocks real device labels — refresh.
         listRemoteAudioDevices()
           .then(setDevices)
@@ -1974,7 +2044,7 @@ function RemoteDevicePickers({
       })
       .catch((err) => {
         setTesting(false);
-        setTestNote(`mic test failed: ${err}`);
+        setTestNote(t("sources-devices-mic-test-failed", { error: String(err) }));
       });
   };
 
@@ -1990,17 +2060,17 @@ function RemoteDevicePickers({
   return (
     <div className="flex flex-col gap-1.5 border-t border-white/5 pt-2">
       <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-        Session audio devices
+        {t("sources-devices-heading")}
       </p>
       <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-        <span className="w-20 shrink-0">Microphone</span>
+        <span className="w-20 shrink-0">{t("sources-devices-microphone-label")}</span>
         <select
           value={micId ?? ""}
           onChange={(event) => pickMic(event.target.value || null)}
-          aria-label="Session microphone"
+          aria-label={t("sources-devices-microphone-aria")}
           className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
         >
-          <option value="">System default</option>
+          <option value="">{t("sources-devices-system-default")}</option>
           {devices.inputs.map((device) => (
             <option key={device.deviceId} value={device.deviceId}>
               {device.label}
@@ -2009,14 +2079,14 @@ function RemoteDevicePickers({
         </select>
       </label>
       <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-        <span className="w-20 shrink-0">Output</span>
+        <span className="w-20 shrink-0">{t("sources-devices-output-label")}</span>
         <select
           value={speakerId ?? ""}
           onChange={(event) => pickSpeaker(event.target.value || null)}
-          aria-label="Session audio output"
+          aria-label={t("sources-devices-output-aria")}
           className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text"
         >
-          <option value="">System default</option>
+          <option value="">{t("sources-devices-system-default")}</option>
           {devices.outputs.map((device) => (
             <option key={device.deviceId} value={device.deviceId}>
               {device.label}
@@ -2035,12 +2105,10 @@ function RemoteDevicePickers({
               : "border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
           }`}
         >
-          {testing ? "Stop test" : "Test — hear yourself"}
+          {testing ? t("sources-devices-stop-test") : t("sources-devices-test")}
         </button>
         <span className="text-[10px] leading-snug text-havoc-muted">
-          {testing
-            ? "talk into the mic — you're hearing the selected devices live"
-            : "loops your mic to the output (headphones avoid feedback)"}
+          {testing ? t("sources-devices-testing-note") : t("sources-devices-idle-note")}
         </span>
       </div>
       {testNote && <p className="m-0 text-[10px] leading-snug text-amber-300">{testNote}</p>}
@@ -2056,6 +2124,7 @@ function RemoteDevicePickers({
  * the local settings file only, never logged, redacted from diagnostics.
  */
 function TurnRelaySection() {
+  const t = useT();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -2076,66 +2145,58 @@ function TurnRelaySection() {
     const next = { ...settings, remote: { ...settings.remote, ...patch } };
     setSettings(next);
     setNote(null);
-    settingsSet(next).catch((err) => setNote(`couldn't save: ${err}`));
+    settingsSet(next).catch((err) =>
+      setNote(t("sources-turn-save-failed", { error: String(err) })),
+    );
   };
 
   return (
     <details className="border-t border-white/5 pt-2">
       <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-havoc-muted">
-        Network — optional TURN relay (advanced)
+        {t("sources-turn-summary")}
       </summary>
       <div className="mt-1.5 flex flex-col gap-1.5">
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Sessions connect directly (P2P) — free, no relay needed. If BOTH sides sit behind strict
-          NATs the direct path can fail; a TURN relay you run yourself carries the media then.
-          Skipping this is fine — most connections work direct-only.
-        </p>
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Free option: Oracle Cloud "Always Free" runs coturn at no cost (note: Oracle asks for a
-          credit card at signup, but the Always-Free shape stays free). Steps: 1) create the free
-          VM, 2) install coturn, 3) open UDP 3478, 4) set a user/password, 5) enter{" "}
-          <span className="font-mono">turn:your-vm-ip:3478</span> + the credentials here. Your
-          credential stays in your local settings file and is never logged.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-turn-note-1")}</p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-turn-note-2")}</p>
         {settings ? (
           <>
             <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-              <span className="w-20 shrink-0">TURN URL</span>
+              <span className="w-20 shrink-0">{t("sources-turn-url-label")}</span>
               <input
                 value={settings.remote.turnUrl}
                 onChange={(event) => save({ turnUrl: event.target.value })}
-                placeholder="turn:host:3478 (empty = direct only)"
-                aria-label="TURN URL"
+                placeholder={t("sources-turn-url-placeholder")}
+                aria-label={t("sources-turn-url-aria")}
                 className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
               />
             </label>
             <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-              <span className="w-20 shrink-0">Username</span>
+              <span className="w-20 shrink-0">{t("sources-turn-username-label")}</span>
               <input
                 value={settings.remote.turnUsername}
                 onChange={(event) => save({ turnUsername: event.target.value })}
-                aria-label="TURN username"
+                aria-label={t("sources-turn-username-aria")}
                 className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
               />
             </label>
             <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-              <span className="w-20 shrink-0">Credential</span>
+              <span className="w-20 shrink-0">{t("sources-turn-credential-label")}</span>
               <input
                 type="password"
                 value={settings.remote.turnCredential}
                 onChange={(event) => save({ turnCredential: event.target.value })}
-                aria-label="TURN credential"
+                aria-label={t("sources-turn-credential-aria")}
                 className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[10px] text-havoc-text"
               />
             </label>
             <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-              The relay engages once all three fields are set (a TURN server requires the
-              credentials) and applies to the next session you start or join. Verify it with a
-              relay-only test call between your own two machines.
+              {t("sources-turn-note-3")}
             </p>
           </>
         ) : (
-          <p className="m-0 text-[10px] text-havoc-muted">settings unavailable (browser mode)</p>
+          <p className="m-0 text-[10px] text-havoc-muted">
+            {t("sources-turn-settings-unavailable")}
+          </p>
         )}
         {note && <p className="m-0 text-[10px] text-amber-300">{note}</p>}
       </div>
@@ -2150,25 +2211,26 @@ function ColorForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
+  const t = useT();
   const [hex, setHex] = useState("#4a9eff");
   const [width, setWidth] = useState(1920);
   const [height, setHeight] = useState(1080);
   return (
-    <PickerShell title="Add a Color" onClose={onClose}>
+    <PickerShell title={t("sources-color-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-          Color
+          {t("sources-color-label")}
           <input
             type="color"
             value={hex}
             onChange={(event) => setHex(event.target.value)}
-            aria-label="Color"
+            aria-label={t("sources-color-label")}
             className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
           />
         </label>
         <div className="flex gap-2">
           <NumberField
-            label="Width"
+            label={t("sources-color-width-label")}
             value={width}
             min={1}
             max={16384}
@@ -2176,7 +2238,7 @@ function ColorForm({
             className="flex-1"
           />
           <NumberField
-            label="Height"
+            label={t("sources-color-height-label")}
             value={height}
             min={1}
             max={16384}
@@ -2189,7 +2251,7 @@ function ColorForm({
           onClick={() => onPick({ kind: "color", color: hexToRgba(hex), width, height })}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
-          Add color
+          {t("sources-color-add")}
         </button>
       </div>
     </PickerShell>
@@ -2203,14 +2265,15 @@ function TextForm({
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
-  const [text, setText] = useState("Text");
+  const t = useT();
+  const [text, setText] = useState(t("sources-text-default"));
   const [hex, setHex] = useState("#ffffff");
   const [size, setSize] = useState(72);
   return (
-    <PickerShell title="Add Text" onClose={onClose}>
+    <PickerShell title={t("sources-text-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Text
+          {t("sources-text-label")}
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -2220,17 +2283,17 @@ function TextForm({
         </label>
         <div className="flex items-end gap-2">
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            Color
+            {t("sources-text-color-label")}
             <input
               type="color"
               value={hex}
               onChange={(event) => setHex(event.target.value)}
-              aria-label="Text color"
+              aria-label={t("sources-text-color-aria")}
               className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
             />
           </label>
           <NumberField
-            label="Size (px)"
+            label={t("sources-text-size-label")}
             value={size}
             min={4}
             max={512}
@@ -2238,10 +2301,7 @@ function TextForm({
             className="flex-1"
           />
         </div>
-        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-          Font family, alignment, wrapping, and RTL live in the source’s Properties. The bundled
-          Noto Sans (incl. Arabic/Hebrew) is the default — identical on every machine.
-        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-text-note")}</p>
         <button
           type="button"
           disabled={!text.trim()}
@@ -2264,7 +2324,7 @@ function TextForm({
           }
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Add text
+          {t("sources-text-add")}
         </button>
       </div>
     </PickerShell>
@@ -2280,14 +2340,12 @@ function ExistingPicker({
   onClose: () => void;
   onPick: (source: SourceId) => void;
 }) {
+  const t = useT();
   const sources = collection?.sources ?? [];
   return (
-    <PickerShell title="Add an existing source" onClose={onClose}>
+    <PickerShell title={t("sources-existing-title")} onClose={onClose}>
       {sources.length === 0 ? (
-        <p className="m-0 text-xs text-havoc-muted">
-          No sources exist yet — add one to any scene first. Existing sources are shared: renaming
-          or reconfiguring one updates every scene that shows it.
-        </p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-existing-empty")}</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {sources.map((source) => (
@@ -2298,7 +2356,7 @@ function ExistingPicker({
                 className="flex w-full items-center gap-1.5 truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
               >
                 <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
-                  {KIND_BADGE[source.kind] ?? "?"}
+                  {t(KIND_BADGE[source.kind] ?? "sources-kind-unknown")}
                 </span>
                 <span className="truncate">{source.name}</span>
               </button>
@@ -2313,13 +2371,14 @@ function ExistingPicker({
 /** A source's assigned slot in the screen-plus-corners layout. */
 type LayoutChoice = "off" | "center" | Corner;
 
+/** `[value, i18n key]` — the call site renders `t(key)`. */
 const SLOT_OPTIONS: Array<[LayoutChoice, string]> = [
-  ["off", "Off"],
-  ["center", "Center (screen)"],
-  ["topLeft", "Top-Left"],
-  ["topRight", "Top-Right"],
-  ["bottomLeft", "Bottom-Left"],
-  ["bottomRight", "Bottom-Right"],
+  ["off", "sources-slot-off"],
+  ["center", "sources-slot-center"],
+  ["topLeft", "sources-slot-top-left"],
+  ["topRight", "sources-slot-top-right"],
+  ["bottomLeft", "sources-slot-bottom-left"],
+  ["bottomRight", "sources-slot-bottom-right"],
 ];
 
 /**
@@ -2337,6 +2396,7 @@ function LayoutPicker({
   scene: Scene | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const sourceOf = (id: SourceId) => collection?.sources.find((source) => source.id === id);
   const visual = (scene?.items ?? []).filter((item) => {
     const kind = sourceOf(item.source)?.kind;
@@ -2385,17 +2445,13 @@ function LayoutPicker({
   };
 
   return (
-    <PickerShell title="Arrange: Screen + corners" onClose={onClose}>
+    <PickerShell title={t("sources-layout-title")} onClose={onClose}>
       {visual.length === 0 ? (
-        <p className="m-0 text-xs text-havoc-muted">
-          Add a screen capture and one or more cameras to this scene first, then arrange them here.
-        </p>
+        <p className="m-0 text-xs text-havoc-muted">{t("sources-layout-empty")}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <p className="m-0 text-[11px] leading-relaxed text-havoc-muted">
-            Put a screen in the center and up to four cameras in the corners — your explainer /
-            podcast layout. Each corner holds a webcam, a captured call window, or a media clip. You
-            can drag any of them on the canvas afterward.
+            {t("sources-layout-note")}
           </p>
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {visual.map((item) => {
@@ -2403,10 +2459,10 @@ function LayoutPicker({
               return (
                 <li key={item.id} className="flex items-center gap-2">
                   <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
-                    {KIND_BADGE[source?.kind ?? ""] ?? "?"}
+                    {t(KIND_BADGE[source?.kind ?? ""] ?? "sources-kind-unknown")}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-xs text-havoc-text">
-                    {source?.name ?? "(missing source)"}
+                    {source?.name ?? t("sources-missing-source")}
                   </span>
                   <select
                     value={choice[item.id] ?? "off"}
@@ -2416,12 +2472,14 @@ function LayoutPicker({
                         [item.id]: event.target.value as LayoutChoice,
                       }))
                     }
-                    aria-label={`Slot for ${source?.name ?? "source"}`}
+                    aria-label={t("sources-layout-slot-aria", {
+                      name: source?.name ?? t("sources-fallback-name"),
+                    })}
                     className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
                   >
                     {SLOT_OPTIONS.map(([value, label]) => (
                       <option key={value} value={value}>
-                        {label}
+                        {t(label)}
                       </option>
                     ))}
                   </select>
@@ -2434,7 +2492,7 @@ function LayoutPicker({
             onClick={apply}
             className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
-            Apply layout
+            {t("sources-layout-apply")}
           </button>
         </div>
       )}

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { browserDockOpen, settingsSet } from "../api/commands";
 import type { BrowserDockSettings, Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -23,6 +24,7 @@ export function BrowserDockDialog({
   onSaved: (next: Settings) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [docks, setDocks] = useState<BrowserDockSettings[]>(settings?.browserDocks ?? []);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -43,11 +45,11 @@ export function BrowserDockDialog({
     const trimmedName = name.trim();
     const trimmedUrl = url.trim();
     if (!trimmedName) {
-      setError("Name the dock (e.g. Twitch Chat).");
+      setError(t("browser-dock-error-name"));
       return;
     }
     if (!/^https?:\/\//.test(trimmedUrl)) {
-      setError("A dock URL must start with http:// or https://.");
+      setError(t("browser-dock-error-url"));
       return;
     }
     persist([...docks, { name: trimmedName, url: trimmedUrl }]);
@@ -61,12 +63,10 @@ export function BrowserDockDialog({
   };
 
   return (
-    <PickerShell title="Browser docks" onClose={onClose}>
+    <PickerShell title={t("browser-dock-title")} onClose={onClose}>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         {docks.length === 0 && (
-          <p className="m-0 text-[11px] text-havoc-muted">
-            No docks yet — add a chat popout, an alerts page, or your Companion web buttons.
-          </p>
+          <p className="m-0 text-[11px] text-havoc-muted">{t("browser-dock-empty")}</p>
         )}
         {docks.map((dock, index) => (
           <div key={`${dock.name}-${index}`} className="flex items-center gap-2">
@@ -79,12 +79,12 @@ export function BrowserDockDialog({
               onClick={() => open(dock)}
               className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2.5 py-1 text-[11px] font-semibold text-havoc-text hover:bg-havoc-accent/25"
             >
-              Open
+              {t("browser-dock-open")}
             </button>
             <button
               type="button"
               onClick={() => persist(docks.filter((_, i) => i !== index))}
-              aria-label={`Remove ${dock.name}`}
+              aria-label={t("browser-dock-remove", { name: dock.name })}
               className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-red-400/50 hover:text-red-300"
             >
               ✕
@@ -96,15 +96,15 @@ export function BrowserDockDialog({
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="name (e.g. Twitch Chat)"
-              aria-label="Dock name"
+              placeholder={t("browser-dock-name-placeholder")}
+              aria-label={t("browser-dock-name-label")}
               className={`${inputClass} w-36 shrink-0`}
             />
             <input
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               placeholder="https://…"
-              aria-label="Dock URL"
+              aria-label={t("browser-dock-url-label")}
               className={`${inputClass} min-w-0 flex-1`}
             />
             <button
@@ -115,10 +115,7 @@ export function BrowserDockDialog({
               Add
             </button>
           </div>
-          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-            A dock opens as its own window you can place beside the studio. The page gets no access
-            to the app — it just renders. http(s) URLs only; docks open only when you click Open.
-          </p>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("browser-dock-note")}</p>
         </div>
         {error && (
           <p role="alert" className="m-0 text-[11px] text-red-300">

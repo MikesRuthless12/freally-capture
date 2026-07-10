@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { onStats, onStream } from "../api/events";
 import type { StatsPayload, StreamStatus } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
+import { useT } from "../i18n/t";
 
 /** One stat readout tile. */
 function Stat({ label, value }: { label: string; value: string }) {
@@ -24,6 +25,7 @@ const targetDot: Record<string, string> = {
 /** The stats dock — the core's ~2 Hz `stats` push event, plus per-target
  * stream health + bitrate from the ~1 Hz `stream` event (TASK-601). */
 export function StatsDock() {
+  const t = useT();
   const [stats, setStats] = useState<StatsPayload | null>(null);
   const [stream, setStream] = useState<StreamStatus | null>(null);
 
@@ -55,20 +57,29 @@ export function StatsDock() {
   const targets = stream && stream.state !== "idle" ? stream.targets : [];
 
   return (
-    <Panel title="Stats">
+    <Panel title={t("stats")}>
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="FPS" value={stats ? (stats.fps ?? 0).toFixed(0) : "—"} />
-        <Stat label="CPU" value={stats ? `${(stats.cpu ?? 0).toFixed(1)}%` : "—"} />
-        <Stat label="Memory" value={stats ? `${(stats.memoryMb ?? 0).toFixed(0)} MB` : "—"} />
-        <Stat label="Dropped" value={stats ? (stats.dropped ?? 0).toFixed(0) : "—"} />
-        <Stat label="Render" value={stats ? `${(stats.renderMs ?? 0).toFixed(1)} ms` : "—"} />
-        <Stat label="GPU" value={stats && (stats.fps ?? 0) > 0 ? "compositing" : "idle"} />
+        <Stat label={t("stats-fps")} value={stats ? (stats.fps ?? 0).toFixed(0) : "—"} />
+        <Stat label={t("stats-cpu")} value={stats ? `${(stats.cpu ?? 0).toFixed(1)}%` : "—"} />
+        <Stat
+          label={t("stats-memory")}
+          value={stats ? `${(stats.memoryMb ?? 0).toFixed(0)} MB` : "—"}
+        />
+        <Stat label={t("stats-dropped")} value={stats ? (stats.dropped ?? 0).toFixed(0) : "—"} />
+        <Stat
+          label={t("stats-render")}
+          value={stats ? `${(stats.renderMs ?? 0).toFixed(1)} ms` : "—"}
+        />
+        <Stat
+          label={t("stats-gpu")}
+          value={stats && (stats.fps ?? 0) > 0 ? t("stats-gpu-compositing") : t("stats-gpu-idle")}
+        />
         {(stats?.verticalFps ?? 0) > 0 && (
-          <Stat label="9:16 FPS" value={(stats?.verticalFps ?? 0).toFixed(0)} />
+          <Stat label={t("stats-vertical-fps")} value={(stats?.verticalFps ?? 0).toFixed(0)} />
         )}
       </div>
       {targets.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-1" aria-label="Stream targets">
+        <ul className="mt-2 flex flex-col gap-1" aria-label={t("stats-targets-label")}>
           {targets.map((target) => (
             <li
               key={target.id}
@@ -82,7 +93,9 @@ export function StatsDock() {
               />
               <span className="min-w-0 flex-1 truncate">
                 {target.label}
-                {target.shared > 0 && <span className="text-havoc-muted"> · shared encode</span>}
+                {target.shared > 0 && (
+                  <span className="text-havoc-muted">{t("stats-shared-encode")}</span>
+                )}
               </span>
               <span className="text-havoc-muted">{target.state}</span>
               <span className="font-semibold tabular-nums">
@@ -96,7 +109,7 @@ export function StatsDock() {
       )}
       {stats?.placeholder && (
         <div className="mt-2">
-          <EmptyHint>Starting the compositor…</EmptyHint>
+          <EmptyHint>{t("stats-starting")}</EmptyHint>
         </div>
       )}
     </Panel>

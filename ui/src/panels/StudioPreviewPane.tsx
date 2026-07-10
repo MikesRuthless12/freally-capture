@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { settingsSet, studioTransition } from "../api/commands";
 import type { Settings, TransitionKind } from "../api/types";
 import { TRANSITION_KINDS } from "../api/types";
+import { useT } from "../i18n/t";
 
 /** How often the pane refetches its JPEG (~10 fps is plenty for a preview). */
 const POLL_MS = 100;
@@ -23,6 +24,7 @@ export function StudioPreviewPane({
   onSettingsSaved: (next: Settings) => void;
   transitioning: boolean;
 }) {
+  const t = useT();
   const imgRef = useRef<HTMLImageElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
@@ -93,14 +95,14 @@ export function StudioPreviewPane({
 
   return (
     <section
-      aria-label="Studio Mode preview"
+      aria-label={t("studio-preview-label")}
       className="flex min-h-0 w-[38%] min-w-0 flex-col gap-2 rounded-xl border border-emerald-400/30 bg-black/60 p-2"
     >
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold tracking-widest text-emerald-300 uppercase">
-          Preview
+          {t("studio-preview-heading")}
         </span>
-        <span className="text-[10px] text-havoc-muted">click a scene to load it here</span>
+        <span className="text-[10px] text-havoc-muted">{t("studio-preview-hint")}</span>
       </div>
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
         <img
@@ -110,12 +112,12 @@ export function StudioPreviewPane({
         />
         {!hasFrame && (
           <div className="absolute inset-0 flex items-center justify-center text-[11px] text-havoc-muted">
-            The preview will appear here.
+            {t("studio-preview-empty")}
           </div>
         )}
         {hasFrame && mirrors && (
           <span className="absolute top-1.5 left-1.5 rounded bg-black/50 px-1.5 py-0.5 text-[9px] tracking-wide text-havoc-muted uppercase">
-            mirrors program
+            {t("studio-preview-mirrors")}
           </span>
         )}
       </div>
@@ -123,12 +125,12 @@ export function StudioPreviewPane({
         <select
           value={transition?.kind ?? "fade"}
           onChange={(event) => saveTransition({ kind: event.target.value as TransitionKind })}
-          aria-label="Transition"
+          aria-label={t("studio-preview-transition-select")}
           className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
         >
-          {TRANSITION_KINDS.map(([value, label]) => (
+          {TRANSITION_KINDS.map(([value, labelKey]) => (
             <option key={value} value={value}>
-              {label}
+              {t(labelKey)}
             </option>
           ))}
         </select>
@@ -139,18 +141,20 @@ export function StudioPreviewPane({
           step={50}
           value={transition?.durationMs ?? 300}
           onChange={(event) => saveTransition({ durationMs: Number(event.target.value) })}
-          aria-label="Transition duration (ms)"
-          title="Transition duration (ms)"
+          aria-label={t("studio-preview-duration")}
+          title={t("studio-preview-duration")}
           className="w-20 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
         />
         <button
           type="button"
           disabled={transitioning}
           onClick={commit}
-          title="Commit Preview → Program through the transition (the audience sees it)"
+          title={t("studio-preview-commit-title")}
           className="shrink-0 rounded-md border border-emerald-400/60 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-havoc-text enabled:hover:bg-emerald-500/25 disabled:opacity-50"
         >
-          {transitioning ? "Transitioning…" : "Transition ⇄"}
+          {transitioning
+            ? t("studio-preview-transitioning")
+            : t("studio-preview-transition-button")}
         </button>
       </div>
       {transition?.kind === "lumaImage" && (
@@ -158,8 +162,8 @@ export function StudioPreviewPane({
           <input
             value={transition.lumaImage}
             onChange={(event) => saveTransition({ lumaImage: event.target.value })}
-            placeholder="grayscale wipe image (png/jpg)"
-            aria-label="Luma wipe image"
+            placeholder={t("studio-preview-luma-placeholder")}
+            aria-label={t("studio-preview-luma-label")}
             className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 font-mono text-[11px] text-havoc-text"
           />
           <button
@@ -167,14 +171,19 @@ export function StudioPreviewPane({
             onClick={() => {
               void open({
                 multiple: false,
-                filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] }],
+                filters: [
+                  {
+                    name: t("studio-preview-filter-images"),
+                    extensions: ["png", "jpg", "jpeg", "bmp", "webp"],
+                  },
+                ],
               }).then((picked) => {
                 if (typeof picked === "string") saveTransition({ lumaImage: picked });
               });
             }}
             className="shrink-0 rounded border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
           >
-            Browse…
+            {t("studio-preview-browse")}
           </button>
         </div>
       )}
@@ -183,8 +192,8 @@ export function StudioPreviewPane({
           <input
             value={transition.stingerPath}
             onChange={(event) => saveTransition({ stingerPath: event.target.value })}
-            placeholder="stinger video (ProRes 4444 .mov keeps its alpha)"
-            aria-label="Stinger video file"
+            placeholder={t("studio-preview-stinger-placeholder")}
+            aria-label={t("studio-preview-stinger-label")}
             className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 font-mono text-[11px] text-havoc-text"
           />
           <button
@@ -192,14 +201,19 @@ export function StudioPreviewPane({
             onClick={() => {
               void open({
                 multiple: false,
-                filters: [{ name: "Video", extensions: ["mov", "mp4", "mkv", "webm", "avi"] }],
+                filters: [
+                  {
+                    name: t("studio-preview-filter-video"),
+                    extensions: ["mov", "mp4", "mkv", "webm", "avi"],
+                  },
+                ],
               }).then((picked) => {
                 if (typeof picked === "string") saveTransition({ stingerPath: picked });
               });
             }}
             className="shrink-0 rounded border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
           >
-            Browse…
+            {t("studio-preview-browse")}
           </button>
           <input
             type="number"
@@ -208,8 +222,8 @@ export function StudioPreviewPane({
             step={50}
             value={transition.stingerCutMs}
             onChange={(event) => saveTransition({ stingerCutMs: Number(event.target.value) })}
-            aria-label="Stinger cut point (ms)"
-            title="When the scene swap lands under the stinger (ms into the transition)"
+            aria-label={t("studio-preview-stinger-cut-label")}
+            title={t("studio-preview-stinger-cut-title")}
             className="w-20 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
           />
         </div>

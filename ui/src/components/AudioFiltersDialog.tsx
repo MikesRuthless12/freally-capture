@@ -18,16 +18,22 @@ import type {
   SourceId,
 } from "../api/types";
 import { kindHasAudio } from "../api/types";
+import { useT } from "../i18n/t";
 import { PickerShell } from "./PickerShell";
 
-const FILTER_NAMES: Record<AudioFilterTypeName, string> = {
-  gain: "Gain",
-  noiseGate: "Noise Gate",
-  compressor: "Compressor",
-  limiter: "Limiter",
-  eq: "3-Band EQ",
-  denoise: "Denoise",
-  ducker: "Ducking",
+/**
+ * `type -> i18n key`. Resolved with `t(...)` at RENDER time, never here: a
+ * module-level `t()` runs at import, before `initLocale`, and would freeze
+ * every name to English for the life of the process.
+ */
+const FILTER_NAME_KEYS: Record<AudioFilterTypeName, string> = {
+  gain: "audiofilters-name-gain",
+  noiseGate: "audiofilters-name-noise-gate",
+  compressor: "audiofilters-name-compressor",
+  limiter: "audiofilters-name-limiter",
+  eq: "audiofilters-name-eq",
+  denoise: "audiofilters-name-denoise",
+  ducker: "audiofilters-name-ducking",
 };
 
 const FILTER_DEFAULTS: Record<AudioFilterTypeName, AudioFilterKind> = {
@@ -74,6 +80,7 @@ type AudioFiltersDialogProps = {
  * spectral suppression, no ML), applied before the fader.
  */
 export function AudioFiltersDialog({ source, collection, onClose }: AudioFiltersDialogProps) {
+  const t = useT();
   const [addOpen, setAddOpen] = useState(false);
   // Wraps the trigger *and* the menu — see `useDismiss`.
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -91,11 +98,11 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
   };
 
   return (
-    <PickerShell title={`Audio filters — ${source.name}`} onClose={onClose} wide>
+    <PickerShell title={t("audiofilters-title", { name: source.name })} onClose={onClose} wide>
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
-            Filter chain (top runs first, before the fader)
+            {t("audiofilters-chain-header")}
           </span>
           <div className="relative" ref={addMenuRef}>
             <button
@@ -105,12 +112,12 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
               aria-expanded={addOpen}
               className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              + Add filter
+              {t("audiofilters-add")}
             </button>
             {addOpen && (
               <div
                 role="menu"
-                aria-label="Add an audio filter"
+                aria-label={t("audiofilters-add-menu")}
                 className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
                 {(Object.keys(FILTER_DEFAULTS) as AudioFilterTypeName[]).map((type) => (
@@ -126,7 +133,7 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                     }}
                     className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
                   >
-                    {FILTER_NAMES[type]}
+                    {t(FILTER_NAME_KEYS[type])}
                   </button>
                 ))}
               </div>
@@ -135,10 +142,7 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
         </div>
 
         {filters.length === 0 ? (
-          <p className="m-0 text-xs text-havoc-muted">
-            No filters yet — denoise a mic (classic DSP, no ML), gate the room, tame peaks with the
-            compressor, or duck music under your voice.
-          </p>
+          <p className="m-0 text-xs text-havoc-muted">{t("audiofilters-empty")}</p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {filters.map((filter, index) => (
@@ -152,10 +156,12 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                         fail("audio filter toggle"),
                       )
                     }
-                    aria-label={`Enable ${FILTER_NAMES[filter.type]}`}
+                    aria-label={t("audiofilters-enable", {
+                      name: t(FILTER_NAME_KEYS[filter.type]),
+                    })}
                   />
                   <span className="flex-1 text-xs font-semibold text-havoc-text">
-                    {FILTER_NAMES[filter.type]}
+                    {t(FILTER_NAME_KEYS[filter.type])}
                   </span>
                   <button
                     type="button"
@@ -165,8 +171,10 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                         fail("audio filter reorder"),
                       )
                     }
-                    title="Run earlier"
-                    aria-label={`Move ${FILTER_NAMES[filter.type]} up`}
+                    title={t("audiofilters-run-earlier")}
+                    aria-label={t("audiofilters-move-up", {
+                      name: t(FILTER_NAME_KEYS[filter.type]),
+                    })}
                     className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                   >
                     ▲
@@ -179,8 +187,10 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                         fail("audio filter reorder"),
                       )
                     }
-                    title="Run later"
-                    aria-label={`Move ${FILTER_NAMES[filter.type]} down`}
+                    title={t("audiofilters-run-later")}
+                    aria-label={t("audiofilters-move-down", {
+                      name: t(FILTER_NAME_KEYS[filter.type]),
+                    })}
                     className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
                   >
                     ▼
@@ -192,8 +202,10 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                         fail("audio filter remove"),
                       )
                     }
-                    title="Remove filter"
-                    aria-label={`Remove ${FILTER_NAMES[filter.type]}`}
+                    title={t("audiofilters-remove-title")}
+                    aria-label={t("audiofilters-remove", {
+                      name: t(FILTER_NAME_KEYS[filter.type]),
+                    })}
                     className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
                   >
                     ×
@@ -261,12 +273,13 @@ function AudioFilterParams({
   triggers: Source[];
   onChange: (kind: AudioFilterKind) => void;
 }) {
+  const t = useT();
   switch (filter.type) {
     case "gain":
       return (
         <div className="mt-2">
           <Slider
-            label="Gain (dB)"
+            label={t("audiofilters-gain-db")}
             value={filter.db}
             min={-30}
             max={30}
@@ -279,7 +292,7 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Open at (dB)"
+            label={t("audiofilters-open-db")}
             value={filter.openThresholdDb}
             min={-96}
             max={0}
@@ -287,7 +300,7 @@ function AudioFilterParams({
             onChange={(openThresholdDb) => onChange({ ...filter, openThresholdDb })}
           />
           <Slider
-            label="Close at (dB)"
+            label={t("audiofilters-close-db")}
             value={filter.closeThresholdDb}
             min={-96}
             max={0}
@@ -295,7 +308,7 @@ function AudioFilterParams({
             onChange={(closeThresholdDb) => onChange({ ...filter, closeThresholdDb })}
           />
           <Slider
-            label="Attack (ms)"
+            label={t("audiofilters-attack-ms")}
             value={filter.attackMs}
             min={1}
             max={500}
@@ -303,7 +316,7 @@ function AudioFilterParams({
             onChange={(attackMs) => onChange({ ...filter, attackMs })}
           />
           <Slider
-            label="Hold (ms)"
+            label={t("audiofilters-hold-ms")}
             value={filter.holdMs}
             min={0}
             max={3000}
@@ -311,7 +324,7 @@ function AudioFilterParams({
             onChange={(holdMs) => onChange({ ...filter, holdMs })}
           />
           <Slider
-            label="Release (ms)"
+            label={t("audiofilters-release-ms")}
             value={filter.releaseMs}
             min={1}
             max={3000}
@@ -324,7 +337,7 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Ratio (:1)"
+            label={t("audiofilters-ratio")}
             value={filter.ratio}
             min={1}
             max={32}
@@ -332,7 +345,7 @@ function AudioFilterParams({
             onChange={(ratio) => onChange({ ...filter, ratio })}
           />
           <Slider
-            label="Threshold (dB)"
+            label={t("audiofilters-threshold-db")}
             value={filter.thresholdDb}
             min={-60}
             max={0}
@@ -340,7 +353,7 @@ function AudioFilterParams({
             onChange={(thresholdDb) => onChange({ ...filter, thresholdDb })}
           />
           <Slider
-            label="Attack (ms)"
+            label={t("audiofilters-attack-ms")}
             value={filter.attackMs}
             min={0.1}
             max={500}
@@ -348,7 +361,7 @@ function AudioFilterParams({
             onChange={(attackMs) => onChange({ ...filter, attackMs })}
           />
           <Slider
-            label="Release (ms)"
+            label={t("audiofilters-release-ms")}
             value={filter.releaseMs}
             min={1}
             max={3000}
@@ -356,7 +369,7 @@ function AudioFilterParams({
             onChange={(releaseMs) => onChange({ ...filter, releaseMs })}
           />
           <Slider
-            label="Output gain (dB)"
+            label={t("audiofilters-output-gain-db")}
             value={filter.outputGainDb}
             min={-30}
             max={30}
@@ -369,7 +382,7 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Ceiling (dB)"
+            label={t("audiofilters-ceiling-db")}
             value={filter.thresholdDb}
             min={-30}
             max={0}
@@ -377,7 +390,7 @@ function AudioFilterParams({
             onChange={(thresholdDb) => onChange({ ...filter, thresholdDb })}
           />
           <Slider
-            label="Release (ms)"
+            label={t("audiofilters-release-ms")}
             value={filter.releaseMs}
             min={1}
             max={1000}
@@ -390,7 +403,7 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Low (dB)"
+            label={t("audiofilters-low-db")}
             value={filter.lowDb}
             min={-20}
             max={20}
@@ -398,7 +411,7 @@ function AudioFilterParams({
             onChange={(lowDb) => onChange({ ...filter, lowDb })}
           />
           <Slider
-            label="Mid (dB)"
+            label={t("audiofilters-mid-db")}
             value={filter.midDb}
             min={-20}
             max={20}
@@ -406,7 +419,7 @@ function AudioFilterParams({
             onChange={(midDb) => onChange({ ...filter, midDb })}
           />
           <Slider
-            label="High (dB)"
+            label={t("audiofilters-high-db")}
             value={filter.highDb}
             min={-20}
             max={20}
@@ -419,7 +432,7 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <Slider
-            label="Strength"
+            label={t("audiofilters-strength")}
             value={filter.strength}
             min={0}
             max={1}
@@ -427,8 +440,7 @@ function AudioFilterParams({
             onChange={(strength) => onChange({ ...filter, strength })}
           />
           <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-            Owned classic-DSP spectral suppression — steady noise (fans, hiss) drops while speech
-            passes. No ML, no models, per the charter.
+            {t("audiofilters-denoise-note")}
           </p>
         </div>
       );
@@ -436,16 +448,16 @@ function AudioFilterParams({
       return (
         <div className="mt-2 flex flex-col gap-1.5">
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <span className="w-28 shrink-0">Duck under</span>
+            <span className="w-28 shrink-0">{t("audiofilters-duck-under")}</span>
             <select
               value={filter.trigger ?? ""}
               onChange={(event) =>
                 onChange({ ...filter, trigger: (event.target.value || null) as SourceId | null })
               }
-              aria-label="Ducking trigger source"
+              aria-label={t("audiofilters-ducking-trigger")}
               className="flex-1 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
             >
-              <option value="">(pick a trigger — e.g. your mic)</option>
+              <option value="">{t("audiofilters-pick-trigger")}</option>
               {triggers.map((trigger) => (
                 <option key={trigger.id} value={trigger.id}>
                   {trigger.name}
@@ -454,7 +466,7 @@ function AudioFilterParams({
             </select>
           </label>
           <Slider
-            label="Trigger at (dB)"
+            label={t("audiofilters-trigger-at-db")}
             value={filter.thresholdDb}
             min={-96}
             max={0}
@@ -462,7 +474,7 @@ function AudioFilterParams({
             onChange={(thresholdDb) => onChange({ ...filter, thresholdDb })}
           />
           <Slider
-            label="Duck by (dB)"
+            label={t("audiofilters-duck-by-db")}
             value={filter.amountDb}
             min={0}
             max={60}
@@ -470,7 +482,7 @@ function AudioFilterParams({
             onChange={(amountDb) => onChange({ ...filter, amountDb })}
           />
           <Slider
-            label="Attack (ms)"
+            label={t("audiofilters-attack-ms")}
             value={filter.attackMs}
             min={1}
             max={1000}
@@ -478,7 +490,7 @@ function AudioFilterParams({
             onChange={(attackMs) => onChange({ ...filter, attackMs })}
           />
           <Slider
-            label="Release (ms)"
+            label={t("audiofilters-release-ms")}
             value={filter.releaseMs}
             min={1}
             max={5000}

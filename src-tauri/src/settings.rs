@@ -29,13 +29,66 @@ pub enum MixerLayout {
     Vertical,
 }
 
+/// Which palette the UI paints with (TASK-906). Applied live through the
+/// frontend's CSS-variable theme provider — never a rebuild, never a reload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeMode {
+    /// Havoc dark — what every build before 0.96.0 shipped, and still the default.
+    #[default]
+    Dark,
+    Light,
+    /// Dark, but with [`ThemeSettings::accent`] replacing the Havoc blue.
+    Custom,
+}
+
+/// Appearance (TASK-906).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ThemeSettings {
+    pub mode: ThemeMode,
+    /// `#rrggbb`. Only read when `mode` is [`ThemeMode::Custom`], but persisted
+    /// always, so switching to Custom and back does not lose the colour.
+    pub accent: String,
+}
+
+impl Default for ThemeSettings {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::default(),
+            // The Havoc accent, so `Custom` starts where `Dark` left off.
+            accent: "#4a9eff".to_owned(),
+        }
+    }
+}
+
+impl ThemeSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        // The accent lands in a CSS custom property. Anything but a plain hex
+        // triple could close the declaration and inject a rule.
+        let hex = self.accent.strip_prefix('#').unwrap_or("");
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("the accent colour must be #rrggbb".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// `Settings::language` sentinel: follow the operating system's preferred
+/// languages instead of a fixed choice. Fresh installs start here, so a Japanese
+/// user does not have to find a picker to stop reading English. Kept in step
+/// with `AUTO_LOCALE` in `ui/src/i18n/locales.ts`.
+pub const AUTO_LANGUAGE: &str = "auto";
+
 /// User-facing settings. Every field defaults (`serde(default)`) so missing
 /// keys never brick the app, and unknown keys from newer builds are ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    /// UI language (BCP-47). The language picker + full 18-language i18n land
-    /// in Phase 9; the field exists from day one for forward compatibility.
+    /// UI language: a BCP-47 tag the user chose, or [`AUTO_LANGUAGE`] to follow
+    /// the operating system. The frontend resolves it against the OS preference
+    /// list — see `ui/src/i18n/locales.ts`. `validate` rejects an empty tag, so
+    /// "follow the system" is a word rather than `""`.
     pub language: String,
     /// Whether the stats dock is shown.
     pub show_stats_dock: bool,
@@ -43,6 +96,8 @@ pub struct Settings {
     pub monitor_device: Option<String>,
     /// Audio Mixer strip orientation.
     pub mixer_layout: MixerLayout,
+    /// Appearance: palette + custom accent (Phase 9, TASK-906).
+    pub theme: ThemeSettings,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
     /// Remote Guests networking (Phase R).
@@ -65,15 +120,20 @@ pub struct Settings {
     /// install) or a stale version → the app shows the acceptance gate before
     /// it can be used.
     pub accepted_eula_version: Option<String>,
+    /// Whether the first-run wizard has been seen (Phase 9, TASK-903/905).
+    /// `false` on a fresh install; set once the user finishes *or skips* it, so
+    /// a skipped wizard never comes back uninvited.
+    pub completed_onboarding: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            language: "en".to_owned(),
+            language: AUTO_LANGUAGE.to_owned(),
             show_stats_dock: true,
             monitor_device: None,
             mixer_layout: MixerLayout::default(),
+            theme: ThemeSettings::default(),
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
@@ -84,6 +144,7 @@ impl Default for Settings {
             browser_docks: Vec::new(),
             scripts: Vec::new(),
             accepted_eula_version: None,
+            completed_onboarding: false,
         }
     }
 }
@@ -751,6 +812,7 @@ impl Settings {
                 return Err("invalid monitor device name".to_owned());
             }
         }
+        self.theme.validate()?;
         self.recording.validate()?;
         self.remote.validate()?;
         self.stream.validate()?;
@@ -833,19 +895,22 @@ impl SettingsStore {
 
     /// Replace the settings and persist them atomically.
     ///
-    /// EULA acceptance is deliberately **not** replaceable through here: it is a
-    /// machine-level fact, not a user-editable preference. Two callers would
-    /// otherwise silently reset it and re-show the gate on the next launch —
-    /// `settings_set`, because the UI's payload omits the field and
-    /// `serde(default)` turns that into `None`; and `profile_switch`, because a
-    /// profile snapshotted before acceptance carries `None`. Only
-    /// [`Self::accept_eula`] may write it.
+    /// Two fields are deliberately **not** replaceable through here, because
+    /// they are machine-level facts rather than user-editable preferences:
+    /// `accepted_eula_version` and `completed_onboarding`. A caller would
+    /// otherwise silently reset them and re-show the gate or the wizard on the
+    /// next launch — `settings_set`, because a stale UI snapshot carries the
+    /// pre-acceptance value, and `profile_switch`, because a profile
+    /// snapshotted earlier carries it too. Only [`Self::accept_eula`] and
+    /// [`Self::complete_onboarding`] may write them.
     pub fn set(&self, next: Settings) -> io::Result<()> {
         {
             let mut guard = self.lock();
             let accepted = guard.accepted_eula_version.clone();
+            let onboarded = guard.completed_onboarding;
             *guard = next;
             guard.accepted_eula_version = accepted;
+            guard.completed_onboarding = onboarded;
         }
         self.persist()
     }
@@ -856,6 +921,17 @@ impl SettingsStore {
         {
             let mut guard = self.lock();
             guard.accepted_eula_version = Some(version.to_owned());
+        }
+        self.persist()
+    }
+
+    /// Mark the first-run wizard as seen — the only path allowed to write it.
+    /// Called when the user finishes **or skips**, so a skipped wizard never
+    /// returns uninvited. Idempotent.
+    pub fn complete_onboarding(&self) -> io::Result<()> {
+        {
+            let mut guard = self.lock();
+            guard.completed_onboarding = true;
         }
         self.persist()
     }
@@ -883,25 +959,61 @@ impl SettingsStore {
 }
 
 fn read_settings(path: &Path) -> Settings {
-    match fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str(&text) {
-            Ok(settings) => settings,
-            Err(err) => {
-                eprintln!(
-                    "settings: {} is not valid settings JSON ({err}); using defaults",
-                    path.display()
-                );
-                Settings::default()
-            }
-        },
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Settings::default(),
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Settings::default(),
         Err(err) => {
             eprintln!(
                 "settings: cannot read {} ({err}); using defaults",
                 path.display()
             );
+            return Settings::default();
+        }
+    };
+
+    // Parsed to a `Value` first so a migration can ask what the file actually
+    // *said*, which `Settings` can no longer tell it: `serde(default)` has by
+    // then filled every missing key, erasing the difference between "absent"
+    // and "explicitly false".
+    let raw: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(raw) => raw,
+        Err(err) => {
+            eprintln!(
+                "settings: {} is not valid settings JSON ({err}); using defaults",
+                path.display()
+            );
+            return Settings::default();
+        }
+    };
+
+    match Settings::deserialize(&raw) {
+        Ok(mut settings) => {
+            migrate(&mut settings, &raw);
+            settings
+        }
+        Err(err) => {
+            eprintln!(
+                "settings: {} is not valid settings JSON ({err}); using defaults",
+                path.display()
+            );
             Settings::default()
         }
+    }
+}
+
+/// Bring a settings file written by an older build up to date.
+fn migrate(settings: &mut Settings, raw: &serde_json::Value) {
+    // `completedOnboarding` arrived in 0.96.0 and defaults to `false`, so every
+    // *existing* user would be greeted by the first-run wizard on upgrade — and
+    // its template step would add a second display capture on top of the scene
+    // they had already arranged. A file that predates the field but has already
+    // accepted an EULA has plainly been run before. Its first run is long past.
+    //
+    // Keyed on the field being *absent*, not falsy: a 0.96.0 user who quit
+    // mid-wizard wrote `false` on purpose and must see it again.
+    let predates_onboarding = raw.get("completedOnboarding").is_none();
+    if predates_onboarding && settings.accepted_eula_version.is_some() {
+        settings.completed_onboarding = true;
     }
 }
 
@@ -974,6 +1086,10 @@ mod tests {
             show_stats_dock: false,
             monitor_device: Some("Speakers (Realtek)".to_owned()),
             mixer_layout: MixerLayout::Vertical,
+            theme: ThemeSettings {
+                mode: ThemeMode::Custom,
+                accent: "#00d4ff".to_owned(),
+            },
             recording: RecordingSettings {
                 container: Container::Mkv,
                 split_minutes: 30,
@@ -1032,10 +1148,13 @@ mod tests {
                 enabled: true,
             }],
             accepted_eula_version: Some("2026-07-08".to_owned()),
+            completed_onboarding: true,
         };
-        // `set` never writes the EULA field (see its docs) — accept first so the
-        // round-trip below compares the whole struct.
+        // `set` never writes the EULA field or the onboarding flag (see its
+        // docs) — go through their real writers first, so the round-trip below
+        // compares the whole struct.
         store.accept_eula("2026-07-08").expect("accept eula");
+        store.complete_onboarding().expect("complete onboarding");
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
@@ -1074,6 +1193,41 @@ mod tests {
             reloaded.get().accepted_eula_version.as_deref(),
             Some("2026-07-08"),
             "acceptance must survive a relaunch"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The first-run wizard is a machine-level fact, exactly like EULA
+    /// acceptance — and it fails the same way. A stale `settings_set` payload or
+    /// a profile snapshotted before the wizard ran would reset it, and the
+    /// wizard would greet the user on every launch, forever.
+    #[test]
+    fn set_cannot_un_complete_the_onboarding() {
+        let path = temp_path("onboarding-set");
+        let store = SettingsStore::load_from(path.clone());
+        assert!(!store.get().completed_onboarding, "fresh install");
+        store.complete_onboarding().expect("complete onboarding");
+
+        // Exactly what a stale UI payload looks like: the field absent.
+        let from_ui: Settings =
+            serde_json::from_str(r#"{"language":"fr"}"#).expect("UI payload parses");
+        assert!(!from_ui.completed_onboarding);
+        store.set(from_ui).expect("save settings");
+
+        assert!(
+            store.get().completed_onboarding,
+            "must survive a settings save"
+        );
+        assert_eq!(
+            store.get().language,
+            "fr",
+            "the rest of the payload applies"
+        );
+
+        let reloaded = SettingsStore::load_from(path.clone());
+        assert!(
+            reloaded.get().completed_onboarding,
+            "must survive a relaunch"
         );
         let _ = fs::remove_file(&path);
     }
@@ -1293,6 +1447,62 @@ mod tests {
         assert!(printed.contains("[redacted]"));
     }
 
+    /// The accent is written into a CSS custom property. A value that can close
+    /// the declaration injects a rule into the page, so `validate` is a security
+    /// boundary, not a formatting nicety.
+    #[test]
+    fn the_accent_colour_must_be_a_plain_hex_triple() {
+        let ok = Settings {
+            theme: ThemeSettings {
+                mode: ThemeMode::Custom,
+                accent: "#00d4ff".to_owned(),
+            },
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+
+        for bad in [
+            "",
+            "4a9eff",                    // no `#`
+            "#4a9ef",                    // too short
+            "#4a9efff",                  // too long
+            "#gggggg",                   // not hex
+            "#4a9eff;color:red",         // closes the declaration
+            "red",                       // a keyword, not a triple
+            "#4a9eff}body{display:none", // escapes the rule
+            "var(--x)",
+        ] {
+            let settings = Settings {
+                theme: ThemeSettings {
+                    mode: ThemeMode::Custom,
+                    accent: bad.to_owned(),
+                },
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "{bad:?} must be rejected");
+        }
+    }
+
+    /// Switching to Custom and back must not lose the colour, and a fresh install
+    /// must look exactly like every build before it.
+    #[test]
+    fn the_theme_defaults_to_havoc_dark() {
+        let theme = ThemeSettings::default();
+        assert_eq!(theme.mode, ThemeMode::Dark);
+        assert_eq!(theme.accent, "#4a9eff");
+        assert!(theme.validate().is_ok());
+    }
+
+    /// A fresh install must follow the OS, not force English on a Japanese user.
+    /// `validate` rejects an empty tag, so the sentinel has to be a word — and it
+    /// has to survive `validate`, or the first `settings_set` would be refused.
+    #[test]
+    fn a_fresh_install_defaults_to_following_the_system_language() {
+        let settings = Settings::default();
+        assert_eq!(settings.language, AUTO_LANGUAGE);
+        assert!(settings.validate().is_ok(), "the sentinel must validate");
+    }
+
     #[test]
     fn validate_bounds_the_language_tag() {
         let ok = Settings {
@@ -1322,6 +1532,62 @@ mod tests {
             settings.recording,
             RecordingSettings::default(),
             "recording settings default in (frec, track 1)"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// Upgrading from 0.95.1: the file predates `completedOnboarding`, and
+    /// `serde(default)` would make it `false`. Without the migration every
+    /// existing user is greeted by the first-run wizard, whose template step
+    /// would drop a second display capture onto the scene they already built.
+    #[test]
+    fn upgrading_a_settings_file_does_not_re_run_the_first_run_wizard() {
+        let path = temp_path("onboarding-migrate");
+        fs::write(
+            &path,
+            r#"{ "language": "fr", "acceptedEulaVersion": "2026-07-08" }"#,
+        )
+        .expect("write a 0.95.1 settings file");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(
+            settings.completed_onboarding,
+            "a file that already accepted an EULA has been run before"
+        );
+        assert_eq!(
+            settings.language, "fr",
+            "the migration touches nothing else"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The same old file, but the EULA was never accepted — the app was never
+    /// really used. That is a first run, and it gets the wizard.
+    #[test]
+    fn an_old_file_that_never_accepted_the_eula_is_still_a_first_run() {
+        let path = temp_path("onboarding-migrate-no-eula");
+        fs::write(&path, r#"{ "language": "fr" }"#).expect("write settings");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(!settings.completed_onboarding, "never accepted, never ran");
+        let _ = fs::remove_file(&path);
+    }
+
+    /// Keyed on *absent*, not falsy. A 0.96.0 user who quit halfway through the
+    /// wizard wrote `false` deliberately, and must be shown it again.
+    #[test]
+    fn an_explicit_false_survives_the_migration() {
+        let path = temp_path("onboarding-migrate-explicit");
+        fs::write(
+            &path,
+            r#"{ "acceptedEulaVersion": "2026-07-08", "completedOnboarding": false }"#,
+        )
+        .expect("write a 0.96.0 settings file");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(
+            !settings.completed_onboarding,
+            "an explicit false is a decision, not a missing key"
         );
         let _ = fs::remove_file(&path);
     }

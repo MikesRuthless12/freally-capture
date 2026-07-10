@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { streamStart, streamStatus, streamStop } from "../api/commands";
 import { onStream } from "../api/events";
 import type { StreamStatus } from "../api/types";
+import { useT } from "../i18n/t";
 import { formatHms } from "../lib/time";
 
 const buttonBase =
@@ -24,6 +25,7 @@ export function LiveButton({
   /** A missing key/ingest routes to the Stream settings. */
   onNeedsSettings: () => void;
 }) {
+  const t = useT();
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,8 @@ export function LiveButton({
   };
 
   // A spent-retries failure surfaces until the next action clears it.
-  const failure = status?.state === "failed" ? (status.error ?? "the stream ended") : null;
+  const failure =
+    status?.state === "failed" ? (status.error ?? t("livebutton-failure-ended")) : null;
   const shownError = error ?? failure;
 
   return (
@@ -80,11 +83,7 @@ export function LiveButton({
         type="button"
         disabled={disabled || busy}
         onClick={toggle}
-        title={
-          live
-            ? "End the stream — every target (a running recording continues)"
-            : "Go live to every enabled Settings → Stream target"
-        }
+        title={live ? t("livebutton-title-live") : t("livebutton-title-offline")}
         className={`${buttonBase} ${
           live
             ? "border-red-500/60 bg-red-500/15 text-havoc-text hover:border-red-400/80"
@@ -93,10 +92,14 @@ export function LiveButton({
       >
         {live && status ? (
           <span className="flex items-center justify-between gap-2">
-            <span>■ End Stream</span>
+            <span>{t("livebutton-end-stream")}</span>
             <span className="inline-flex items-center gap-1.5" role="status">
               <span
-                aria-label={status.state === "reconnecting" ? "Reconnecting" : "Live"}
+                aria-label={
+                  status.state === "reconnecting"
+                    ? t("livebutton-aria-reconnecting")
+                    : t("livebutton-aria-live")
+                }
                 className={`inline-block h-2 w-2 rounded-full ${
                   status.state === "reconnecting"
                     ? "animate-pulse bg-amber-400"
@@ -104,13 +107,15 @@ export function LiveButton({
                 }`}
               />
               <span className="text-[10px] font-bold tracking-widest text-red-300 uppercase">
-                {status.state === "reconnecting" ? `retry ${status.reconnects + 1}` : "live"}
+                {status.state === "reconnecting"
+                  ? t("livebutton-badge-retry", { n: status.reconnects + 1 })
+                  : t("livebutton-badge-live")}
               </span>
               <span className="font-mono text-xs tabular-nums">{formatHms(status.elapsedSec)}</span>
             </span>
           </span>
         ) : (
-          "⦿ Go Live"
+          t("livebutton-go-live")
         )}
       </button>
       {shownError && (

@@ -77,7 +77,8 @@
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },
       "nsis": {
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "nsis-hooks.nsh"
       }
     },
     "macOS": {

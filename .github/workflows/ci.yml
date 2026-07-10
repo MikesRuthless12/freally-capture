@@ -67,7 +67,7 @@ jobs:
         run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   ui:
-    name: UI (prettier + eslint + vitest + build)
+    name: UI (prettier + eslint + i18n + vitest + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +78,14 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
+      # Catalog parity across all 18 locales, no duplicate keys, and every
+      # literal `t("…")` resolving to a key in en.ftl. A missing key would
+      # otherwise ship as silent English, or as a raw id on screen.
+      - run: npm run i18n:lint
+      # Every white-alpha utility a component uses has a light-theme override.
+      # Dark mode looks perfect without one, so this is invisible in review and
+      # renders white-on-white for anyone running the light theme.
+      - run: npm run theme:lint
       # `npm run build` runs `tsc --noEmit` first, so no separate typecheck.
       - run: npm run test:ui
       - run: npm run build

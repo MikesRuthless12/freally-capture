@@ -17,6 +17,7 @@ import type {
   Source,
 } from "../api/types";
 import { MAX_SYNC_OFFSET_MS, MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT } from "../api/types";
+import { useT } from "../i18n/t";
 import { NumberField } from "./NumberField";
 
 const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
@@ -55,6 +56,7 @@ function VuMeter({
   dimmed: boolean;
   orientation: "horizontal" | "vertical";
 }) {
+  const t = useT();
   const rms = levels ? Math.max(levels.rms[0], levels.rms[1]) : 0;
   const peak = levels ? Math.max(levels.peak[0], levels.peak[1]) : 0;
   const rmsPercent = dbToPercent(linToDb(rms));
@@ -67,7 +69,7 @@ function VuMeter({
   return (
     <div
       role="meter"
-      aria-label="Level"
+      aria-label={t("channelstrip-level")}
       aria-valuemin={MIN_VOLUME_DB}
       aria-valuemax={0}
       aria-valuenow={Math.round(linToDb(peak))}
@@ -104,10 +106,11 @@ function VuMeter({
   );
 }
 
-const MONITOR_LABEL: Record<MonitorMode, string> = {
-  off: "Monitor off",
-  monitorOnly: "Monitor only (not in the mix)",
-  monitorAndOutput: "Monitor and output",
+/** `mode -> i18n key`. Resolved at render — see FILTER_NAME_KEYS. */
+const MONITOR_LABEL_KEYS: Record<MonitorMode, string> = {
+  off: "channelstrip-monitor-off",
+  monitorOnly: "channelstrip-monitor-only",
+  monitorAndOutput: "channelstrip-monitor-and-output",
 };
 
 const MONITOR_NEXT: Record<MonitorMode, MonitorMode> = {
@@ -119,17 +122,20 @@ const MONITOR_NEXT: Record<MonitorMode, MonitorMode> = {
 // -- shared control atoms (identical behaviour in both orientations) ---------
 
 function StatusDot({ levels }: { levels?: AudioSourceLevels }) {
+  const t = useT();
   const hasError = levels?.state === "error";
   return (
     <span
       title={
         hasError
-          ? (levels?.errorMessage ?? "error")
+          ? (levels?.errorMessage ?? t("channelstrip-status-error"))
           : levels?.state === "live"
-            ? "live"
-            : "waiting for audio"
+            ? t("channelstrip-status-live")
+            : t("channelstrip-status-waiting-audio")
       }
-      aria-label={`status: ${levels?.state ?? "waiting"}`}
+      aria-label={t("channelstrip-status", {
+        state: levels?.state ?? t("channelstrip-status-waiting"),
+      })}
       className={`h-1.5 w-1.5 shrink-0 rounded-full ${
         hasError ? "bg-red-400" : levels?.state === "live" ? "bg-emerald-400" : "bg-amber-300"
       }`}
@@ -146,12 +152,17 @@ function MuteButton({
   muted: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={muted ? "Unmute" : "Mute"}
-      aria-label={`${muted ? "Unmute" : "Mute"} ${source.name}`}
+      title={muted ? t("channelstrip-unmute") : t("channelstrip-mute")}
+      aria-label={
+        muted
+          ? t("channelstrip-unmute-source", { name: source.name })
+          : t("channelstrip-mute-source", { name: source.name })
+      }
       aria-pressed={muted}
       className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${
         muted
@@ -175,16 +186,13 @@ function SceneMixButton({
   active: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={
-        active
-          ? "Per-scene mix ON — this strip overrides the global mix for this scene (click to follow the global mix again)"
-          : "Per-scene mix — give this strip its own fader/mute for the current scene"
-      }
-      aria-label={`Per-scene mix for ${source.name}`}
+      title={active ? t("channelstrip-scene-mix-on") : t("channelstrip-scene-mix-off")}
+      aria-label={t("channelstrip-scene-mix-label", { name: source.name })}
       aria-pressed={active}
       className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${
         active
@@ -198,14 +206,18 @@ function SceneMixButton({
 }
 
 function MonitorButton({ source, audio }: { source: Source; audio: AudioSettings }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={() =>
         studioSetAudioMonitor(source.id, MONITOR_NEXT[audio.monitor]).catch(fail("monitor"))
       }
-      title={`${MONITOR_LABEL[audio.monitor]} — click to cycle`}
-      aria-label={`Monitor mode of ${source.name}: ${MONITOR_LABEL[audio.monitor]}`}
+      title={t("channelstrip-monitor-cycle", { mode: t(MONITOR_LABEL_KEYS[audio.monitor]) })}
+      aria-label={t("channelstrip-monitor-mode", {
+        name: source.name,
+        mode: t(MONITOR_LABEL_KEYS[audio.monitor]),
+      })}
       className={`shrink-0 rounded border px-1.5 text-[10px] ${
         audio.monitor === "off"
           ? "border-white/10 text-havoc-muted hover:text-havoc-text"
@@ -228,12 +240,13 @@ function FiltersButton({
   audio: AudioSettings;
   onOpenFilters: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onOpenFilters}
-      title="Audio filters (denoise, gate, compressor…)"
-      aria-label={`Audio filters for ${source.name}`}
+      title={t("channelstrip-audio-filters-title")}
+      aria-label={t("channelstrip-audio-filters-label", { name: source.name })}
       className="shrink-0 rounded border border-white/10 px-1.5 text-[10px] text-havoc-muted hover:text-havoc-text"
     >
       ƒ{audio.filters.length > 0 ? audio.filters.length : ""}
@@ -248,12 +261,13 @@ function AdvancedButton({
   source: Source;
   onOpenAdvanced: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onOpenAdvanced}
-      title="Sync offset & push-to-talk hotkeys"
-      aria-label={`Advanced audio settings for ${source.name}`}
+      title={t("channelstrip-advanced-title")}
+      aria-label={t("channelstrip-advanced-label", { name: source.name })}
       className="shrink-0 rounded border border-white/10 px-1.5 text-[10px] text-havoc-muted hover:text-havoc-text"
     >
       ⋯
@@ -262,8 +276,12 @@ function AdvancedButton({
 }
 
 function TrackDots({ source, audio }: { source: Source; audio: AudioSettings }) {
+  const t = useT();
   return (
-    <div className="flex shrink-0 items-center gap-0.5" aria-label="Track assignment">
+    <div
+      className="flex shrink-0 items-center gap-0.5"
+      aria-label={t("channelstrip-track-assignment")}
+    >
       {Array.from({ length: TRACK_COUNT }, (_, index) => {
         const assigned = (audio.tracks & (1 << index)) !== 0;
         return (
@@ -275,8 +293,12 @@ function TrackDots({ source, audio }: { source: Source; audio: AudioSettings }) 
                 fail("track assignment"),
               )
             }
-            title={`Track ${index + 1}${assigned ? " (assigned)" : ""}`}
-            aria-label={`Track ${index + 1} for ${source.name}`}
+            title={
+              assigned
+                ? t("channelstrip-track-assigned", { n: index + 1 })
+                : t("channelstrip-track", { n: index + 1 })
+            }
+            aria-label={t("channelstrip-track-label", { n: index + 1, name: source.name })}
             aria-pressed={assigned}
             className={`h-3.5 w-3.5 rounded-full border text-[8px] leading-none ${
               assigned
@@ -325,6 +347,7 @@ export function ChannelStrip({
   onOpenFilters,
   onOpenAdvanced,
 }: ChannelStripProps) {
+  const t = useT();
   // Fader drags stream; keep a local draft for instant feedback.
   const [draftDb, setDraftDb] = useState<number | null>(null);
   // Per-scene mix (TASK-605): when this scene overrides the strip, the
@@ -391,7 +414,7 @@ export function ChannelStrip({
             className="m-0 flex-1 px-0.5 text-center text-[9px] text-red-400"
             title={levels?.errorMessage}
           >
-            {levels?.errorMessage ?? "device error"}
+            {levels?.errorMessage ?? t("channelstrip-device-error")}
           </p>
         ) : (
           <div className="flex min-h-0 flex-1 items-stretch gap-1.5 py-0.5">
@@ -411,7 +434,7 @@ export function ChannelStrip({
               onChange={onFaderChange}
               onMouseUp={commitVolume}
               onKeyUp={commitVolume}
-              aria-label={`Volume of ${source.name} in decibels`}
+              aria-label={t("channelstrip-volume-label", { name: source.name })}
               className="accent-havoc-accent"
               style={{ writingMode: "vertical-lr", direction: "rtl", width: "1rem" }}
             />
@@ -419,7 +442,7 @@ export function ChannelStrip({
         )}
         {audio.pushToTalk && (
           <span
-            title={`Push-to-talk: hold ${audio.pushToTalk}`}
+            title={t("channelstrip-ptt-hold", { key: audio.pushToTalk })}
             className={`rounded px-1 text-[8px] uppercase ${
               gated ? "bg-white/10 text-havoc-muted" : "bg-emerald-500/20 text-emerald-300"
             }`}
@@ -450,7 +473,7 @@ export function ChannelStrip({
         </span>
         {audio.pushToTalk && (
           <span
-            title={`Push-to-talk: hold ${audio.pushToTalk}`}
+            title={t("channelstrip-ptt-hold", { key: audio.pushToTalk })}
             className={`rounded px-1 text-[9px] uppercase ${
               gated ? "bg-white/10 text-havoc-muted" : "bg-emerald-500/20 text-emerald-300"
             }`}
@@ -472,7 +495,7 @@ export function ChannelStrip({
 
       {hasError ? (
         <p className="m-0 truncate text-[10px] text-red-400" title={levels?.errorMessage}>
-          {levels?.errorMessage ?? "audio device error"}
+          {levels?.errorMessage ?? t("channelstrip-audio-device-error")}
         </p>
       ) : (
         <VuMeter levels={levels} dimmed={gated} orientation="horizontal" />
@@ -488,7 +511,7 @@ export function ChannelStrip({
           onChange={onFaderChange}
           onMouseUp={commitVolume}
           onKeyUp={commitVolume}
-          aria-label={`Volume of ${source.name} in decibels`}
+          aria-label={t("channelstrip-volume-label", { name: source.name })}
           className="min-w-0 flex-1 accent-havoc-accent"
         />
         <TrackDots source={source} audio={audio} />
@@ -507,6 +530,7 @@ export function AdvancedAudioFields({
   audio: AudioSettings;
   onSetHotkeys: (pushToTalk: string | null, pushToMute: string | null) => void;
 }) {
+  const t = useT();
   const [ptt, setPtt] = useState(audio.pushToTalk ?? "");
   const [ptm, setPtm] = useState(audio.pushToMute ?? "");
   const hotkeyClass =
@@ -515,7 +539,7 @@ export function AdvancedAudioFields({
   return (
     <div className="flex flex-col gap-2">
       <NumberField
-        label={`Sync offset (ms, 0–${MAX_SYNC_OFFSET_MS} — delays this audio)`}
+        label={t("channelstrip-sync-offset", { max: MAX_SYNC_OFFSET_MS })}
         value={audio.syncOffsetMs}
         min={0}
         max={MAX_SYNC_OFFSET_MS}
@@ -525,35 +549,34 @@ export function AdvancedAudioFields({
         }
       />
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        Push-to-talk hotkey (silent unless held)
+        {t("channelstrip-ptt-hotkey")}
         <input
           value={ptt}
           onChange={(event) => setPtt(event.target.value)}
-          placeholder="e.g. Ctrl+Shift+T or F13"
-          aria-label="Push-to-talk hotkey"
+          placeholder={t("channelstrip-ptt-placeholder")}
+          aria-label={t("channelstrip-ptt-aria")}
           className={hotkeyClass}
         />
       </label>
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        Push-to-mute hotkey (silent while held)
+        {t("channelstrip-ptm-hotkey")}
         <input
           value={ptm}
           onChange={(event) => setPtm(event.target.value)}
-          placeholder="e.g. Ctrl+Shift+M"
-          aria-label="Push-to-mute hotkey"
+          placeholder={t("channelstrip-ptm-placeholder")}
+          aria-label={t("channelstrip-ptm-aria")}
           className={hotkeyClass}
         />
       </label>
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-        Hotkeys work while other apps are focused. On Linux/Wayland, global hotkeys may be
-        unavailable — that's a compositor limit, said honestly.
+        {t("channelstrip-hotkeys-note")}
       </p>
       <button
         type="button"
         onClick={() => onSetHotkeys(ptt.trim() || null, ptm.trim() || null)}
         className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
       >
-        Apply
+        {t("channelstrip-apply")}
       </button>
     </div>
   );

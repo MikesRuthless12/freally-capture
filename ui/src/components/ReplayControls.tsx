@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { replayArm, replayDisarm, replaySave, replayStatus } from "../api/commands";
 import { onReplay, onReplaySaved } from "../api/events";
 import type { ReplayStatus } from "../api/types";
+import { useT } from "../i18n/t";
 
 const buttonBase =
   "w-full rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
@@ -20,6 +21,7 @@ export function ReplayControls({
   /** The honest ffmpeg gate: route the user to the labeled component panel. */
   onNeedsComponents: () => void;
 }) {
+  const t = useT();
   const [status, setStatus] = useState<ReplayStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +42,7 @@ export function ReplayControls({
       .catch(() => undefined);
     onReplaySaved(({ path }) => {
       const name = path.split(/[\\/]/).pop() ?? path;
-      setToast(`Replay saved — ${name}`);
+      setToast(t("replaycontrols-saved", { name }));
       window.clearTimeout(toastTimer.current);
       toastTimer.current = window.setTimeout(() => setToast(null), 5000);
     })
@@ -54,7 +56,7 @@ export function ReplayControls({
       window.clearTimeout(toastTimer.current);
       cleanups.forEach((fn) => fn());
     };
-  }, []);
+  }, [t]);
 
   const armed = status?.armed ?? false;
 
@@ -90,7 +92,8 @@ export function ReplayControls({
     }
   };
 
-  const failure = status?.state === "failed" ? (status.error ?? "the buffer stopped") : null;
+  const failure =
+    status?.state === "failed" ? (status.error ?? t("replaycontrols-failure-stopped")) : null;
   const shownError = error ?? failure;
 
   return (
@@ -100,11 +103,7 @@ export function ReplayControls({
           type="button"
           disabled={disabled || busy}
           onClick={toggle}
-          title={
-            armed
-              ? "Disarm the replay buffer (drops the un-saved history)"
-              : "Arm the rolling replay buffer — keeps the last N seconds ready to save (its own lightweight encode; the stream and recording are untouched)"
-          }
+          title={armed ? t("replaycontrols-title-disarm") : t("replaycontrols-title-arm")}
           className={`${buttonBase} min-w-0 flex-1 ${
             armed
               ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text hover:border-havoc-accent/80"
@@ -113,7 +112,7 @@ export function ReplayControls({
         >
           {armed && status ? (
             <span className="flex items-center justify-between gap-2">
-              <span>⟲ Replay {status.seconds}s</span>
+              <span>{t("replaycontrols-replay-seconds", { seconds: status.seconds })}</span>
               <span
                 aria-label={status.state}
                 className={`inline-block h-2 w-2 rounded-full ${
@@ -126,7 +125,7 @@ export function ReplayControls({
               />
             </span>
           ) : (
-            "⟲ Arm Replay Buffer"
+            t("replaycontrols-arm")
           )}
         </button>
         {armed && (
@@ -134,10 +133,10 @@ export function ReplayControls({
             type="button"
             disabled={busy}
             onClick={save}
-            title="Save the last N seconds to the recordings folder (also on the Save-Replay hotkey)"
+            title={t("replaycontrols-save-title")}
             className={`${buttonBase} w-auto shrink-0 border-white/10 bg-white/[0.04] text-havoc-text hover:border-havoc-accent/50`}
           >
-            ⤓ Save
+            {t("replaycontrols-save")}
           </button>
         )}
       </div>

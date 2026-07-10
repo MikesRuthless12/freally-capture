@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { initLocale, useT } from "./i18n/t";
+import { applyTheme } from "./theme/theme";
+
 import {
   eulaStatus,
   health,
@@ -16,6 +19,10 @@ import {
   studioSetStudioMode,
   studioSetItemTransform,
   studioSetItemVisible,
+  studioSelectScene,
+  studioTransition,
+  replaySave,
+  recordingAddMarker,
 } from "./api/commands";
 import { onAudio, onProgram, onRemoteInvite, onStudio } from "./api/events";
 import type {
@@ -31,11 +38,15 @@ import type {
   Transform,
 } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
+import { CommandPalette } from "./components/CommandPalette";
+import { StatusAnnouncer } from "./components/StatusAnnouncer";
+import type { Command } from "./lib/commands";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
 import { spikeSetJoinPrefill } from "./remote/spike";
 import { ControlsDock } from "./panels/ControlsDock";
 import { EulaGate } from "./panels/EulaGate";
+import { FirstRunWizard } from "./panels/FirstRunWizard";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { RemoteSessionBar } from "./panels/RemoteSessionBar";
@@ -54,6 +65,8 @@ type OpenDialog =
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
 export default function App() {
+  // Subscribes this tree to language changes; `t` is the same function either way.
+  const t = useT();
   const [core, setCore] = useState<Health | null>(null);
   const [coreError, setCoreError] = useState(false);
   // First-run EULA gate: `null` while loading, then the status. Until the
@@ -70,6 +83,11 @@ export default function App() {
   const [audio, setAudio] = useState<AudioLevelsPayload | null>(null);
   const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // The wizard is dismissible from its own close button, so its visibility is
+  // local state seeded from settings — not `!settings.completedOnboarding`
+  // directly, which would flicker it back while the save round-trips.
+  const [wizardDismissed, setWizardDismissed] = useState(false);
   // Ignore stale event echoes while a drag streams newer transforms.
   const localRevision = useRef(0);
 
@@ -94,6 +112,19 @@ export default function App() {
     settingsGet()
       .then((loaded) => {
         if (!cancelled) {
+          // Language and palette are cosmetic; the settings are not. A throw in
+          // either would land in the `.catch` below and leave `settings` null,
+          // which silently disables every control that reads it — the studio
+          // would look alive and refuse to save anything.
+          try {
+            // `"auto"` follows the OS, an explicit tag wins. Also stamps
+            // <html lang/dir>, which is what actually flips Arabic to RTL.
+            initLocale(loaded.language);
+            // Paint before the first render, so a light theme never flashes dark.
+            applyTheme(loaded.theme);
+          } catch (err) {
+            console.error("could not apply the language or theme:", err);
+          }
           setSettings(loaded);
           setSettingsSettled(true);
         }
@@ -158,6 +189,83 @@ export default function App() {
       ? selectedItem
       : null;
 
+  /**
+   * What the palette can reach (TASK-904). Scenes and sources come from the live
+   * collection, so the list is always the studio's truth rather than a snapshot.
+   * Labels are translated here — the palette never calls `t` on caller strings.
+   */
+  const paletteCommands = useMemo<Command[]>(() => {
+    const list: Command[] = [];
+
+    for (const scene of collection?.scenes ?? []) {
+      list.push({
+        id: `scene-${scene.id}`,
+        group: t("palette-group-scenes"),
+        label: scene.name,
+        keywords: "scene switch",
+        run: () => {
+          studioSelectScene(scene.id).catch((err) => console.error("scene switch failed:", err));
+        },
+      });
+    }
+
+    for (const item of activeScene?.items ?? []) {
+      const source = collection?.sources.find((candidate) => candidate.id === item.source);
+      list.push({
+        id: `item-${item.id}`,
+        group: t("palette-group-sources"),
+        label: source?.name ?? item.id,
+        keywords: "source select",
+        run: () => setSelectedItem(item.id),
+      });
+    }
+
+    list.push(
+      {
+        id: "action-studio-mode",
+        group: t("palette-group-actions"),
+        label: studioMode ? t("studio-mode-leave") : t("studio-mode"),
+        run: () => {
+          studioSetStudioMode(!studioMode).catch((err) =>
+            console.error("studio mode toggle failed:", err),
+          );
+        },
+      },
+      {
+        id: "action-transition",
+        group: t("palette-group-actions"),
+        label: t("palette-transition"),
+        run: () => {
+          studioTransition().catch((err) => console.error("transition failed:", err));
+        },
+      },
+      {
+        id: "action-save-replay",
+        group: t("palette-group-actions"),
+        label: t("palette-save-replay"),
+        run: () => {
+          replaySave().catch((err) => console.error("save replay failed:", err));
+        },
+      },
+      {
+        id: "action-add-marker",
+        group: t("palette-group-actions"),
+        label: t("palette-add-marker"),
+        run: () => {
+          recordingAddMarker().catch((err) => console.error("add marker failed:", err));
+        },
+      },
+      {
+        id: "action-vertical",
+        group: t("palette-group-actions"),
+        label: t("palette-vertical-canvas"),
+        run: () => setDialog({ kind: "vertical" }),
+      },
+    );
+
+    return list;
+  }, [collection, activeScene, studioMode, t]);
+
   // Highlight Speaker keyboard toggle: "F" focuses the selected item (fills
   // the canvas) or, when a focus is active, restores the layout — never while
   // typing in a field.
@@ -179,6 +287,21 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeScene, effectiveSelection]);
+
+  // Ctrl/Cmd-K opens the palette (TASK-904). Unlike the "F" shortcut this DOES
+  // fire while a field has focus — that is the point of a command palette — so
+  // it only guards against the browser's own find-in-page binding.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "k" && event.key !== "K") return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const addItem = useCallback(
     (settings: SourceSettings, name?: string) => {
@@ -283,7 +406,7 @@ export default function App() {
     settingsSet(next).catch((err) => {
       // Roll back so the UI never claims a state the disk doesn't have.
       setSettings(previous);
-      setSaveError("Couldn't save settings — the change won't survive a restart.");
+      setSaveError(t("app-save-error"));
       console.error("could not persist settings:", err);
     });
   };
@@ -312,6 +435,20 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      {/* Speaks going-live, recording and dropped-frame bursts to a screen reader. */}
+      <StatusAnnouncer />
+      {/* After the EULA gate, never before: consent precedes onboarding. */}
+      {settings && !settings.completedOnboarding && !wizardDismissed && (
+        <FirstRunWizard
+          settings={settings}
+          onSettingsSaved={setSettings}
+          activeSceneId={activeScene?.id ?? null}
+          onClose={() => setWizardDismissed(true)}
+        />
+      )}
+      {paletteOpen && (
+        <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
+      )}
       {/* No app title here — the OS titlebar already says "Freally Capture".
           `justify-end` (not `justify-between`) keeps the controls on the right
           now that nothing balances them on the left. */}
@@ -330,11 +467,7 @@ export default function App() {
               )
             }
             disabled={!collection}
-            title={
-              studioMode
-                ? "Leave Studio Mode"
-                : "Studio Mode — edit a preview scene, commit it to the program with a transition"
-            }
+            title={studioMode ? t("studio-mode-leave") : t("studio-mode-enter-title")}
             aria-pressed={studioMode !== null}
             className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
               studioMode
@@ -342,13 +475,13 @@ export default function App() {
                 : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
             }`}
           >
-            Studio Mode {studioMode ? "on" : "off"}
+            {t("studio-mode")} {studioMode ? t("toggle-on") : t("toggle-off")}
           </button>
           <button
             type="button"
             onClick={() => setDialog({ kind: "vertical" })}
             disabled={!collection}
-            title="The second (vertical 9:16) output canvas — recordable and streamable independently"
+            title={t("vertical-canvas-title")}
             aria-pressed={Boolean(collection?.vertical)}
             className={`rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${
               collection?.vertical
@@ -356,23 +489,25 @@ export default function App() {
                 : "border-white/10 text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text"
             }`}
           >
-            9:16 {collection?.vertical ? "on" : "off"}
+            9:16 {collection?.vertical ? t("toggle-on") : t("toggle-off")}
           </button>
           <button
             type="button"
             onClick={toggleStatsDock}
             disabled={!settings}
-            title={showStats ? "Hide the stats dock" : "Show the stats dock"}
+            title={showStats ? t("hide-stats-dock") : t("show-stats-dock")}
             className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
           >
-            Stats {showStats ? "on" : "off"}
+            {t("stats")} {showStats ? t("toggle-on") : t("toggle-off")}
           </button>
           <span className="text-xs text-havoc-muted">
             {core
-              ? `v${core.appVersion} · core ${core.coreOk ? "OK" : "ERROR"}`
+              ? `${t("app-version", { version: core.appVersion })} · ${
+                  core.coreOk ? t("core-ok") : t("core-error")
+                }`
               : coreError
-                ? "core unreachable (browser mode)"
-                : "connecting to core…"}
+                ? t("core-unreachable")
+                : t("connecting-to-core")}
           </span>
         </div>
       </header>
@@ -445,7 +580,8 @@ export default function App() {
           sceneId={activeScene.id}
           item={dialogItem}
           sourceName={
-            collection?.sources.find((source) => source.id === dialogItem.source)?.name ?? "Source"
+            collection?.sources.find((source) => source.id === dialogItem.source)?.name ??
+            t("filters-source-fallback")
           }
           onClose={() => setDialog(null)}
         />

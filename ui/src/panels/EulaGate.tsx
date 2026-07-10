@@ -4,6 +4,7 @@ import { exit } from "@tauri-apps/plugin-process";
 
 import { eulaAccept } from "../api/commands";
 import type { EulaStatus } from "../api/types";
+import { useT } from "../i18n/t";
 
 /** Decode the HTML entities the source doc may carry (belt + suspenders). */
 function decodeEntities(s: string): string {
@@ -100,6 +101,7 @@ function renderMarkdown(text: string): ReactElement[] {
  * version changes).
  */
 export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepted: () => void }) {
+  const t = useT();
   const [scrolledToEnd, setScrolledToEnd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,15 +143,13 @@ export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepte
       <div className="flex max-h-full w-full max-w-3xl flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-5">
         <div className="flex items-baseline justify-between gap-2">
           <h1 className="m-0 bg-gradient-to-r from-havoc-accent to-havoc-accent-2 bg-clip-text text-lg font-bold tracking-wide text-transparent">
-            Freally Capture — License Agreement
+            {t("eula-title")}
           </h1>
-          <span className="shrink-0 font-mono text-[10px] text-havoc-muted">v{status.version}</span>
+          <span className="shrink-0 font-mono text-[10px] text-havoc-muted">
+            {t("eula-version", { version: status.version })}
+          </span>
         </div>
-        <p className="m-0 text-xs leading-relaxed text-havoc-muted">
-          Please read and accept this agreement to use Freally Capture. In short: it&apos;s a
-          neutral tool, and <strong className="text-havoc-text">you are solely responsible</strong>{" "}
-          for what you capture, record, and broadcast — and for having the rights to it.
-        </p>
+        <p className="m-0 text-xs leading-relaxed text-havoc-muted">{t("eula-intro")}</p>
         <div
           ref={scrollRef}
           onScroll={onScroll}
@@ -164,7 +164,7 @@ export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepte
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-[10px] text-havoc-muted">
-            {scrolledToEnd ? "Thanks for reading." : "Scroll to the end to continue."}
+            {scrolledToEnd ? t("eula-thanks") : t("eula-scroll-hint")}
           </span>
           <div className="flex gap-2">
             <button
@@ -172,7 +172,7 @@ export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepte
               onClick={decline}
               className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-red-400/50 hover:text-red-200"
             >
-              Decline &amp; Quit
+              {t("eula-decline")}
             </button>
             <button
               type="button"
@@ -180,7 +180,7 @@ export function EulaGate({ status, onAccepted }: { status: EulaStatus; onAccepte
               disabled={!scrolledToEnd || busy}
               className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-40"
             >
-              I Agree
+              {t("eula-agree")}
             </button>
           </div>
         </div>

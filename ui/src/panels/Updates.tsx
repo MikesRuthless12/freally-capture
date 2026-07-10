@@ -4,6 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 type Phase =
   | { kind: "checking" }
@@ -21,6 +22,7 @@ type Phase =
  * this UI. Nothing is downloaded without an explicit click.
  */
 export function UpdatesDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
 
   const runCheck = useCallback(async () => {
@@ -80,16 +82,18 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   return (
-    <PickerShell title="Software update" onClose={onClose} wide>
+    <PickerShell title={t("updates-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
-        {phase.kind === "checking" && <p className="m-0 text-havoc-muted">Checking for updates…</p>}
+        {phase.kind === "checking" && (
+          <p className="m-0 text-havoc-muted">{t("updates-checking")}</p>
+        )}
 
         {phase.kind === "uptodate" && (
           <>
-            <p className="m-0 text-emerald-300">You&apos;re on the latest version.</p>
+            <p className="m-0 text-emerald-300">{t("updates-uptodate")}</p>
             <div className="flex gap-2">
               <button type="button" onClick={runCheck} className={secondaryBtn}>
-                Check again
+                {t("updates-check-again")}
               </button>
             </div>
           </>
@@ -98,9 +102,12 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
         {phase.kind === "available" && (
           <>
             <p className="m-0">
-              <strong>Version {phase.update.version}</strong> is available
+              {t("updates-available", { version: phase.update.version })}
               {phase.update.currentVersion ? (
-                <span className="text-havoc-muted"> (you have {phase.update.currentVersion})</span>
+                <span className="text-havoc-muted">
+                  {" "}
+                  {t("updates-current-version", { current: phase.update.currentVersion })}
+                </span>
               ) : null}
               .
             </p>
@@ -110,7 +117,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                   htmlFor="release-notes"
                   className="text-[10px] tracking-wide text-havoc-muted uppercase"
                 >
-                  Version {phase.update.version} — Release notes
+                  {t("updates-release-notes-label", { version: phase.update.version })}
                 </label>
                 <textarea
                   id="release-notes"
@@ -121,17 +128,13 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                 />
               </div>
             ) : null}
-            <p className="m-0 text-[11px] leading-snug text-havoc-muted">
-              Do you want to update now? The download is verified against the bundled signing key
-              before it&apos;s applied. Freally Capture closes, the installer runs, and the new
-              version reopens by itself.
-            </p>
+            <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("updates-confirm")}</p>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => install(phase.update)} className={primaryBtn}>
-                Yes, update now
+                {t("updates-yes-update-now")}
               </button>
               <button type="button" onClick={onClose} className={secondaryBtn}>
-                No, not now
+                {t("updates-no-not-now")}
               </button>
             </div>
           </>
@@ -140,9 +143,9 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
         {phase.kind === "downloading" && (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between">
-              <span>Downloading {phase.version}…</span>
+              <span>{t("updates-downloading", { version: phase.version })}</span>
               <span className="font-mono text-havoc-muted">
-                {phase.pct !== null ? `${phase.pct.toFixed(2)}%` : "starting…"}
+                {phase.pct !== null ? `${phase.pct.toFixed(2)}%` : t("updates-starting")}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
@@ -156,7 +159,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
 
         {phase.kind === "installed" && (
           <>
-            <p className="m-0 text-emerald-300">Update installed.</p>
+            <p className="m-0 text-emerald-300">{t("updates-installed")}</p>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -165,10 +168,10 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
                 }}
                 className={primaryBtn}
               >
-                Restart now
+                {t("updates-restart-now")}
               </button>
               <button type="button" onClick={onClose} className={secondaryBtn}>
-                Restart later
+                {t("updates-restart-later")}
               </button>
             </div>
           </>
@@ -181,7 +184,7 @@ export function UpdatesDialog({ onClose }: { onClose: () => void }) {
             </p>
             <div className="flex gap-2">
               <button type="button" onClick={runCheck} className={secondaryBtn}>
-                Try again
+                {t("updates-try-again")}
               </button>
             </div>
           </>

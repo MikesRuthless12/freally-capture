@@ -1,7 +1,7 @@
 {
   "name": "@freally-capture/ui",
   "private": true,
-  "version": "0.95.1",
+  "version": "0.96.0",
   "type": "module",
   "description": "Freally Capture — the React + TypeScript control UI (Vite, Havoc dark).",
   "license": "SEE LICENSE IN LICENSE",
@@ -14,9 +14,12 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "i18n:lint": "node scripts/i18n-lint.mjs",
+    "theme:lint": "node scripts/theme-lint.mjs"
   },
   "dependencies": {
+    "@fluent/bundle": "^0.19.1",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-process": "^2.3.1",

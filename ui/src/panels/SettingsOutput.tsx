@@ -15,6 +15,7 @@ import type {
 import { TRACK_COUNT } from "../api/types";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const selectClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -23,13 +24,13 @@ const inputClass = selectClass;
 const CONTAINERS: { value: Container; label: string; wire: boolean }[] = [
   {
     value: "frec",
-    label: "freally-video (.frec) — lossless, owned, nothing to download",
+    label: "output-container-frec",
     wire: false,
   },
-  { value: "mkv", label: "MKV — crash-tolerant; remux to mp4 later", wire: true },
-  { value: "mp4", label: "MP4 — plays everywhere", wire: true },
-  { value: "mov", label: "MOV", wire: true },
-  { value: "webm", label: "WebM (AV1 + Opus)", wire: true },
+  { value: "mkv", label: "output-container-mkv", wire: true },
+  { value: "mp4", label: "output-container-mp4", wire: true },
+  { value: "mov", label: "output-container-mov", wire: true },
+  { value: "webm", label: "output-container-webm", wire: true },
 ];
 
 const FPS_CHOICES = [24, 30, 50, 60, 120, 144, 240];
@@ -48,13 +49,13 @@ const RECORD_PRESETS: {
   patch: Partial<RecordingSettings>;
 }[] = [
   {
-    label: "Lossless",
-    title: "The owned freally-video codec — bit-exact, no download",
+    label: "output-preset-lossless-label",
+    title: "output-preset-lossless-title",
     patch: { container: "frec" },
   },
   {
-    label: "High quality",
-    title: "MP4, best-detected encoder, near-lossless CQ 16, Quality preset",
+    label: "output-preset-high-label",
+    title: "output-preset-high-title",
     patch: {
       container: "mp4",
       encoderId: "auto",
@@ -63,8 +64,8 @@ const RECORD_PRESETS: {
     },
   },
   {
-    label: "Balanced",
-    title: "MKV, best-detected encoder, CQ 23, Balanced preset",
+    label: "output-preset-balanced-label",
+    title: "output-preset-balanced-title",
     patch: {
       container: "mkv",
       encoderId: "auto",
@@ -90,6 +91,7 @@ export function SettingsOutput({
   onClose: () => void;
   onOpenComponents: () => void;
 }) {
+  const t = useT();
   const [saveError, setSaveError] = useState<string | null>(null);
   const [ffmpeg, setFfmpeg] = useState<FfmpegStatus | null>(null);
   const [catalog, setCatalog] = useState<EncoderCatalog | null>(null);
@@ -134,8 +136,8 @@ export function SettingsOutput({
 
   if (!settings) {
     return (
-      <PickerShell title="Output" onClose={onClose}>
-        <p className="m-0 text-xs text-havoc-muted">Settings are still loading…</p>
+      <PickerShell title={t("output-title")} onClose={onClose}>
+        <p className="m-0 text-xs text-havoc-muted">{t("output-loading")}</p>
       </PickerShell>
     );
   }
@@ -155,10 +157,10 @@ export function SettingsOutput({
   const ffmpegReady = ffmpeg?.state === "ready";
 
   return (
-    <PickerShell title="Output" onClose={onClose} wide>
+    <PickerShell title={t("output-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-3 text-xs text-havoc-text">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Recording format
+          {t("output-recording-format")}
           <select
             value={rec.container}
             onChange={(event) => save({ container: event.target.value as Container })}
@@ -166,7 +168,7 @@ export function SettingsOutput({
           >
             {CONTAINERS.map((entry) => (
               <option key={entry.value} value={entry.value}>
-                {entry.label}
+                {t(entry.label)}
               </option>
             ))}
           </select>
@@ -174,33 +176,30 @@ export function SettingsOutput({
 
         {wire && !ffmpegReady && (
           <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-2">
-            <span className="text-[11px] text-amber-200">
-              This format needs the FFmpeg component (wire codecs — not bundled). Lossless .frec
-              needs nothing.
-            </span>
+            <span className="text-[11px] text-amber-200">{t("output-ffmpeg-warning")}</span>
             <button
               type="button"
               onClick={onOpenComponents}
               className="shrink-0 rounded-md border border-amber-400/40 px-2 py-1 text-[11px] text-amber-200 transition-colors hover:border-amber-300"
             >
-              Install…
+              {t("output-install")}
             </button>
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Recordings folder
+            {t("output-recordings-folder")}
             <input
               type="text"
               value={rec.folder}
-              placeholder="OS Videos folder"
+              placeholder={t("output-folder-placeholder")}
               onChange={(event) => save({ folder: event.target.value })}
               className={inputClass}
             />
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Filename prefix
+            {t("output-filename-prefix")}
             <input
               type="text"
               value={rec.filenamePrefix}
@@ -212,7 +211,7 @@ export function SettingsOutput({
 
         <div className="grid grid-cols-3 items-end gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Frame rate
+            {t("output-frame-rate")}
             <select
               value={rec.fps}
               onChange={(event) => save({ fps: Number(event.target.value) })}
@@ -220,20 +219,20 @@ export function SettingsOutput({
             >
               {FPS_CHOICES.map((fps) => (
                 <option key={fps} value={fps}>
-                  {fps} fps
+                  {t("output-fps-option", { fps })}
                 </option>
               ))}
             </select>
           </label>
           <NumberField
-            label="Split every (minutes, 0 = off)"
+            label={t("output-split-every")}
             value={rec.splitMinutes}
             min={0}
             max={1440}
             onCommit={(value) => save({ splitMinutes: Math.round(value) })}
           />
           <NumberField
-            label="Output width (0 = canvas; wire formats only)"
+            label={t("output-output-width")}
             value={rec.outputWidth}
             min={0}
             max={16384}
@@ -241,7 +240,7 @@ export function SettingsOutput({
             onCommit={(value) => save({ outputWidth: Math.round(value) })}
           />
           <NumberField
-            label="Output height (0 = canvas)"
+            label={t("output-output-height")}
             value={rec.outputHeight}
             min={0}
             max={16384}
@@ -254,12 +253,15 @@ export function SettingsOutput({
               checked={rec.recordVertical}
               onChange={(event) => save({ recordVertical: event.target.checked })}
             />
-            Also record the vertical canvas (a parallel “… (vertical)” file; needs the 9:16 canvas
-            enabled)
+            {t("output-record-vertical")}
           </label>
           <div className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Audio tracks
-            <div className="flex items-center gap-1" role="group" aria-label="Recorded tracks">
+            {t("output-audio-tracks")}
+            <div
+              className="flex items-center gap-1"
+              role="group"
+              aria-label={t("output-recorded-tracks-group")}
+            >
               {Array.from({ length: TRACK_COUNT }, (_, index) => {
                 const on = (rec.tracksMask & (1 << index)) !== 0;
                 const lastOne = on && rec.tracksMask === 1 << index;
@@ -269,8 +271,10 @@ export function SettingsOutput({
                     type="button"
                     title={
                       lastOne
-                        ? "At least one track must record"
-                        : `Record track ${index + 1}: ${on ? "on" : "off"}`
+                        ? t("output-track-last-one")
+                        : on
+                          ? t("output-record-track-on", { index: index + 1 })
+                          : t("output-record-track-off", { index: index + 1 })
                     }
                     aria-pressed={on}
                     disabled={lastOne}
@@ -292,16 +296,16 @@ export function SettingsOutput({
         {wire && (
           <section className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
             <h4 className="m-0 text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
-              Encoder
+              {t("output-encoder-heading")}
             </h4>
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Video encoder
+              {t("output-video-encoder")}
               <select
                 value={rec.encoderId}
                 onChange={(event) => save({ encoderId: event.target.value })}
                 className={selectClass}
               >
-                <option value="auto">Auto — best detected (H.264)</option>
+                <option value="auto">{t("output-encoder-auto")}</option>
                 {(catalog?.encoders ?? [])
                   .filter((encoder) => containerAccepts(rec.container, encoder.codec))
                   .map((encoder) => (
@@ -311,7 +315,7 @@ export function SettingsOutput({
                       disabled={encoder.verified === false}
                     >
                       {encoder.label}
-                      {encoder.verified === false ? " — unavailable here" : ""}
+                      {encoder.verified === false ? ` ${t("output-encoder-unavailable")}` : ""}
                     </option>
                   ))}
               </select>
@@ -324,19 +328,19 @@ export function SettingsOutput({
             })()}
             <div className="grid grid-cols-3 gap-2">
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Preset
+                {t("output-preset")}
                 <select
                   value={rec.preset}
                   onChange={(event) => save({ preset: event.target.value as EncPreset })}
                   className={selectClass}
                 >
-                  <option value="quality">Quality</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="performance">Performance</option>
+                  <option value="quality">{t("output-preset-quality")}</option>
+                  <option value="balanced">{t("output-preset-balanced-option")}</option>
+                  <option value="performance">{t("output-preset-performance")}</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-                Rate control
+                {t("output-rate-control")}
                 <select
                   value={rec.rateControl.mode}
                   onChange={(event) =>
@@ -346,14 +350,14 @@ export function SettingsOutput({
                   }
                   className={selectClass}
                 >
-                  <option value="cqp">CQP (constant quality)</option>
-                  <option value="cbr">CBR (constant bitrate)</option>
-                  <option value="vbr">VBR (variable bitrate)</option>
+                  <option value="cqp">{t("output-rc-cqp")}</option>
+                  <option value="cbr">{t("output-rc-cbr")}</option>
+                  <option value="vbr">{t("output-rc-vbr")}</option>
                 </select>
               </label>
               {rec.rateControl.mode === "cqp" ? (
                 <NumberField
-                  label="CQ (0–51, lower = better)"
+                  label={t("output-cq")}
                   value={rec.rateControl.cq}
                   min={0}
                   max={51}
@@ -363,7 +367,7 @@ export function SettingsOutput({
                 />
               ) : (
                 <NumberField
-                  label="Bitrate (kbps)"
+                  label={t("output-bitrate")}
                   value={rec.rateControl.bitrateKbps}
                   min={100}
                   max={300000}
@@ -378,7 +382,7 @@ export function SettingsOutput({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <NumberField
-                label="Keyframe interval (s)"
+                label={t("output-keyframe")}
                 value={rec.keyframeSec}
                 min={0.25}
                 max={10}
@@ -386,7 +390,7 @@ export function SettingsOutput({
                 onCommit={(value) => save({ keyframeSec: value })}
               />
               <NumberField
-                label="Audio bitrate (kbps / track)"
+                label={t("output-audio-bitrate")}
                 value={rec.audioBitrateKbps}
                 min={32}
                 max={512}
@@ -398,16 +402,16 @@ export function SettingsOutput({
         )}
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-havoc-muted">Presets:</span>
+          <span className="text-[11px] text-havoc-muted">{t("output-presets")}</span>
           {RECORD_PRESETS.map((preset) => (
             <button
               key={preset.label}
               type="button"
-              title={preset.title}
+              title={t(preset.title)}
               onClick={() => save(preset.patch)}
               className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors hover:border-havoc-accent/50 hover:text-havoc-text"
             >
-              {preset.label}
+              {t(preset.label)}
             </button>
           ))}
         </div>

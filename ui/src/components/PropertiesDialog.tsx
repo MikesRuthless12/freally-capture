@@ -19,6 +19,7 @@ import type {
   VideoFormat,
 } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
+import { useT } from "../i18n/t";
 import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
 
@@ -34,6 +35,7 @@ type PropertiesDialogProps = {
 
 /** Per-kind source settings + rename. Apply pushes to the engine live. */
 export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDialogProps) {
+  const t = useT();
   const [name, setName] = useState(source.name);
   const [draft, setDraft] = useState<SourceSettings>(() => {
     // A Source is its settings plus identity (+ the audio strip) — peel
@@ -58,10 +60,10 @@ export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDia
   };
 
   return (
-    <PickerShell title={`Properties — ${source.name}`} onClose={onClose} wide>
+    <PickerShell title={t("properties-title", { name: source.name })} onClose={onClose} wide>
       <div className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Name
+          {t("properties-name")}
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -82,14 +84,14 @@ export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDia
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
-            Cancel
+            {t("properties-cancel")}
           </button>
           <button
             type="button"
             onClick={apply}
             className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
           >
-            Apply
+            {t("properties-apply")}
           </button>
         </div>
       </div>
@@ -106,12 +108,13 @@ function SettingsEditor({
   scenes: Array<{ id: string; name: string }>;
   onChange: (settings: SourceSettings) => void;
 }) {
+  const t = useT();
   switch (draft.kind) {
     case "chatOverlay":
       return (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            YouTube — channel / watch / live_chat URL (no key, no sign-in, ever)
+            {t("properties-youtube")}
             <input
               value={draft.youtube}
               onChange={(event) => onChange({ ...draft, youtube: event.target.value })}
@@ -119,7 +122,7 @@ function SettingsEditor({
             />
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Twitch — channel name (anonymous)
+            {t("properties-twitch")}
             <input
               value={draft.twitch}
               onChange={(event) => onChange({ ...draft, twitch: event.target.value })}
@@ -127,7 +130,7 @@ function SettingsEditor({
             />
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Kick — channel slug (public endpoint)
+            {t("properties-kick")}
             <input
               value={draft.kick}
               onChange={(event) => onChange({ ...draft, kick: event.target.value })}
@@ -136,7 +139,7 @@ function SettingsEditor({
           </label>
           <div className="grid grid-cols-3 gap-2">
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Width (px)
+              {t("properties-width-px")}
               <input
                 type="number"
                 min={120}
@@ -147,7 +150,7 @@ function SettingsEditor({
               />
             </label>
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Lines
+              {t("properties-lines")}
               <input
                 type="number"
                 min={1}
@@ -158,7 +161,7 @@ function SettingsEditor({
               />
             </label>
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Font (px)
+              {t("properties-font-px")}
               <input
                 type="number"
                 min={10}
@@ -175,7 +178,7 @@ function SettingsEditor({
       return (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Image files (one path per line, shown in order)
+            {t("properties-images")}
             <textarea
               value={draft.paths.join("\n")}
               onChange={(event) =>
@@ -193,7 +196,7 @@ function SettingsEditor({
           </label>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Per-slide (ms)
+              {t("properties-per-slide")}
               <input
                 type="number"
                 min={100}
@@ -203,7 +206,7 @@ function SettingsEditor({
               />
             </label>
             <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-              Crossfade (ms, 0 = cut)
+              {t("properties-crossfade")}
               <input
                 type="number"
                 min={0}
@@ -222,7 +225,7 @@ function SettingsEditor({
               checked={draft.loop}
               onChange={(event) => onChange({ ...draft, loop: event.target.checked })}
             />
-            Loop (off = hold the last slide)
+            {t("properties-loop-slideshow")}
           </label>
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
             <input
@@ -230,14 +233,14 @@ function SettingsEditor({
               checked={draft.shuffle}
               onChange={(event) => onChange({ ...draft, shuffle: event.target.checked })}
             />
-            Shuffle each cycle
+            {t("properties-shuffle")}
           </label>
         </div>
       );
     case "nestedScene":
       return (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Scene this source composes (a scene that already contains this one is rejected)
+          {t("properties-nested-scene")}
           <select
             value={draft.scene}
             onChange={(event) => onChange({ ...draft, scene: event.target.value })}
@@ -257,8 +260,7 @@ function SettingsEditor({
     case "portal":
       return (
         <p className="m-0 text-xs leading-relaxed text-havoc-muted">
-          The Wayland ScreenCast portal picks the screen or window in the <em>system</em> dialog
-          every time this source starts — there is nothing to configure here, by design.
+          {t("properties-portal-note")}
         </p>
       );
     case "videoDevice":
@@ -269,16 +271,17 @@ function SettingsEditor({
     case "appAudio":
       return (
         <p className="m-0 text-xs leading-relaxed text-havoc-muted">
-          Capturing audio from{" "}
-          <span className="text-havoc-text">{draft.exe || "an application"}</span>
-          {draft.pid ? <span className="font-mono"> · pid {draft.pid}</span> : null}. Re-add the
-          source to target a different app (a process id changes when the app restarts).
+          {t("properties-appaudio-capturing", {
+            exe: draft.exe || t("properties-appaudio-exe-fallback"),
+          })}
+          {draft.pid ? ` ${t("properties-appaudio-pid", { pid: draft.pid })}` : ""}.{" "}
+          {t("properties-appaudio-note")}
         </p>
       );
     case "image":
       return (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Image file
+          {t("properties-image-file")}
           <input
             value={draft.path}
             onChange={(event) => onChange({ ...draft, path: event.target.value })}
@@ -291,7 +294,7 @@ function SettingsEditor({
       return (
         <div className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            Media file (mp4, mkv, webm, mov, .frec, or an image)
+            {t("properties-media-file")}
             <input
               value={draft.path}
               onChange={(event) => onChange({ ...draft, path: event.target.value })}
@@ -305,7 +308,7 @@ function SettingsEditor({
               checked={draft.loop}
               onChange={(event) => onChange({ ...draft, loop: event.target.checked })}
             />
-            Loop (restart from the top at the end)
+            {t("properties-media-loop")}
           </label>
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
             <input
@@ -313,13 +316,10 @@ function SettingsEditor({
               checked={draft.hwDecode}
               onChange={(event) => onChange({ ...draft, hwDecode: event.target.checked })}
             />
-            Hardware decode (falls back to software on its own)
+            {t("properties-media-hwdecode")}
           </label>
           <p className="m-0 text-[10px] leading-relaxed text-havoc-muted">
-            .frec plays through the owned freally-video codec — nothing to download. Other video
-            formats decode through the on-demand FFmpeg component. The file&apos;s audio gets its
-            own mixer strip; the strip&apos;s sync offset fine-tunes A/V alignment. A clip with no
-            audio leaves its strip silent.
+            {t("properties-media-note")}
           </p>
         </div>
       );
@@ -327,19 +327,19 @@ function SettingsEditor({
       return (
         <div className="flex items-end gap-2">
           <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            Color
+            {t("properties-color")}
             <input
               type="color"
               value={rgbaToHex(draft.color)}
               onChange={(event) =>
                 onChange({ ...draft, color: hexToRgba(event.target.value, draft.color.a) })
               }
-              aria-label="Color"
+              aria-label={t("properties-color")}
               className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
             />
           </label>
           <NumberField
-            label="Width"
+            label={t("properties-width")}
             value={draft.width}
             min={1}
             max={16384}
@@ -347,7 +347,7 @@ function SettingsEditor({
             className="flex-1"
           />
           <NumberField
-            label="Height"
+            label={t("properties-height")}
             value={draft.height}
             min={1}
             max={16384}
@@ -368,6 +368,7 @@ function CaptureRepick({
   draft: Extract<SourceSettings, { kind: "display" | "window" }>;
   onChange: (settings: SourceSettings) => void;
 }) {
+  const t = useT();
   const [entries, setEntries] = useState<CaptureSource[] | null>(null);
 
   useEffect(() => {
@@ -387,14 +388,16 @@ function CaptureRepick({
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[11px] text-havoc-muted">
-        Capturing: <span className="text-havoc-text">{draft.label}</span>
+        {t("properties-repick-capturing", { label: draft.label })}
       </span>
       <span className="text-[11px] text-havoc-muted">
         {entries === null
-          ? "Looking for sources…"
+          ? t("properties-repick-looking")
           : entries.length === 0
-            ? `No ${draft.kind === "display" ? "displays" : "windows"} found to re-pick.`
-            : "Pick again:"}
+            ? draft.kind === "display"
+              ? t("properties-repick-none-displays")
+              : t("properties-repick-none-windows")
+            : t("properties-repick-again")}
       </span>
       {entries && entries.length > 0 && (
         <ul className="m-0 flex max-h-48 list-none flex-col gap-1 overflow-auto p-0">
@@ -429,6 +432,7 @@ function VideoDeviceEditor({
   draft: Extract<SourceSettings, { kind: "videoDevice" }>;
   onChange: (settings: SourceSettings) => void;
 }) {
+  const t = useT();
   const [devices, setDevices] = useState<VideoDevice[] | null>(null);
   // Keyed by device id so switching devices reads as "loading" without a
   // synchronous reset inside the fetch effect.
@@ -475,7 +479,7 @@ function VideoDeviceEditor({
   return (
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        Device
+        {t("properties-device")}
         <select
           value={draft.deviceId}
           onChange={(event) => onChange({ ...draft, deviceId: event.target.value, format: null })}
@@ -487,12 +491,12 @@ function VideoDeviceEditor({
             </option>
           ))}
           {devices !== null && !devices.some((device) => device.id === draft.deviceId) && (
-            <option value={draft.deviceId}>(current device)</option>
+            <option value={draft.deviceId}>{t("properties-video-current-device")}</option>
           )}
         </select>
       </label>
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        Format
+        {t("properties-format")}
         <select
           value={current}
           onChange={(event) => {
@@ -504,7 +508,7 @@ function VideoDeviceEditor({
           className={inputClass}
         >
           <option value="">
-            {formats === null ? "Auto (loading formats…)" : "Auto (highest resolution)"}
+            {formats === null ? t("properties-format-auto-loading") : t("properties-format-auto")}
           </option>
           {(formats ?? []).map((format) => (
             <option key={formatKey(format)} value={formatKey(format)}>
@@ -524,6 +528,7 @@ function AudioDeviceEditor({
   draft: Extract<SourceSettings, { kind: "audioInput" | "audioOutput" }>;
   onChange: (settings: SourceSettings) => void;
 }) {
+  const t = useT();
   const [devices, setDevices] = useState<AudioDevice[] | null>(null);
   const [guidance, setGuidance] = useState<string | null>(null);
   const isLoopback = draft.kind === "audioOutput";
@@ -561,7 +566,7 @@ function AudioDeviceEditor({
   return (
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        {isLoopback ? "Capture the audio of" : "Device"}
+        {isLoopback ? t("properties-audio-capture-of") : t("properties-device")}
         <select
           value={draft.deviceId}
           onChange={(event) => onChange({ ...draft, deviceId: event.target.value })}
@@ -569,19 +574,23 @@ function AudioDeviceEditor({
         >
           {offerDefault && (
             <option value="">
-              {isLoopback ? "Default output (what you hear)" : "Default input"}
+              {isLoopback
+                ? t("properties-audio-default-output")
+                : t("properties-audio-default-input")}
             </option>
           )}
           {(devices ?? []).map((device) => (
             <option key={device.id} value={device.id}>
               {device.name}
-              {device.isDefault ? " (default)" : ""}
+              {device.isDefault ? ` ${t("properties-audio-default-suffix")}` : ""}
             </option>
           ))}
           {devices !== null &&
             draft.deviceId !== "" &&
             !devices.some((device) => device.id === draft.deviceId) && (
-              <option value={draft.deviceId}>(current device: {draft.deviceId})</option>
+              <option value={draft.deviceId}>
+                {t("properties-audio-current-device", { id: draft.deviceId })}
+              </option>
             )}
         </select>
       </label>
@@ -601,10 +610,11 @@ function TextEditor({
   draft: Extract<SourceSettings, { kind: "text" }>;
   onChange: (settings: SourceSettings) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-        Text
+        {t("properties-text")}
         <textarea
           value={draft.text}
           onChange={(event) => onChange({ ...draft, text: event.target.value })}
@@ -614,7 +624,7 @@ function TextEditor({
       </label>
       <div className="flex gap-2">
         <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-          Font family (system; blank = default)
+          {t("properties-font-family")}
           <input
             value={draft.fontFamily ?? ""}
             onChange={(event) =>
@@ -625,7 +635,7 @@ function TextEditor({
           />
         </label>
         <NumberField
-          label="Size (px)"
+          label={t("properties-size-px")}
           value={draft.sizePx}
           min={4}
           max={512}
@@ -635,31 +645,31 @@ function TextEditor({
       </div>
       <div className="flex items-end gap-3">
         <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-          Color
+          {t("properties-color")}
           <input
             type="color"
             value={rgbaToHex(draft.color)}
             onChange={(event) =>
               onChange({ ...draft, color: hexToRgba(event.target.value, draft.color.a) })
             }
-            aria-label="Text color"
+            aria-label={t("properties-text-color")}
             className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
           />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          Align
+          {t("properties-align")}
           <select
             value={draft.align}
             onChange={(event) => onChange({ ...draft, align: event.target.value as TextAlign })}
             className={inputClass}
           >
-            <option value="left">left</option>
-            <option value="center">center</option>
-            <option value="right">right</option>
+            <option value="left">{t("properties-align-left")}</option>
+            <option value="center">{t("properties-align-center")}</option>
+            <option value="right">{t("properties-align-right")}</option>
           </select>
         </label>
         <NumberField
-          label="Line spacing"
+          label={t("properties-line-spacing")}
           value={draft.lineSpacing}
           min={0.25}
           max={4}
@@ -670,7 +680,7 @@ function TextEditor({
       </div>
       <div className="flex items-center gap-4">
         <label className="flex w-40 flex-col gap-1 text-[11px] text-havoc-muted">
-          Wrap width (px; 0 = off)
+          {t("properties-wrap-width")}
           <input
             type="number"
             min={0}
@@ -688,14 +698,10 @@ function TextEditor({
             checked={draft.forceRtl}
             onChange={(event) => onChange({ ...draft, forceRtl: event.target.checked })}
           />
-          Force right-to-left
+          {t("properties-force-rtl")}
         </label>
       </div>
-      <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-        Rendering uses real shaping (Arabic joining, ligatures) and bidi line ordering. The bundled
-        Noto Sans family (incl. Arabic/Hebrew) is the default; system families work too. CJK uses
-        system fonts for now.
-      </p>
+      <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("properties-text-note")}</p>
     </div>
   );
 }

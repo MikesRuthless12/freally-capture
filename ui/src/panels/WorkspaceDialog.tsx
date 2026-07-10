@@ -11,6 +11,7 @@ import {
 } from "../api/commands";
 import type { Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { useT } from "../i18n/t";
 
 const inputClass =
   "min-w-0 flex-1 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -29,6 +30,7 @@ function NamedColumn({
   onSwitch: (name: string) => void;
   onCreate: (name: string) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState("");
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -43,7 +45,7 @@ function NamedColumn({
               <button
                 type="button"
                 onClick={() => !active && onSwitch(name)}
-                title={active ? "Active" : `Switch to ${name}`}
+                title={active ? t("workspace-active") : t("workspace-switch-to", { name })}
                 className={`w-full truncate rounded-md border px-2 py-1 text-left text-xs ${
                   active
                     ? "border-havoc-accent/50 bg-havoc-accent/10 text-havoc-text"
@@ -51,7 +53,11 @@ function NamedColumn({
                 }`}
               >
                 {name}
-                {active && <span className="ml-1.5 text-[10px] text-havoc-accent">● active</span>}
+                {active && (
+                  <span className="ml-1.5 text-[10px] text-havoc-accent">
+                    {t("workspace-active-marker")}
+                  </span>
+                )}
               </button>
             </li>
           );
@@ -61,8 +67,8 @@ function NamedColumn({
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="new name…"
-          aria-label={`New ${title.toLowerCase()} name`}
+          placeholder={t("workspace-new-name-placeholder")}
+          aria-label={t("workspace-new-name-label", { title: title.toLowerCase() })}
           className={inputClass}
         />
         <button
@@ -74,7 +80,7 @@ function NamedColumn({
           }}
           className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2.5 py-1 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
         >
-          Create
+          {t("workspace-create")}
         </button>
       </div>
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">{hint}</p>
@@ -95,6 +101,7 @@ export function WorkspaceDialog({
   /** A profile switch replaces the live settings — the app re-renders them. */
   onSettingsSaved: (next: Settings) => void;
 }) {
+  const t = useT();
   const [profiles, setProfiles] = useState<NamedList | null>(null);
   const [collections, setCollections] = useState<NamedList | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,11 +122,11 @@ export function WorkspaceDialog({
   };
 
   return (
-    <PickerShell title="Profiles & Scene Collections" onClose={onClose} wide>
+    <PickerShell title={t("workspace-title")} onClose={onClose} wide>
       <div className="flex gap-4">
         <NamedColumn
-          title="Profiles"
-          hint="A profile is your settings — stream target, output, hotkeys. Switch per show or per platform."
+          title={t("workspace-profiles")}
+          hint={t("workspace-profiles-hint")}
           list={profiles}
           onSwitch={(name) =>
             run(profileSwitch(name).then((settings) => onSettingsSaved(settings)))
@@ -127,8 +134,8 @@ export function WorkspaceDialog({
           onCreate={(name) => run(profileCreate(name))}
         />
         <NamedColumn
-          title="Scene collections"
-          hint="A collection is your scenes + sources. Create duplicates the current one as a starting point."
+          title={t("workspace-collections")}
+          hint={t("workspace-collections-hint")}
           list={collections}
           onSwitch={(name) => run(collectionSwitch(name))}
           onCreate={(name) => run(collectionCreate(name))}
