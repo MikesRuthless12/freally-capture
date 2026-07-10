@@ -1140,3 +1140,34 @@ palette-transition = Przejście Podgląd → Program
 palette-save-replay = Zapisz powtórkę
 palette-add-marker = Umieść znacznik rozdziału
 palette-vertical-canvas = Płótno pionowe (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Witaj w Freally Capture
+wizard-welcome = Dwa szybkie kroki: sprawdzimy, co potrafi Twój komputer, a potem uruchomimy scenę. Zajmie to około trzydziestu sekund, a wszystko możesz później zmienić.
+wizard-local-first = Nic stąd nie opuszcza Twojego komputera. Freally Capture nie ma kont, telemetrii ani chmury.
+wizard-start = Zaczynajmy
+wizard-skip = Pomiń
+wizard-hardware-title = Co potrafi Twój komputer
+wizard-probing = Sprawdzamy Twoją kartę graficzną i procesor…
+wizard-encoder = Koder
+wizard-canvas = Płótno
+wizard-bitrate = Bitrate
+wizard-probe-found = Znaleziono: { $gpus } · { $cores } rdzeni fizycznych
+wizard-no-gpu = brak dedykowanego GPU
+wizard-apply = Użyj tych ustawień
+wizard-keep-current = Zostaw to, co mam
+wizard-template-title = Zacznij od sceny
+wizard-template-screen = Przechwyć mój ekran
+wizard-template-screen-note = Dodaje Przechwytywanie ekranu Twojego głównego monitora. Najczęstszy punkt startu.
+wizard-template-empty = Zacznij od pustej
+wizard-template-empty-note = Pusta scena. Źródła dodasz samodzielnie przyciskiem +.
+wizard-done = Wszystko gotowe.
+wizard-done-hint = W dowolnej chwili naciśnij Ctrl+K, aby wyszukać sceny, źródła i akcje. Ustawienia znajdziesz pod przyciskiem ⚙.
+wizard-close = Zacznij transmisję
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Twoja karta graficzna potrafi samodzielnie kodować wideo, dzięki czemu procesor pozostaje wolny dla reszty studia.
+autoconfig-reason-software = Nie znaleziono użytecznego kodera sprzętowego, więc kodowaniem zajmie się procesor. To działa, po prostu obciąża bardziej CPU.
+autoconfig-reason-quality-hardware = 1080p przy 60 klatkach na sekundę, z bitrate akceptowanym przez każdą dużą platformę.
+autoconfig-reason-quality-software = 30 klatek na sekundę, ponieważ kodowanie programowe przy 60 gubi klatki na większości procesorów.
+autoconfig-reason-quality-low-cores = Niższy bitrate, ponieważ ten procesor ma niewiele rdzeni, a kodowanie programowe będzie o nie rywalizować z kompozytorem.

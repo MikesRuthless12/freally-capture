@@ -1127,3 +1127,34 @@ palette-transition = Переход: превью → программа
 palette-save-replay = Сохранить повтор
 palette-add-marker = Поставить метку главы
 palette-vertical-canvas = Вертикальный холст (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Добро пожаловать в Freally Capture
+wizard-welcome = Два коротких шага: посмотрим, на что способна ваша машина, а затем создадим сцену. Это займёт около тридцати секунд, и всё можно изменить позже.
+wizard-local-first = Отсюда ничто не покидает ваш компьютер. У Freally Capture нет аккаунтов, нет телеметрии и нет облака.
+wizard-start = Начать
+wizard-skip = Пропустить
+wizard-hardware-title = На что способна ваша машина
+wizard-probing = Проверяем вашу видеокарту и процессор…
+wizard-encoder = Кодировщик
+wizard-canvas = Холст
+wizard-bitrate = Битрейт
+wizard-probe-found = Найдено: { $gpus } · { $cores } физических ядер
+wizard-no-gpu = нет отдельного GPU
+wizard-apply = Использовать эти настройки
+wizard-keep-current = Оставить как есть
+wizard-template-title = Начните со сцены
+wizard-template-screen = Захватить мой экран
+wizard-template-screen-note = Добавляет «Захват дисплея» вашего основного монитора. Самое привычное начало.
+wizard-template-empty = Начать с пустого
+wizard-template-empty-note = Пустая сцена. Источники добавите сами кнопкой «+».
+wizard-done = Всё готово.
+wizard-done-hint = Нажмите Ctrl+K в любой момент, чтобы искать сцены, источники и действия. Настройки — за кнопкой ⚙.
+wizard-close = Начать трансляцию
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Ваша видеокарта умеет кодировать видео сама, оставляя процессор свободным для остальной студии.
+autoconfig-reason-software = Подходящий аппаратный кодировщик не найден, поэтому кодировать будет процессор. Это работает, просто нагружает CPU сильнее.
+autoconfig-reason-quality-hardware = 1080p при 60 кадрах в секунду и битрейте, который принимает любая крупная платформа.
+autoconfig-reason-quality-software = 30 кадров в секунду, потому что программное кодирование при 60 теряет кадры на большинстве процессоров.
+autoconfig-reason-quality-low-cores = Пониженный битрейт, потому что у этого процессора мало ядер, а программное кодирование будет бороться за них с компоновщиком.

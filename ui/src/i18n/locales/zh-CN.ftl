@@ -1146,3 +1146,34 @@ palette-transition = 转场 预览 → 节目
 palette-save-replay = 保存重放
 palette-add-marker = 打入章节标记
 palette-vertical-canvas = 竖屏（9:16）画布…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = 欢迎使用 Freally Capture
+wizard-welcome = 两个简单的步骤：先看看你的机器能做什么，再开始一个场景。大约需要三十秒，而且之后一切都可以更改。
+wizard-local-first = 这里的一切都不会离开你的电脑。Freally Capture 没有账户、没有遥测，也没有云端。
+wizard-start = 开始使用
+wizard-skip = 跳过
+wizard-hardware-title = 你的机器能做什么
+wizard-probing = 正在查看你的显卡和处理器…
+wizard-encoder = 编码器
+wizard-canvas = 画布
+wizard-bitrate = 比特率
+wizard-probe-found = 找到：{ $gpus } · { $cores } 个物理核心
+wizard-no-gpu = 无独立 GPU
+wizard-apply = 使用这些设置
+wizard-keep-current = 保持我现有的设置
+wizard-template-title = 从一个场景开始
+wizard-template-screen = 采集我的屏幕
+wizard-template-screen-note = 为你的主显示器添加一个显示器采集。这是最常见的起点。
+wizard-template-empty = 从空白开始
+wizard-template-empty-note = 一个空场景。用 + 按钮自己添加来源。
+wizard-done = 一切就绪。
+wizard-done-hint = 随时按 Ctrl+K 即可搜索场景、来源和操作。设置就在 ⚙ 按钮后面。
+wizard-close = 开始推流
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = 你的显卡可以自行编码视频，让处理器腾出手来处理工作室的其余工作。
+autoconfig-reason-software = 未找到可用的硬件编码器，因此将由处理器来编码。这样也能用，只是会多占用一些 CPU。
+autoconfig-reason-quality-hardware = 1080p、每秒 60 帧，比特率也是每个主流平台都接受的水平。
+autoconfig-reason-quality-software = 每秒 30 帧，因为软件编码在 60 帧时会在大多数处理器上丢帧。
+autoconfig-reason-quality-low-cores = 较低的比特率，因为这台处理器核心不多，软件编码会与合成器争抢它们。

@@ -1127,3 +1127,34 @@ palette-transition = Transição Prévia → Programa
 palette-save-replay = Salvar replay
 palette-add-marker = Soltar um marcador de capítulo
 palette-vertical-canvas = Canvas vertical (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Bem-vindo ao Freally Capture
+wizard-welcome = Dois passos rápidos: veja o que sua máquina consegue fazer e depois comece uma cena. Leva cerca de trinta segundos, e você pode mudar tudo depois.
+wizard-local-first = Nada aqui sai do seu computador. O Freally Capture não tem contas, nem telemetria, nem nuvem.
+wizard-start = Começar
+wizard-skip = Pular
+wizard-hardware-title = O que sua máquina consegue fazer
+wizard-probing = Verificando sua placa de vídeo e seu processador…
+wizard-encoder = Codificador
+wizard-canvas = Canvas
+wizard-bitrate = Taxa de bits
+wizard-probe-found = Encontrado: { $gpus } · { $cores } núcleos físicos
+wizard-no-gpu = sem GPU dedicada
+wizard-apply = Usar estas configurações
+wizard-keep-current = Manter o que eu tenho
+wizard-template-title = Comece com uma cena
+wizard-template-screen = Capturar minha tela
+wizard-template-screen-note = Adiciona uma Captura de Tela do seu monitor principal. O ponto de partida mais comum.
+wizard-template-empty = Começar vazio
+wizard-template-empty-note = Uma cena vazia. Adicione as fontes você mesmo com o botão +.
+wizard-done = Tudo pronto.
+wizard-done-hint = Pressione Ctrl+K a qualquer momento para pesquisar cenas, fontes e ações. As configurações ficam atrás do botão ⚙.
+wizard-close = Começar a transmitir
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Sua placa de vídeo consegue codificar o vídeo sozinha, o que deixa o processador livre para o resto do estúdio.
+autoconfig-reason-software = Nenhum codificador por hardware utilizável foi encontrado, então o processador fará a codificação. Funciona, apenas custa mais CPU.
+autoconfig-reason-quality-hardware = 1080p a 60 quadros por segundo, com uma taxa de bits que toda grande plataforma aceita.
+autoconfig-reason-quality-software = 30 quadros por segundo, porque a codificação por software a 60 descarta quadros na maioria dos processadores.
+autoconfig-reason-quality-low-cores = Uma taxa de bits mais baixa, porque este processador tem poucos núcleos e a codificação por software vai disputá-los com o compositor.

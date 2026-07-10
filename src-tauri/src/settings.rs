@@ -120,6 +120,10 @@ pub struct Settings {
     /// install) or a stale version → the app shows the acceptance gate before
     /// it can be used.
     pub accepted_eula_version: Option<String>,
+    /// Whether the first-run wizard has been seen (Phase 9, TASK-903/905).
+    /// `false` on a fresh install; set once the user finishes *or skips* it, so
+    /// a skipped wizard never comes back uninvited.
+    pub completed_onboarding: bool,
 }
 
 impl Default for Settings {
@@ -140,6 +144,7 @@ impl Default for Settings {
             browser_docks: Vec::new(),
             scripts: Vec::new(),
             accepted_eula_version: None,
+            completed_onboarding: false,
         }
     }
 }
@@ -890,19 +895,22 @@ impl SettingsStore {
 
     /// Replace the settings and persist them atomically.
     ///
-    /// EULA acceptance is deliberately **not** replaceable through here: it is a
-    /// machine-level fact, not a user-editable preference. Two callers would
-    /// otherwise silently reset it and re-show the gate on the next launch —
-    /// `settings_set`, because the UI's payload omits the field and
-    /// `serde(default)` turns that into `None`; and `profile_switch`, because a
-    /// profile snapshotted before acceptance carries `None`. Only
-    /// [`Self::accept_eula`] may write it.
+    /// Two fields are deliberately **not** replaceable through here, because
+    /// they are machine-level facts rather than user-editable preferences:
+    /// `accepted_eula_version` and `completed_onboarding`. A caller would
+    /// otherwise silently reset them and re-show the gate or the wizard on the
+    /// next launch — `settings_set`, because a stale UI snapshot carries the
+    /// pre-acceptance value, and `profile_switch`, because a profile
+    /// snapshotted earlier carries it too. Only [`Self::accept_eula`] and
+    /// [`Self::complete_onboarding`] may write them.
     pub fn set(&self, next: Settings) -> io::Result<()> {
         {
             let mut guard = self.lock();
             let accepted = guard.accepted_eula_version.clone();
+            let onboarded = guard.completed_onboarding;
             *guard = next;
             guard.accepted_eula_version = accepted;
+            guard.completed_onboarding = onboarded;
         }
         self.persist()
     }
@@ -913,6 +921,17 @@ impl SettingsStore {
         {
             let mut guard = self.lock();
             guard.accepted_eula_version = Some(version.to_owned());
+        }
+        self.persist()
+    }
+
+    /// Mark the first-run wizard as seen — the only path allowed to write it.
+    /// Called when the user finishes **or skips**, so a skipped wizard never
+    /// returns uninvited. Idempotent.
+    pub fn complete_onboarding(&self) -> io::Result<()> {
+        {
+            let mut guard = self.lock();
+            guard.completed_onboarding = true;
         }
         self.persist()
     }
@@ -1093,10 +1112,13 @@ mod tests {
                 enabled: true,
             }],
             accepted_eula_version: Some("2026-07-08".to_owned()),
+            completed_onboarding: true,
         };
-        // `set` never writes the EULA field (see its docs) — accept first so the
-        // round-trip below compares the whole struct.
+        // `set` never writes the EULA field or the onboarding flag (see its
+        // docs) — go through their real writers first, so the round-trip below
+        // compares the whole struct.
         store.accept_eula("2026-07-08").expect("accept eula");
+        store.complete_onboarding().expect("complete onboarding");
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
@@ -1135,6 +1157,41 @@ mod tests {
             reloaded.get().accepted_eula_version.as_deref(),
             Some("2026-07-08"),
             "acceptance must survive a relaunch"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The first-run wizard is a machine-level fact, exactly like EULA
+    /// acceptance — and it fails the same way. A stale `settings_set` payload or
+    /// a profile snapshotted before the wizard ran would reset it, and the
+    /// wizard would greet the user on every launch, forever.
+    #[test]
+    fn set_cannot_un_complete_the_onboarding() {
+        let path = temp_path("onboarding-set");
+        let store = SettingsStore::load_from(path.clone());
+        assert!(!store.get().completed_onboarding, "fresh install");
+        store.complete_onboarding().expect("complete onboarding");
+
+        // Exactly what a stale UI payload looks like: the field absent.
+        let from_ui: Settings =
+            serde_json::from_str(r#"{"language":"fr"}"#).expect("UI payload parses");
+        assert!(!from_ui.completed_onboarding);
+        store.set(from_ui).expect("save settings");
+
+        assert!(
+            store.get().completed_onboarding,
+            "must survive a settings save"
+        );
+        assert_eq!(
+            store.get().language,
+            "fr",
+            "the rest of the payload applies"
+        );
+
+        let reloaded = SettingsStore::load_from(path.clone());
+        assert!(
+            reloaded.get().completed_onboarding,
+            "must survive a relaunch"
         );
         let _ = fs::remove_file(&path);
     }

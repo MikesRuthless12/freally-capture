@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddedItem,
+  AutoConfig,
   BuildInfo,
   AppAudioList,
   AudioDevice,
@@ -718,6 +719,16 @@ export function bugReportSubmit(
   includeCrash: boolean,
 ): Promise<void> {
   return invoke("bug_report_submit", { target, description, includeCrash });
+}
+
+/** Probe the machine and suggest encoder/fps/bitrate. Reads hardware; changes nothing. */
+export function autoconfigSuggest(): Promise<AutoConfig> {
+  return invoke<AutoConfig>("autoconfig_suggest");
+}
+
+/** Record that the first-run wizard was finished OR skipped. */
+export function settingsCompleteOnboarding(): Promise<void> {
+  return invoke("settings_complete_onboarding");
 }
 
 /** What the About panel shows: version, authors, dates, links. Read-only. */

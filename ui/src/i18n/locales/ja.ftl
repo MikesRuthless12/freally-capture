@@ -1163,3 +1163,34 @@ palette-transition = プレビュー → プログラムへトランジション
 palette-save-replay = リプレイを保存
 palette-add-marker = チャプターマーカーを打つ
 palette-vertical-canvas = 縦型（9:16）キャンバス…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Freally Capture へようこそ
+wizard-welcome = かんたんな2ステップです: お使いのマシンにできることを確認して、シーンを始めましょう。30秒ほどで終わり、あとから何でも変更できます。
+wizard-local-first = ここでの操作は、あなたのコンピューターから外に出ることはありません。Freally Capture にはアカウントも、テレメトリも、クラウドもありません。
+wizard-start = 始める
+wizard-skip = スキップ
+wizard-hardware-title = お使いのマシンにできること
+wizard-probing = グラフィックカードとプロセッサーを確認しています…
+wizard-encoder = エンコーダ
+wizard-canvas = キャンバス
+wizard-bitrate = ビットレート
+wizard-probe-found = 検出: { $gpus } · { $cores } 物理コア
+wizard-no-gpu = 専用GPUなし
+wizard-apply = この設定を使う
+wizard-keep-current = 今のままにする
+wizard-template-title = シーンから始める
+wizard-template-screen = 画面をキャプチャ
+wizard-template-screen-note = メインモニターの画面キャプチャを追加します。最もよくある始め方です。
+wizard-template-empty = 空の状態で始める
+wizard-template-empty-note = 空のシーンです。ソースは + ボタンで自分で追加します。
+wizard-done = 準備ができました。
+wizard-done-hint = いつでも Ctrl+K を押すと、シーン、ソース、アクションを検索できます。設定は ⚙ ボタンの中にあります。
+wizard-close = 配信を始める
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = グラフィックカードが自分で映像をエンコードできるので、プロセッサーはスタジオの他の処理にそのまま使えます。
+autoconfig-reason-software = 使えるハードウェアエンコーダが見つからなかったので、プロセッサーがエンコードします。問題なく動きますが、CPUをより多く使います。
+autoconfig-reason-quality-hardware = 60フレーム毎秒の 1080p で、主要なすべてのプラットフォームが受け入れるビットレートです。
+autoconfig-reason-quality-software = 30フレーム毎秒です。60でのソフトウェアエンコードは、ほとんどのプロセッサーでフレームを落とすためです。
+autoconfig-reason-quality-low-cores = 低めのビットレートです。このプロセッサーはコアが少なく、ソフトウェアエンコードがコンポジターとコアを奪い合うためです。

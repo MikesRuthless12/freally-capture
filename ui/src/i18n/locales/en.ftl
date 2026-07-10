@@ -1163,3 +1163,34 @@ palette-transition = Transition Preview → Program
 palette-save-replay = Save replay
 palette-add-marker = Drop a chapter marker
 palette-vertical-canvas = Vertical (9:16) canvas…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Welcome to Freally Capture
+wizard-welcome = Two quick steps: check what your machine can do, then start a scene. It takes about thirty seconds, and you can change everything later.
+wizard-local-first = Nothing here leaves your computer. Freally Capture has no accounts, no telemetry, and no cloud.
+wizard-start = Get started
+wizard-skip = Skip
+wizard-hardware-title = What your machine can do
+wizard-probing = Checking your graphics card and processor…
+wizard-encoder = Encoder
+wizard-canvas = Canvas
+wizard-bitrate = Bitrate
+wizard-probe-found = Found: { $gpus } · { $cores } physical cores
+wizard-no-gpu = no dedicated GPU
+wizard-apply = Use these settings
+wizard-keep-current = Keep what I have
+wizard-template-title = Start with a scene
+wizard-template-screen = Capture my screen
+wizard-template-screen-note = Adds a Display Capture of your main monitor. The most common place to start.
+wizard-template-empty = Start empty
+wizard-template-empty-note = An empty scene. Add sources yourself with the + button.
+wizard-done = You're set up.
+wizard-done-hint = Press Ctrl+K at any time to search scenes, sources and actions. Settings live behind the ⚙ button.
+wizard-close = Start streaming
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Your graphics card can encode video on its own, which leaves the processor free for the rest of the studio.
+autoconfig-reason-software = No usable hardware encoder was found, so the processor will encode. That works, it just costs more CPU.
+autoconfig-reason-quality-hardware = 1080p at 60 frames per second, at a bitrate every major platform accepts.
+autoconfig-reason-quality-software = 30 frames per second, because software encoding at 60 drops frames on most processors.
+autoconfig-reason-quality-low-cores = A lower bitrate, because this processor has few cores and software encoding will fight the compositor for them.

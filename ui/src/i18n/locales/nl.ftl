@@ -1163,3 +1163,34 @@ palette-transition = Overgang Voorbeeld → Programma
 palette-save-replay = Replay opslaan
 palette-add-marker = Zet een hoofdstukmarkering
 palette-vertical-canvas = Verticaal (9:16) canvas…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Welkom bij Freally Capture
+wizard-welcome = Twee snelle stappen: kijk wat je computer aankan en start dan een scène. Het kost ongeveer dertig seconden, en je kunt later alles nog aanpassen.
+wizard-local-first = Niets hiervan verlaat je computer. Freally Capture heeft geen accounts, geen telemetrie en geen cloud.
+wizard-start = Aan de slag
+wizard-skip = Overslaan
+wizard-hardware-title = Wat je computer aankan
+wizard-probing = Je grafische kaart en processor controleren…
+wizard-encoder = Encoder
+wizard-canvas = Canvas
+wizard-bitrate = Bitrate
+wizard-probe-found = Gevonden: { $gpus } · { $cores } fysieke cores
+wizard-no-gpu = geen aparte GPU
+wizard-apply = Deze instellingen gebruiken
+wizard-keep-current = Houden wat ik heb
+wizard-template-title = Begin met een scène
+wizard-template-screen = Mijn scherm vastleggen
+wizard-template-screen-note = Voegt een Beeldschermopname van je hoofdmonitor toe. De meest gebruikelijke plek om te beginnen.
+wizard-template-empty = Leeg beginnen
+wizard-template-empty-note = Een lege scène. Voeg zelf bronnen toe met de +-knop.
+wizard-done = Je bent er klaar voor.
+wizard-done-hint = Druk op elk moment op Ctrl+K om scènes, bronnen en acties te zoeken. De instellingen vind je achter de ⚙-knop.
+wizard-close = Beginnen met streamen
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Je grafische kaart kan video zelf encoderen, waardoor de processor vrij blijft voor de rest van de studio.
+autoconfig-reason-software = Er is geen bruikbare hardware-encoder gevonden, dus de processor encodeert — dat werkt prima, het kost alleen meer CPU.
+autoconfig-reason-quality-hardware = 1080p op 60 beelden per seconde, met een bitrate die elk groot platform accepteert.
+autoconfig-reason-quality-software = 30 beelden per seconde, omdat software-encodering op 60 bij de meeste processors beelden laat vallen.
+autoconfig-reason-quality-low-cores = Een lagere bitrate, omdat deze processor weinig cores heeft en de software-encodering met de compositor moet concurreren om die cores.

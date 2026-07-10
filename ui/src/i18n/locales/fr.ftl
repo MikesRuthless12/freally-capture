@@ -1163,3 +1163,34 @@ palette-transition = Transition Aperçu → Direct
 palette-save-replay = Enregistrer la rediffusion
 palette-add-marker = Ajouter un marqueur de chapitre
 palette-vertical-canvas = Canevas vertical (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Bienvenue dans Freally Capture
+wizard-welcome = Deux étapes rapides : voir ce dont votre machine est capable, puis créer une scène. Cela prend une trentaine de secondes, et vous pourrez tout changer plus tard.
+wizard-local-first = Rien de tout cela ne quitte votre ordinateur. Freally Capture n'a ni comptes, ni télémétrie, ni cloud.
+wizard-start = C'est parti
+wizard-skip = Ignorer
+wizard-hardware-title = Ce dont votre machine est capable
+wizard-probing = Analyse de votre carte graphique et de votre processeur…
+wizard-encoder = Encodeur
+wizard-canvas = Canevas
+wizard-bitrate = Débit
+wizard-probe-found = Trouvé : { $gpus } · { $cores } cœurs physiques
+wizard-no-gpu = aucun GPU dédié
+wizard-apply = Utiliser ces paramètres
+wizard-keep-current = Garder ce que j'ai
+wizard-template-title = Commencer avec une scène
+wizard-template-screen = Capturer mon écran
+wizard-template-screen-note = Ajoute une Capture d'écran de votre moniteur principal. Le point de départ le plus courant.
+wizard-template-empty = Partir de zéro
+wizard-template-empty-note = Une scène vide. Ajoutez vous-même des sources avec le bouton +.
+wizard-done = Tout est prêt.
+wizard-done-hint = Appuyez sur Ctrl+K à tout moment pour rechercher des scènes, des sources et des actions. Les paramètres se trouvent derrière le bouton ⚙.
+wizard-close = Commencer à diffuser
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Votre carte graphique peut encoder la vidéo toute seule, ce qui laisse le processeur libre pour le reste du studio.
+autoconfig-reason-software = Aucun encodeur matériel utilisable n'a été trouvé, c'est donc le processeur qui encodera. Ça fonctionne, mais ça sollicite davantage le CPU.
+autoconfig-reason-quality-hardware = 1080p à 60 images par seconde, à un débit accepté par toutes les grandes plateformes.
+autoconfig-reason-quality-software = 30 images par seconde, car l'encodage logiciel à 60 fait perdre des images sur la plupart des processeurs.
+autoconfig-reason-quality-low-cores = Un débit plus faible, car ce processeur a peu de cœurs et l'encodage logiciel les disputera au compositeur.

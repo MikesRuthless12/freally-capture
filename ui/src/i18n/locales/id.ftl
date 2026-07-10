@@ -1162,3 +1162,34 @@ palette-transition = Transisi Pratinjau → Program
 palette-save-replay = Simpan replay
 palette-add-marker = Jatuhkan penanda bab
 palette-vertical-canvas = Kanvas vertikal (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Selamat datang di Freally Capture
+wizard-welcome = Dua langkah singkat: periksa kemampuan mesin Anda, lalu mulai sebuah scene. Hanya sekitar tiga puluh detik, dan semuanya bisa Anda ubah nanti.
+wizard-local-first = Tidak ada apa pun di sini yang meninggalkan komputer Anda. Freally Capture tanpa akun, tanpa telemetri, dan tanpa cloud.
+wizard-start = Mulai
+wizard-skip = Lewati
+wizard-hardware-title = Kemampuan mesin Anda
+wizard-probing = Memeriksa kartu grafis dan prosesor Anda…
+wizard-encoder = Encoder
+wizard-canvas = Kanvas
+wizard-bitrate = Bitrate
+wizard-probe-found = Ditemukan: { $gpus } · { $cores } inti fisik
+wizard-no-gpu = tanpa GPU khusus
+wizard-apply = Gunakan pengaturan ini
+wizard-keep-current = Pertahankan yang saya punya
+wizard-template-title = Mulai dengan sebuah scene
+wizard-template-screen = Tangkap layar saya
+wizard-template-screen-note = Menambahkan Tangkapan Layar dari monitor utama Anda. Tempat paling umum untuk memulai.
+wizard-template-empty = Mulai kosong
+wizard-template-empty-note = Sebuah scene kosong. Tambahkan sumber sendiri dengan tombol +.
+wizard-done = Anda sudah siap.
+wizard-done-hint = Tekan Ctrl+K kapan saja untuk mencari scene, sumber, dan aksi. Pengaturan ada di balik tombol ⚙.
+wizard-close = Mulai streaming
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Kartu grafis Anda bisa meng-encode video sendiri, sehingga prosesor tetap bebas untuk sisa studio.
+autoconfig-reason-software = Tidak ada encoder perangkat keras yang bisa dipakai, jadi prosesor yang akan meng-encode. Itu tetap berfungsi, hanya lebih membebani CPU.
+autoconfig-reason-quality-hardware = 1080p pada 60 frame per detik, dengan bitrate yang diterima setiap platform besar.
+autoconfig-reason-quality-software = 30 frame per detik, karena encoding perangkat lunak pada 60 menjatuhkan frame di sebagian besar prosesor.
+autoconfig-reason-quality-low-cores = Bitrate lebih rendah, karena prosesor ini punya sedikit inti dan encoding perangkat lunak akan berebut dengan kompositor untuknya.

@@ -128,6 +128,16 @@ pub fn settings_get(store: State<'_, SettingsStore>) -> Settings {
     store.get()
 }
 
+/// Mark the first-run wizard as seen. Called when the user finishes OR skips it.
+/// Goes through the store's dedicated writer rather than a read-modify-write of
+/// the whole `Settings`, which every later `settings_set` would clobber.
+#[tauri::command]
+pub fn settings_complete_onboarding(store: State<'_, SettingsStore>) -> Result<(), String> {
+    store
+        .complete_onboarding()
+        .map_err(|err| format!("could not record onboarding: {err}"))
+}
+
 /// Replace and persist the settings.
 #[tauri::command]
 pub fn settings_set(store: State<'_, SettingsStore>, settings: Settings) -> Result<(), String> {

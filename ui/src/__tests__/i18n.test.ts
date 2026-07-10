@@ -170,6 +170,27 @@ describe("label tables", () => {
    * Keys built with a template literal — `` t(`filters-crop-${side}`) `` — are
    * matched by their prefix, which is the same escape hatch the lint uses.
    */
+  /**
+   * `autoconfig_suggest` returns i18n KEYS, not sentences — the reasons are
+   * chosen in Rust and rendered here. Nothing else connects the two, so renaming
+   * a const in `src-tauri/src/autoconfig.rs` would put a raw id on the wizard's
+   * first screen while `tsc`, eslint and the lint all stayed green.
+   */
+  it("every reason key Rust can return exists in en.ftl", () => {
+    for (const key of [
+      "autoconfig-reason-hardware",
+      "autoconfig-reason-software",
+      "autoconfig-reason-quality-hardware",
+      "autoconfig-reason-quality-software",
+      "autoconfig-reason-quality-low-cores",
+    ]) {
+      expect(
+        source.getMessage(key)?.value,
+        `${key} — see src-tauri/src/autoconfig.rs`,
+      ).toBeDefined();
+    }
+  });
+
   it("no key in en.ftl is orphaned", () => {
     const keys = catalogSource(SOURCE_LOCALE)
       .split(/\r?\n/)
@@ -191,6 +212,10 @@ describe("label tables", () => {
 
     // `t(`some-prefix-${x}`)` → keys starting with `some-prefix-` are referenced.
     const dynamicPrefixes = [...haystack.matchAll(/t\(\s*`([a-z0-9-]+-)\$\{/g)].map((m) => m[1]);
+
+    // Supplied by Rust (`AutoConfig.encoderReason`), so no TS source names them.
+    // Pinned individually by the test below, which is what keeps this honest.
+    dynamicPrefixes.push("autoconfig-reason-");
 
     const orphans = keys.filter(
       (key) =>

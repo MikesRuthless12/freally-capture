@@ -1127,3 +1127,34 @@ palette-transition = انتقال المعاينة → البرنامج
 palette-save-replay = حفظ الإعادة
 palette-add-marker = وضع علامة فصل
 palette-vertical-canvas = اللوحة العمودية (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = مرحبًا بك في Freally Capture
+wizard-welcome = خطوتان سريعتان: نتحقّق ممّا يستطيع جهازك فعله، ثم نبدأ مشهدًا. يستغرق الأمر نحو ثلاثين ثانية، ويمكنك تغيير كل شيء لاحقًا.
+wizard-local-first = لا شيء هنا يغادر حاسوبك. لا يملك Freally Capture حسابات ولا قياسًا عن بُعد ولا سحابة.
+wizard-start = لنبدأ
+wizard-skip = تخطّي
+wizard-hardware-title = ما يستطيع جهازك فعله
+wizard-probing = نتحقّق من بطاقة الرسوميات والمعالج لديك…
+wizard-encoder = المُرمِّز
+wizard-canvas = اللوحة
+wizard-bitrate = معدل البت
+wizard-probe-found = وُجد: { $gpus } · { $cores } نواة فعلية
+wizard-no-gpu = لا GPU مخصّص
+wizard-apply = استخدم هذه الإعدادات
+wizard-keep-current = أبقِ ما لديّ
+wizard-template-title = ابدأ بمشهد
+wizard-template-screen = التقط شاشتي
+wizard-template-screen-note = يضيف التقاط الشاشة لشاشتك الرئيسية. أكثر نقطة بداية شيوعًا.
+wizard-template-empty = ابدأ فارغًا
+wizard-template-empty-note = مشهد فارغ. أضف المصادر بنفسك بزر +.
+wizard-done = أصبح كل شيء جاهزًا.
+wizard-done-hint = اضغط Ctrl+K في أي وقت للبحث في المشاهد والمصادر والإجراءات. الإعدادات خلف زر ⚙.
+wizard-close = ابدأ البث
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = تستطيع بطاقة الرسوميات ترميز الفيديو بنفسها، فيبقى المعالج متفرّغًا لبقية الاستوديو.
+autoconfig-reason-software = لم يُعثر على مُرمِّز عتادي صالح، لذا سيتولّى المعالج الترميز. هذا يعمل، لكنه يستهلك المزيد من CPU.
+autoconfig-reason-quality-hardware = 1080p عند 60 إطارًا في الثانية، بمعدل بت تقبله كل منصة كبرى.
+autoconfig-reason-quality-software = 30 إطارًا في الثانية، لأن الترميز البرمجي عند 60 يُسقِط إطارات على معظم المعالجات.
+autoconfig-reason-quality-low-cores = معدل بت أقل، لأن هذا المعالج قليل الأنوية وسينافس الترميز البرمجي المُركِّب عليها.

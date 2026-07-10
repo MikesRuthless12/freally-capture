@@ -1127,3 +1127,34 @@ palette-transition = ट्रांज़िशन प्रीव्यू →
 palette-save-replay = रीप्ले सहेजें
 palette-add-marker = एक चैप्टर मार्कर डालें
 palette-vertical-canvas = वर्टिकल (9:16) कैनवास…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Freally Capture में आपका स्वागत है
+wizard-welcome = दो आसान कदम: पहले देखें कि आपकी मशीन क्या कर सकती है, फिर एक सीन शुरू करें। इसमें लगभग तीस सेकंड लगते हैं, और बाद में आप सब कुछ बदल सकते हैं।
+wizard-local-first = यहाँ कुछ भी आपके कंप्यूटर से बाहर नहीं जाता। Freally Capture में कोई अकाउंट नहीं, कोई टेलीमेट्री नहीं, और कोई क्लाउड नहीं है।
+wizard-start = शुरू करें
+wizard-skip = छोड़ें
+wizard-hardware-title = आपकी मशीन क्या कर सकती है
+wizard-probing = आपका ग्राफ़िक्स कार्ड और प्रोसेसर जाँचा जा रहा है…
+wizard-encoder = एन्कोडर
+wizard-canvas = कैनवास
+wizard-bitrate = बिटरेट
+wizard-probe-found = मिला: { $gpus } · { $cores } फ़िज़िकल कोर
+wizard-no-gpu = कोई समर्पित GPU नहीं
+wizard-apply = ये सेटिंग्स उपयोग करें
+wizard-keep-current = जो मेरे पास है वही रखें
+wizard-template-title = एक सीन से शुरू करें
+wizard-template-screen = मेरी स्क्रीन कैप्चर करें
+wizard-template-screen-note = आपके मुख्य मॉनिटर की एक डिस्प्ले कैप्चर जोड़ता है। शुरू करने की सबसे आम जगह।
+wizard-template-empty = खाली शुरू करें
+wizard-template-empty-note = एक खाली सीन। + बटन से सोर्स खुद जोड़ें।
+wizard-done = आप तैयार हैं।
+wizard-done-hint = सीन, सोर्स और क्रियाएँ खोजने के लिए किसी भी समय Ctrl+K दबाएँ। सेटिंग्स ⚙ बटन के पीछे रहती हैं।
+wizard-close = स्ट्रीमिंग शुरू करें
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = आपका ग्राफ़िक्स कार्ड खुद वीडियो एन्कोड कर सकता है, जिससे प्रोसेसर बाकी स्टूडियो के लिए मुक्त रहता है।
+autoconfig-reason-software = कोई उपयोगी हार्डवेयर एन्कोडर नहीं मिला, इसलिए प्रोसेसर एन्कोड करेगा। यह काम करता है, बस इसमें ज़्यादा CPU लगता है।
+autoconfig-reason-quality-hardware = 60 फ़्रेम प्रति सेकंड पर 1080p, ऐसे बिटरेट पर जिसे हर बड़ा प्लेटफ़ॉर्म स्वीकार करता है।
+autoconfig-reason-quality-software = 30 फ़्रेम प्रति सेकंड, क्योंकि 60 पर सॉफ़्टवेयर एन्कोडिंग अधिकांश प्रोसेसर पर फ़्रेम गिरा देती है।
+autoconfig-reason-quality-low-cores = एक कम बिटरेट, क्योंकि इस प्रोसेसर में कम कोर हैं और सॉफ़्टवेयर एन्कोडिंग उनके लिए कम्पोज़िटर से होड़ करेगी।

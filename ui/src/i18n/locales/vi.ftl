@@ -1140,3 +1140,34 @@ palette-transition = Chuyển cảnh Xem trước → Chương trình
 palette-save-replay = Lưu phát lại
 palette-add-marker = Thả một marker chương
 palette-vertical-canvas = Khung hình dọc (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Chào mừng bạn đến với Freally Capture
+wizard-welcome = Hai bước nhanh gọn: xem máy của bạn làm được những gì, rồi bắt đầu một cảnh. Chỉ mất khoảng ba mươi giây, và bạn có thể thay đổi mọi thứ sau này.
+wizard-local-first = Không có gì ở đây rời khỏi máy tính của bạn. Freally Capture không có tài khoản, không đo lường từ xa, và không đám mây.
+wizard-start = Bắt đầu
+wizard-skip = Bỏ qua
+wizard-hardware-title = Máy của bạn làm được những gì
+wizard-probing = Đang xem card đồ họa và bộ xử lý của bạn…
+wizard-encoder = Bộ mã hóa
+wizard-canvas = Khung hình
+wizard-bitrate = Bitrate
+wizard-probe-found = Tìm thấy: { $gpus } · { $cores } lõi vật lý
+wizard-no-gpu = không có GPU riêng
+wizard-apply = Dùng các cài đặt này
+wizard-keep-current = Giữ những gì tôi đang có
+wizard-template-title = Bắt đầu với một cảnh
+wizard-template-screen = Chụp màn hình của tôi
+wizard-template-screen-note = Thêm một Chụp Màn hình cho màn hình chính của bạn. Đây là nơi phổ biến nhất để bắt đầu.
+wizard-template-empty = Bắt đầu với cảnh trống
+wizard-template-empty-note = Một cảnh trống. Bạn tự thêm nguồn bằng nút +.
+wizard-done = Bạn đã thiết lập xong.
+wizard-done-hint = Nhấn Ctrl+K bất cứ lúc nào để tìm cảnh, nguồn và hành động. Các cài đặt nằm sau nút ⚙.
+wizard-close = Bắt đầu phát trực tiếp
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Card đồ họa của bạn có thể tự mã hóa video, để bộ xử lý được rảnh cho phần còn lại của studio.
+autoconfig-reason-software = Không tìm thấy bộ mã hóa phần cứng khả dụng, nên bộ xử lý sẽ đảm nhận việc mã hóa, cách này vẫn chạy tốt, chỉ là tốn nhiều CPU hơn.
+autoconfig-reason-quality-hardware = 1080p ở 60 khung hình mỗi giây, tại một bitrate mà mọi nền tảng lớn đều chấp nhận.
+autoconfig-reason-quality-software = 30 khung hình mỗi giây, vì mã hóa bằng phần mềm ở mức 60 sẽ rớt khung trên hầu hết bộ xử lý.
+autoconfig-reason-quality-low-cores = Một bitrate thấp hơn, vì bộ xử lý này có ít lõi và mã hóa bằng phần mềm sẽ tranh giành chúng với bộ dựng hình.

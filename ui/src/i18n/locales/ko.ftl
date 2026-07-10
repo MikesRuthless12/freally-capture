@@ -1140,3 +1140,34 @@ palette-transition = 미리 보기 → 프로그램 전환
 palette-save-replay = 리플레이 저장
 palette-add-marker = 챕터 마커 남기기
 palette-vertical-canvas = 세로 (9:16) 캔버스…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Freally Capture에 오신 것을 환영합니다
+wizard-welcome = 간단한 두 단계면 됩니다. 먼저 이 컴퓨터가 무엇을 할 수 있는지 확인한 다음 장면을 시작합니다. 30초 남짓이면 되고, 나중에 무엇이든 바꿀 수 있습니다.
+wizard-local-first = 여기서 당신의 컴퓨터를 떠나는 것은 아무것도 없습니다. Freally Capture에는 계정도, 텔레메트리도, 클라우드도 없습니다.
+wizard-start = 시작하기
+wizard-skip = 건너뛰기
+wizard-hardware-title = 이 컴퓨터가 할 수 있는 것
+wizard-probing = 그래픽 카드와 프로세서를 확인하는 중…
+wizard-encoder = 인코더
+wizard-canvas = 캔버스
+wizard-bitrate = 비트레이트
+wizard-probe-found = 발견됨: { $gpus } · 물리 코어 { $cores }개
+wizard-no-gpu = 전용 GPU 없음
+wizard-apply = 이 설정 사용하기
+wizard-keep-current = 지금 설정 그대로 두기
+wizard-template-title = 장면으로 시작하기
+wizard-template-screen = 내 화면 캡처하기
+wizard-template-screen-note = 주 모니터의 디스플레이 캡처를 추가합니다. 가장 많이 선택하는 시작 방법입니다.
+wizard-template-empty = 빈 상태로 시작하기
+wizard-template-empty-note = 비어 있는 장면입니다. + 버튼으로 소스를 직접 추가하세요.
+wizard-done = 준비가 끝났습니다.
+wizard-done-hint = 언제든지 Ctrl+K를 누르면 장면, 소스, 작업을 검색할 수 있습니다. 설정은 ⚙ 버튼 뒤에 있습니다.
+wizard-close = 방송 시작하기
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = 그래픽 카드가 스스로 영상을 인코딩할 수 있어서, 프로세서는 스튜디오의 나머지 작업에 온전히 쓸 수 있습니다.
+autoconfig-reason-software = 쓸 만한 하드웨어 인코더를 찾지 못해 프로세서가 인코딩하며, 잘 작동하지만 CPU를 더 많이 씁니다.
+autoconfig-reason-quality-hardware = 모든 주요 플랫폼이 받아들이는 비트레이트로 1080p, 초당 60프레임입니다.
+autoconfig-reason-quality-software = 대부분의 프로세서에서는 소프트웨어 인코딩으로 60프레임을 처리하면 프레임이 끊기기 때문에, 초당 30프레임입니다.
+autoconfig-reason-quality-low-cores = 이 프로세서는 코어가 적어 소프트웨어 인코딩이 컴포지터와 코어를 두고 다투기 때문에, 비트레이트를 낮췄습니다.

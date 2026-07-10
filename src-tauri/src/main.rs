@@ -11,6 +11,7 @@
 //! 60 fps compose loop; the engine lives in the owned `fcap-*` crates.
 
 mod audio;
+mod autoconfig;
 mod bugreport;
 mod buildinfo;
 mod commands;
@@ -166,6 +167,8 @@ fn main() {
             commands::video_device_formats,
             commands::open_privacy_settings,
             docks::browser_dock_open,
+            autoconfig::autoconfig_suggest,
+            commands::settings_complete_onboarding,
             buildinfo::build_info,
             bugreport::bug_report_context,
             bugreport::bug_report_submit,

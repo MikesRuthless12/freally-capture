@@ -1140,3 +1140,34 @@ palette-transition = Übergang Vorschau → Programm
 palette-save-replay = Wiederholung speichern
 palette-add-marker = Kapitelmarker setzen
 palette-vertical-canvas = Vertikale (9:16) Leinwand…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Willkommen bei Freally Capture
+wizard-welcome = Zwei kurze Schritte: schau, was dein Rechner leisten kann, und starte dann eine Szene. Das dauert etwa dreißig Sekunden, und du kannst später alles ändern.
+wizard-local-first = Nichts davon verlässt deinen Computer. Freally Capture hat keine Konten, keine Telemetrie und keine Cloud.
+wizard-start = Los geht's
+wizard-skip = Überspringen
+wizard-hardware-title = Was dein Rechner leisten kann
+wizard-probing = Deine Grafikkarte und dein Prozessor werden geprüft…
+wizard-encoder = Encoder
+wizard-canvas = Leinwand
+wizard-bitrate = Bitrate
+wizard-probe-found = Gefunden: { $gpus } · { $cores } physische Kerne
+wizard-no-gpu = keine dedizierte GPU
+wizard-apply = Diese Einstellungen verwenden
+wizard-keep-current = Behalten, was ich habe
+wizard-template-title = Mit einer Szene beginnen
+wizard-template-screen = Meinen Bildschirm aufnehmen
+wizard-template-screen-note = Fügt eine Bildschirmaufnahme deines Hauptmonitors hinzu. Der häufigste Startpunkt.
+wizard-template-empty = Leer beginnen
+wizard-template-empty-note = Eine leere Szene. Füge Quellen selbst mit der +-Schaltfläche hinzu.
+wizard-done = Alles eingerichtet.
+wizard-done-hint = Drücke jederzeit Ctrl+K, um Szenen, Quellen und Aktionen zu durchsuchen. Die Einstellungen liegen hinter der ⚙-Schaltfläche.
+wizard-close = Streaming starten
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Deine Grafikkarte kann Video selbst kodieren, was den Prozessor für den Rest des Studios frei lässt.
+autoconfig-reason-software = Kein nutzbarer Hardware-Encoder gefunden, also kodiert der Prozessor. Das funktioniert, es kostet nur mehr CPU.
+autoconfig-reason-quality-hardware = 1080p mit 60 Bildern pro Sekunde, bei einer Bitrate, die jede große Plattform akzeptiert.
+autoconfig-reason-quality-software = 30 Bilder pro Sekunde, weil Software-Kodierung bei 60 auf den meisten Prozessoren Bilder verwirft.
+autoconfig-reason-quality-low-cores = Eine niedrigere Bitrate, weil dieser Prozessor wenige Kerne hat und die Software-Kodierung mit dem Compositor um sie konkurriert.

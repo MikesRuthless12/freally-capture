@@ -36,6 +36,22 @@ export type BuildInfo = {
   target: string;
 };
 
+/** What `autoconfig_suggest` proposes (mirrors `AutoConfig` in autoconfig.rs).
+ * `encoderReason` / `qualityReason` are i18n KEYS, not sentences. */
+export type AutoConfig = {
+  encoderId: string;
+  encoderLabel: string;
+  hardware: boolean;
+  width: number;
+  height: number;
+  fps: number;
+  bitrateKbps: number;
+  encoderReason: string;
+  qualityReason: string;
+  gpus: string[];
+  physicalCores: number;
+};
+
 /** Which palette the UI paints with (mirrors `ThemeMode` in settings.rs). */
 export type ThemeMode = "dark" | "light" | "custom";
 
@@ -59,6 +75,8 @@ export type Settings = {
   mixerLayout: MixerLayout;
   /** Appearance: palette + custom accent (Phase 9). */
   theme: ThemeSettings;
+  /** Whether the first-run wizard has been seen (Phase 9). */
+  completedOnboarding: boolean;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */

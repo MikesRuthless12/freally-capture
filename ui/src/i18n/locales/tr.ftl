@@ -1163,3 +1163,34 @@ palette-transition = Önizleme → Program geçişi
 palette-save-replay = Tekrarı kaydet
 palette-add-marker = Bölüm işaretçisi bırak
 palette-vertical-canvas = Dikey (9:16) tuval…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Freally Capture'a hoş geldiniz
+wizard-welcome = İki hızlı adım: makinenizin neler yapabileceğine bir bakın, sonra bir sahne başlatın. Yaklaşık otuz saniye sürer ve her şeyi sonradan değiştirebilirsiniz.
+wizard-local-first = Burada hiçbir şey bilgisayarınızdan çıkmaz. Freally Capture'da hesap, telemetri ve bulut yoktur.
+wizard-start = Başlayalım
+wizard-skip = Atla
+wizard-hardware-title = Makineniz neler yapabilir
+wizard-probing = Ekran kartınız ve işlemciniz kontrol ediliyor…
+wizard-encoder = Kodlayıcı
+wizard-canvas = Tuval
+wizard-bitrate = Bit hızı
+wizard-probe-found = Bulundu: { $gpus } · { $cores } fiziksel çekirdek
+wizard-no-gpu = ayrı GPU yok
+wizard-apply = Bu ayarları kullan
+wizard-keep-current = Olduğu gibi bırak
+wizard-template-title = Bir sahneyle başlayın
+wizard-template-screen = Ekranımı yakala
+wizard-template-screen-note = Ana monitörünüzün bir Ekran Yakalama'sını ekler. Başlamak için en yaygın yer.
+wizard-template-empty = Boş başla
+wizard-template-empty-note = Boş bir sahne. Kaynakları + düğmesiyle kendiniz ekleyin.
+wizard-done = Her şey hazır.
+wizard-done-hint = Sahneleri, kaynakları ve eylemleri aramak için istediğiniz zaman Ctrl+K'ye basın. Ayarlar ⚙ düğmesinin arkasındadır.
+wizard-close = Yayına başla
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = Ekran kartınız videoyu kendi başına kodlayabiliyor, bu da işlemciyi stüdyonun geri kalanı için serbest bırakıyor.
+autoconfig-reason-software = Kullanılabilir bir donanım kodlayıcı bulunamadı, bu yüzden kodlamayı işlemci yapacak — çalışır, yalnızca daha fazla CPU harcar.
+autoconfig-reason-quality-hardware = Her büyük platformun kabul ettiği bir bit hızında, saniyede 60 karede 1080p.
+autoconfig-reason-quality-software = Saniyede 30 kare, çünkü 60 karede yazılım kodlaması çoğu işlemcide kare düşürür.
+autoconfig-reason-quality-low-cores = Daha düşük bir bit hızı, çünkü bu işlemcinin çekirdeği az ve yazılım kodlaması bunlar için birleştiriciyle yarışacak.

@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { pushModal } from "../lib/modal";
 import { useT } from "../i18n/t";
 
@@ -14,6 +15,11 @@ import { useT } from "../i18n/t";
  * off the bottom of the window, unreachable. Any ancestor `transform`, `filter`
  * or `contain` would do the same, so the portal is the durable fix, not deleting
  * one blur.
+ *
+ * Focus is trapped inside while open and restored on close (TASK-901).
+ * `aria-modal` tells assistive tech that everything behind the dialog is inert;
+ * without a trap, Tab walks the user straight into controls their screen reader
+ * has been told to ignore. The two belong together or not at all.
  */
 export function PickerShell({
   title,
@@ -30,6 +36,9 @@ export function PickerShell({
   wide?: boolean;
 }) {
   const t = useT();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(true, dialogRef);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -46,6 +55,7 @@ export function PickerShell({
   return createPortal(
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-6">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

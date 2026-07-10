@@ -45,6 +45,7 @@ import { PropertiesDialog } from "./components/PropertiesDialog";
 import { spikeSetJoinPrefill } from "./remote/spike";
 import { ControlsDock } from "./panels/ControlsDock";
 import { EulaGate } from "./panels/EulaGate";
+import { FirstRunWizard } from "./panels/FirstRunWizard";
 import { MixerDock } from "./panels/MixerDock";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { RemoteSessionBar } from "./panels/RemoteSessionBar";
@@ -82,6 +83,10 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The wizard is dismissible from its own close button, so its visibility is
+  // local state seeded from settings — not `!settings.completedOnboarding`
+  // directly, which would flicker it back while the save round-trips.
+  const [wizardDismissed, setWizardDismissed] = useState(false);
   // Ignore stale event echoes while a drag streams newer transforms.
   const localRevision = useRef(0);
 
@@ -429,6 +434,15 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      {/* After the EULA gate, never before: consent precedes onboarding. */}
+      {settings && !settings.completedOnboarding && !wizardDismissed && (
+        <FirstRunWizard
+          settings={settings}
+          onSettingsSaved={setSettings}
+          activeSceneId={activeScene?.id ?? null}
+          onClose={() => setWizardDismissed(true)}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
       )}

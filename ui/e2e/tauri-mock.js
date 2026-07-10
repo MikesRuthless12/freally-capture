@@ -39,6 +39,10 @@
 
   const settings = {
     language: "en",
+    // The gallery photographs the studio, not the first-run wizard. A fresh
+    // install shows the wizard over everything; this fixture is an existing user.
+    completedOnboarding: true,
+    theme: { mode: "dark", accent: "#4a9eff" },
     showStatsDock: true,
     monitorDevice: null,
     mixerLayout: "horizontal",
@@ -74,6 +78,7 @@
     eula_status: { version: "2026-07-08", text: EULA_TEXT, accepted: eulaAccepted },
     settings_get: settings,
     settings_set: null,
+    settings_complete_onboarding: null,
     studio_get: { revision: 1, collection },
     integrations_status: {
       ndiAvailable: false,

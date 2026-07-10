@@ -1163,3 +1163,34 @@ palette-transition = Transizione Anteprima → Programma
 palette-save-replay = Salva replay
 palette-add-marker = Inserisci un marcatore di capitolo
 palette-vertical-canvas = Canvas verticale (9:16)…
+
+# --- first-run wizard (TASK-903 + TASK-905) ---
+wizard-title = Ti diamo il benvenuto in Freally Capture
+wizard-welcome = Due passaggi veloci: vediamo cosa può fare il tuo computer, poi iniziamo una scena. Ci vogliono circa trenta secondi e potrai cambiare tutto in seguito.
+wizard-local-first = Niente di tutto questo lascia il tuo computer. Freally Capture non ha account, né telemetria, né cloud.
+wizard-start = Iniziamo
+wizard-skip = Salta
+wizard-hardware-title = Cosa può fare il tuo computer
+wizard-probing = Controlliamo la scheda grafica e il processore…
+wizard-encoder = Encoder
+wizard-canvas = Canvas
+wizard-bitrate = Bitrate
+wizard-probe-found = Trovato: { $gpus } · { $cores } core fisici
+wizard-no-gpu = nessuna GPU dedicata
+wizard-apply = Usa queste impostazioni
+wizard-keep-current = Mantieni le mie impostazioni
+wizard-template-title = Inizia con una scena
+wizard-template-screen = Cattura il mio schermo
+wizard-template-screen-note = Aggiunge una Cattura schermo del tuo monitor principale. Il punto di partenza più comune.
+wizard-template-empty = Inizia da vuoto
+wizard-template-empty-note = Una scena vuota. Aggiungi tu le sorgenti con il pulsante +.
+wizard-done = È tutto pronto.
+wizard-done-hint = Premi Ctrl+K in qualsiasi momento per cercare scene, sorgenti e azioni. Le impostazioni si trovano dietro il pulsante ⚙.
+wizard-close = Inizia a trasmettere
+
+# --- auto-config reasons (rendered by the wizard; keys come from Rust) ---
+autoconfig-reason-hardware = La tua scheda grafica può codificare il video da sola, lasciando il processore libero per il resto dello studio.
+autoconfig-reason-software = Non è stato trovato un encoder hardware utilizzabile, quindi codificherà il processore. Funziona, costa solo più CPU.
+autoconfig-reason-quality-hardware = 1080p a 60 fotogrammi al secondo, a un bitrate accettato da ogni grande piattaforma.
+autoconfig-reason-quality-software = 30 fotogrammi al secondo, perché la codifica software a 60 perde fotogrammi sulla maggior parte dei processori.
+autoconfig-reason-quality-low-cores = Un bitrate più basso, perché questo processore ha pochi core e la codifica software se li contende con il compositor.

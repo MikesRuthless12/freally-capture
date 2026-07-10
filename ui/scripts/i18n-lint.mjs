@@ -24,8 +24,15 @@ const LOCALES_DIR = join(UI, "src/i18n/locales");
 const SRC = join(UI, "src");
 const SOURCE = "en";
 
-/** Keys whose ids are built at runtime; the lint cannot follow them. */
-const DYNAMIC_PREFIXES = ["source-kind-", "filter-kind-", "state-"];
+/**
+ * Keys whose ids the lint cannot follow.
+ *
+ * `autoconfig-reason-` is supplied by RUST (`AutoConfig.encoderReason`), so no
+ * TypeScript source mentions it. `ui/src/__tests__/i18n.test.ts` pins those five
+ * keys explicitly — a rename on the Rust side would otherwise render a raw id
+ * with every gate green.
+ */
+const DYNAMIC_PREFIXES = ["source-kind-", "filter-kind-", "state-", "autoconfig-reason-"];
 
 const fail = [];
 
