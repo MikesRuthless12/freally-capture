@@ -49,6 +49,12 @@ export function StatusAnnouncer() {
     const unlistenStream = onStream((status) => {
       if (status.state !== lastStream.current) {
         lastStream.current = status.state;
+        // Re-baseline on every transition. `framesDropped` is cumulative and
+        // keeps climbing through an outage, so a live → reconnecting → live
+        // round trip would otherwise leave a stale baseline and the first tick
+        // back on air would announce the whole outage as a fresh burst — an
+        // interruption the user already heard as "reconnecting" and "live".
+        lastDropped.current = status.framesDropped;
         if (status.state === "live") say(t("announce-live-started"));
         else if (status.state === "reconnecting") say(t("announce-reconnecting"));
         else if (status.state === "failed") say(t("announce-stream-failed"));

@@ -959,25 +959,61 @@ impl SettingsStore {
 }
 
 fn read_settings(path: &Path) -> Settings {
-    match fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str(&text) {
-            Ok(settings) => settings,
-            Err(err) => {
-                eprintln!(
-                    "settings: {} is not valid settings JSON ({err}); using defaults",
-                    path.display()
-                );
-                Settings::default()
-            }
-        },
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Settings::default(),
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Settings::default(),
         Err(err) => {
             eprintln!(
                 "settings: cannot read {} ({err}); using defaults",
                 path.display()
             );
+            return Settings::default();
+        }
+    };
+
+    // Parsed to a `Value` first so a migration can ask what the file actually
+    // *said*, which `Settings` can no longer tell it: `serde(default)` has by
+    // then filled every missing key, erasing the difference between "absent"
+    // and "explicitly false".
+    let raw: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(raw) => raw,
+        Err(err) => {
+            eprintln!(
+                "settings: {} is not valid settings JSON ({err}); using defaults",
+                path.display()
+            );
+            return Settings::default();
+        }
+    };
+
+    match Settings::deserialize(&raw) {
+        Ok(mut settings) => {
+            migrate(&mut settings, &raw);
+            settings
+        }
+        Err(err) => {
+            eprintln!(
+                "settings: {} is not valid settings JSON ({err}); using defaults",
+                path.display()
+            );
             Settings::default()
         }
+    }
+}
+
+/// Bring a settings file written by an older build up to date.
+fn migrate(settings: &mut Settings, raw: &serde_json::Value) {
+    // `completedOnboarding` arrived in 0.96.0 and defaults to `false`, so every
+    // *existing* user would be greeted by the first-run wizard on upgrade — and
+    // its template step would add a second display capture on top of the scene
+    // they had already arranged. A file that predates the field but has already
+    // accepted an EULA has plainly been run before. Its first run is long past.
+    //
+    // Keyed on the field being *absent*, not falsy: a 0.96.0 user who quit
+    // mid-wizard wrote `false` on purpose and must see it again.
+    let predates_onboarding = raw.get("completedOnboarding").is_none();
+    if predates_onboarding && settings.accepted_eula_version.is_some() {
+        settings.completed_onboarding = true;
     }
 }
 
@@ -1496,6 +1532,62 @@ mod tests {
             settings.recording,
             RecordingSettings::default(),
             "recording settings default in (frec, track 1)"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// Upgrading from 0.95.1: the file predates `completedOnboarding`, and
+    /// `serde(default)` would make it `false`. Without the migration every
+    /// existing user is greeted by the first-run wizard, whose template step
+    /// would drop a second display capture onto the scene they already built.
+    #[test]
+    fn upgrading_a_settings_file_does_not_re_run_the_first_run_wizard() {
+        let path = temp_path("onboarding-migrate");
+        fs::write(
+            &path,
+            r#"{ "language": "fr", "acceptedEulaVersion": "2026-07-08" }"#,
+        )
+        .expect("write a 0.95.1 settings file");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(
+            settings.completed_onboarding,
+            "a file that already accepted an EULA has been run before"
+        );
+        assert_eq!(
+            settings.language, "fr",
+            "the migration touches nothing else"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The same old file, but the EULA was never accepted — the app was never
+    /// really used. That is a first run, and it gets the wizard.
+    #[test]
+    fn an_old_file_that_never_accepted_the_eula_is_still_a_first_run() {
+        let path = temp_path("onboarding-migrate-no-eula");
+        fs::write(&path, r#"{ "language": "fr" }"#).expect("write settings");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(!settings.completed_onboarding, "never accepted, never ran");
+        let _ = fs::remove_file(&path);
+    }
+
+    /// Keyed on *absent*, not falsy. A 0.96.0 user who quit halfway through the
+    /// wizard wrote `false` deliberately, and must be shown it again.
+    #[test]
+    fn an_explicit_false_survives_the_migration() {
+        let path = temp_path("onboarding-migrate-explicit");
+        fs::write(
+            &path,
+            r#"{ "acceptedEulaVersion": "2026-07-08", "completedOnboarding": false }"#,
+        )
+        .expect("write a 0.96.0 settings file");
+
+        let settings = SettingsStore::load_from(path.clone()).get();
+        assert!(
+            !settings.completed_onboarding,
+            "an explicit false is a decision, not a missing key"
         );
         let _ = fs::remove_file(&path);
     }

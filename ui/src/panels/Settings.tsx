@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { settingsSet } from "../api/commands";
+import { settingsGet, settingsSet } from "../api/commands";
 import type { Settings, ThemeMode } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { AUTO_LOCALE, LOCALES, isLocaleCode } from "../i18n/locales";
@@ -38,7 +38,13 @@ export function SettingsDialog({
     onSettingsSaved(next);
     settingsSet(next).catch((err) => {
       rollback();
-      onSettingsSaved(settings);
+      // Re-read rather than restoring the `settings` this closure captured on
+      // render: a *different* setting may have saved successfully while this
+      // one was in flight, and putting the old snapshot back would silently
+      // discard it. The store is the only thing that knows what actually stuck.
+      void settingsGet()
+        .then(onSettingsSaved)
+        .catch(() => onSettingsSaved(settings));
       setError(String(err));
     });
   };
@@ -61,9 +67,12 @@ export function SettingsDialog({
   const changeAccent = (accent: string) => {
     if (!isHexColor(accent)) return;
     const previous = settings.theme;
-    // Choosing a colour implies wanting it — otherwise the picker does nothing
-    // visible until you also flip the mode, which reads as a broken control.
-    const theme = { mode: "custom" as ThemeMode, accent };
+    // The mode is left alone. Forcing `custom` here made the picker "work" from
+    // any mode, but a Light user who nudged the swatch was thrown into the dark
+    // custom palette with no warning and no way back but re-picking Light. The
+    // swatch is disabled outside Custom instead, so this only runs when the
+    // mode is already Custom.
+    const theme = { ...settings.theme, accent };
     applyTheme(theme);
     save({ ...settings, theme }, () => applyTheme(previous));
   };
@@ -117,14 +126,16 @@ export function SettingsDialog({
                 {t(`settings-theme-${mode}`)}
               </button>
             ))}
+            {/* Only Custom spends the accent, so only Custom may set it. */}
             <label className="ml-auto flex items-center gap-2 text-[11px] text-havoc-muted">
               {t("settings-accent")}
               <input
                 type="color"
                 value={settings.theme.accent}
                 onChange={(event) => changeAccent(event.target.value)}
+                disabled={settings.theme.mode !== "custom"}
                 aria-label={t("settings-accent")}
-                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent p-0"
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-40"
               />
             </label>
           </div>
