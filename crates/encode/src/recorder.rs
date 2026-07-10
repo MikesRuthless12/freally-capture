@@ -381,6 +381,33 @@ mod tests {
         Arc::new(vec![fill; spec.frame_bytes()])
     }
 
+    /// Block until `cond` holds, or fail loudly.
+    ///
+    /// The recorder works on its own thread, so a test cannot know when that
+    /// thread has been scheduled. Sleeping a fixed duration and then asserting
+    /// is a guess about the scheduler: it holds on an idle laptop and breaks on
+    /// a loaded CI runner. Poll for the condition instead — the happy path
+    /// returns within a tick or two, and the deadline is reached only when the
+    /// thing under test is genuinely broken, where a slow failure beats a
+    /// flaky one.
+    ///
+    /// This is only for waiting on an *event*. Tests that measure a *rate* over
+    /// wall-clock (frames written in 400 ms) must still sleep — there is no
+    /// condition to poll, only elapsed time, and they assert a generous range.
+    fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
+        const DEADLINE: Duration = Duration::from_secs(5);
+        const POLL: Duration = Duration::from_millis(5);
+
+        let start = Instant::now();
+        while start.elapsed() < DEADLINE {
+            if cond() {
+                return;
+            }
+            std::thread::sleep(POLL);
+        }
+        panic!("timed out after {DEADLINE:?} waiting for {what}");
+    }
+
     #[test]
     fn cfr_pacing_duplicates_static_content() {
         let spec = spec_30fps();
@@ -529,7 +556,15 @@ mod tests {
         let recorder = Recorder::start(spec.clone(), Box::new(FailingSink));
         let handle = recorder.handle();
         handle.push_frame(frame(&spec, 1));
-        std::thread::sleep(Duration::from_millis(150));
+
+        // The error only becomes visible after the session thread has armed its
+        // clock, attempted the write, broken out, and run `finish()`. A fixed
+        // 150 ms sleep assumed all four had happened; on a loaded macOS runner
+        // they had not, and the assertion below read `None`.
+        wait_for("the sink error to reach the handle", || {
+            handle.error().is_some()
+        });
+
         assert_eq!(handle.error().as_deref(), Some("disk full"));
         assert!(recorder.stop().is_err(), "stop reports the write error");
     }
