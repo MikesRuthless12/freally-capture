@@ -1085,3 +1085,44 @@ stream-service-trovo = Trovo
 stream-service-custom = Tùy chỉnh (RTMP/RTMPS)
 stream-service-srt = SRT (tự lưu trữ)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = Giới thiệu
+about-tagline = Ghi và phát trực tiếp như một studio — không tài khoản, không đám mây.
+about-version = Phiên bản
+about-created-by = Được tạo bởi
+about-project-started = Dự án bắt đầu
+about-first-stable = Bản phát hành ổn định đầu tiên
+about-first-stable-pending = Chưa — 1.0.0 đang được thực hiện
+about-platform = Nền tảng
+about-local-first = Freally Capture chạy hoàn toàn trên máy của bạn. Không tài khoản, không đo lường từ xa, không đám mây — thứ duy nhất rời khỏi máy tính của bạn là luồng mà bạn chọn gửi đi.
+about-website = Trang web
+about-issues = Báo cáo sự cố
+about-license = Giấy phép
+about-eula = EULA
+about-third-party = Thông báo bên thứ ba
+about-check-updates = Kiểm tra cập nhật…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = Cài đặt
+settings-language-section = Ngôn ngữ
+settings-language = Ngôn ngữ giao diện
+settings-language-system = Mặc định của hệ thống
+settings-language-note = Ngôn ngữ bạn chọn ở đây sẽ được ghi nhớ. “Mặc định của hệ thống” theo hệ điều hành của bạn. Văn bản chưa dịch sẽ hiển thị bằng tiếng Anh.
+settings-appearance-section = Giao diện
+settings-theme = Chủ đề
+settings-theme-dark = Tối
+settings-theme-light = Sáng
+settings-theme-custom = Tùy chỉnh
+settings-accent = Màu nhấn
+settings-general-section = Chung
+settings-show-stats-dock = Hiện bảng thống kê
+settings-more-section = Cài đặt khác
+settings-open-output = Ghi hình…
+settings-open-stream = Phát trực tiếp…
+settings-open-replay = Phát lại…
+settings-open-hotkeys = Phím tắt…
+settings-open-remote = API từ xa…
+settings-open-about = Giới thiệu…
+controls-settings = ⚙ Cài đặt…
+controls-settings-title = Ngôn ngữ, giao diện và các tùy chọn toàn ứng dụng

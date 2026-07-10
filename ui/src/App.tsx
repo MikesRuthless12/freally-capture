@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { initLocale, useT } from "./i18n/t";
+import { applyTheme } from "./theme/theme";
 
 import {
   eulaStatus,
@@ -98,10 +99,19 @@ export default function App() {
     settingsGet()
       .then((loaded) => {
         if (!cancelled) {
-          // Before the first paint that uses a string: `"auto"` follows the OS,
-          // an explicit tag wins. Also stamps <html lang/dir>, which is what
-          // actually flips the layout for Arabic.
-          initLocale(loaded.language);
+          // Language and palette are cosmetic; the settings are not. A throw in
+          // either would land in the `.catch` below and leave `settings` null,
+          // which silently disables every control that reads it — the studio
+          // would look alive and refuse to save anything.
+          try {
+            // `"auto"` follows the OS, an explicit tag wins. Also stamps
+            // <html lang/dir>, which is what actually flips Arabic to RTL.
+            initLocale(loaded.language);
+            // Paint before the first render, so a light theme never flashes dark.
+            applyTheme(loaded.theme);
+          } catch (err) {
+            console.error("could not apply the language or theme:", err);
+          }
           setSettings(loaded);
           setSettingsSettled(true);
         }

@@ -1091,3 +1091,44 @@ stream-service-trovo = Trovo
 stream-service-custom = 自定义（RTMP/RTMPS）
 stream-service-srt = SRT（自托管）
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = 关于
+about-tagline = 像专业工作室一样录制和推流 — 无需账户，无需云端。
+about-version = 版本
+about-created-by = 创建者
+about-project-started = 项目启动
+about-first-stable = 首个稳定版本
+about-first-stable-pending = 尚未发布 — 1.0.0 正在开发中
+about-platform = 平台
+about-local-first = Freally Capture 完全在你的机器上运行。无需账户，无遥测，无云端 — 唯一离开你电脑的只有你选择发送的直播流。
+about-website = 网站
+about-issues = 报告问题
+about-license = 许可证
+about-eula = EULA
+about-third-party = 第三方声明
+about-check-updates = 检查更新…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = 设置
+settings-language-section = 语言
+settings-language = 界面语言
+settings-language-system = 系统默认
+settings-language-note = 在此选择的语言会被记住。"系统默认"会跟随你的操作系统。未翻译的文本会回退为英文。
+settings-appearance-section = 外观
+settings-theme = 主题
+settings-theme-dark = 深色
+settings-theme-light = 浅色
+settings-theme-custom = 自定义
+settings-accent = 强调色
+settings-general-section = 常规
+settings-show-stats-dock = 显示统计面板
+settings-more-section = 更多设置
+settings-open-output = 录制…
+settings-open-stream = 推流…
+settings-open-replay = 重放…
+settings-open-hotkeys = 热键…
+settings-open-remote = 远程 API…
+settings-open-about = 关于…
+controls-settings = ⚙ 设置…
+controls-settings-title = 语言、外观和全应用范围的偏好设置

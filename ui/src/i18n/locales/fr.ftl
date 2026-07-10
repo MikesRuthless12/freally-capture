@@ -1108,3 +1108,44 @@ stream-service-trovo = Trovo
 stream-service-custom = Personnalisé (RTMP/RTMPS)
 stream-service-srt = SRT (auto-hébergé)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = À propos
+about-tagline = Enregistrez et diffusez comme un studio — sans compte ni cloud.
+about-version = Version
+about-created-by = Créé par
+about-project-started = Projet démarré
+about-first-stable = Première version stable
+about-first-stable-pending = Pas encore — la 1.0.0 est en cours
+about-platform = Plateforme
+about-local-first = Freally Capture fonctionne entièrement sur votre machine. Aucun compte, aucune télémétrie, aucun cloud — la seule chose qui quitte votre ordinateur est le flux que vous avez choisi d'envoyer.
+about-website = Site web
+about-issues = Signaler un problème
+about-license = Licence
+about-eula = EULA
+about-third-party = Mentions des tiers
+about-check-updates = Vérifier les mises à jour…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = Paramètres
+settings-language-section = Langue
+settings-language = Langue de l'interface
+settings-language-system = Valeur par défaut du système
+settings-language-note = Une langue choisie ici est mémorisée. « Valeur par défaut du système » suit votre système d'exploitation. Le texte non traduit revient à l'anglais.
+settings-appearance-section = Apparence
+settings-theme = Thème
+settings-theme-dark = Sombre
+settings-theme-light = Clair
+settings-theme-custom = Personnalisé
+settings-accent = Accent
+settings-general-section = Général
+settings-show-stats-dock = Afficher le panneau de statistiques
+settings-more-section = Plus de paramètres
+settings-open-output = Enregistrement…
+settings-open-stream = Diffusion…
+settings-open-replay = Relecture…
+settings-open-hotkeys = Raccourcis…
+settings-open-remote = API distante…
+settings-open-about = À propos…
+controls-settings = ⚙ Paramètres…
+controls-settings-title = Langue, apparence et préférences globales de l'application

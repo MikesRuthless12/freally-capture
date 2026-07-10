@@ -1108,3 +1108,44 @@ stream-service-trovo = Trovo
 stream-service-custom = Aangepast (RTMP/RTMPS)
 stream-service-srt = SRT (zelf gehost)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = Over
+about-tagline = Neem op en stream als een studio — geen accounts, geen cloud.
+about-version = Versie
+about-created-by = Gemaakt door
+about-project-started = Project gestart
+about-first-stable = Eerste stabiele release
+about-first-stable-pending = Nog niet — 1.0.0 is in ontwikkeling
+about-platform = Platform
+about-local-first = Freally Capture draait volledig op je machine. Geen accounts, geen telemetrie, geen cloud — het enige dat je computer verlaat is de stream die je zelf besloot te versturen.
+about-website = Website
+about-issues = Een probleem melden
+about-license = Licentie
+about-eula = EULA
+about-third-party = Kennisgevingen van derden
+about-check-updates = Controleren op updates…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = Instellingen
+settings-language-section = Taal
+settings-language = Interfacetaal
+settings-language-system = Systeemstandaard
+settings-language-note = Een taal die je hier kiest wordt onthouden. "Systeemstandaard" volgt je besturingssysteem. Niet-vertaalde tekst valt terug op Engels.
+settings-appearance-section = Weergave
+settings-theme = Thema
+settings-theme-dark = Donker
+settings-theme-light = Licht
+settings-theme-custom = Aangepast
+settings-accent = Accent
+settings-general-section = Algemeen
+settings-show-stats-dock = Toon het statistiekenpaneel
+settings-more-section = Meer instellingen
+settings-open-output = Opnemen…
+settings-open-stream = Streamen…
+settings-open-replay = Replay…
+settings-open-hotkeys = Sneltoetsen…
+settings-open-remote = Remote-API…
+settings-open-about = Over…
+controls-settings = ⚙ Instellingen…
+controls-settings-title = Taal, weergave en de app-brede voorkeuren

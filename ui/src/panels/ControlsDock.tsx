@@ -23,6 +23,8 @@ import { useT } from "../i18n/t";
 import { BrowserDockDialog } from "./BrowserDock";
 import { BugReportDialog } from "./BugReport";
 import { UpdatesDialog } from "./Updates";
+import { AboutDialog } from "./About";
+import { SettingsDialog } from "./Settings";
 import { ModelsDialog } from "./Models";
 import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
@@ -62,6 +64,8 @@ export function ControlsDock({
     | "scripts"
     | "bug"
     | "updates"
+    | "settings"
+    | "about"
     | null
   >(null);
 
@@ -362,6 +366,14 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("settings")}
+            title={t("controls-settings-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-settings")}
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("bug")}
             title={t("controls-bug-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
@@ -443,6 +455,17 @@ export function ControlsDock({
       )}
       {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
       {dialog === "updates" && <UpdatesDialog onClose={() => setDialog(null)} />}
+      {dialog === "settings" && settings && (
+        <SettingsDialog
+          settings={settings}
+          onSettingsSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+          onOpen={(next) => setDialog(next)}
+        />
+      )}
+      {dialog === "about" && (
+        <AboutDialog onClose={() => setDialog(null)} onCheckUpdates={() => setDialog("updates")} />
+      )}
       {openedFrec && <OpenedFrecDialog path={openedFrec} onClose={() => setOpenedFrec(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />

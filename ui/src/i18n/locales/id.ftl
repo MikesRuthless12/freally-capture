@@ -1108,3 +1108,44 @@ stream-service-trovo = Trovo
 stream-service-custom = Kustom (RTMP/RTMPS)
 stream-service-srt = SRT (swakelola)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = Tentang
+about-tagline = Rekam dan stream seperti studio — tanpa akun, tanpa cloud.
+about-version = Versi
+about-created-by = Dibuat oleh
+about-project-started = Proyek dimulai
+about-first-stable = Rilis stabil pertama
+about-first-stable-pending = Belum — 1.0.0 sedang dalam proses
+about-platform = Platform
+about-local-first = Freally Capture berjalan sepenuhnya di mesin Anda. Tanpa akun, tanpa telemetri, tanpa cloud — satu-satunya hal yang meninggalkan komputer Anda adalah stream yang Anda pilih untuk dikirim.
+about-website = Situs web
+about-issues = Laporkan masalah
+about-license = Lisensi
+about-eula = EULA
+about-third-party = Pemberitahuan pihak ketiga
+about-check-updates = Periksa pembaruan…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = Pengaturan
+settings-language-section = Bahasa
+settings-language = Bahasa antarmuka
+settings-language-system = Default sistem
+settings-language-note = Bahasa yang Anda pilih di sini akan diingat. “Default sistem” mengikuti sistem operasi Anda. Teks yang belum diterjemahkan kembali ke bahasa Inggris.
+settings-appearance-section = Tampilan
+settings-theme = Tema
+settings-theme-dark = Gelap
+settings-theme-light = Terang
+settings-theme-custom = Kustom
+settings-accent = Aksen
+settings-general-section = Umum
+settings-show-stats-dock = Tampilkan dok statistik
+settings-more-section = Pengaturan lainnya
+settings-open-output = Rekaman…
+settings-open-stream = Streaming…
+settings-open-replay = Replay…
+settings-open-hotkeys = Hotkey…
+settings-open-remote = API remote…
+settings-open-about = Tentang…
+controls-settings = ⚙ Pengaturan…
+controls-settings-title = Bahasa, tampilan, dan preferensi seluruh aplikasi

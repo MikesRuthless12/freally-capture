@@ -20,6 +20,32 @@ export type Health = {
   crates: CrateHealth[];
 };
 
+/** What the About panel shows (mirrors `BuildInfo` in `buildinfo.rs`). */
+export type BuildInfo = {
+  version: string;
+  authors: string;
+  projectStarted: string;
+  /** `null` until 1.0.0 ships. */
+  firstStableReleased: string | null;
+  copyright: string;
+  homepage: string;
+  repository: string;
+  issues: string;
+  os: string;
+  arch: string;
+  target: string;
+};
+
+/** Which palette the UI paints with (mirrors `ThemeMode` in settings.rs). */
+export type ThemeMode = "dark" | "light" | "custom";
+
+/** Appearance (mirrors `ThemeSettings` in settings.rs). */
+export type ThemeSettings = {
+  mode: ThemeMode;
+  /** `#rrggbb` — Rust's `validate()` rejects anything else. */
+  accent: string;
+};
+
 /** The persisted user settings (`settings.json` in the OS config dir). */
 /** Audio Mixer strip orientation. */
 export type MixerLayout = "horizontal" | "vertical";
@@ -31,6 +57,8 @@ export type Settings = {
   monitorDevice: string | null;
   /** Audio Mixer strip orientation. */
   mixerLayout: MixerLayout;
+  /** Appearance: palette + custom accent (Phase 9). */
+  theme: ThemeSettings;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */

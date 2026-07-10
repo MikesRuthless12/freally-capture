@@ -1072,3 +1072,44 @@ stream-service-trovo = Trovo
 stream-service-custom = مخصص (RTMP/RTMPS)
 stream-service-srt = SRT (مستضاف ذاتيًا)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = حول
+about-tagline = سجّل وابثّ كاستوديو — بلا حسابات، بلا سحابة.
+about-version = الإصدار
+about-created-by = من إنشاء
+about-project-started = بدء المشروع
+about-first-stable = أول إصدار مستقر
+about-first-stable-pending = ليس بعد — 1.0.0 قيد التنفيذ
+about-platform = المنصة
+about-local-first = يعمل Freally Capture بالكامل على جهازك. بلا حسابات، بلا قياس عن بُعد، بلا سحابة — الشيء الوحيد الذي يغادر حاسوبك هو البث الذي اخترت إرساله.
+about-website = الموقع الإلكتروني
+about-issues = الإبلاغ عن مشكلة
+about-license = الترخيص
+about-eula = EULA
+about-third-party = إشعارات الأطراف الثالثة
+about-check-updates = تحقّق من التحديثات…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = الإعدادات
+settings-language-section = اللغة
+settings-language = لغة الواجهة
+settings-language-system = افتراضي النظام
+settings-language-note = تُحفَظ اللغة التي تختارها هنا. "افتراضي النظام" يتبع نظام تشغيلك. النص غير المُترجَم يعود إلى الإنجليزية.
+settings-appearance-section = المظهر
+settings-theme = السمة
+settings-theme-dark = داكن
+settings-theme-light = فاتح
+settings-theme-custom = مخصص
+settings-accent = لون التمييز
+settings-general-section = عام
+settings-show-stats-dock = إظهار لوحة الإحصائيات
+settings-more-section = إعدادات إضافية
+settings-open-output = التسجيل…
+settings-open-stream = البث…
+settings-open-replay = الإعادة…
+settings-open-hotkeys = الاختصارات…
+settings-open-remote = الواجهة البرمجية عن بُعد…
+settings-open-about = حول…
+controls-settings = ⚙ الإعدادات…
+controls-settings-title = اللغة والمظهر والتفضيلات على مستوى التطبيق

@@ -1108,3 +1108,44 @@ stream-service-trovo = Trovo
 stream-service-custom = Özel (RTMP/RTMPS)
 stream-service-srt = SRT (kendi barındırılan)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = Hakkında
+about-tagline = Bir stüdyo gibi kaydedin ve yayınlayın — hesap yok, bulut yok.
+about-version = Sürüm
+about-created-by = Oluşturan
+about-project-started = Proje başlangıcı
+about-first-stable = İlk kararlı sürüm
+about-first-stable-pending = Henüz değil — 1.0.0 üzerinde çalışılıyor
+about-platform = Platform
+about-local-first = Freally Capture tamamen sizin makinenizde çalışır. Hesap yok, telemetri yok, bulut yok — bilgisayarınızdan çıkan tek şey göndermeyi seçtiğiniz yayındır.
+about-website = Web sitesi
+about-issues = Sorun bildir
+about-license = Lisans
+about-eula = EULA
+about-third-party = Üçüncü taraf bildirimleri
+about-check-updates = Güncellemeleri denetle…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = Ayarlar
+settings-language-section = Dil
+settings-language = Arayüz dili
+settings-language-system = Sistem varsayılanı
+settings-language-note = Burada seçtiğiniz dil hatırlanır. “Sistem varsayılanı” işletim sisteminizi izler. Çevrilmemiş metin İngilizceye geri döner.
+settings-appearance-section = Görünüm
+settings-theme = Tema
+settings-theme-dark = Koyu
+settings-theme-light = Açık
+settings-theme-custom = Özel
+settings-accent = Vurgu
+settings-general-section = Genel
+settings-show-stats-dock = İstatistik panelini göster
+settings-more-section = Diğer ayarlar
+settings-open-output = Kayıt…
+settings-open-stream = Yayın…
+settings-open-replay = Tekrar…
+settings-open-hotkeys = Kısayollar…
+settings-open-remote = Uzak API…
+settings-open-about = Hakkında…
+controls-settings = ⚙ Ayarlar…
+controls-settings-title = Dil, görünüm ve uygulama genelindeki tercihler

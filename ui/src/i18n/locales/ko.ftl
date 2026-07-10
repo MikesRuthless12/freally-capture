@@ -1085,3 +1085,44 @@ stream-service-trovo = Trovo
 stream-service-custom = 사용자 지정 (RTMP/RTMPS)
 stream-service-srt = SRT (자체 호스팅)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = 정보
+about-tagline = 스튜디오처럼 녹화하고 방송하세요 — 계정도, 클라우드도 없습니다.
+about-version = 버전
+about-created-by = 만든 사람
+about-project-started = 프로젝트 시작
+about-first-stable = 첫 정식 릴리스
+about-first-stable-pending = 아직 아님 — 1.0.0 진행 중
+about-platform = 플랫폼
+about-local-first = Freally Capture는 전적으로 당신의 컴퓨터에서 실행됩니다. 계정도, 텔레메트리도, 클라우드도 없습니다 — 컴퓨터를 떠나는 것은 당신이 보내기로 선택한 방송뿐입니다.
+about-website = 웹사이트
+about-issues = 문제 신고
+about-license = 라이선스
+about-eula = EULA
+about-third-party = 서드파티 고지
+about-check-updates = 업데이트 확인…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = 설정
+settings-language-section = 언어
+settings-language = 인터페이스 언어
+settings-language-system = 시스템 기본값
+settings-language-note = 여기서 선택한 언어는 기억됩니다. "시스템 기본값"은 운영 체제를 따릅니다. 번역되지 않은 텍스트는 영어로 대체됩니다.
+settings-appearance-section = 모양
+settings-theme = 테마
+settings-theme-dark = 어둡게
+settings-theme-light = 밝게
+settings-theme-custom = 사용자 지정
+settings-accent = 강조 색
+settings-general-section = 일반
+settings-show-stats-dock = 통계 독 표시
+settings-more-section = 추가 설정
+settings-open-output = 녹화…
+settings-open-stream = 스트리밍…
+settings-open-replay = 리플레이…
+settings-open-hotkeys = 단축키…
+settings-open-remote = 원격 API…
+settings-open-about = 정보…
+controls-settings = ⚙ 설정…
+controls-settings-title = 언어, 모양 및 앱 전체 환경설정

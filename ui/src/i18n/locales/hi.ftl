@@ -1072,3 +1072,44 @@ stream-service-trovo = Trovo
 stream-service-custom = कस्टम (RTMP/RTMPS)
 stream-service-srt = SRT (स्व-होस्टेड)
 stream-service-whip = WHIP (WebRTC)
+
+# --- about (TASK-907) ---
+about-title = परिचय
+about-tagline = स्टूडियो की तरह रिकॉर्ड और स्ट्रीम करें — कोई अकाउंट नहीं, कोई क्लाउड नहीं।
+about-version = संस्करण
+about-created-by = निर्माता
+about-project-started = प्रोजेक्ट शुरू हुआ
+about-first-stable = पहली स्थिर रिलीज़
+about-first-stable-pending = अभी नहीं — 1.0.0 प्रगति पर है
+about-platform = प्लेटफ़ॉर्म
+about-local-first = Freally Capture पूरी तरह आपकी मशीन पर चलता है। कोई अकाउंट नहीं, कोई टेलीमेट्री नहीं, कोई क्लाउड नहीं — आपके कंप्यूटर से केवल वही चीज़ बाहर जाती है जो स्ट्रीम आपने भेजने के लिए चुनी है।
+about-website = वेबसाइट
+about-issues = समस्या रिपोर्ट करें
+about-license = लाइसेंस
+about-eula = EULA
+about-third-party = तृतीय-पक्ष सूचनाएँ
+about-check-updates = अपडेट जाँचें…
+
+# --- unified settings modal (TASK-906) ---
+settings-title = सेटिंग्स
+settings-language-section = भाषा
+settings-language = इंटरफ़ेस भाषा
+settings-language-system = सिस्टम डिफ़ॉल्ट
+settings-language-note = यहाँ चुनी गई भाषा याद रखी जाती है। “सिस्टम डिफ़ॉल्ट” आपके ऑपरेटिंग सिस्टम का अनुसरण करता है। अनुवादित न किया गया टेक्स्ट अंग्रेज़ी पर वापस आ जाता है।
+settings-appearance-section = दिखावट
+settings-theme = थीम
+settings-theme-dark = गहरा
+settings-theme-light = हल्का
+settings-theme-custom = कस्टम
+settings-accent = एक्सेंट
+settings-general-section = सामान्य
+settings-show-stats-dock = आँकड़े डॉक दिखाएँ
+settings-more-section = अधिक सेटिंग्स
+settings-open-output = रिकॉर्डिंग…
+settings-open-stream = स्ट्रीमिंग…
+settings-open-replay = रीप्ले…
+settings-open-hotkeys = हॉटकी…
+settings-open-remote = रिमोट API…
+settings-open-about = परिचय…
+controls-settings = ⚙ सेटिंग्स…
+controls-settings-title = भाषा, दिखावट और ऐप-व्यापी प्राथमिकताएँ

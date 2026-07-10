@@ -12,6 +12,7 @@
 
 mod audio;
 mod bugreport;
+mod buildinfo;
 mod commands;
 mod docks;
 mod eula;
@@ -165,6 +166,7 @@ fn main() {
             commands::video_device_formats,
             commands::open_privacy_settings,
             docks::browser_dock_open,
+            buildinfo::build_info,
             bugreport::bug_report_context,
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,

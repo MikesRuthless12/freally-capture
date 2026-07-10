@@ -29,6 +29,51 @@ pub enum MixerLayout {
     Vertical,
 }
 
+/// Which palette the UI paints with (TASK-906). Applied live through the
+/// frontend's CSS-variable theme provider — never a rebuild, never a reload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeMode {
+    /// Havoc dark — what every build before 0.96.0 shipped, and still the default.
+    #[default]
+    Dark,
+    Light,
+    /// Dark, but with [`ThemeSettings::accent`] replacing the Havoc blue.
+    Custom,
+}
+
+/// Appearance (TASK-906).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ThemeSettings {
+    pub mode: ThemeMode,
+    /// `#rrggbb`. Only read when `mode` is [`ThemeMode::Custom`], but persisted
+    /// always, so switching to Custom and back does not lose the colour.
+    pub accent: String,
+}
+
+impl Default for ThemeSettings {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::default(),
+            // The Havoc accent, so `Custom` starts where `Dark` left off.
+            accent: "#4a9eff".to_owned(),
+        }
+    }
+}
+
+impl ThemeSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        // The accent lands in a CSS custom property. Anything but a plain hex
+        // triple could close the declaration and inject a rule.
+        let hex = self.accent.strip_prefix('#').unwrap_or("");
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("the accent colour must be #rrggbb".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// `Settings::language` sentinel: follow the operating system's preferred
 /// languages instead of a fixed choice. Fresh installs start here, so a Japanese
 /// user does not have to find a picker to stop reading English. Kept in step
@@ -51,6 +96,8 @@ pub struct Settings {
     pub monitor_device: Option<String>,
     /// Audio Mixer strip orientation.
     pub mixer_layout: MixerLayout,
+    /// Appearance: palette + custom accent (Phase 9, TASK-906).
+    pub theme: ThemeSettings,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
     /// Remote Guests networking (Phase R).
@@ -82,6 +129,7 @@ impl Default for Settings {
             show_stats_dock: true,
             monitor_device: None,
             mixer_layout: MixerLayout::default(),
+            theme: ThemeSettings::default(),
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
@@ -759,6 +807,7 @@ impl Settings {
                 return Err("invalid monitor device name".to_owned());
             }
         }
+        self.theme.validate()?;
         self.recording.validate()?;
         self.remote.validate()?;
         self.stream.validate()?;
@@ -982,6 +1031,10 @@ mod tests {
             show_stats_dock: false,
             monitor_device: Some("Speakers (Realtek)".to_owned()),
             mixer_layout: MixerLayout::Vertical,
+            theme: ThemeSettings {
+                mode: ThemeMode::Custom,
+                accent: "#00d4ff".to_owned(),
+            },
             recording: RecordingSettings {
                 container: Container::Mkv,
                 split_minutes: 30,
@@ -1299,6 +1352,52 @@ mod tests {
         let printed = format!("{settings:?}");
         assert!(!printed.contains("hunter2"), "credential leaked: {printed}");
         assert!(printed.contains("[redacted]"));
+    }
+
+    /// The accent is written into a CSS custom property. A value that can close
+    /// the declaration injects a rule into the page, so `validate` is a security
+    /// boundary, not a formatting nicety.
+    #[test]
+    fn the_accent_colour_must_be_a_plain_hex_triple() {
+        let ok = Settings {
+            theme: ThemeSettings {
+                mode: ThemeMode::Custom,
+                accent: "#00d4ff".to_owned(),
+            },
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+
+        for bad in [
+            "",
+            "4a9eff",                    // no `#`
+            "#4a9ef",                    // too short
+            "#4a9efff",                  // too long
+            "#gggggg",                   // not hex
+            "#4a9eff;color:red",         // closes the declaration
+            "red",                       // a keyword, not a triple
+            "#4a9eff}body{display:none", // escapes the rule
+            "var(--x)",
+        ] {
+            let settings = Settings {
+                theme: ThemeSettings {
+                    mode: ThemeMode::Custom,
+                    accent: bad.to_owned(),
+                },
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "{bad:?} must be rejected");
+        }
+    }
+
+    /// Switching to Custom and back must not lose the colour, and a fresh install
+    /// must look exactly like every build before it.
+    #[test]
+    fn the_theme_defaults_to_havoc_dark() {
+        let theme = ThemeSettings::default();
+        assert_eq!(theme.mode, ThemeMode::Dark);
+        assert_eq!(theme.accent, "#4a9eff");
+        assert!(theme.validate().is_ok());
     }
 
     /// A fresh install must follow the OS, not force English on a Japanese user.

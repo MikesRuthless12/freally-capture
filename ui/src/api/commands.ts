@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddedItem,
+  BuildInfo,
   AppAudioList,
   AudioDevice,
   AudioFilterId,
@@ -717,6 +718,11 @@ export function bugReportSubmit(
   includeCrash: boolean,
 ): Promise<void> {
   return invoke("bug_report_submit", { target, description, includeCrash });
+}
+
+/** What the About panel shows: version, authors, dates, links. Read-only. */
+export function buildInfo(): Promise<BuildInfo> {
+  return invoke<BuildInfo>("build_info");
 }
 
 /** Dismiss + delete the pending crash report. */
