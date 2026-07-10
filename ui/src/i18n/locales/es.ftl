@@ -1171,3 +1171,13 @@ autoconfig-reason-software = No se encontró un codificador por hardware utiliza
 autoconfig-reason-quality-hardware = 1080p a 60 fotogramas por segundo, con una tasa de bits que aceptan todas las plataformas principales.
 autoconfig-reason-quality-software = 30 fotogramas por segundo, porque la codificación por software a 60 descarta fotogramas en la mayoría de los procesadores.
 autoconfig-reason-quality-low-cores = Una tasa de bits más baja, porque este procesador tiene pocos núcleos y la codificación por software competirá con el compositor por ellos.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Grabación iniciada
+announce-recording-paused = Grabación en pausa
+announce-recording-stopped = Grabación detenida
+announce-live-started = Estás en directo
+announce-live-ended = Transmisión finalizada
+announce-reconnecting = Conexión perdida, reconectando
+announce-stream-failed = Falló la transmisión
+announce-frames-dropped = Fotogramas descartados: { $count }

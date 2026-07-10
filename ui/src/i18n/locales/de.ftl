@@ -1171,3 +1171,13 @@ autoconfig-reason-software = Kein nutzbarer Hardware-Encoder gefunden, also kodi
 autoconfig-reason-quality-hardware = 1080p mit 60 Bildern pro Sekunde, bei einer Bitrate, die jede große Plattform akzeptiert.
 autoconfig-reason-quality-software = 30 Bilder pro Sekunde, weil Software-Kodierung bei 60 auf den meisten Prozessoren Bilder verwirft.
 autoconfig-reason-quality-low-cores = Eine niedrigere Bitrate, weil dieser Prozessor wenige Kerne hat und die Software-Kodierung mit dem Compositor um sie konkurriert.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Aufnahme gestartet
+announce-recording-paused = Aufnahme pausiert
+announce-recording-stopped = Aufnahme gestoppt
+announce-live-started = Du bist live
+announce-live-ended = Stream beendet
+announce-reconnecting = Verbindung verloren, verbinde neu
+announce-stream-failed = Stream fehlgeschlagen
+announce-frames-dropped = { $count } Bilder verworfen

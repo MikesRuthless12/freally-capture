@@ -1193,3 +1193,13 @@ autoconfig-reason-software = Tidak ada encoder perangkat keras yang bisa dipakai
 autoconfig-reason-quality-hardware = 1080p pada 60 frame per detik, dengan bitrate yang diterima setiap platform besar.
 autoconfig-reason-quality-software = 30 frame per detik, karena encoding perangkat lunak pada 60 menjatuhkan frame di sebagian besar prosesor.
 autoconfig-reason-quality-low-cores = Bitrate lebih rendah, karena prosesor ini punya sedikit inti dan encoding perangkat lunak akan berebut dengan kompositor untuknya.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Rekaman dimulai
+announce-recording-paused = Rekaman dijeda
+announce-recording-stopped = Rekaman dihentikan
+announce-live-started = Anda sedang tayang langsung
+announce-live-ended = Siaran berakhir
+announce-reconnecting = Koneksi terputus, menyambung ulang
+announce-stream-failed = Siaran gagal
+announce-frames-dropped = { $count } frame terjatuh

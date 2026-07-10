@@ -1194,3 +1194,13 @@ autoconfig-reason-software = 使えるハードウェアエンコーダが見つ
 autoconfig-reason-quality-hardware = 60フレーム毎秒の 1080p で、主要なすべてのプラットフォームが受け入れるビットレートです。
 autoconfig-reason-quality-software = 30フレーム毎秒です。60でのソフトウェアエンコードは、ほとんどのプロセッサーでフレームを落とすためです。
 autoconfig-reason-quality-low-cores = 低めのビットレートです。このプロセッサーはコアが少なく、ソフトウェアエンコードがコンポジターとコアを奪い合うためです。
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = 録画を開始しました
+announce-recording-paused = 録画を一時停止しました
+announce-recording-stopped = 録画を停止しました
+announce-live-started = ライブ配信中です
+announce-live-ended = 配信を終了しました
+announce-reconnecting = 接続が切れたため再接続しています
+announce-stream-failed = 配信に失敗しました
+announce-frames-dropped = { $count } フレームをドロップしました

@@ -1194,3 +1194,13 @@ autoconfig-reason-software = No usable hardware encoder was found, so the proces
 autoconfig-reason-quality-hardware = 1080p at 60 frames per second, at a bitrate every major platform accepts.
 autoconfig-reason-quality-software = 30 frames per second, because software encoding at 60 drops frames on most processors.
 autoconfig-reason-quality-low-cores = A lower bitrate, because this processor has few cores and software encoding will fight the compositor for them.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Recording started
+announce-recording-paused = Recording paused
+announce-recording-stopped = Recording stopped
+announce-live-started = You are live
+announce-live-ended = Stream ended
+announce-reconnecting = Connection lost, reconnecting
+announce-stream-failed = Stream failed
+announce-frames-dropped = { $count } frames dropped

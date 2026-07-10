@@ -1194,3 +1194,13 @@ autoconfig-reason-software = Er is geen bruikbare hardware-encoder gevonden, dus
 autoconfig-reason-quality-hardware = 1080p op 60 beelden per seconde, met een bitrate die elk groot platform accepteert.
 autoconfig-reason-quality-software = 30 beelden per seconde, omdat software-encodering op 60 bij de meeste processors beelden laat vallen.
 autoconfig-reason-quality-low-cores = Een lagere bitrate, omdat deze processor weinig cores heeft en de software-encodering met de compositor moet concurreren om die cores.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Opname gestart
+announce-recording-paused = Opname gepauzeerd
+announce-recording-stopped = Opname gestopt
+announce-live-started = Je bent live
+announce-live-ended = Stream beëindigd
+announce-reconnecting = Verbinding verbroken, opnieuw verbinden
+announce-stream-failed = Stream mislukt
+announce-frames-dropped = { $count } frames verloren

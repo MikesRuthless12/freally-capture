@@ -1171,3 +1171,13 @@ autoconfig-reason-software = 쓸 만한 하드웨어 인코더를 찾지 못해 
 autoconfig-reason-quality-hardware = 모든 주요 플랫폼이 받아들이는 비트레이트로 1080p, 초당 60프레임입니다.
 autoconfig-reason-quality-software = 대부분의 프로세서에서는 소프트웨어 인코딩으로 60프레임을 처리하면 프레임이 끊기기 때문에, 초당 30프레임입니다.
 autoconfig-reason-quality-low-cores = 이 프로세서는 코어가 적어 소프트웨어 인코딩이 컴포지터와 코어를 두고 다투기 때문에, 비트레이트를 낮췄습니다.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = 녹화가 시작되었습니다
+announce-recording-paused = 녹화가 일시정지되었습니다
+announce-recording-stopped = 녹화가 중지되었습니다
+announce-live-started = 지금 생방송 중입니다
+announce-live-ended = 방송이 종료되었습니다
+announce-reconnecting = 연결이 끊겨 다시 연결하는 중입니다
+announce-stream-failed = 방송에 실패했습니다
+announce-frames-dropped = 프레임 { $count }개가 누락되었습니다

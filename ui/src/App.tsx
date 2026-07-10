@@ -39,6 +39,7 @@ import type {
 } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { StatusAnnouncer } from "./components/StatusAnnouncer";
 import type { Command } from "./lib/commands";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
@@ -434,6 +435,8 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      {/* Speaks going-live, recording and dropped-frame bursts to a screen reader. */}
+      <StatusAnnouncer />
       {/* After the EULA gate, never before: consent precedes onboarding. */}
       {settings && !settings.completedOnboarding && !wizardDismissed && (
         <FirstRunWizard

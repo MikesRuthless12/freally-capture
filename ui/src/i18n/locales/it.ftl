@@ -1194,3 +1194,13 @@ autoconfig-reason-software = Non è stato trovato un encoder hardware utilizzabi
 autoconfig-reason-quality-hardware = 1080p a 60 fotogrammi al secondo, a un bitrate accettato da ogni grande piattaforma.
 autoconfig-reason-quality-software = 30 fotogrammi al secondo, perché la codifica software a 60 perde fotogrammi sulla maggior parte dei processori.
 autoconfig-reason-quality-low-cores = Un bitrate più basso, perché questo processore ha pochi core e la codifica software se li contende con il compositor.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Registrazione avviata
+announce-recording-paused = Registrazione in pausa
+announce-recording-stopped = Registrazione interrotta
+announce-live-started = Sei in diretta
+announce-live-ended = Diretta terminata
+announce-reconnecting = Connessione persa, riconnessione in corso
+announce-stream-failed = Diretta non riuscita
+announce-frames-dropped = Fotogrammi persi: { $count }

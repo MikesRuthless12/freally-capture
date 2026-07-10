@@ -1171,3 +1171,13 @@ autoconfig-reason-software = Nie znaleziono użytecznego kodera sprzętowego, wi
 autoconfig-reason-quality-hardware = 1080p przy 60 klatkach na sekundę, z bitrate akceptowanym przez każdą dużą platformę.
 autoconfig-reason-quality-software = 30 klatek na sekundę, ponieważ kodowanie programowe przy 60 gubi klatki na większości procesorów.
 autoconfig-reason-quality-low-cores = Niższy bitrate, ponieważ ten procesor ma niewiele rdzeni, a kodowanie programowe będzie o nie rywalizować z kompozytorem.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Nagrywanie rozpoczęte
+announce-recording-paused = Nagrywanie wstrzymane
+announce-recording-stopped = Nagrywanie zatrzymane
+announce-live-started = Jesteś na żywo
+announce-live-ended = Transmisja zakończona
+announce-reconnecting = Utracono połączenie, ponowne łączenie
+announce-stream-failed = Transmisja nie powiodła się
+announce-frames-dropped = Utracono klatki: { $count }

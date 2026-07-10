@@ -1194,3 +1194,13 @@ autoconfig-reason-software = Aucun encodeur matériel utilisable n'a été trouv
 autoconfig-reason-quality-hardware = 1080p à 60 images par seconde, à un débit accepté par toutes les grandes plateformes.
 autoconfig-reason-quality-software = 30 images par seconde, car l'encodage logiciel à 60 fait perdre des images sur la plupart des processeurs.
 autoconfig-reason-quality-low-cores = Un débit plus faible, car ce processeur a peu de cœurs et l'encodage logiciel les disputera au compositeur.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = Enregistrement démarré
+announce-recording-paused = Enregistrement en pause
+announce-recording-stopped = Enregistrement arrêté
+announce-live-started = Vous êtes en direct
+announce-live-ended = Diffusion terminée
+announce-reconnecting = Connexion perdue, reconnexion en cours
+announce-stream-failed = Échec de la diffusion
+announce-frames-dropped = Images perdues : { $count }

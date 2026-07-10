@@ -1158,3 +1158,13 @@ autoconfig-reason-software = لم يُعثر على مُرمِّز عتادي ص
 autoconfig-reason-quality-hardware = 1080p عند 60 إطارًا في الثانية، بمعدل بت تقبله كل منصة كبرى.
 autoconfig-reason-quality-software = 30 إطارًا في الثانية، لأن الترميز البرمجي عند 60 يُسقِط إطارات على معظم المعالجات.
 autoconfig-reason-quality-low-cores = معدل بت أقل، لأن هذا المعالج قليل الأنوية وسينافس الترميز البرمجي المُركِّب عليها.
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = بدأ التسجيل
+announce-recording-paused = توقف التسجيل مؤقتا
+announce-recording-stopped = توقف التسجيل
+announce-live-started = أنت الآن على الهواء مباشرة
+announce-live-ended = انتهى البث المباشر
+announce-reconnecting = انقطع الاتصال، جارٍ إعادة الاتصال
+announce-stream-failed = فشل البث المباشر
+announce-frames-dropped = أسقط { $count } من الإطارات

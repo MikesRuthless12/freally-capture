@@ -1177,3 +1177,13 @@ autoconfig-reason-software = 未找到可用的硬件编码器，因此将由处
 autoconfig-reason-quality-hardware = 1080p、每秒 60 帧，比特率也是每个主流平台都接受的水平。
 autoconfig-reason-quality-software = 每秒 30 帧，因为软件编码在 60 帧时会在大多数处理器上丢帧。
 autoconfig-reason-quality-low-cores = 较低的比特率，因为这台处理器核心不多，软件编码会与合成器争抢它们。
+
+# --- screen-reader announcements (TASK-901, aria-live) ---
+announce-recording-started = 录制已开始
+announce-recording-paused = 录制已暂停
+announce-recording-stopped = 录制已停止
+announce-live-started = 你已开始直播
+announce-live-ended = 直播已结束
+announce-reconnecting = 连接已断开，正在重新连接
+announce-stream-failed = 直播失败
+announce-frames-dropped = 丢失了 { $count } 帧
