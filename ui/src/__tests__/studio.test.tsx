@@ -130,7 +130,18 @@ describe("the studio UI", () => {
   beforeEach(() => {
     listeners.clear();
     invokeCalls.length = 0;
-    mockState.dto = { revision: 1, collection: fixtureCollection() };
+    mockState.dto = {
+      revision: 1,
+      collection: fixtureCollection(),
+      history: {
+        canUndo: false,
+        canRedo: false,
+        undoLabel: null,
+        redoLabel: null,
+        undo: [],
+        redo: [],
+      },
+    };
   });
 
   it("renders scenes and the active scene's items from studio_get", async () => {
@@ -185,6 +196,30 @@ describe("the studio UI", () => {
       const call = invokeCalls.find((c) => c.cmd === "studio_set_item_visible");
       expect(call?.args).toMatchObject({ itemId: "item-cam", visible: false });
     });
+  });
+
+  it("drives undo and redo from the keyboard (CAP-M01)", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: /^Main/ });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    });
+    await waitFor(() => expect(invokeCalls.some((c) => c.cmd === "studio_undo")).toBe(true));
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true }),
+      );
+    });
+    await waitFor(() => expect(invokeCalls.some((c) => c.cmd === "studio_redo")).toBe(true));
+
+    // Ctrl+Y is the alternate redo binding.
+    invokeCalls.length = 0;
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true }));
+    });
+    await waitFor(() => expect(invokeCalls.some((c) => c.cmd === "studio_redo")).toBe(true));
   });
 
   it("applies studio events pushed from the core", async () => {

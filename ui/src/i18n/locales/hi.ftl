@@ -1003,6 +1003,44 @@ workspace-new-name-placeholder = नया नाम…
 workspace-new-name-label = नया { $title } नाम
 workspace-create = बनाएँ
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = OBS से आयात करें…
+workspace-import-obs-hint = कोई OBS सीन संग्रह (उसकी scenes.json) लाएँ। आपका मौजूदा संग्रह पहले सहेजा जाता है।
+workspace-import-busy = आयात हो रहा है…
+workspace-import-title = "{ $name }" आयात किया गया
+workspace-import-summary = { $scenes } सीन · { $sources } स्रोत · { $items } आइटम
+workspace-import-dismiss = बंद करें
+workspace-import-clean = सब कुछ ठीक से आयात हो गया।
+workspace-import-geometry-caveat = आकार और स्थिति OBS लेआउट से समायोजित की जाती हैं — हर सीन जाँचें और कैप्चर डिवाइस फिर से चुनें।
+workspace-import-notes-title = टिप्पणियों के साथ आयात
+workspace-import-skipped-title = आयात नहीं हुआ
+import-note-needsReselect = डिवाइस/मॉनिटर/विंडो फिर से चुनें
+import-note-gameCaptureAsWindow = गेम कैप्चर → विंडो कैप्चर
+import-note-referencesFile = फ़ाइल पथ जाँचें
+import-note-filterDropped = कुछ फ़िल्टर असमर्थित
+import-note-geometryApproximated = स्थिति/आकार अनुमानित
+import-skip-unsupportedKind = कोई समकक्ष स्रोत प्रकार नहीं
+import-skip-group = समूह अभी समर्थित नहीं
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = अनुपलब्ध फ़ाइलें फिर से जोड़ें…
+doctor-title = अनुपलब्ध फ़ाइलें
+doctor-scanning = स्कैन हो रहा है…
+doctor-all-good = सभी संदर्भित फ़ाइलें मौजूद हैं। फिर से जोड़ने के लिए कुछ नहीं।
+doctor-intro = इस कंप्यूटर पर { $count } संदर्भित फ़ाइलें नहीं मिलीं। हर एक का नया स्थान बताएं — उसका उपयोग करने वाला हर सीन एक साथ ठीक हो जाएगा।
+doctor-relinked = { $count } संदर्भ फिर से जोड़े गए।
+doctor-uses = { $count }× उपयोग
+doctor-locate = ढूँढें…
+doctor-locate-folder = फ़ोल्डर में ढूँढें…
+doctor-locate-folder-hint = एक फ़ोल्डर चुनें; हर अनुपलब्ध फ़ाइल नाम से मिलाकर फिर से जोड़ी जाती है।
+doctor-kind-image = छवि
+doctor-kind-media = मीडिया
+doctor-kind-slideshow = स्लाइडशो
+doctor-kind-font = फ़ॉन्ट
+doctor-kind-lut = LUT
+doctor-kind-mask = मास्क
+history-relinkFiles = फ़ाइलें फिर से जोड़ें
+
 # --- ScriptsDialog.tsx ---
 scripts-title = स्क्रिप्ट (Lua)
 scripts-empty = अभी कोई स्क्रिप्ट नहीं — एक .lua फ़ाइल जोड़ें। API के लिए scripts/sample.lua देखें: go-live/scene/recording घटनाओं पर प्रतिक्रिया दें और रिमोट API जैसी ही कमांड चलाएँ।
@@ -1168,3 +1206,143 @@ announce-live-ended = स्ट्रीम समाप्त हो गई
 announce-reconnecting = कनेक्शन टूट गया, फिर से जुड़ रहे हैं
 announce-stream-failed = स्ट्रीम विफल हो गई
 announce-frames-dropped = { $count } फ़्रेम ड्रॉप हुए
+
+# CAP-M01 — undo/redo edit history
+palette-undo = पूर्ववत करें
+palette-redo = फिर से करें
+palette-edit-history = संपादन इतिहास…
+history-title = संपादन इतिहास
+history-empty = अभी पूर्ववत करने के लिए कुछ नहीं है।
+history-current = वर्तमान स्थिति
+history-close = बंद करें
+history-addScene = दृश्य जोड़ें
+history-renameScene = दृश्य का नाम बदलें
+history-removeScene = दृश्य हटाएँ
+history-reorderScene = दृश्य पुनः क्रमित करें
+history-addSource = स्रोत जोड़ें
+history-removeSource = स्रोत हटाएँ
+history-reorderSource = स्रोत पुनः क्रमित करें
+history-renameSource = स्रोत का नाम बदलें
+history-transformSource = स्रोत ले जाएँ
+history-toggleVisibility = दृश्यता टॉगल करें
+history-toggleLock = लॉक टॉगल करें
+history-setBlendMode = ब्लेंड मोड बदलें
+history-editSourceProperties = गुण संपादित करें
+history-applyLayout = लेआउट व्यवस्थित करें
+history-moveToSeat = स्थान पर ले जाएँ
+history-groupSources = स्रोत समूहित करें
+history-ungroupSources = समूह अलग करें
+history-toggleGroupVisibility = समूह टॉगल करें
+history-setSceneAudio = दृश्य ऑडियो
+history-setVerticalCanvas = लंबवत कैनवास
+history-addFilter = फ़िल्टर जोड़ें
+history-removeFilter = फ़िल्टर हटाएँ
+history-reorderFilter = फ़िल्टर पुनः क्रमित करें
+history-editFilter = फ़िल्टर संपादित करें
+history-toggleFilter = फ़िल्टर टॉगल करें
+history-setVolume = वॉल्यूम समायोजित करें
+history-toggleMute = म्यूट टॉगल करें
+history-setMonitor = मॉनिटरिंग बदलें
+history-setTracks = ट्रैक बदलें
+history-setSyncOffset = A/V सिंक समायोजित करें
+history-setAudioHotkeys = ऑडियो शॉर्टकट
+
+# CAP-M04 — alignment aids
+settings-alignment-section = संरेखण सहायक
+settings-smart-guides = स्मार्ट गाइड (खींचते समय स्नैप)
+settings-safe-areas = सुरक्षित-क्षेत्र ओवरले
+settings-rulers = रूलर
+align-group = कैनवास पर संरेखित करें
+align-left = बाएँ संरेखित करें
+align-hcenter = क्षैतिज केंद्र
+align-right = दाएँ संरेखित करें
+align-top = ऊपर संरेखित करें
+align-vcenter = लंबवत केंद्र
+align-bottom = नीचे संरेखित करें
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = चयन संरेखित करें और वितरित करें
+arrange-left = बाएँ किनारे संरेखित करें
+arrange-hcenter = क्षैतिज रूप से केंद्रित करें
+arrange-right = दाएँ किनारे संरेखित करें
+arrange-top = ऊपरी किनारे संरेखित करें
+arrange-vcenter = लंबवत रूप से केंद्रित करें
+arrange-bottom = निचले किनारे संरेखित करें
+distribute-h = क्षैतिज रूप से वितरित करें
+distribute-v = लंबवत रूप से वितरित करें
+guides-group = गाइड
+guides-add-v = लंबवत गाइड जोड़ें
+guides-add-h = क्षैतिज गाइड जोड़ें
+history-arrangeItems = आइटम व्यवस्थित करें
+history-editGuides = गाइड संपादित करें
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = ट्रांसफ़ॉर्म संपादित करें — { $name }
+transform-anchor = एंकर
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = घुमाव
+transform-crop = क्रॉप
+transform-crop-left = बाएँ
+transform-crop-top = ऊपर
+transform-crop-right = दाएँ
+transform-crop-bottom = नीचे
+transform-no-size = स्रोत द्वारा अपने आयाम बताए जाने पर आकार और क्रॉप उपलब्ध होंगे।
+transform-copy = ट्रांसफ़ॉर्म कॉपी करें
+transform-paste = ट्रांसफ़ॉर्म पेस्ट करें
+transform-close = बंद करें
+filters-copy = फ़िल्टर कॉपी करें ({ $count })
+filters-paste = फ़िल्टर पेस्ट करें ({ $count })
+palette-edit-transform = ट्रांसफ़ॉर्म संपादित करें…
+history-pasteFilters = फ़िल्टर पेस्ट करें
+
+# CAP-M26 — keying workbench
+workbench-title = कीइंग वर्कबेंच — { $name }
+workbench-mode-keyed = कीड
+workbench-mode-source = स्रोत
+workbench-mode-matte = मैट
+workbench-mode-split = विभाजित
+workbench-eyedropper = आईड्रॉपर
+workbench-eyedropper-hint = की रंग नमूना लेने के लिए स्रोत पर क्लिक करें।
+workbench-loupe = लूप
+workbench-split = विभाजन
+workbench-preview-alt = कीइंग वर्कबेंच पूर्वावलोकन
+workbench-tune = समायोजित करें
+workbench-close = बंद करें
+
+# CAP-M06 — multiview monitor
+multiview-title = मल्टीव्यू
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = किसी दृश्य पर स्विच करने के लिए उस पर क्लिक करें।
+multiview-hint-stage = किसी दृश्य को पूर्वावलोकन में तैयार करने के लिए उस पर क्लिक करें।
+palette-multiview = मल्टीव्यू मॉनिटर
+
+# CAP-M07 — projectors
+projector-title = प्रोजेक्टर खोलें
+projector-source = स्रोत
+projector-target-program = प्रोग्राम
+projector-target-preview = पूर्वावलोकन
+projector-target-scene = सीन…
+projector-target-source = स्रोत…
+projector-target-multiview = मल्टीव्यू
+projector-which-scene = कौन-सा सीन
+projector-which-source = कौन-सा स्रोत
+projector-none = दिखाने के लिए कुछ नहीं
+projector-display = डिस्प्ले
+projector-windowed = तैरती हुई विंडो (यह स्क्रीन)
+projector-display-option = डिस्प्ले { $n } — { $w }×{ $h }
+projector-primary = (प्राथमिक)
+projector-open = खोलें
+projector-cancel = रद्द करें
+projector-exit-hint = बाहर निकलने के लिए Esc दबाएँ
+palette-projector = प्रोजेक्टर खोलें…
+
+# CAP-M08 — still-frame grab
+palette-still = स्थिर फ़्रेम कैप्चर करें…
+still-saved-toast = फ़्रेम सहेजा गया: { $name }
+still-failed-toast = फ़्रेम कैप्चर विफल: { $error }
+hotkeys-still = स्थिर फ़्रेम कैप्चर करें
+hotkeys-still-placeholder = उदा. Ctrl+Shift+P

@@ -40,6 +40,7 @@ const settings = (mode: ThemeMode): Settings =>
     language: "en",
     showStatsDock: true,
     theme: { mode, accent: "#4a9eff" },
+    alignment: { smartGuides: true, safeAreas: false, rulers: false },
   }) as Settings;
 
 function open(mode: ThemeMode, onSettingsSaved = vi.fn()) {

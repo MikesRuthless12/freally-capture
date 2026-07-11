@@ -52,6 +52,8 @@ pub(crate) enum PassKind {
     Sharpen,
     Scroll,
     Crop,
+    /// Preview-only alpha→grayscale, appended by the keying workbench (CAP-M26).
+    Matte,
 }
 
 /// Mirrors `shaders/filters.wgsl` (`FilterUniform`).
@@ -173,6 +175,17 @@ pub(crate) fn color_matrix(
         rows[row][3] = offset;
     }
     rows
+}
+
+/// Plan the preview-only matte pass (CAP-M26): alpha → opaque grayscale, no
+/// size change. Appended after a keyer so the workbench can show its matte.
+pub(crate) fn plan_matte(in_size: (u32, u32)) -> PassPlan {
+    PassPlan {
+        kind: PassKind::Matte,
+        uniform: FilterUniform::zero().with_texel(in_size),
+        resource: None,
+        out: in_size,
+    }
 }
 
 /// Plan one scene filter into render passes. `None` = the filter contributes
@@ -528,7 +541,7 @@ impl FilterEngine {
             push_constant_ranges: &[],
         });
 
-        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 10] = [
+        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 11] = [
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
             (PassKind::ColorKey, "fs_color_key", &basic_layout),
             (PassKind::LumaKey, "fs_luma_key", &basic_layout),
@@ -543,6 +556,7 @@ impl FilterEngine {
             (PassKind::Sharpen, "fs_sharpen", &basic_layout),
             (PassKind::Scroll, "fs_scroll", &basic_layout),
             (PassKind::Crop, "fs_crop", &basic_layout),
+            (PassKind::Matte, "fs_matte", &basic_layout),
         ];
         let pipelines = entries
             .iter()

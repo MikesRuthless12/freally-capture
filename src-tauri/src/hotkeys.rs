@@ -25,6 +25,7 @@ pub enum HotkeyAction {
     Transition,
     SaveReplay,
     AddMarker,
+    CaptureStill,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -115,6 +116,9 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
                 eprintln!("hotkey: marker failed: {err}");
             }
         }
+        HotkeyAction::CaptureStill => {
+            crate::studio::capture_still(app, crate::studio::StillTarget::Program);
+        }
     }
 }
 
@@ -134,6 +138,7 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
         (&settings.transition, HotkeyAction::Transition),
         (&settings.save_replay, HotkeyAction::SaveReplay),
         (&settings.add_marker, HotkeyAction::AddMarker),
+        (&settings.still, HotkeyAction::CaptureStill),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

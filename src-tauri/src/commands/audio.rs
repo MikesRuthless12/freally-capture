@@ -9,7 +9,7 @@ use tauri_plugin_global_shortcut::Shortcut;
 
 use fcap_scene::{AudioFilterId, AudioFilterKind, MonitorMode, SourceId};
 
-use crate::studio::StudioState;
+use crate::studio::{coalesce_key, StudioState};
 
 /// One selectable audio device.
 #[derive(Debug, Clone, Serialize)]
@@ -141,9 +141,12 @@ pub fn studio_set_audio_volume(
     source_id: SourceId,
     volume_db: f32,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.set_audio_volume(source_id, volume_db)
-    })
+    state.mutate_tracked(
+        &app,
+        "setVolume",
+        Some(coalesce_key("volume", source_id)),
+        |collection| collection.set_audio_volume(source_id, volume_db),
+    )
 }
 
 #[tauri::command]
@@ -153,7 +156,7 @@ pub fn studio_set_audio_muted(
     source_id: SourceId,
     muted: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleMute", None, |collection| {
         collection.set_audio_muted(source_id, muted)
     })
 }
@@ -165,7 +168,7 @@ pub fn studio_set_audio_monitor(
     source_id: SourceId,
     monitor: MonitorMode,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "setMonitor", None, |collection| {
         collection.set_audio_monitor(source_id, monitor)
     })
 }
@@ -177,7 +180,7 @@ pub fn studio_set_audio_tracks(
     source_id: SourceId,
     tracks: u8,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "setTracks", None, |collection| {
         collection.set_audio_tracks(source_id, tracks)
     })
 }
@@ -189,9 +192,12 @@ pub fn studio_set_audio_sync_offset(
     source_id: SourceId,
     sync_offset_ms: u32,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.set_audio_sync_offset(source_id, sync_offset_ms)
-    })
+    state.mutate_tracked(
+        &app,
+        "setSyncOffset",
+        Some(coalesce_key("syncOffset", source_id)),
+        |collection| collection.set_audio_sync_offset(source_id, sync_offset_ms),
+    )
 }
 
 /// Bind/clear push-to-talk / push-to-mute. Keys must parse as accelerators
@@ -214,7 +220,7 @@ pub fn studio_set_audio_hotkeys(
         key.parse::<Shortcut>()
             .map_err(|err| format!("not a usable hotkey ({key:?}): {err}"))?;
     }
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "setAudioHotkeys", None, |collection| {
         collection.set_audio_hotkeys(source_id, push_to_talk, push_to_mute)
     })
 }
@@ -230,7 +236,7 @@ pub fn studio_add_audio_filter(
     source_id: SourceId,
     kind: AudioFilterKind,
 ) -> Result<AudioFilterId, String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "addFilter", None, |collection| {
         collection.add_audio_filter(source_id, kind)
     })
 }
@@ -242,7 +248,7 @@ pub fn studio_remove_audio_filter(
     source_id: SourceId,
     filter_id: AudioFilterId,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "removeFilter", None, |collection| {
         collection.remove_audio_filter(source_id, filter_id)
     })
 }
@@ -255,7 +261,7 @@ pub fn studio_reorder_audio_filter(
     filter_id: AudioFilterId,
     to_index: usize,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "reorderFilter", None, |collection| {
         collection.reorder_audio_filter(source_id, filter_id, to_index)
     })
 }
@@ -268,9 +274,12 @@ pub fn studio_update_audio_filter(
     filter_id: AudioFilterId,
     kind: AudioFilterKind,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.update_audio_filter(source_id, filter_id, kind)
-    })
+    state.mutate_tracked(
+        &app,
+        "editFilter",
+        Some(coalesce_key("audioFilterParams", filter_id)),
+        |collection| collection.update_audio_filter(source_id, filter_id, kind),
+    )
 }
 
 #[tauri::command]
@@ -281,7 +290,7 @@ pub fn studio_set_audio_filter_enabled(
     filter_id: AudioFilterId,
     enabled: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleFilter", None, |collection| {
         collection.set_audio_filter_enabled(source_id, filter_id, enabled)
     })
 }

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "multiview-window",
+  "description": "The multiview-on-display window (CAP-M07 extension): the default core permissions so it can listen to `studio` events and drive scene cut/stage. The chrome-free program/preview/scene/source projector windows stay capability-free — they only fetch the `preview://` slot.",
+  "windows": ["multiview"],
+  "permissions": ["core:default"]
+}

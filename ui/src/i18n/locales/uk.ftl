@@ -1003,6 +1003,44 @@ workspace-new-name-placeholder = нова назва…
 workspace-new-name-label = Нова назва { $title }
 workspace-create = Створити
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Імпорт з OBS…
+workspace-import-obs-hint = Завантажте колекцію сцен OBS (її scenes.json). Поточну колекцію буде збережено заздалегідь.
+workspace-import-busy = Імпортування…
+workspace-import-title = «{ $name }» імпортовано
+workspace-import-summary = сцен: { $scenes } · джерел: { $sources } · елементів: { $items }
+workspace-import-dismiss = Закрити
+workspace-import-clean = Усе імпортовано без помилок.
+workspace-import-geometry-caveat = Розміри й позиції підганяються з макета OBS — перевірте кожну сцену та повторно виберіть пристрої захоплення.
+workspace-import-notes-title = Імпортовано із зауваженнями
+workspace-import-skipped-title = Не імпортовано
+import-note-needsReselect = Повторно виберіть пристрій/монітор/вікно
+import-note-gameCaptureAsWindow = Захоплення гри → Захоплення вікна
+import-note-referencesFile = Перевірте шлях до файлу
+import-note-filterDropped = Деякі фільтри не підтримуються
+import-note-geometryApproximated = Позиція/розмір приблизні
+import-skip-unsupportedKind = Немає відповідного типу джерела
+import-skip-group = Групи ще не підтримуються
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Повторно прив'язати відсутні файли…
+doctor-title = Відсутні файли
+doctor-scanning = Сканування…
+doctor-all-good = Усі згадані файли на місці. Немає що прив'язувати.
+doctor-intro = { $count } згаданих файлів не знайдено на цьому комп'ютері. Вкажіть нове розташування кожного — кожну сцену, що його використовує, буде виправлено одразу.
+doctor-relinked = Повторно прив'язано посилань: { $count }.
+doctor-uses = використано { $count }×
+doctor-locate = Знайти…
+doctor-locate-folder = Шукати в теці…
+doctor-locate-folder-hint = Виберіть теку; кожен відсутній файл знаходиться за іменем і прив'язується повторно.
+doctor-kind-image = зображення
+doctor-kind-media = медіа
+doctor-kind-slideshow = слайд-шоу
+doctor-kind-font = шрифт
+doctor-kind-lut = LUT
+doctor-kind-mask = маска
+history-relinkFiles = Повторно прив'язати файли
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Скрипти (Lua)
 scripts-empty = Ще немає скриптів — додайте файл .lua. Див. scripts/sample.lua щодо API: реагуйте на події трансляції/сцени/запису та керуйте тими самими командами, що й віддалений API.
@@ -1168,3 +1206,143 @@ announce-live-ended = Трансляцію завершено
 announce-reconnecting = Зв'язок втрачено, повторне підключення
 announce-stream-failed = Помилка трансляції
 announce-frames-dropped = Пропущено кадрів { $count }
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Скасувати
+palette-redo = Повторити
+palette-edit-history = Історія змін…
+history-title = Історія змін
+history-empty = Поки немає що скасовувати.
+history-current = Поточний стан
+history-close = Закрити
+history-addScene = Додати сцену
+history-renameScene = Перейменувати сцену
+history-removeScene = Видалити сцену
+history-reorderScene = Змінити порядок сцен
+history-addSource = Додати джерело
+history-removeSource = Видалити джерело
+history-reorderSource = Змінити порядок джерел
+history-renameSource = Перейменувати джерело
+history-transformSource = Перемістити джерело
+history-toggleVisibility = Перемкнути видимість
+history-toggleLock = Перемкнути блокування
+history-setBlendMode = Змінити режим змішування
+history-editSourceProperties = Змінити властивості
+history-applyLayout = Розташувати макет
+history-moveToSeat = Перемістити на місце
+history-groupSources = Згрупувати джерела
+history-ungroupSources = Розгрупувати джерела
+history-toggleGroupVisibility = Перемкнути групу
+history-setSceneAudio = Звук сцени
+history-setVerticalCanvas = Вертикальне полотно
+history-addFilter = Додати фільтр
+history-removeFilter = Видалити фільтр
+history-reorderFilter = Змінити порядок фільтрів
+history-editFilter = Змінити фільтр
+history-toggleFilter = Перемкнути фільтр
+history-setVolume = Налаштувати гучність
+history-toggleMute = Перемкнути звук
+history-setMonitor = Змінити моніторинг
+history-setTracks = Змінити доріжки
+history-setSyncOffset = Налаштувати синхронізацію A/V
+history-setAudioHotkeys = Аудіоскорочення
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Помічники вирівнювання
+settings-smart-guides = Розумні напрямні (прилипання під час перетягування)
+settings-safe-areas = Накладки безпечної зони
+settings-rulers = Лінійки
+align-group = Вирівняти за полотном
+align-left = Вирівняти ліворуч
+align-hcenter = Центрувати горизонтально
+align-right = Вирівняти праворуч
+align-top = Вирівняти вгору
+align-vcenter = Центрувати вертикально
+align-bottom = Вирівняти вниз
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Вирівняти й розподілити вибране
+arrange-left = Вирівняти ліві краї
+arrange-hcenter = Центрувати горизонтально
+arrange-right = Вирівняти праві краї
+arrange-top = Вирівняти верхні краї
+arrange-vcenter = Центрувати вертикально
+arrange-bottom = Вирівняти нижні краї
+distribute-h = Розподілити горизонтально
+distribute-v = Розподілити вертикально
+guides-group = Напрямні
+guides-add-v = Додати вертикальну напрямну
+guides-add-h = Додати горизонтальну напрямну
+history-arrangeItems = Упорядкувати елементи
+history-editGuides = Редагувати напрямні
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Змінити трансформацію — { $name }
+transform-anchor = Опорна точка
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Обертання
+transform-crop = Обрізання
+transform-crop-left = Ліворуч
+transform-crop-top = Зверху
+transform-crop-right = Праворуч
+transform-crop-bottom = Знизу
+transform-no-size = Розмір та обрізання стануть доступні, коли джерело повідомить свої розміри.
+transform-copy = Копіювати трансформацію
+transform-paste = Вставити трансформацію
+transform-close = Закрити
+filters-copy = Копіювати фільтри ({ $count })
+filters-paste = Вставити фільтри ({ $count })
+palette-edit-transform = Змінити трансформацію…
+history-pasteFilters = Вставити фільтри
+
+# CAP-M26 — keying workbench
+workbench-title = Майстерня кеїнгу — { $name }
+workbench-mode-keyed = З ключем
+workbench-mode-source = Джерело
+workbench-mode-matte = Матт
+workbench-mode-split = Розділення
+workbench-eyedropper = Піпетка
+workbench-eyedropper-hint = Клацніть джерело, щоб узяти колір ключа.
+workbench-loupe = Лупа
+workbench-split = Розділення
+workbench-preview-alt = Перегляд майстерні кеїнгу
+workbench-tune = Налаштувати
+workbench-close = Закрити
+
+# CAP-M06 — multiview monitor
+multiview-title = Мультив’ю
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Клацніть сцену, щоб перемкнутися на неї.
+multiview-hint-stage = Клацніть сцену, щоб підготувати її в попередньому перегляді.
+palette-multiview = Монітор мультив’ю
+
+# CAP-M07 — projectors
+projector-title = Відкрити проектор
+projector-source = Джерело
+projector-target-program = Програма
+projector-target-preview = Попередній перегляд
+projector-target-scene = Сцена…
+projector-target-source = Джерело…
+projector-target-multiview = Мультивʼю
+projector-which-scene = Яка сцена
+projector-which-source = Яке джерело
+projector-none = Немає що показати
+projector-display = Дисплей
+projector-windowed = Плаваюче вікно (цей екран)
+projector-display-option = Дисплей { $n } — { $w }×{ $h }
+projector-primary = (основний)
+projector-open = Відкрити
+projector-cancel = Скасувати
+projector-exit-hint = Натисніть Esc для виходу
+palette-projector = Відкрити проектор…
+
+# CAP-M08 — still-frame grab
+palette-still = Зробити стоп-кадр…
+still-saved-toast = Стоп-кадр збережено: { $name }
+still-failed-toast = Не вдалося зробити стоп-кадр: { $error }
+hotkeys-still = Зробити стоп-кадр
+hotkeys-still-placeholder = напр. Ctrl+Shift+P

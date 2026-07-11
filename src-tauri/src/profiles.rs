@@ -21,12 +21,31 @@ use crate::studio::StudioState;
 
 pub const DEFAULT_NAME: &str = "Default";
 
+/// One open projector/aux window, remembered so it reopens next launch
+/// (CAP-M07 extension). The `label` encodes the target
+/// (`projector-program|preview`, `projector-scene:<id>`, `projector-source:<id>`,
+/// `multiview`); scene/source ids are validated against the loaded collection
+/// on reopen (stale ones are skipped).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectorState {
+    pub label: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<usize>,
+    #[serde(default)]
+    pub fullscreen: bool,
+}
+
 /// Which profile + collection are active (persisted as `workspace.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Workspace {
     pub profile: String,
     pub collection: String,
+    /// Open projector windows, reopened on launch (CAP-M07 extension).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projectors: Vec<ProjectorState>,
 }
 
 impl Default for Workspace {
@@ -34,6 +53,7 @@ impl Default for Workspace {
         Workspace {
             profile: DEFAULT_NAME.to_string(),
             collection: DEFAULT_NAME.to_string(),
+            projectors: Vec::new(),
         }
     }
 }
@@ -86,6 +106,18 @@ impl WorkspaceState {
         self.dir
             .as_deref()
             .ok_or_else(|| "no config directory".to_string())
+    }
+
+    /// Replace the remembered open-projector list and persist it (CAP-M07
+    /// extension). Called at exit with the windows still open, so they reopen.
+    pub fn set_projectors(&self, projectors: Vec<ProjectorState>) {
+        self.lock().projectors = projectors;
+        self.save();
+    }
+
+    /// The remembered open-projector list (for reopen on launch).
+    pub fn projectors(&self) -> Vec<ProjectorState> {
+        self.lock().projectors.clone()
     }
 }
 
@@ -292,9 +324,125 @@ pub fn collection_switch<R: Runtime>(
     Ok(collections_list(state))
 }
 
+/// Turn an OBS collection name into a safe, unique collection name: keep only
+/// whitelisted characters, cap the stem so a ` N` suffix still fits, fall back
+/// to `"Imported"`, then bump a counter until it does not clash.
+fn make_import_name(base: &std::path::Path, raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    // Truncate by CHARS, never bytes — `String::truncate` panics on a multi-byte
+    // boundary, and the whitelist keeps non-ASCII alphanumerics (accents, CJK, …).
+    let stem: String = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(36)
+        .collect();
+    let stem = stem.trim();
+    // Empty, or a Windows reserved device name (CON/NUL/COM1…/LPT1…), falls back
+    // to a safe default — the atomic write to such a name would fail.
+    let reserved = {
+        let upper = stem.to_ascii_uppercase();
+        matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+                && upper.len() == 4
+                && upper.as_bytes()[3].is_ascii_digit())
+    };
+    let stem = if stem.is_empty() || reserved {
+        "Imported"
+    } else {
+        stem
+    };
+
+    if stem != DEFAULT_NAME && !collection_exists(base, stem) {
+        return stem.to_string();
+    }
+    for n in 2..1000 {
+        let candidate = format!("{stem} {n}");
+        if !collection_exists(base, &candidate) {
+            return candidate;
+        }
+    }
+    stem.to_string()
+}
+
+/// Import an OBS scene collection (`scenes.json`) as a new native collection and
+/// switch to it. Returns the honest per-source [`fcap_scene::ImportReport`]; the
+/// current collection is saved first (never silently lost), exactly like a
+/// switch. `path` is a user-picked file — read, never written.
+#[tauri::command]
+pub fn collection_import_obs<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, WorkspaceState>,
+    path: String,
+) -> Result<fcap_scene::ImportReport, String> {
+    // Bound the read: a scene collection is KB–MB; a multi-GB file is hostile
+    // (it balloons several× as a serde_json::Value).
+    const MAX_OBS_BYTES: u64 = 64 * 1024 * 1024;
+    let size = std::fs::metadata(&path)
+        .map_err(|err| format!("could not read {path:?}: {err}"))?
+        .len();
+    if size > MAX_OBS_BYTES {
+        return Err(format!(
+            "that file is too large to import ({} MB) — an OBS scene collection is normally a few KB",
+            size / (1024 * 1024)
+        ));
+    }
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("could not read {path:?}: {err}"))?;
+    let imported = fcap_scene::import_obs(&text).map_err(|err| err.to_string())?;
+
+    let base = state.base()?.to_path_buf();
+    state.subdir("collections"); // ensure the dir exists
+    let name = make_import_name(&base, &imported.report.name);
+
+    // Write the mapped collection to its own file, then switch to it (which
+    // saves the outgoing collection to its own file first).
+    let load = crate::studio::collection_file(&base, &name);
+    let json = serde_json::to_string_pretty(&imported.collection).map_err(|err| err.to_string())?;
+    write_atomic(&load, &json).map_err(|err| err.to_string())?;
+
+    let current = state.lock().collection.clone();
+    let save_as = crate::studio::collection_file(&base, &current);
+    app.state::<StudioState>()
+        .switch_collection_file(&app, save_as, load, false)?;
+    state.lock().collection = name;
+    state.save();
+
+    Ok(imported.report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_names_are_cleaned_and_bounded() {
+        let dir = std::path::Path::new("/nonexistent-cfg");
+        assert_eq!(make_import_name(dir, "My Stream"), "My Stream");
+        // Illegal characters become spaces and collapse.
+        assert_eq!(make_import_name(dir, "../my:stream?"), "my stream");
+        // Empty / all-illegal falls back.
+        assert_eq!(make_import_name(dir, "***"), "Imported");
+        assert_eq!(make_import_name(dir, ""), "Imported");
+        // The stem is bounded so a counter suffix still fits in 40 chars.
+        assert!(make_import_name(dir, &"x".repeat(80)).len() <= 40);
+        // A multi-byte name that would straddle the truncation boundary must
+        // truncate by chars, not bytes — never panic (security review).
+        assert!(!make_import_name(dir, &"é".repeat(40)).is_empty());
+        // Windows reserved device names fall back instead of naming a device.
+        assert_eq!(make_import_name(dir, "CON"), "Imported");
+        assert_eq!(make_import_name(dir, "com1"), "Imported");
+    }
 
     #[test]
     fn names_are_whitelisted() {

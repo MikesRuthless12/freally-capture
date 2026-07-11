@@ -21,6 +21,8 @@
 
 pub mod audio;
 pub mod filter;
+pub mod history;
+pub mod obs_import;
 pub mod scene;
 pub mod source;
 
@@ -29,9 +31,15 @@ pub use audio::{
     MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
+pub use history::{History, HistoryState};
+pub use obs_import::{
+    import_obs, ImportNote, ImportReport, ImportedSource, ObsImport, ObsImportError, SkipReason,
+    SkippedSource,
+};
 pub use scene::{
-    BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, ItemId, NormRect, Scene,
-    SceneAudioOverride, SceneId, SceneItem, SourceGroup, Transform, TransitionKind,
+    BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, GuideLine, GuideOrientation,
+    ItemId, NormRect, Scene, SceneAudioOverride, SceneId, SceneItem, SourceGroup, Transform,
+    TransitionKind,
 };
 pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
 
@@ -44,6 +52,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The current on-disk format version (bumped only on breaking shape changes;
 /// additive fields ride on serde defaults instead).
 pub const FORMAT_VERSION: u32 = 1;
+
+/// The most custom alignment guides one scene keeps (CAP-M04 follow-on). Bounds
+/// an untrusted `set_guides`, and stays under the native overlay's 16-guide
+/// budget with headroom for the live snap guides pushed alongside it — so every
+/// custom guide renders on the native GPU path, not just the SVG fallback.
+pub const MAX_GUIDES_PER_SCENE: usize = 12;
 
 /// Two seats match approximately: the webview sends f64 JSON that rounds to
 /// f32 a ULP differently than Rust-side arithmetic, so exact equality would
@@ -135,6 +149,30 @@ pub struct VerticalCanvas {
     pub height: u32,
     /// The scene this canvas composes (independent of the program scene).
     pub scene: SceneId,
+}
+
+/// What kind of thing references a file path (for the missing-file doctor,
+/// CAP-M03). Purely informational — relinking is by path, not by kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileRefKind {
+    Image,
+    Media,
+    Slideshow,
+    Font,
+    Lut,
+    Mask,
+}
+
+/// One file path the collection references, tagged with what points at it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRef {
+    pub path: String,
+    pub kind: FileRefKind,
+    /// The source that carries this path (for a filter path, the item's source).
+    pub source: SourceId,
+    pub source_name: String,
 }
 
 impl Default for Collection {
@@ -424,6 +462,117 @@ impl Collection {
         self.scenes
             .iter()
             .any(|scene| scene.items.iter().any(|item| item.source == id))
+    }
+
+    /// Every file path the collection references — source media/images/fonts +
+    /// slideshow entries + each item's LUT/mask filters — tagged with what
+    /// points at it (CAP-M03). Paths are returned verbatim (URLs included); a
+    /// caller checking existence should skip non-local paths. Empty paths are
+    /// omitted (an unset path is not a *missing* file).
+    pub fn file_refs(&self) -> Vec<FileRef> {
+        let mut refs = Vec::new();
+        let mut push = |path: &str, kind: FileRefKind, source: SourceId, name: &str| {
+            if !path.is_empty() {
+                refs.push(FileRef {
+                    path: path.to_string(),
+                    kind,
+                    source,
+                    source_name: name.to_string(),
+                });
+            }
+        };
+        for source in &self.sources {
+            match &source.settings {
+                SourceSettings::Image { path } => {
+                    push(path, FileRefKind::Image, source.id, &source.name)
+                }
+                SourceSettings::Media { path, .. } => {
+                    push(path, FileRefKind::Media, source.id, &source.name)
+                }
+                SourceSettings::Slideshow { paths, .. } => {
+                    for path in paths {
+                        push(path, FileRefKind::Slideshow, source.id, &source.name);
+                    }
+                }
+                SourceSettings::Text {
+                    font_file: Some(path),
+                    ..
+                } => push(path, FileRefKind::Font, source.id, &source.name),
+                _ => {}
+            }
+        }
+        for scene in &self.scenes {
+            for item in &scene.items {
+                let name = self
+                    .source(item.source)
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("");
+                for filter in &item.filters {
+                    match &filter.kind {
+                        FilterKind::Lut { path, .. } => {
+                            push(path, FileRefKind::Lut, item.source, name)
+                        }
+                        FilterKind::Mask { path, .. } => {
+                            push(path, FileRefKind::Mask, item.source, name)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        refs
+    }
+
+    /// Replace every exact occurrence of `old` with `new` across all source
+    /// settings and item filters (CAP-M03 relink). Returns how many references
+    /// changed — fix one broken path, and every place that used it is repaired.
+    pub fn relink_file(&mut self, old: &str, new: &str) -> usize {
+        if old.is_empty() || old == new {
+            return 0;
+        }
+        let mut changed = 0;
+        let mut swap = |path: &mut String| {
+            if path == old {
+                *path = new.to_string();
+                changed += 1;
+            }
+        };
+        for source in &mut self.sources {
+            match &mut source.settings {
+                SourceSettings::Image { path } | SourceSettings::Media { path, .. } => swap(path),
+                SourceSettings::Slideshow { paths, .. } => paths.iter_mut().for_each(&mut swap),
+                SourceSettings::Text {
+                    font_file: Some(path),
+                    ..
+                } => swap(path),
+                _ => {}
+            }
+        }
+        for scene in &mut self.scenes {
+            for item in &mut scene.items {
+                for filter in &mut item.filters {
+                    match &mut filter.kind {
+                        FilterKind::Lut { path, .. } | FilterKind::Mask { path, .. } => swap(path),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        changed
+    }
+
+    /// Replace a scene's custom alignment guides (CAP-M04 follow-on). The list
+    /// is bounded so an untrusted webview can't grow it without limit; off-canvas
+    /// positions are harmless (they just draw off-screen).
+    pub fn set_guides(
+        &mut self,
+        scene_id: SceneId,
+        mut guides: Vec<GuideLine>,
+    ) -> Result<(), SceneError> {
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+        guides.truncate(MAX_GUIDES_PER_SCENE);
+        scene.guides = guides;
+        Ok(())
     }
 
     /// Drop pool sources no item references (called by the removal paths).
@@ -1206,6 +1355,28 @@ impl Collection {
         Ok(id)
     }
 
+    /// Append copied filters to an item's chain (CAP-M05 paste). Each lands on
+    /// top with a **fresh id** (so a filter can be pasted onto the same item it
+    /// was copied from) while keeping its kind + enabled state. Returns how many
+    /// were added. One mutation — the whole paste is a single undo step.
+    pub fn paste_filters(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        filters: Vec<Filter>,
+    ) -> Result<usize, SceneError> {
+        let item = self.item_mut(scene_id, item_id)?;
+        let count = filters.len();
+        for filter in filters {
+            item.filters.push(Filter {
+                id: FilterId::new(),
+                enabled: filter.enabled,
+                kind: filter.kind,
+            });
+        }
+        Ok(count)
+    }
+
     pub fn remove_filter(
         &mut self,
         scene_id: SceneId,
@@ -1651,6 +1822,120 @@ mod tests {
         let json = serde_json::to_string_pretty(&original).expect("serialize");
         let restored: Collection = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, restored, "the model must round-trip losslessly");
+    }
+
+    #[test]
+    fn file_refs_lists_paths_and_relink_repairs_every_use() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // An image source pointing at a broken path...
+        let (_img, item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Logo",
+                    SourceSettings::Image {
+                        path: "old.png".into(),
+                    },
+                ),
+            )
+            .expect("add image");
+        // ...plus a LUT filter that (say) points at the SAME path.
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::Lut {
+                    path: "old.png".into(),
+                    amount: 1.0,
+                },
+            )
+            .expect("add lut");
+
+        let refs = collection.file_refs();
+        assert_eq!(refs.len(), 2, "the image and the LUT both reference a file");
+        assert!(refs.iter().any(|r| r.kind == FileRefKind::Image));
+        assert!(refs.iter().any(|r| r.kind == FileRefKind::Lut));
+
+        // One relink repairs every use of that path.
+        assert_eq!(collection.relink_file("old.png", "new.png"), 2);
+        assert!(collection.file_refs().iter().all(|r| r.path == "new.png"));
+        // No-ops: unknown path, and old == new.
+        assert_eq!(collection.relink_file("absent.png", "x.png"), 0);
+        assert_eq!(collection.relink_file("new.png", "new.png"), 0);
+    }
+
+    #[test]
+    fn set_guides_replaces_and_bounds_the_list() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        collection
+            .set_guides(
+                scene,
+                vec![GuideLine {
+                    orientation: GuideOrientation::V,
+                    position: 960.0,
+                }],
+            )
+            .expect("set");
+        assert_eq!(collection.scene(scene).expect("scene").guides.len(), 1);
+
+        // The list is bounded (an untrusted webview can't grow it without limit).
+        let many: Vec<GuideLine> = (0..100)
+            .map(|i| GuideLine {
+                orientation: GuideOrientation::H,
+                position: i as f32,
+            })
+            .collect();
+        collection.set_guides(scene, many).expect("set many");
+        assert_eq!(
+            collection.scene(scene).expect("scene").guides.len(),
+            MAX_GUIDES_PER_SCENE
+        );
+
+        // An unknown scene is rejected.
+        assert!(collection.set_guides(SceneId::new(), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn paste_filters_appends_with_fresh_ids() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_source, item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::VideoDevice {
+                        device_id: "c".into(),
+                        format: None,
+                    },
+                ),
+            )
+            .expect("add");
+        let original = collection
+            .add_filter(scene, item, FilterKind::Sharpen { amount: 0.5 })
+            .expect("add filter");
+
+        // Copy the chain, flip the copy's enabled flag, paste it back.
+        let mut copied = collection
+            .scene(scene)
+            .unwrap()
+            .item(item)
+            .unwrap()
+            .filters
+            .clone();
+        copied[0].enabled = false;
+        let added = collection
+            .paste_filters(scene, item, copied)
+            .expect("paste");
+        assert_eq!(added, 1);
+
+        let filters = &collection.scene(scene).unwrap().item(item).unwrap().filters;
+        assert_eq!(filters.len(), 2, "the copy is appended on top");
+        assert_ne!(filters[1].id, original, "the pasted filter gets a fresh id");
+        assert!(!filters[1].enabled, "enabled state is preserved");
+        assert_eq!(filters[1].kind, FilterKind::Sharpen { amount: 0.5 });
     }
 
     #[test]

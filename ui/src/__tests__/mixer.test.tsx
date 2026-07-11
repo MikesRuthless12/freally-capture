@@ -141,7 +141,18 @@ function pushAudio(payload: Partial<AudioLevelsPayload>) {
 }
 
 async function renderApp() {
-  mockState.dto = { revision: 1, collection: fixtureCollection() };
+  mockState.dto = {
+    revision: 1,
+    collection: fixtureCollection(),
+    history: {
+      canUndo: false,
+      canRedo: false,
+      undoLabel: null,
+      redoLabel: null,
+      undo: [],
+      redo: [],
+    },
+  };
   render(<App />);
   // The name shows in both the Sources rail and the mixer strip.
   await waitFor(() => expect(screen.getAllByText("USB Mic").length).toBeGreaterThan(0));

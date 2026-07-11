@@ -398,6 +398,18 @@ pub fn native_preview_set_selection(
     state.set_selection(item);
 }
 
+/// The UI reports the preview alignment overlay (safe areas + smart guides,
+/// canvas px) so the native preview can draw it *into* the GPU frame, where the
+/// SVG below is occluded (CAP-M04). Counts are clamped in `set_overlay`. A no-op
+/// off the native path.
+#[tauri::command]
+pub fn native_preview_set_overlay(
+    state: tauri::State<'_, crate::native_preview::NativePreviewState>,
+    overlay: crate::native_preview::AlignmentOverlay,
+) {
+    state.set_overlay(overlay);
+}
+
 /// macOS: deep-link the user to the Privacy pane they need after a denial.
 /// `pane` is "screenRecording" or "camera".
 #[tauri::command]

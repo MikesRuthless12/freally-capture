@@ -341,6 +341,26 @@ pub struct SceneAudioOverride {
     pub muted: bool,
 }
 
+/// A custom alignment guide line the user dragged out (CAP-M04 follow-on):
+/// a straight line at a fixed canvas-pixel position that dragged items snap to.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GuideOrientation {
+    /// A vertical line at a constant x.
+    V,
+    /// A horizontal line at a constant y.
+    H,
+}
+
+/// One custom guide line, in canvas pixels (CAP-M04 follow-on).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuideLine {
+    pub orientation: GuideOrientation,
+    /// x for a vertical line, y for a horizontal one.
+    pub position: f32,
+}
+
 /// One placement of a source in a scene.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -407,6 +427,9 @@ pub struct Scene {
     /// program.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub audio_overrides: Vec<SceneAudioOverride>,
+    /// Custom alignment guides the user dragged out (CAP-M04 follow-on).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<GuideLine>,
 }
 
 impl Scene {
@@ -418,6 +441,7 @@ impl Scene {
             focus: None,
             groups: Vec::new(),
             audio_overrides: Vec::new(),
+            guides: Vec::new(),
         }
     }
 

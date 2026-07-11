@@ -1016,6 +1016,44 @@ workspace-new-name-placeholder = neuer Name…
 workspace-new-name-label = Neuer { $title }-Name
 workspace-create = Erstellen
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Aus OBS importieren…
+workspace-import-obs-hint = Eine OBS-Szenensammlung (deren scenes.json) übernehmen. Deine aktuelle Sammlung wird zuvor gespeichert.
+workspace-import-busy = Importiere…
+workspace-import-title = „{ $name }" importiert
+workspace-import-summary = { $scenes } Szenen · { $sources } Quellen · { $items } Elemente
+workspace-import-dismiss = Schließen
+workspace-import-clean = Alles wurde sauber übernommen.
+workspace-import-geometry-caveat = Größen und Positionen werden aus dem OBS-Layout eingepasst – prüfe jede Szene und wähle Aufnahmegeräte neu.
+workspace-import-notes-title = Mit Hinweisen importiert
+workspace-import-skipped-title = Nicht importiert
+import-note-needsReselect = Gerät/Monitor/Fenster neu wählen
+import-note-gameCaptureAsWindow = Spielaufnahme → Fensteraufnahme
+import-note-referencesFile = Dateipfad prüfen
+import-note-filterDropped = Einige Filter nicht unterstützt
+import-note-geometryApproximated = Position/Größe angenähert
+import-skip-unsupportedKind = Kein passender Quellentyp
+import-skip-group = Gruppen noch nicht unterstützt
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Fehlende Dateien neu verknüpfen…
+doctor-title = Fehlende Dateien
+doctor-scanning = Suche…
+doctor-all-good = Alle referenzierten Dateien sind vorhanden. Nichts neu zu verknüpfen.
+doctor-intro = { $count } referenzierte Dateien wurden auf diesem Computer nicht gefunden. Weise jeder ihren neuen Ort zu – jede Szene, die sie nutzt, wird sofort korrigiert.
+doctor-relinked = { $count } Verweise neu verknüpft.
+doctor-uses = { $count }× verwendet
+doctor-locate = Suchen…
+doctor-locate-folder = In Ordner suchen…
+doctor-locate-folder-hint = Ordner wählen; jede fehlende Datei wird per Name zugeordnet und neu verknüpft.
+doctor-kind-image = Bild
+doctor-kind-media = Medien
+doctor-kind-slideshow = Diashow
+doctor-kind-font = Schriftart
+doctor-kind-lut = LUT
+doctor-kind-mask = Maske
+history-relinkFiles = Dateien neu verknüpfen
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Skripte (Lua)
 scripts-empty = Noch keine Skripte — füge eine .lua-Datei hinzu. Siehe scripts/sample.lua für die API: auf Live-/Szenen-/Aufnahmeereignisse reagieren und dieselben Befehle wie die Remote-API steuern.
@@ -1181,3 +1219,143 @@ announce-live-ended = Stream beendet
 announce-reconnecting = Verbindung verloren, verbinde neu
 announce-stream-failed = Stream fehlgeschlagen
 announce-frames-dropped = { $count } Bilder verworfen
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Rückgängig
+palette-redo = Wiederholen
+palette-edit-history = Bearbeitungsverlauf…
+history-title = Bearbeitungsverlauf
+history-empty = Noch nichts zum Rückgängigmachen.
+history-current = Aktueller Stand
+history-close = Schließen
+history-addScene = Szene hinzufügen
+history-renameScene = Szene umbenennen
+history-removeScene = Szene entfernen
+history-reorderScene = Szenen neu anordnen
+history-addSource = Quelle hinzufügen
+history-removeSource = Quelle entfernen
+history-reorderSource = Quellen neu anordnen
+history-renameSource = Quelle umbenennen
+history-transformSource = Quelle verschieben
+history-toggleVisibility = Sichtbarkeit umschalten
+history-toggleLock = Sperre umschalten
+history-setBlendMode = Mischmodus ändern
+history-editSourceProperties = Eigenschaften bearbeiten
+history-applyLayout = Layout anordnen
+history-moveToSeat = Auf Platz setzen
+history-groupSources = Quellen gruppieren
+history-ungroupSources = Gruppierung aufheben
+history-toggleGroupVisibility = Gruppe umschalten
+history-setSceneAudio = Szenen-Audio
+history-setVerticalCanvas = Vertikale Leinwand
+history-addFilter = Filter hinzufügen
+history-removeFilter = Filter entfernen
+history-reorderFilter = Filter neu anordnen
+history-editFilter = Filter bearbeiten
+history-toggleFilter = Filter umschalten
+history-setVolume = Lautstärke anpassen
+history-toggleMute = Stumm umschalten
+history-setMonitor = Monitoring ändern
+history-setTracks = Spuren ändern
+history-setSyncOffset = A/V-Sync anpassen
+history-setAudioHotkeys = Audio-Tastenkürzel
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Ausrichtungshilfen
+settings-smart-guides = Intelligente Hilfslinien (beim Ziehen einrasten)
+settings-safe-areas = Sichtbereichs-Overlays
+settings-rulers = Lineale
+align-group = Am Canvas ausrichten
+align-left = Links ausrichten
+align-hcenter = Horizontal zentrieren
+align-right = Rechts ausrichten
+align-top = Oben ausrichten
+align-vcenter = Vertikal zentrieren
+align-bottom = Unten ausrichten
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Auswahl ausrichten & verteilen
+arrange-left = Linke Kanten ausrichten
+arrange-hcenter = Horizontal zentrieren
+arrange-right = Rechte Kanten ausrichten
+arrange-top = Obere Kanten ausrichten
+arrange-vcenter = Vertikal zentrieren
+arrange-bottom = Untere Kanten ausrichten
+distribute-h = Horizontal verteilen
+distribute-v = Vertikal verteilen
+guides-group = Hilfslinien
+guides-add-v = Vertikale Hilfslinie hinzufügen
+guides-add-h = Horizontale Hilfslinie hinzufügen
+history-arrangeItems = Elemente anordnen
+history-editGuides = Hilfslinien bearbeiten
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Transformation bearbeiten — { $name }
+transform-anchor = Ankerpunkt
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Drehung
+transform-crop = Zuschnitt
+transform-crop-left = Links
+transform-crop-top = Oben
+transform-crop-right = Rechts
+transform-crop-bottom = Unten
+transform-no-size = Größe und Zuschnitt sind verfügbar, sobald die Quelle ihre Maße meldet.
+transform-copy = Transformation kopieren
+transform-paste = Transformation einfügen
+transform-close = Schließen
+filters-copy = Filter kopieren ({ $count })
+filters-paste = Filter einfügen ({ $count })
+palette-edit-transform = Transformation bearbeiten…
+history-pasteFilters = Filter einfügen
+
+# CAP-M26 — keying workbench
+workbench-title = Keying-Werkbank — { $name }
+workbench-mode-keyed = Gekeyt
+workbench-mode-source = Quelle
+workbench-mode-matte = Matte
+workbench-mode-split = Geteilt
+workbench-eyedropper = Pipette
+workbench-eyedropper-hint = Klicken Sie auf die Quelle, um die Key-Farbe zu übernehmen.
+workbench-loupe = Lupe
+workbench-split = Teilung
+workbench-preview-alt = Vorschau der Keying-Werkbank
+workbench-tune = Anpassen
+workbench-close = Schließen
+
+# CAP-M06 — multiview monitor
+multiview-title = Multiview
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Klicken Sie auf eine Szene, um zu ihr zu schneiden.
+multiview-hint-stage = Klicken Sie auf eine Szene, um sie in der Vorschau vorzubereiten.
+palette-multiview = Multiview-Monitor
+
+# CAP-M07 — projectors
+projector-title = Projektor öffnen
+projector-source = Quelle
+projector-target-program = Programm
+projector-target-preview = Vorschau
+projector-target-scene = Szene…
+projector-target-source = Quelle…
+projector-target-multiview = Multiview
+projector-which-scene = Welche Szene
+projector-which-source = Welche Quelle
+projector-none = Nichts zum Anzeigen
+projector-display = Bildschirm
+projector-windowed = Schwebendes Fenster (dieser Bildschirm)
+projector-display-option = Bildschirm { $n } — { $w }×{ $h }
+projector-primary = (primär)
+projector-open = Öffnen
+projector-cancel = Abbrechen
+projector-exit-hint = Zum Beenden Esc drücken
+palette-projector = Projektor öffnen…
+
+# CAP-M08 — still-frame grab
+palette-still = Standbild aufnehmen…
+still-saved-toast = Standbild gespeichert: { $name }
+still-failed-toast = Standbildaufnahme fehlgeschlagen: { $error }
+hotkeys-still = Standbild aufnehmen
+hotkeys-still-placeholder = z. B. Ctrl+Shift+P

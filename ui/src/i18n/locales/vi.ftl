@@ -1016,6 +1016,44 @@ workspace-new-name-placeholder = tên mới…
 workspace-new-name-label = Tên { $title } mới
 workspace-create = Tạo
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Nhập từ OBS…
+workspace-import-obs-hint = Mang vào một bộ sưu tập cảnh OBS (tệp scenes.json). Bộ sưu tập hiện tại của bạn sẽ được lưu trước.
+workspace-import-busy = Đang nhập…
+workspace-import-title = Đã nhập "{ $name }"
+workspace-import-summary = { $scenes } cảnh · { $sources } nguồn · { $items } mục
+workspace-import-dismiss = Đóng
+workspace-import-clean = Mọi thứ đã được nhập trọn vẹn.
+workspace-import-geometry-caveat = Kích thước và vị trí được khớp theo bố cục OBS — hãy xem lại từng cảnh và chọn lại thiết bị ghi.
+workspace-import-notes-title = Đã nhập kèm ghi chú
+workspace-import-skipped-title = Không được nhập
+import-note-needsReselect = Chọn lại thiết bị/màn hình/cửa sổ
+import-note-gameCaptureAsWindow = Ghi trò chơi → Ghi cửa sổ
+import-note-referencesFile = Kiểm tra đường dẫn tệp
+import-note-filterDropped = Một số bộ lọc không được hỗ trợ
+import-note-geometryApproximated = Vị trí/kích thước gần đúng
+import-skip-unsupportedKind = Không có loại nguồn tương đương
+import-skip-group = Nhóm chưa được hỗ trợ
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Liên kết lại tệp bị thiếu…
+doctor-title = Tệp bị thiếu
+doctor-scanning = Đang quét…
+doctor-all-good = Mọi tệp được tham chiếu đều tồn tại. Không có gì để liên kết lại.
+doctor-intro = Không tìm thấy { $count } tệp được tham chiếu trên máy này. Hãy chỉ vị trí mới cho từng tệp — mọi cảnh dùng nó đều được sửa cùng lúc.
+doctor-relinked = Đã liên kết lại { $count } tham chiếu.
+doctor-uses = dùng { $count }×
+doctor-locate = Định vị…
+doctor-locate-folder = Tìm trong thư mục…
+doctor-locate-folder-hint = Chọn một thư mục; mỗi tệp bị thiếu được khớp theo tên và liên kết lại.
+doctor-kind-image = hình ảnh
+doctor-kind-media = phương tiện
+doctor-kind-slideshow = trình chiếu
+doctor-kind-font = phông chữ
+doctor-kind-lut = LUT
+doctor-kind-mask = mặt nạ
+history-relinkFiles = Liên kết lại tệp
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Script (Lua)
 scripts-empty = Chưa có script nào — thêm một tệp .lua. Xem scripts/sample.lua để biết API: phản ứng với sự kiện phát trực tiếp/cảnh/ghi và điều khiển cùng các lệnh như API từ xa.
@@ -1181,3 +1219,143 @@ announce-live-ended = Đã kết thúc phát trực tiếp
 announce-reconnecting = Mất kết nối, đang kết nối lại
 announce-stream-failed = Phát trực tiếp thất bại
 announce-frames-dropped = Đã rớt { $count } khung hình
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Hoàn tác
+palette-redo = Làm lại
+palette-edit-history = Lịch sử chỉnh sửa…
+history-title = Lịch sử chỉnh sửa
+history-empty = Chưa có gì để hoàn tác.
+history-current = Trạng thái hiện tại
+history-close = Đóng
+history-addScene = Thêm cảnh
+history-renameScene = Đổi tên cảnh
+history-removeScene = Xóa cảnh
+history-reorderScene = Sắp xếp lại cảnh
+history-addSource = Thêm nguồn
+history-removeSource = Xóa nguồn
+history-reorderSource = Sắp xếp lại nguồn
+history-renameSource = Đổi tên nguồn
+history-transformSource = Di chuyển nguồn
+history-toggleVisibility = Bật/tắt hiển thị
+history-toggleLock = Bật/tắt khóa
+history-setBlendMode = Đổi chế độ hòa trộn
+history-editSourceProperties = Chỉnh sửa thuộc tính
+history-applyLayout = Sắp xếp bố cục
+history-moveToSeat = Chuyển đến vị trí
+history-groupSources = Nhóm nguồn
+history-ungroupSources = Bỏ nhóm nguồn
+history-toggleGroupVisibility = Bật/tắt nhóm
+history-setSceneAudio = Âm thanh cảnh
+history-setVerticalCanvas = Khung dọc
+history-addFilter = Thêm bộ lọc
+history-removeFilter = Xóa bộ lọc
+history-reorderFilter = Sắp xếp lại bộ lọc
+history-editFilter = Chỉnh sửa bộ lọc
+history-toggleFilter = Bật/tắt bộ lọc
+history-setVolume = Điều chỉnh âm lượng
+history-toggleMute = Bật/tắt tắt tiếng
+history-setMonitor = Đổi giám sát
+history-setTracks = Đổi bản nhạc
+history-setSyncOffset = Điều chỉnh đồng bộ A/V
+history-setAudioHotkeys = Phím tắt âm thanh
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Trợ giúp căn chỉnh
+settings-smart-guides = Đường gióng thông minh (hít khi kéo)
+settings-safe-areas = Lớp phủ vùng an toàn
+settings-rulers = Thước
+align-group = Căn theo khung
+align-left = Căn trái
+align-hcenter = Căn giữa theo chiều ngang
+align-right = Căn phải
+align-top = Căn trên
+align-vcenter = Căn giữa theo chiều dọc
+align-bottom = Căn dưới
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Căn chỉnh & phân bố mục đã chọn
+arrange-left = Căn cạnh trái
+arrange-hcenter = Căn giữa theo chiều ngang
+arrange-right = Căn cạnh phải
+arrange-top = Căn cạnh trên
+arrange-vcenter = Căn giữa theo chiều dọc
+arrange-bottom = Căn cạnh dưới
+distribute-h = Phân bố theo chiều ngang
+distribute-v = Phân bố theo chiều dọc
+guides-group = Đường gióng
+guides-add-v = Thêm đường gióng dọc
+guides-add-h = Thêm đường gióng ngang
+history-arrangeItems = Sắp xếp mục
+history-editGuides = Sửa đường gióng
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Chỉnh sửa biến đổi — { $name }
+transform-anchor = Điểm neo
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Xoay
+transform-crop = Cắt xén
+transform-crop-left = Trái
+transform-crop-top = Trên
+transform-crop-right = Phải
+transform-crop-bottom = Dưới
+transform-no-size = Kích thước và cắt xén sẽ khả dụng khi nguồn báo cáo kích thước của nó.
+transform-copy = Sao chép biến đổi
+transform-paste = Dán biến đổi
+transform-close = Đóng
+filters-copy = Sao chép bộ lọc ({ $count })
+filters-paste = Dán bộ lọc ({ $count })
+palette-edit-transform = Chỉnh sửa biến đổi…
+history-pasteFilters = Dán bộ lọc
+
+# CAP-M26 — keying workbench
+workbench-title = Bàn tách nền — { $name }
+workbench-mode-keyed = Đã tách
+workbench-mode-source = Nguồn
+workbench-mode-matte = Mặt nạ
+workbench-mode-split = Chia đôi
+workbench-eyedropper = Ống hút màu
+workbench-eyedropper-hint = Nhấp vào nguồn để lấy màu khóa.
+workbench-loupe = Kính lúp
+workbench-split = Chia
+workbench-preview-alt = Xem trước bàn tách nền
+workbench-tune = Tinh chỉnh
+workbench-close = Đóng
+
+# CAP-M06 — multiview monitor
+multiview-title = Đa khung
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Nhấp vào một cảnh để chuyển sang cảnh đó.
+multiview-hint-stage = Nhấp vào một cảnh để dàn dựng trong bản xem trước.
+palette-multiview = Màn hình đa khung
+
+# CAP-M07 — projectors
+projector-title = Mở máy chiếu
+projector-source = Nguồn
+projector-target-program = Chương trình
+projector-target-preview = Xem trước
+projector-target-scene = Cảnh…
+projector-target-source = Nguồn…
+projector-target-multiview = Multiview
+projector-which-scene = Cảnh nào
+projector-which-source = Nguồn nào
+projector-none = Không có gì để hiển thị
+projector-display = Màn hình
+projector-windowed = Cửa sổ nổi (màn hình này)
+projector-display-option = Màn hình { $n } — { $w }×{ $h }
+projector-primary = (chính)
+projector-open = Mở
+projector-cancel = Hủy
+projector-exit-hint = Nhấn Esc để thoát
+palette-projector = Mở máy chiếu…
+
+# CAP-M08 — still-frame grab
+palette-still = Chụp khung hình…
+still-saved-toast = Đã lưu khung hình: { $name }
+still-failed-toast = Chụp khung hình thất bại: { $error }
+hotkeys-still = Chụp khung hình
+hotkeys-still-placeholder = vd. Ctrl+Shift+P

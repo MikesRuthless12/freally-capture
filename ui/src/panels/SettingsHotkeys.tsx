@@ -14,6 +14,7 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["transition", "hotkeys-transition", "hotkeys-transition-placeholder"],
   ["saveReplay", "hotkeys-save-replay", "hotkeys-save-replay-placeholder"],
   ["addMarker", "hotkeys-add-marker", "hotkeys-add-marker-placeholder"],
+  ["still", "hotkeys-still", "hotkeys-still-placeholder"],
 ];
 
 /**
@@ -44,6 +45,7 @@ export function SettingsHotkeys({
       transition: draft.transition?.trim() || null,
       saveReplay: draft.saveReplay?.trim() || null,
       addMarker: draft.addMarker?.trim() || null,
+      still: draft.still?.trim() || null,
     };
     const next = { ...settings, hotkeys: normalized };
     settingsSet(next)

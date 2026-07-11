@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
+image = { workspace = true } # lossless PNG for still-frame grab (CAP-M08)
 jpeg-encoder = { workspace = true }
 # Prints wgpu's `log` diagnostics (adapter enumeration, surface errors) when
 # RUST_LOG is set; silent by default, so no effect on normal runs.

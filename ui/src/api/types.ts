@@ -62,6 +62,16 @@ export type ThemeSettings = {
   accent: string;
 };
 
+/** Preview alignment aids (CAP-M04) — mirrors `AlignmentSettings` in settings.rs. */
+export type AlignmentSettings = {
+  /** Snap a dragged item to canvas + other-item edges/centers. */
+  smartGuides: boolean;
+  /** Draw action-safe + title-safe rectangles over the preview. */
+  safeAreas: boolean;
+  /** Draw px rulers in the gutter around the preview. */
+  rulers: boolean;
+};
+
 /** The persisted user settings (`settings.json` in the OS config dir). */
 /** Audio Mixer strip orientation. */
 export type MixerLayout = "horizontal" | "vertical";
@@ -75,6 +85,8 @@ export type Settings = {
   mixerLayout: MixerLayout;
   /** Appearance: palette + custom accent (Phase 9). */
   theme: ThemeSettings;
+  /** Preview alignment aids: smart guides, safe areas, rulers (CAP-M04). */
+  alignment: AlignmentSettings;
   /** Whether the first-run wizard has been seen (Phase 9). */
   completedOnboarding: boolean;
   /** Recording output configuration (Phase 4). */
@@ -158,7 +170,13 @@ export type HotkeySettings = {
   saveReplay: string | null;
   /** Drop a chapter marker into the active recording (Phase 6). */
   addMarker: string | null;
+  /** Grab a still frame of the program (CAP-M08). */
+  still: string | null;
 };
+
+/** What a still-frame grab captures (CAP-M08). Mirrors `StillTarget` in studio.rs. */
+export type StillTarget =
+  { kind: "program" } | { kind: "source"; item: ItemId; preFilter: boolean };
 
 /** Studio Mode's commit transition (Phase 5). Stinger lands with the Phase 6
  * packs. */
@@ -731,6 +749,22 @@ export type FilterTypeName = FilterKind["type"];
 /** One filter instance in an item's chain. */
 export type Filter = { id: FilterId; enabled: boolean } & FilterKind;
 
+/** Keying-workbench render mode (CAP-M26): raw source, keyed, alpha matte, or a
+ * before/after split. Mirrors `WorkbenchMode` in studio.rs. */
+export type WorkbenchMode = "source" | "keyed" | "matte" | "split";
+
+/** One connected display for the projector "open on…" picker (CAP-M07).
+ * Mirrors `DisplayInfo` in projector.rs. */
+export type DisplayInfo = {
+  index: number;
+  name: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  primary: boolean;
+};
+
 /** One placement of a source in a scene. */
 export type SceneItem = {
   id: ItemId;
@@ -785,7 +819,14 @@ export type Scene = {
   groups?: SourceGroup[];
   /** Per-scene mixer overrides (Phase 6). */
   audioOverrides?: SceneAudioOverride[];
+  /** Custom alignment guides the user dragged out (CAP-M04 follow-on). */
+  guides?: GuideLine[];
 };
+
+/** One custom alignment guide line in canvas px (CAP-M04 follow-on). Mirrors
+ * `GuideLine` in Rust: `"v"` is a vertical line at a constant x, `"h"` a
+ * horizontal line at a constant y. */
+export type GuideLine = { orientation: "v" | "h"; position: number };
 
 /** The second output canvas (Phase 6): its own size + the scene it shows. */
 export type VerticalCanvas = {
@@ -813,6 +854,25 @@ export type StudioDto = {
   collection: Collection;
   /** Studio Mode (Phase 5): present while enabled. */
   studioMode?: StudioModeDto;
+  /** Undo/redo availability + the viewable history list (CAP-M01). */
+  history: HistoryState;
+};
+
+/**
+ * Undo/redo state (CAP-M01). Labels are stable keys the UI localizes
+ * (`history.<label>`), not user-facing strings.
+ */
+export type HistoryState = {
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Label the next undo would reverse (`null` when nothing to undo). */
+  undoLabel: string | null;
+  /** Label the next redo would replay. */
+  redoLabel: string | null;
+  /** Every undoable edit, oldest → newest (the newest is the next undo). */
+  undo: string[];
+  /** Every undone edit still redoable; the last is the next redo. */
+  redo: string[];
 };
 
 /** The Studio-Mode slice of the model (session state, never persisted). */

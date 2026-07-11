@@ -6,11 +6,22 @@ import { useT } from "../i18n/t";
 
 import {
   nativePreviewActive,
+  nativePreviewSetOverlay,
   nativePreviewSetRegion,
   nativePreviewSetSelection,
   studioSetFocus,
+  studioSetGuides,
 } from "../api/commands";
-import type { Collection, ItemId, ProgramStatus, Scene, SceneItem, Transform } from "../api/types";
+import type {
+  AlignmentSettings,
+  Collection,
+  GuideLine,
+  ItemId,
+  ProgramStatus,
+  Scene,
+  SceneItem,
+  Transform,
+} from "../api/types";
 import {
   boundsOf,
   clampMoveAgainstObstacles,
@@ -23,6 +34,16 @@ import {
   type Box,
   type Size,
 } from "../lib/constrain";
+import { safeAreaRects, snapCandidates, snapMove, type Guide, type Rect } from "../lib/guides";
+import {
+  alignItems,
+  alignToCanvas,
+  ALIGN_EDGES,
+  distributeItems,
+  type AlignEdge,
+  type DistributeAxis,
+  type Measured,
+} from "../lib/align";
 import {
   canvasToLocal,
   contentSize,
@@ -37,10 +58,26 @@ type PreviewPanelProps = {
   collection: Collection | null;
   scene: Scene | null;
   program: ProgramStatus | null;
+  /** The primary selection — carries the transform handles. */
   selectedItem: ItemId | null;
+  /** The full multi-selection (includes the primary). CAP-M04 follow-on. */
+  selectedItems: ItemId[];
   onSelect: (item: ItemId | null) => void;
+  /** Shift-click: add/remove one item from the multi-selection. */
+  onToggleSelect: (item: ItemId) => void;
+  /** Marquee result: replace the selection with these items. */
+  onSelectMany: (items: ItemId[]) => void;
   onItemTransform: (item: ItemId, transform: Transform) => void;
+  /** Batch transform for align/distribute/group-move (one undo step). */
+  onItemsTransform: (changes: { item: ItemId; transform: Transform }[], coalesce: boolean) => void;
+  /** Preview alignment aids (CAP-M04): smart guides, safe areas, rulers. */
+  alignment: AlignmentSettings;
 };
+
+/** Grab radius for a custom guide line, display px. */
+const GUIDE_GRAB = 6;
+/** Persistent custom-guide color (distinct from the pink live snap guides). */
+const GUIDE_COLOR = "#22d3ee";
 
 /** Poll interval for the program frame pipe (~30 fps). */
 const FRAME_POLL_MS = 33;
@@ -48,6 +85,10 @@ const FRAME_POLL_MS = 33;
 const HANDLE_RADIUS = 7;
 /** Rotate handle offset above the top edge, display px. */
 const ROTATE_OFFSET = 22;
+/** Smart-guide snap radius, display px (converted to canvas px per drag). */
+const SNAP_RADIUS = 8;
+/** Ruler gutter width/height, display px (reserved outside the native region). */
+const RULER_SIZE = 16;
 
 type DragState = {
   mode: "move" | "scale-corner" | "scale-edge" | "rotate" | "crop-edge";
@@ -71,7 +112,23 @@ type DragState = {
   fixedIndex?: number;
   /** For rotate: the cursor's start angle minus the item's start rotation. */
   angleOffset?: number;
+  /** Smart-guide snap context (move mode only; absent = snapping off). */
+  snap?: { candidates: ReturnType<typeof snapCandidates>; threshold: number };
 };
+
+/** The CAP-M04-follow-on interactions, kept apart from the single-item
+ * `DragState` so the delicate resize/rotate/crop math stays untouched. */
+type AuxDrag =
+  | { kind: "marquee"; start: Vec2; current: Vec2 }
+  | {
+      kind: "group";
+      pointer: Vec2;
+      canvas: Size;
+      members: { id: ItemId; start: Transform; content: Size }[];
+      groupBox: Box;
+      snap?: { candidates: ReturnType<typeof snapCandidates>; threshold: number };
+    }
+  | { kind: "guide"; orientation: "v" | "h"; index: number; position: number };
 
 /**
  * The program preview: the composed program frame (polled from the
@@ -84,14 +141,29 @@ export function PreviewPanel({
   scene,
   program,
   selectedItem,
+  selectedItems,
   onSelect,
+  onToggleSelect,
+  onSelectMany,
   onItemTransform,
+  onItemsTransform,
+  alignment,
 }: PreviewPanelProps) {
   const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const dragRef = useRef<DragState | null>(null);
+  // CAP-M04 follow-on: marquee / group-move / guide-drag, separate from dragRef.
+  const auxRef = useRef<AuxDrag | null>(null);
+  const [marquee, setMarquee] = useState<{ start: Vec2; current: Vec2 } | null>(null);
+  const [guideDrag, setGuideDrag] = useState<{
+    orientation: "v" | "h";
+    position: number;
+    index: number;
+  } | null>(null);
+  // Live smart-guide lines while a move drag is snapping (canvas px).
+  const [liveGuides, setLiveGuides] = useState<Guide[]>([]);
   // The native GPU preview surface (the "OBS feel" path): when active, a
   // native child window paints the program region and the JPEG canvas is
   // suppressed. Off Windows this stays false → the JPEG path renders.
@@ -103,22 +175,30 @@ export function PreviewPanel({
   const programH = collection?.canvasHeight ?? 1080;
   const running = program?.state === "running";
   const emptyScene = (scene?.items.length ?? 0) === 0;
+  // Custom alignment guides for the active scene (CAP-M04 follow-on).
+  const customGuides = useMemo<GuideLine[]>(() => scene?.guides ?? [], [scene]);
   // A modal dialog is a webview element; the native preview child window would
   // paint over it, so suppress the overlay while any modal is open.
   const modalOpen = useSyncExternalStore(modalSubscribe, isModalOpen);
 
   // The displayed box: the program frame letterboxed inside the container.
+  // When rulers are on, a gutter is reserved on the top+left edges so the ruler
+  // strips sit *outside* the box (and so outside the native preview region,
+  // which would otherwise occlude them on Windows).
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const gutter = alignment.rulers ? RULER_SIZE : 0;
     const recompute = () => {
       const rect = container.getBoundingClientRect();
-      const scale = Math.min(rect.width / programW, rect.height / programH);
+      const availW = Math.max(1, rect.width - gutter);
+      const availH = Math.max(1, rect.height - gutter);
+      const scale = Math.min(availW / programW, availH / programH);
       const width = Math.max(1, programW * scale);
       const height = Math.max(1, programH * scale);
       setBox({
-        left: (rect.width - width) / 2,
-        top: (rect.height - height) / 2,
+        left: gutter + (availW - width) / 2,
+        top: gutter + (availH - height) / 2,
         width,
         height,
       });
@@ -127,7 +207,7 @@ export function PreviewPanel({
     const observer = new ResizeObserver(recompute);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [programW, programH]);
+  }, [programW, programH, alignment.rulers]);
 
   // Is the native GPU preview viable? (Windows DX12 + overlay, not failed.) It
   // can flip false mid-session (surface build error, device lost), so re-poll
@@ -194,6 +274,33 @@ export function PreviewPanel({
     if (!nativeActive) return;
     void nativePreviewSetSelection(selectedItem).catch(() => undefined);
   }, [nativeActive, selectedItem]);
+
+  // Push the alignment overlay (safe areas + live snap guides) into the native
+  // GPU frame, where the SVG below is occluded. Off the native path this is
+  // skipped and the SVG renders the same model instead.
+  useEffect(() => {
+    if (!nativeActive) return;
+    const safeAreas = alignment.safeAreas
+      ? Object.values(safeAreaRects({ w: programW, h: programH }))
+      : [];
+    // Custom guides span the whole canvas; the dragged one tracks live.
+    const custom = customGuides.map((guide, index) => ({
+      orientation: guide.orientation,
+      position: guideDrag && guideDrag.index === index ? guideDrag.position : guide.position,
+      from: 0,
+      to: guide.orientation === "v" ? programH : programW,
+    }));
+    const guides = [
+      ...custom,
+      ...liveGuides.map((guide) => ({
+        orientation: guide.orientation,
+        position: guide.position,
+        from: guide.from,
+        to: guide.to,
+      })),
+    ];
+    void nativePreviewSetOverlay({ safeAreas, guides }).catch(() => undefined);
+  }, [nativeActive, alignment.safeAreas, programW, programH, liveGuides, customGuides, guideDrag]);
 
   // Poll the composed frame onto the canvas while the studio runs (skipped
   // when the native surface is painting the region).
@@ -293,6 +400,61 @@ export function PreviewPanel({
     [scene, collection, sourceSize],
   );
 
+  /** Smart-guide snap context for a move drag: every *other* visible item's
+   * box as a snap target, plus the canvas. Absent when snapping is off. */
+  const buildSnap = useCallback(
+    (moving: SceneItem): DragState["snap"] => {
+      if (!alignment.smartGuides || !scene) return undefined;
+      const others: Box[] = scene.items
+        .filter((item) => item.id !== moving.id && item.visible)
+        .flatMap((item) => {
+          const source = sourceSize(item);
+          if (!source) return [];
+          const content = contentSize(source.w, source.h, item.transform.crop);
+          if (!content) return [];
+          return [boundsOf(item.transform, content)];
+        });
+      const canvas: Size = { w: programW, h: programH };
+      const candidates = snapCandidates(canvas, others);
+      // Custom guides are snap targets too (CAP-M04 follow-on).
+      for (const guide of scene.guides ?? []) {
+        if (guide.orientation === "v") {
+          candidates.v.push({ pos: guide.position, lo: 0, hi: programH, target: "item" });
+        } else {
+          candidates.h.push({ pos: guide.position, lo: 0, hi: programW, target: "item" });
+        }
+      }
+      return {
+        candidates,
+        threshold: SNAP_RADIUS / Math.max(displayScale, 1e-6),
+      };
+    },
+    [alignment.smartGuides, scene, sourceSize, programW, programH, displayScale],
+  );
+
+  /** An item's rotation-aware bounding box in canvas px, or null if unsized. */
+  const itemBox = useCallback(
+    (item: SceneItem): Box | null => {
+      const source = sourceSize(item);
+      if (!source) return null;
+      const content = contentSize(source.w, source.h, item.transform.crop);
+      if (!content) return null;
+      return boundsOf(item.transform, content);
+    },
+    [sourceSize],
+  );
+
+  /** The multi-selection measured for align/distribute (unsized items dropped). */
+  const measuredSelection = useCallback((): Measured[] => {
+    if (!scene) return [];
+    return selectedItems.flatMap((id) => {
+      const item = scene.items.find((i) => i.id === id);
+      if (!item) return [];
+      const box = itemBox(item);
+      return box ? [{ id, transform: item.transform, box }] : [];
+    });
+  }, [scene, selectedItems, itemBox]);
+
   const selected = scene?.items.find((item) => item.id === selectedItem) ?? null;
   const selectedGeometry = useMemo(() => {
     if (!selected || selected.pendingFit) return null;
@@ -334,12 +496,202 @@ export function PreviewPanel({
 
   // -- pointer interactions ---------------------------------------------------
 
+  /** The index of the custom guide within grab range of `p`, or null. */
+  const hitGuide = (p: Vec2): number | null => {
+    const threshold = GUIDE_GRAB / Math.max(displayScale, 1e-6);
+    let best: number | null = null;
+    let bestDist = threshold;
+    customGuides.forEach((guide, index) => {
+      const dist =
+        guide.orientation === "v" ? Math.abs(p.x - guide.position) : Math.abs(p.y - guide.position);
+      if (dist <= bestDist) {
+        bestDist = dist;
+        best = index;
+      }
+    });
+    return best;
+  };
+
+  /** Snap context for a group move: every *non-selected* visible item, the
+   * canvas, and custom guides. */
+  const buildGroupSnap = (ids: ItemId[]): Extract<AuxDrag, { kind: "group" }>["snap"] => {
+    if (!alignment.smartGuides || !scene) return undefined;
+    const set = new Set(ids);
+    const others: Box[] = scene.items
+      .filter((item) => !set.has(item.id) && item.visible)
+      .flatMap((item) => {
+        const box = itemBox(item);
+        return box ? [box] : [];
+      });
+    const candidates = snapCandidates({ w: programW, h: programH }, others);
+    for (const guide of customGuides) {
+      if (guide.orientation === "v") {
+        candidates.v.push({ pos: guide.position, lo: 0, hi: programH, target: "item" });
+      } else {
+        candidates.h.push({ pos: guide.position, lo: 0, hi: programW, target: "item" });
+      }
+    }
+    return { candidates, threshold: SNAP_RADIUS / Math.max(displayScale, 1e-6) };
+  };
+
+  /** Assemble a group-move drag from the current multi-selection at pointer `p`. */
+  const beginGroupMove = (p: Vec2): Extract<AuxDrag, { kind: "group" }> | null => {
+    if (!scene) return null;
+    const members = selectedItems.flatMap((id) => {
+      const item = scene.items.find((i) => i.id === id);
+      if (!item || item.locked) return [];
+      const source = sourceSize(item);
+      if (!source) return [];
+      const content = contentSize(source.w, source.h, item.transform.crop);
+      if (!content) return [];
+      return [{ id, start: item.transform, content, box: boundsOf(item.transform, content) }];
+    });
+    if (members.length === 0) return null;
+    return {
+      kind: "group",
+      pointer: p,
+      canvas: { w: programW, h: programH },
+      members: members.map(({ id, start, content }) => ({ id, start, content })),
+      groupBox: unionBoxes(members.map((m) => m.box)),
+      snap: buildGroupSnap(members.map((m) => m.id)),
+    };
+  };
+
+  /** Advance a marquee / guide / group aux drag. */
+  const updateAux = (aux: AuxDrag, p: Vec2, shift: boolean) => {
+    if (aux.kind === "marquee") {
+      aux.current = p;
+      setMarquee({ start: aux.start, current: p });
+      return;
+    }
+    if (aux.kind === "guide") {
+      aux.position = aux.orientation === "v" ? p.x : p.y;
+      setGuideDrag({ orientation: aux.orientation, position: aux.position, index: aux.index });
+      return;
+    }
+    let dx = p.x - aux.pointer.x;
+    let dy = p.y - aux.pointer.y;
+    ({ dx, dy } = clampMoveDelta(aux.groupBox, dx, dy, aux.canvas));
+    if (aux.snap && !shift) {
+      const moved: Box = {
+        minX: aux.groupBox.minX + dx,
+        maxX: aux.groupBox.maxX + dx,
+        minY: aux.groupBox.minY + dy,
+        maxY: aux.groupBox.maxY + dy,
+      };
+      const snap = snapMove(moved, aux.snap.candidates, aux.snap.threshold);
+      let sdx = snap.dx;
+      let sdy = snap.dy;
+      ({ dx: sdx, dy: sdy } = clampMoveDelta(moved, sdx, sdy, aux.canvas));
+      dx += sdx;
+      dy += sdy;
+      setLiveGuides(snap.guides);
+    }
+    onItemsTransform(
+      aux.members.map((m) => ({
+        item: m.id,
+        transform: { ...m.start, x: m.start.x + dx, y: m.start.y + dy },
+      })),
+      true,
+    );
+  };
+
+  /** Commit an aux drag on pointer-up. */
+  const finishAux = (aux: AuxDrag, p: Vec2, shift: boolean) => {
+    if (aux.kind === "marquee") {
+      const dragged = Math.abs(p.x - aux.start.x) > 3 || Math.abs(p.y - aux.start.y) > 3;
+      if (!dragged) {
+        onSelect(null); // a click on empty space clears the selection
+        return;
+      }
+      const rect: Box = {
+        minX: Math.min(aux.start.x, p.x),
+        maxX: Math.max(aux.start.x, p.x),
+        minY: Math.min(aux.start.y, p.y),
+        maxY: Math.max(aux.start.y, p.y),
+      };
+      const hits = (scene?.items ?? [])
+        .filter((item) => item.visible)
+        .filter((item) => {
+          const box = itemBox(item);
+          return box ? intersects(rect, box) : false;
+        })
+        .map((item) => item.id);
+      onSelectMany(hits);
+      return;
+    }
+    if (aux.kind === "guide") {
+      if (!scene) return;
+      const pos = aux.orientation === "v" ? p.x : p.y;
+      const within =
+        aux.orientation === "v" ? pos >= 0 && pos <= programW : pos >= 0 && pos <= programH;
+      // Dragged off the canvas → delete the guide.
+      const next = within
+        ? customGuides.map((g, i) => (i === aux.index ? { ...g, position: Math.round(pos) } : g))
+        : customGuides.filter((_, i) => i !== aux.index);
+      studioSetGuides(scene.id, next).catch((err) => console.error("set guides failed:", err));
+      return;
+    }
+    updateAux(aux, p, shift); // group: land the final position
+  };
+
+  /** Add a custom guide down the middle of the canvas; drag it from there. */
+  const addGuide = (orientation: "v" | "h") => {
+    if (!scene) return;
+    const position = orientation === "v" ? programW / 2 : programH / 2;
+    studioSetGuides(scene.id, [...customGuides, { orientation, position }]).catch((err) =>
+      console.error("add guide failed:", err),
+    );
+  };
+
+  /** Align the multi-selection to each other (one undo step). */
+  const arrangeSelected = (edge: AlignEdge) => {
+    const changes = alignItems(measuredSelection(), edge);
+    if (changes.size > 0) {
+      onItemsTransform(
+        [...changes].map(([item, transform]) => ({ item, transform })),
+        false,
+      );
+    }
+  };
+
+  /** Distribute the multi-selection evenly along an axis (one undo step). */
+  const distributeSelected = (axis: DistributeAxis) => {
+    const changes = distributeItems(measuredSelection(), axis);
+    if (changes.size > 0) {
+      onItemsTransform(
+        [...changes].map(([item, transform]) => ({ item, transform })),
+        false,
+      );
+    }
+  };
+
   const beginDrag = (event: React.PointerEvent) => {
     if (!scene) return;
     const p = toProgram(event);
 
-    // Grab a handle of the selected item first.
-    if (selected && selectedGeometry && !selected.locked) {
+    // Shift-click toggles an item in/out of the multi-selection — handled first,
+    // so it works on the primary item too (whose handles would otherwise win).
+    if (event.shiftKey) {
+      for (let index = scene.items.length - 1; index >= 0; index -= 1) {
+        const item = scene.items[index];
+        if (!item.visible) continue;
+        const source = sourceSize(item);
+        if (!source) continue;
+        const content = contentSize(source.w, source.h, item.transform.crop);
+        if (!content) continue;
+        if (hitTest(item.transform, content, p)) {
+          onToggleSelect(item.id);
+          event.preventDefault();
+          return;
+        }
+      }
+      return; // shift on empty space keeps the current selection
+    }
+
+    // Grab a handle of the selected item — only in a single selection, so that
+    // in a multi-selection clicking the primary group-moves like any member.
+    if (selected && selectedGeometry && !selected.locked && selectedItems.length <= 1) {
       const { content, source } = selectedGeometry;
       const t = selected.transform;
       const corner = itemCorners(t, content);
@@ -383,7 +735,12 @@ export function PreviewPanel({
               fixed: mids[edgeHit ^ 1], // 0↔1 (left/right), 2↔3 (top/bottom)
             };
           } else if (hitTest(t, content, p)) {
-            dragRef.current = { ...start, mode: "move", fixed: { x: t.x, y: t.y } };
+            dragRef.current = {
+              ...start,
+              mode: "move",
+              fixed: { x: t.x, y: t.y },
+              snap: buildSnap(selected),
+            };
           }
         }
       }
@@ -394,7 +751,23 @@ export function PreviewPanel({
       }
     }
 
-    // Otherwise: select the topmost item under the cursor (top = last).
+    // A custom guide line under the cursor grabs for a drag (CAP-M04 follow-on).
+    const guideIndex = hitGuide(p);
+    if (guideIndex !== null) {
+      const guide = customGuides[guideIndex];
+      auxRef.current = {
+        kind: "guide",
+        orientation: guide.orientation,
+        index: guideIndex,
+        position: guide.position,
+      };
+      setGuideDrag({ orientation: guide.orientation, position: guide.position, index: guideIndex });
+      (event.target as Element).setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
+    // Otherwise: hit-test items top-down (top = last).
     for (let index = scene.items.length - 1; index >= 0; index -= 1) {
       const item = scene.items[index];
       if (!item.visible) continue;
@@ -403,6 +776,16 @@ export function PreviewPanel({
       const content = contentSize(source.w, source.h, item.transform.crop);
       if (!content) continue;
       if (hitTest(item.transform, content, p)) {
+        // Clicking an item already in a multi-selection drags the whole group.
+        if (selectedItems.length > 1 && selectedItems.includes(item.id)) {
+          const group = beginGroupMove(p);
+          if (group) {
+            auxRef.current = group;
+            (event.target as Element).setPointerCapture(event.pointerId);
+            event.preventDefault();
+            return;
+          }
+        }
         onSelect(item.id);
         // Immediately allow dragging the newly selected (unlocked) item.
         if (!item.locked) {
@@ -416,6 +799,7 @@ export function PreviewPanel({
             fixed: { x: item.transform.x, y: item.transform.y },
             canvas: { w: programW, h: programH },
             obstacles: guestObstacles(item),
+            snap: buildSnap(item),
           };
           (event.target as Element).setPointerCapture(event.pointerId);
         }
@@ -423,29 +807,63 @@ export function PreviewPanel({
         return;
       }
     }
-    onSelect(null);
+
+    // Empty space → a rubber-band marquee select.
+    auxRef.current = { kind: "marquee", start: p, current: p };
+    setMarquee({ start: p, current: p });
+    (event.target as Element).setPointerCapture(event.pointerId);
+    event.preventDefault();
   };
 
   const updateDrag = (event: React.PointerEvent) => {
     const p = toProgram(event);
+    const aux = auxRef.current;
+    if (aux) {
+      updateAux(aux, p, event.shiftKey);
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) {
       setHoverCursor(cursorFor(p));
       return;
     }
-    const next = applyDrag(drag, p, event.shiftKey);
-    if (next) {
-      onItemTransform(drag.itemId, next);
-      const content = contentSize(drag.source.w, drag.source.h, next.crop) ?? drag.content;
-      setDragReadout(edgeDistances(boundsOf(next, content), drag.canvas));
+    let next = applyDrag(drag, p, event.shiftKey);
+    if (!next) return;
+    // Smart guides: snap the moved box onto the nearest canvas/other-item line
+    // (Shift bypasses). Snapping runs after the canvas clamp, so an item never
+    // leaves the frame; slideIntoCanvas re-seats it if a snap nudged it out.
+    if (drag.mode === "move" && drag.snap && !event.shiftKey) {
+      const c = contentSize(drag.source.w, drag.source.h, next.crop) ?? drag.content;
+      const snap = snapMove(boundsOf(next, c), drag.snap.candidates, drag.snap.threshold);
+      if (snap.dx !== 0 || snap.dy !== 0) {
+        next = slideIntoCanvas(
+          { ...next, x: next.x + snap.dx, y: next.y + snap.dy },
+          c,
+          drag.canvas,
+        );
+      }
+      setLiveGuides(snap.guides);
     }
+    onItemTransform(drag.itemId, next);
+    const content = contentSize(drag.source.w, drag.source.h, next.crop) ?? drag.content;
+    setDragReadout(edgeDistances(boundsOf(next, content), drag.canvas));
   };
 
   const endDrag = (event: React.PointerEvent) => {
+    const aux = auxRef.current;
+    if (aux) {
+      finishAux(aux, toProgram(event), event.shiftKey);
+      auxRef.current = null;
+      setMarquee(null);
+      setGuideDrag(null);
+      setLiveGuides([]);
+      return;
+    }
     if (dragRef.current) {
       updateDrag(event);
       dragRef.current = null;
       setDragReadout(null);
+      setLiveGuides([]);
     }
   };
 
@@ -472,6 +890,24 @@ export function PreviewPanel({
     }
   };
 
+  // Align the selected item's bounding box to a canvas edge/center (CAP-M04).
+  const alignSelected = useCallback(
+    (edge: AlignEdge) => {
+      if (!selected || !program) return;
+      const status = program.sources[selected.source];
+      if (!status?.width || !status?.height) return;
+      const next = alignToCanvas(
+        selected,
+        status.width,
+        status.height,
+        { w: programW, h: programH },
+        edge,
+      );
+      if (next) onItemTransform(selected.id, next);
+    },
+    [selected, program, programW, programH, onItemTransform],
+  );
+
   // -- overlay geometry (display px) -------------------------------------------
 
   const overlay = useMemo(() => {
@@ -484,6 +920,60 @@ export function PreviewPanel({
     const rotate = toDisplay(rotateHandle(t, content, displayScale));
     return { corner, mids, rotate, locked: selected.locked };
   }, [selected, selectedGeometry, displayScale]);
+
+  // Alignment overlay in display px for the SVG path (safe-area rects + live
+  // smart-guide lines). Occluded on the native path — pushed there separately.
+  const alignmentOverlay = useMemo(() => {
+    const s = displayScale;
+    const safe: Rect[] = alignment.safeAreas
+      ? Object.values(safeAreaRects({ w: programW, h: programH })).map((r) => ({
+          x: r.x * s,
+          y: r.y * s,
+          w: r.w * s,
+          h: r.h * s,
+        }))
+      : [];
+    const guides = liveGuides.map((guide) => ({
+      orientation: guide.orientation,
+      position: guide.position * s,
+      from: guide.from * s,
+      to: guide.to * s,
+    }));
+    return { safe, guides };
+  }, [alignment.safeAreas, programW, programH, liveGuides, displayScale]);
+
+  // Outlines for the non-primary members of a multi-selection (display px). The
+  // primary still draws its full handle overlay. CAP-M04 follow-on.
+  const selectionBoxes = useMemo(() => {
+    if (!scene || selectedItems.length < 2) return [];
+    return selectedItems.flatMap((id) => {
+      if (id === selectedItem) return [];
+      const item = scene.items.find((i) => i.id === id);
+      if (!item) return [];
+      const box = itemBox(item);
+      if (!box) return [];
+      return [
+        {
+          x: box.minX * displayScale,
+          y: box.minY * displayScale,
+          w: (box.maxX - box.minX) * displayScale,
+          h: (box.maxY - box.minY) * displayScale,
+        },
+      ];
+    });
+  }, [scene, selectedItems, selectedItem, itemBox, displayScale]);
+
+  // Custom guides in display px, with the live position for the dragged one.
+  const displayGuides = useMemo(
+    () =>
+      customGuides.map((guide, index) => ({
+        orientation: guide.orientation,
+        position:
+          (guideDrag && guideDrag.index === index ? guideDrag.position : guide.position) *
+          displayScale,
+      })),
+    [customGuides, guideDrag, displayScale],
+  );
 
   return (
     <section
@@ -524,6 +1014,91 @@ export function PreviewPanel({
               onPointerCancel={endDrag}
               onDoubleClick={toggleFocusAt}
             >
+              {alignmentOverlay.safe.map((r, index) => (
+                <rect
+                  key={`safe-${index}`}
+                  x={r.x}
+                  y={r.y}
+                  width={r.w}
+                  height={r.h}
+                  fill="none"
+                  stroke={index === 0 ? "#ffffff66" : "#ffffff3a"}
+                  strokeWidth={1}
+                  strokeDasharray="6 4"
+                />
+              ))}
+              {alignmentOverlay.guides.map((guide, index) =>
+                guide.orientation === "v" ? (
+                  <line
+                    key={`guide-${index}`}
+                    x1={guide.position}
+                    y1={guide.from}
+                    x2={guide.position}
+                    y2={guide.to}
+                    stroke="#ff3ea5"
+                    strokeWidth={1}
+                  />
+                ) : (
+                  <line
+                    key={`guide-${index}`}
+                    x1={guide.from}
+                    y1={guide.position}
+                    x2={guide.to}
+                    y2={guide.position}
+                    stroke="#ff3ea5"
+                    strokeWidth={1}
+                  />
+                ),
+              )}
+              {displayGuides.map((guide, index) =>
+                guide.orientation === "v" ? (
+                  <line
+                    key={`cg-${index}`}
+                    x1={guide.position}
+                    y1={0}
+                    x2={guide.position}
+                    y2={box.height}
+                    stroke={GUIDE_COLOR}
+                    strokeWidth={1}
+                  />
+                ) : (
+                  <line
+                    key={`cg-${index}`}
+                    x1={0}
+                    y1={guide.position}
+                    x2={box.width}
+                    y2={guide.position}
+                    stroke={GUIDE_COLOR}
+                    strokeWidth={1}
+                  />
+                ),
+              )}
+              {selectionBoxes.map((b, index) => (
+                <rect
+                  key={`sel-${index}`}
+                  x={b.x}
+                  y={b.y}
+                  width={b.w}
+                  height={b.h}
+                  fill="none"
+                  stroke="#4a9eff"
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                  opacity={0.8}
+                />
+              ))}
+              {marquee && (
+                <rect
+                  x={Math.min(marquee.start.x, marquee.current.x) * displayScale}
+                  y={Math.min(marquee.start.y, marquee.current.y) * displayScale}
+                  width={Math.abs(marquee.current.x - marquee.start.x) * displayScale}
+                  height={Math.abs(marquee.current.y - marquee.start.y) * displayScale}
+                  fill="#4a9eff22"
+                  stroke="#4a9eff"
+                  strokeWidth={1}
+                  strokeDasharray="4 2"
+                />
+              )}
               {overlay && (
                 <g>
                   <polygon
@@ -577,6 +1152,7 @@ export function PreviewPanel({
             </svg>
           </>
         )}
+        {running && alignment.rulers && <Rulers box={box} canvasW={programW} canvasH={programH} />}
         {dragReadout && (
           <div
             className="pointer-events-none absolute z-10 rounded-md border border-white/10 bg-black/75 px-2 py-1 font-mono text-[10px] leading-tight text-havoc-text"
@@ -616,6 +1192,17 @@ export function PreviewPanel({
       </div>
       {running && program && (
         <div className="flex shrink-0 items-center gap-3 border-t border-white/5 bg-black/40 px-3 py-1 text-[11px] text-havoc-muted">
+          {selectedItems.length >= 2 ? (
+            <ArrangeBar
+              onArrange={arrangeSelected}
+              onDistribute={distributeSelected}
+              canDistribute={selectedItems.length >= 3}
+              t={t}
+            />
+          ) : (
+            selected && !selected.locked && <AlignBar onAlign={alignSelected} t={t} />
+          )}
+          <GuideButtons onAdd={addGuide} t={t} />
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
             {program.width}×{program.height}
@@ -636,11 +1223,244 @@ export function PreviewPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Align-to-canvas bar (CAP-M04): lives in the footer, outside the native region
+// ---------------------------------------------------------------------------
+
+/** A 12×12 pictogram: the canvas frame + the item bar snapped to `edge`. */
+function alignGlyph(edge: AlignEdge) {
+  const bar: Record<AlignEdge, { x: number; y: number; w: number; h: number }> = {
+    left: { x: 2, y: 3, w: 3, h: 6 },
+    hcenter: { x: 4.5, y: 3, w: 3, h: 6 },
+    right: { x: 7, y: 3, w: 3, h: 6 },
+    top: { x: 3, y: 2, w: 6, h: 3 },
+    vcenter: { x: 3, y: 4.5, w: 6, h: 3 },
+    bottom: { x: 3, y: 7, w: 6, h: 3 },
+  };
+  const b = bar[edge];
+  return (
+    <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+      <rect x={1} y={1} width={10} height={10} fill="none" stroke="currentColor" opacity={0.45} />
+      <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Six align-to-canvas buttons (left/center/right, top/middle/bottom). */
+function AlignBar({
+  onAlign,
+  t,
+}: {
+  onAlign: (edge: AlignEdge) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("align-group")}>
+      {ALIGN_EDGES.map((edge) => (
+        <button
+          key={edge}
+          type="button"
+          title={t(`align-${edge}`)}
+          aria-label={t(`align-${edge}`)}
+          onClick={() => onAlign(edge)}
+          className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted hover:text-havoc-text"
+        >
+          {alignGlyph(edge)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A 12×12 pictogram: three bars distributed along `axis`. */
+function distributeGlyph(axis: DistributeAxis) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+      {axis === "h" ? (
+        <>
+          <rect x={1} y={3} width={2} height={6} fill="currentColor" />
+          <rect x={5} y={3} width={2} height={6} fill="currentColor" />
+          <rect x={9} y={3} width={2} height={6} fill="currentColor" />
+        </>
+      ) : (
+        <>
+          <rect x={3} y={1} width={6} height={2} fill="currentColor" />
+          <rect x={3} y={5} width={6} height={2} fill="currentColor" />
+          <rect x={3} y={9} width={6} height={2} fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Align-to-each-other + distribute, shown when 2+ items are selected (CAP-M04
+ * follow-on). Distribute needs 3+, so it's disabled with only two. */
+function ArrangeBar({
+  onArrange,
+  onDistribute,
+  canDistribute,
+  t,
+}: {
+  onArrange: (edge: AlignEdge) => void;
+  onDistribute: (axis: DistributeAxis) => void;
+  canDistribute: boolean;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("arrange-group")}>
+      {ALIGN_EDGES.map((edge) => (
+        <button
+          key={edge}
+          type="button"
+          title={t(`arrange-${edge}`)}
+          aria-label={t(`arrange-${edge}`)}
+          onClick={() => onArrange(edge)}
+          className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted hover:text-havoc-text"
+        >
+          {alignGlyph(edge)}
+        </button>
+      ))}
+      <span className="mx-0.5 h-4 w-px bg-white/10" aria-hidden="true" />
+      {(["h", "v"] as const).map((axis) => (
+        <button
+          key={axis}
+          type="button"
+          disabled={!canDistribute}
+          title={t(`distribute-${axis}`)}
+          aria-label={t(`distribute-${axis}`)}
+          onClick={() => onDistribute(axis)}
+          className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+        >
+          {distributeGlyph(axis)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Add a vertical / horizontal custom guide (CAP-M04 follow-on). */
+function GuideButtons({
+  onAdd,
+  t,
+}: {
+  onAdd: (orientation: "v" | "h") => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5" role="group" aria-label={t("guides-group")}>
+      {(["v", "h"] as const).map((orientation) => (
+        <button
+          key={orientation}
+          type="button"
+          title={t(`guides-add-${orientation}`)}
+          aria-label={t(`guides-add-${orientation}`)}
+          onClick={() => onAdd(orientation)}
+          className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted hover:text-havoc-text"
+        >
+          <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+            <rect
+              x={1}
+              y={1}
+              width={10}
+              height={10}
+              fill="none"
+              stroke="currentColor"
+              opacity={0.4}
+            />
+            {orientation === "v" ? (
+              <line x1={6} y1={1} x2={6} y2={11} stroke={GUIDE_COLOR} strokeWidth={1.5} />
+            ) : (
+              <line x1={1} y1={6} x2={11} y2={6} stroke={GUIDE_COLOR} strokeWidth={1.5} />
+            )}
+          </svg>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rulers (CAP-M04): px ticks in the reserved top/left gutter
+// ---------------------------------------------------------------------------
+
+const RULER_FRACS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+
+/** Px rulers along the top and left edges of the preview box, drawn in the
+ * reserved gutter (outside the box, so never occluded by the native surface).
+ * Ticks every 10% of the canvas; labelled every 20%. */
+function Rulers({
+  box,
+  canvasW,
+  canvasH,
+}: {
+  box: { left: number; top: number; width: number; height: number };
+  canvasW: number;
+  canvasH: number;
+}) {
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+      {RULER_FRACS.map((frac) => {
+        const major = Math.round(frac * 10) % 2 === 0;
+        const len = major ? 6 : 3;
+        const x = box.left + frac * box.width;
+        const y = box.top + frac * box.height;
+        return (
+          <g key={frac}>
+            <line
+              x1={x}
+              y1={RULER_SIZE - len}
+              x2={x}
+              y2={RULER_SIZE}
+              stroke="#ffffff55"
+              strokeWidth={1}
+            />
+            {major && (
+              <text x={x} y={RULER_SIZE - 8} textAnchor="middle" fontSize={7} fill="#ffffff99">
+                {Math.round(frac * canvasW)}
+              </text>
+            )}
+            <line
+              x1={RULER_SIZE - len}
+              y1={y}
+              x2={RULER_SIZE}
+              y2={y}
+              stroke="#ffffff55"
+              strokeWidth={1}
+            />
+            {major && (
+              <text
+                x={RULER_SIZE - 8}
+                y={y}
+                textAnchor="middle"
+                fontSize={7}
+                fill="#ffffff99"
+                transform={`rotate(-90 ${RULER_SIZE - 8} ${y})`}
+              >
+                {Math.round(frac * canvasH)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Drag math (program-pixel space; mirrors transform.rs semantics)
 // ---------------------------------------------------------------------------
 
 function distance(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/** The smallest box containing all of `boxes` (caller guarantees non-empty). */
+function unionBoxes(boxes: Box[]): Box {
+  return boxes.reduce((acc, b) => ({
+    minX: Math.min(acc.minX, b.minX),
+    minY: Math.min(acc.minY, b.minY),
+    maxX: Math.max(acc.maxX, b.maxX),
+    maxY: Math.max(acc.maxY, b.maxY),
+  }));
 }
 
 /** Edge midpoints from the corner array: [left, right, top, bottom]. */

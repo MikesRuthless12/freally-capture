@@ -4,12 +4,15 @@ import { useDismiss } from "../lib/useDismiss";
 
 import {
   studioAddFilter,
+  studioPasteFilters,
   studioRemoveFilter,
   studioReorderFilter,
   studioSetFilterEnabled,
   studioSetItemBlend,
   studioUpdateFilter,
 } from "../api/commands";
+import { copyFilters, useClipboard } from "../lib/clipboard";
+import { WorkbenchDialog } from "./WorkbenchDialog";
 import type {
   BlendMode,
   Filter,
@@ -88,7 +91,11 @@ const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`
 /** Per-item blend mode + the ordered filter chain with live parameters. */
 export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDialogProps) {
   const t = useT();
+  const clipboard = useClipboard();
   const [addOpen, setAddOpen] = useState(false);
+  // The key filter open in the keying workbench (CAP-M26), if any.
+  const [tuning, setTuning] = useState<Filter | null>(null);
+  const tuningFilter = tuning && item.filters.find((f) => f.id === tuning.id);
   // Wraps the trigger *and* the menu — see `useDismiss`.
   const addMenuRef = useRef<HTMLDivElement>(null);
   useDismiss(addOpen, addMenuRef, () => setAddOpen(false));
@@ -98,138 +105,188 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
   };
 
   return (
-    <PickerShell title={t("filters-title", { name: sourceName })} onClose={onClose} wide>
-      <div className="flex flex-col gap-3">
-        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-          {t("filters-blend-mode")}
-          <select
-            value={item.blend}
-            onChange={(event) =>
-              studioSetItemBlend(sceneId, item.id, event.target.value as BlendMode).catch(
-                fail("blend change"),
-              )
-            }
-            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
-          >
-            {BLEND_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {mode}
-              </option>
-            ))}
-          </select>
-        </label>
+    <>
+      <PickerShell title={t("filters-title", { name: sourceName })} onClose={onClose} wide>
+        <div className="flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            {t("filters-blend-mode")}
+            <select
+              value={item.blend}
+              onChange={(event) =>
+                studioSetItemBlend(sceneId, item.id, event.target.value as BlendMode).catch(
+                  fail("blend change"),
+                )
+              }
+              className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+            >
+              {BLEND_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {mode}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
-            {t("filters-chain-header")}
-          </span>
-          <div className="relative" ref={addMenuRef}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+              {t("filters-chain-header")}
+            </span>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                type="button"
+                onClick={() => setAddOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={addOpen}
+                className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+              >
+                {t("filters-add")}
+              </button>
+              {addOpen && (
+                <div
+                  role="menu"
+                  aria-label={t("filters-add-menu")}
+                  className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+                >
+                  {(Object.keys(FILTER_DEFAULTS) as FilterTypeName[]).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddOpen(false);
+                        studioAddFilter(sceneId, item.id, FILTER_DEFAULTS[type]).catch(
+                          fail("filter add"),
+                        );
+                      }}
+                      className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                    >
+                      {t(FILTER_NAME_KEYS[type])}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setAddOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={addOpen}
-              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+              disabled={item.filters.length === 0}
+              onClick={() => copyFilters(item.filters)}
+              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
             >
-              {t("filters-add")}
+              {t("filters-copy", { count: item.filters.length })}
             </button>
-            {addOpen && (
-              <div
-                role="menu"
-                aria-label={t("filters-add-menu")}
-                className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
-              >
-                {(Object.keys(FILTER_DEFAULTS) as FilterTypeName[]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAddOpen(false);
-                      studioAddFilter(sceneId, item.id, FILTER_DEFAULTS[type]).catch(
-                        fail("filter add"),
-                      );
-                    }}
-                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                  >
-                    {t(FILTER_NAME_KEYS[type])}
-                  </button>
-                ))}
-              </div>
-            )}
+            <button
+              type="button"
+              disabled={!clipboard.filters?.length}
+              onClick={() =>
+                clipboard.filters &&
+                studioPasteFilters(sceneId, item.id, clipboard.filters).catch(fail("filter paste"))
+              }
+              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+            >
+              {t("filters-paste", { count: clipboard.filters?.length ?? 0 })}
+            </button>
           </div>
-        </div>
 
-        {item.filters.length === 0 ? (
-          <p className="m-0 text-xs text-havoc-muted">{t("filters-empty")}</p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {item.filters.map((filter, index) => (
-              <li key={filter.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={filter.enabled}
-                    onChange={(event) =>
-                      studioSetFilterEnabled(
-                        sceneId,
-                        item.id,
-                        filter.id,
-                        event.target.checked,
-                      ).catch(fail("filter toggle"))
-                    }
-                    aria-label={t("filters-enable", { name: t(FILTER_NAME_KEYS[filter.type]) })}
-                  />
-                  <span className="flex-1 text-xs font-semibold text-havoc-text">
-                    {t(FILTER_NAME_KEYS[filter.type])}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={index === 0}
-                    onClick={() =>
-                      studioReorderFilter(sceneId, item.id, filter.id, index - 1).catch(
-                        fail("filter reorder"),
-                      )
-                    }
-                    title={t("filters-run-earlier")}
-                    aria-label={t("filters-move-up", { name: t(FILTER_NAME_KEYS[filter.type]) })}
-                    className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                  >
-                    ▲
-                  </button>
-                  <button
-                    type="button"
-                    disabled={index === item.filters.length - 1}
-                    onClick={() =>
-                      studioReorderFilter(sceneId, item.id, filter.id, index + 1).catch(
-                        fail("filter reorder"),
-                      )
-                    }
-                    title={t("filters-run-later")}
-                    aria-label={t("filters-move-down", { name: t(FILTER_NAME_KEYS[filter.type]) })}
-                    className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                  >
-                    ▼
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      studioRemoveFilter(sceneId, item.id, filter.id).catch(fail("filter remove"))
-                    }
-                    title={t("filters-remove-title")}
-                    aria-label={t("filters-remove", { name: t(FILTER_NAME_KEYS[filter.type]) })}
-                    className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
-                  >
-                    ×
-                  </button>
-                </div>
-                <FilterParams filter={filter} onChange={(kind) => update(filter, kind)} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </PickerShell>
+          {item.filters.length === 0 ? (
+            <p className="m-0 text-xs text-havoc-muted">{t("filters-empty")}</p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {item.filters.map((filter, index) => (
+                <li
+                  key={filter.id}
+                  className="rounded-lg border border-white/10 bg-white/[0.02] p-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={filter.enabled}
+                      onChange={(event) =>
+                        studioSetFilterEnabled(
+                          sceneId,
+                          item.id,
+                          filter.id,
+                          event.target.checked,
+                        ).catch(fail("filter toggle"))
+                      }
+                      aria-label={t("filters-enable", { name: t(FILTER_NAME_KEYS[filter.type]) })}
+                    />
+                    <span className="flex-1 text-xs font-semibold text-havoc-text">
+                      {t(FILTER_NAME_KEYS[filter.type])}
+                    </span>
+                    {(filter.type === "chromaKey" ||
+                      filter.type === "colorKey" ||
+                      filter.type === "lumaKey") && (
+                      <button
+                        type="button"
+                        onClick={() => setTuning(filter)}
+                        title={t("workbench-tune")}
+                        className="rounded px-1.5 text-[10px] text-havoc-muted hover:text-havoc-accent"
+                      >
+                        {t("workbench-tune")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() =>
+                        studioReorderFilter(sceneId, item.id, filter.id, index - 1).catch(
+                          fail("filter reorder"),
+                        )
+                      }
+                      title={t("filters-run-earlier")}
+                      aria-label={t("filters-move-up", { name: t(FILTER_NAME_KEYS[filter.type]) })}
+                      className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === item.filters.length - 1}
+                      onClick={() =>
+                        studioReorderFilter(sceneId, item.id, filter.id, index + 1).catch(
+                          fail("filter reorder"),
+                        )
+                      }
+                      title={t("filters-run-later")}
+                      aria-label={t("filters-move-down", {
+                        name: t(FILTER_NAME_KEYS[filter.type]),
+                      })}
+                      className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                    >
+                      ▼
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        studioRemoveFilter(sceneId, item.id, filter.id).catch(fail("filter remove"))
+                      }
+                      title={t("filters-remove-title")}
+                      aria-label={t("filters-remove", { name: t(FILTER_NAME_KEYS[filter.type]) })}
+                      className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <FilterParams filter={filter} onChange={(kind) => update(filter, kind)} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </PickerShell>
+      {tuningFilter && (
+        <WorkbenchDialog
+          item={item}
+          filter={tuningFilter}
+          sourceName={sourceName}
+          onChange={(kind) => update(tuningFilter, kind)}
+          onClose={() => setTuning(null)}
+        />
+      )}
+    </>
   );
 }
 
