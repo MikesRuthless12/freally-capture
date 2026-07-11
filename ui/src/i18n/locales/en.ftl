@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = new name…
 workspace-new-name-label = New { $title } name
 workspace-create = Create
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Import from OBS…
+workspace-import-obs-hint = Bring in an OBS scene collection (its scenes.json). Your current collection is saved first.
+workspace-import-busy = Importing…
+workspace-import-title = Imported "{ $name }"
+workspace-import-summary = { $scenes } scenes · { $sources } sources · { $items } items
+workspace-import-dismiss = Dismiss
+workspace-import-clean = Everything came across cleanly.
+workspace-import-geometry-caveat = Item sizes and positions are fitted from OBS's layout — review each scene, and re-pick any capture device.
+workspace-import-notes-title = Imported with notes
+workspace-import-skipped-title = Not imported
+import-note-needsReselect = Re-pick the device/monitor/window
+import-note-gameCaptureAsWindow = Game Capture → Window Capture
+import-note-referencesFile = Check the file path
+import-note-filterDropped = Some filters weren't supported
+import-note-geometryApproximated = Position/size approximated
+import-skip-unsupportedKind = No equivalent source type
+import-skip-group = Groups aren't supported yet
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Relink missing files…
+doctor-title = Missing files
+doctor-scanning = Scanning…
+doctor-all-good = Every referenced file resolves. Nothing to relink.
+doctor-intro = { $count } referenced files can't be found on this computer. Point each to its new location — every scene that uses it is fixed at once.
+doctor-relinked = Relinked { $count } references.
+doctor-uses = used { $count }×
+doctor-locate = Locate…
+doctor-locate-folder = Locate in folder…
+doctor-locate-folder-hint = Pick a folder; each missing file is matched by name and repointed.
+doctor-kind-image = image
+doctor-kind-media = media
+doctor-kind-slideshow = slideshow
+doctor-kind-font = font
+doctor-kind-lut = LUT
+doctor-kind-mask = mask
+history-relinkFiles = Relink files
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Scripts (Lua)
 scripts-empty = No scripts yet — add a .lua file. See scripts/sample.lua for the API: react to go-live/scene/recording events and drive the same commands as the remote API.
@@ -1204,3 +1242,143 @@ announce-live-ended = Stream ended
 announce-reconnecting = Connection lost, reconnecting
 announce-stream-failed = Stream failed
 announce-frames-dropped = { $count } frames dropped
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Undo
+palette-redo = Redo
+palette-edit-history = Edit history…
+history-title = Edit history
+history-empty = No edits to undo yet.
+history-current = Current state
+history-close = Close
+history-addScene = Add scene
+history-renameScene = Rename scene
+history-removeScene = Remove scene
+history-reorderScene = Reorder scenes
+history-addSource = Add source
+history-removeSource = Remove source
+history-reorderSource = Reorder sources
+history-renameSource = Rename source
+history-transformSource = Move source
+history-toggleVisibility = Toggle visibility
+history-toggleLock = Toggle lock
+history-setBlendMode = Change blend mode
+history-editSourceProperties = Edit properties
+history-applyLayout = Arrange layout
+history-moveToSeat = Move to seat
+history-groupSources = Group sources
+history-ungroupSources = Ungroup sources
+history-toggleGroupVisibility = Toggle group
+history-setSceneAudio = Scene audio
+history-setVerticalCanvas = Vertical canvas
+history-addFilter = Add filter
+history-removeFilter = Remove filter
+history-reorderFilter = Reorder filters
+history-editFilter = Edit filter
+history-toggleFilter = Toggle filter
+history-setVolume = Adjust volume
+history-toggleMute = Toggle mute
+history-setMonitor = Change monitoring
+history-setTracks = Change tracks
+history-setSyncOffset = Adjust A/V sync
+history-setAudioHotkeys = Audio hotkeys
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Alignment aids
+settings-smart-guides = Smart guides (snap while dragging)
+settings-safe-areas = Safe-area overlays
+settings-rulers = Rulers
+align-group = Align to canvas
+align-left = Align left
+align-hcenter = Center horizontally
+align-right = Align right
+align-top = Align top
+align-vcenter = Center vertically
+align-bottom = Align bottom
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Align & distribute selected
+arrange-left = Align left edges
+arrange-hcenter = Align horizontal centers
+arrange-right = Align right edges
+arrange-top = Align top edges
+arrange-vcenter = Align vertical centers
+arrange-bottom = Align bottom edges
+distribute-h = Distribute horizontally
+distribute-v = Distribute vertically
+guides-group = Guides
+guides-add-v = Add vertical guide
+guides-add-h = Add horizontal guide
+history-arrangeItems = Arrange items
+history-editGuides = Edit guides
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Edit Transform — { $name }
+transform-anchor = Anchor
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Rotation
+transform-crop = Crop
+transform-crop-left = Left
+transform-crop-top = Top
+transform-crop-right = Right
+transform-crop-bottom = Bottom
+transform-no-size = Size and crop become available once the source reports its dimensions.
+transform-copy = Copy transform
+transform-paste = Paste transform
+transform-close = Close
+filters-copy = Copy filters ({ $count })
+filters-paste = Paste filters ({ $count })
+palette-edit-transform = Edit transform…
+history-pasteFilters = Paste filters
+
+# CAP-M26 — keying workbench
+workbench-title = Keying Workbench — { $name }
+workbench-mode-keyed = Keyed
+workbench-mode-source = Source
+workbench-mode-matte = Matte
+workbench-mode-split = Split
+workbench-eyedropper = Eyedropper
+workbench-eyedropper-hint = Click the source to sample the key colour.
+workbench-loupe = Loupe
+workbench-split = Split
+workbench-preview-alt = Keying workbench preview
+workbench-tune = Tune
+workbench-close = Close
+
+# CAP-M06 — multiview monitor
+multiview-title = Multiview
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Click a scene to cut to it.
+multiview-hint-stage = Click a scene to stage it in preview.
+palette-multiview = Multiview monitor
+
+# CAP-M07 — projectors
+projector-title = Open projector
+projector-source = Source
+projector-target-program = Program
+projector-target-preview = Preview
+projector-target-scene = Scene…
+projector-target-source = Source…
+projector-target-multiview = Multiview
+projector-which-scene = Which scene
+projector-which-source = Which source
+projector-none = Nothing to show there
+projector-display = Display
+projector-windowed = Floating window (this screen)
+projector-display-option = Display { $n } — { $w }×{ $h }
+projector-primary = (primary)
+projector-open = Open
+projector-cancel = Cancel
+projector-exit-hint = Press Esc to exit
+palette-projector = Open projector…
+
+# CAP-M08 — still-frame grab
+palette-still = Grab still frame…
+still-saved-toast = Still saved: { $name }
+still-failed-toast = Still grab failed: { $error }
+hotkeys-still = Grab still
+hotkeys-still-placeholder = e.g. Ctrl+Shift+P

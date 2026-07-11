@@ -11,16 +11,32 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use fcap_scene::{
-    BlendMode, Corner, FilterId, FilterKind, ItemId, NormRect, SceneId, Source, SourceId,
-    SourceSettings, Transform,
+    BlendMode, Corner, FileRef, FileRefKind, Filter, FilterId, FilterKind, GuideLine, ItemId,
+    NormRect, SceneId, Source, SourceId, SourceSettings, Transform,
 };
 
-use crate::studio::{StudioDto, StudioState};
+use crate::studio::{coalesce_key, StillTarget, StudioDto, StudioState, WorkbenchMode};
 
 /// The whole current model (initial load / reconnect).
 #[tauri::command]
 pub fn studio_get(state: State<'_, StudioState>) -> StudioDto {
     state.snapshot()
+}
+
+// -- undo / redo (CAP-M01) --------------------------------------------------
+
+/// Undo the newest scene edit. Returns the reversed edit's label (a stable key
+/// the UI localizes), or `null` when there was nothing to undo. The restored
+/// model arrives on the `studio` event like any mutation.
+#[tauri::command]
+pub fn studio_undo(app: AppHandle, state: State<'_, StudioState>) -> Option<String> {
+    state.undo(&app)
+}
+
+/// Redo the most recently undone scene edit. Mirror of [`studio_undo`].
+#[tauri::command]
+pub fn studio_redo(app: AppHandle, state: State<'_, StudioState>) -> Option<String> {
+    state.redo(&app)
 }
 
 // -- scenes -----------------------------------------------------------------
@@ -31,7 +47,9 @@ pub fn studio_add_scene(
     state: State<'_, StudioState>,
     name: String,
 ) -> Result<SceneId, String> {
-    state.mutate(&app, |collection| Ok(collection.add_scene(&name)))
+    state.mutate_tracked(&app, "addScene", None, |collection| {
+        Ok(collection.add_scene(&name))
+    })
 }
 
 #[tauri::command]
@@ -41,7 +59,9 @@ pub fn studio_rename_scene(
     scene_id: SceneId,
     name: String,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| collection.rename_scene(scene_id, &name))
+    state.mutate_tracked(&app, "renameScene", None, |collection| {
+        collection.rename_scene(scene_id, &name)
+    })
 }
 
 #[tauri::command]
@@ -50,7 +70,9 @@ pub fn studio_remove_scene(
     state: State<'_, StudioState>,
     scene_id: SceneId,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| collection.remove_scene(scene_id))
+    state.mutate_tracked(&app, "removeScene", None, |collection| {
+        collection.remove_scene(scene_id)
+    })
 }
 
 #[tauri::command]
@@ -69,7 +91,7 @@ pub fn studio_reorder_scene(
     scene_id: SceneId,
     to_index: usize,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "reorderScene", None, |collection| {
         collection.reorder_scene(scene_id, to_index)
     })
 }
@@ -93,7 +115,7 @@ pub fn studio_add_item(
     name: Option<String>,
     settings: SourceSettings,
 ) -> Result<AddedItem, String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "addSource", None, |collection| {
         let source = Source::new(name.unwrap_or_default(), settings);
         collection
             .add_item_with_new_source(scene_id, source)
@@ -109,7 +131,7 @@ pub fn studio_add_existing_source(
     scene_id: SceneId,
     source_id: SourceId,
 ) -> Result<ItemId, String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "addSource", None, |collection| {
         collection.add_item_with_existing_source(scene_id, source_id)
     })
 }
@@ -121,7 +143,9 @@ pub fn studio_remove_item(
     scene_id: SceneId,
     item_id: ItemId,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| collection.remove_item(scene_id, item_id))
+    state.mutate_tracked(&app, "removeSource", None, |collection| {
+        collection.remove_item(scene_id, item_id)
+    })
 }
 
 #[tauri::command]
@@ -132,7 +156,7 @@ pub fn studio_reorder_item(
     item_id: ItemId,
     to_index: usize,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "reorderSource", None, |collection| {
         collection.reorder_item(scene_id, item_id, to_index)
     })
 }
@@ -145,9 +169,12 @@ pub fn studio_set_item_transform(
     item_id: ItemId,
     transform: Transform,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.set_item_transform(scene_id, item_id, transform)
-    })
+    state.mutate_tracked(
+        &app,
+        "transformSource",
+        Some(coalesce_key("transform", item_id)),
+        |collection| collection.set_item_transform(scene_id, item_id, transform),
+    )
 }
 
 #[tauri::command]
@@ -158,7 +185,7 @@ pub fn studio_set_item_visible(
     item_id: ItemId,
     visible: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleVisibility", None, |collection| {
         collection.set_item_visible(scene_id, item_id, visible)
     })
 }
@@ -171,7 +198,7 @@ pub fn studio_set_item_locked(
     item_id: ItemId,
     locked: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleLock", None, |collection| {
         collection.set_item_locked(scene_id, item_id, locked)
     })
 }
@@ -184,7 +211,7 @@ pub fn studio_set_item_blend(
     item_id: ItemId,
     blend: BlendMode,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "setBlendMode", None, |collection| {
         collection.set_item_blend(scene_id, item_id, blend)
     })
 }
@@ -208,7 +235,7 @@ pub fn studio_apply_layout(
     center: Option<ItemId>,
     corners: Vec<CornerSlot>,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "applyLayout", None, |collection| {
         let corners: Vec<(ItemId, Corner)> = corners
             .iter()
             .map(|slot| (slot.item_id, slot.corner))
@@ -228,7 +255,7 @@ pub fn studio_set_item_slot(
     item_id: ItemId,
     slot: NormRect,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "moveToSeat", None, |collection| {
         collection.set_item_slot(scene_id, item_id, slot)
     })
 }
@@ -258,7 +285,7 @@ pub fn studio_create_group(
     name: String,
     item_ids: Vec<ItemId>,
 ) -> Result<fcap_scene::GroupId, String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "groupSources", None, |collection| {
         collection.create_group(scene_id, &name, &item_ids)
     })
 }
@@ -271,7 +298,9 @@ pub fn studio_ungroup(
     scene_id: SceneId,
     group_id: fcap_scene::GroupId,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| collection.ungroup(scene_id, group_id))
+    state.mutate_tracked(&app, "ungroupSources", None, |collection| {
+        collection.ungroup(scene_id, group_id)
+    })
 }
 
 /// A group's eye toggle — hides/shows every member together.
@@ -283,7 +312,7 @@ pub fn studio_set_group_visible(
     group_id: fcap_scene::GroupId,
     visible: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleGroupVisibility", None, |collection| {
         collection.set_group_visible(scene_id, group_id, visible)
     })
 }
@@ -306,13 +335,18 @@ pub fn studio_set_scene_audio_override(
     source_id: fcap_scene::SourceId,
     over: Option<SceneAudioOverrideArg>,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.set_scene_audio_override(
-            scene_id,
-            source_id,
-            over.as_ref().map(|entry| (entry.volume_db, entry.muted)),
-        )
-    })
+    state.mutate_tracked(
+        &app,
+        "setSceneAudio",
+        Some(coalesce_key("sceneAudio", source_id)),
+        |collection| {
+            collection.set_scene_audio_override(
+                scene_id,
+                source_id,
+                over.as_ref().map(|entry| (entry.volume_db, entry.muted)),
+            )
+        },
+    )
 }
 
 /// Configure (or clear, with `null`) the second output canvas — e.g. a
@@ -323,7 +357,9 @@ pub fn studio_set_vertical(
     state: State<'_, StudioState>,
     vertical: Option<fcap_scene::VerticalCanvas>,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| collection.set_vertical(vertical))
+    state.mutate_tracked(&app, "setVerticalCanvas", None, |collection| {
+        collection.set_vertical(vertical)
+    })
 }
 
 /// Studio Mode (Phase 5): on = a preview pane opens on the program scene;
@@ -386,7 +422,7 @@ pub fn studio_rename_source(
     source_id: SourceId,
     name: String,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "renameSource", None, |collection| {
         collection.rename_source(source_id, &name)
     })
 }
@@ -400,9 +436,12 @@ pub fn studio_update_source_settings(
     source_id: SourceId,
     settings: SourceSettings,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.update_source_settings(source_id, settings)
-    })
+    state.mutate_tracked(
+        &app,
+        "editSourceProperties",
+        Some(coalesce_key("sourceProps", source_id)),
+        |collection| collection.update_source_settings(source_id, settings),
+    )
 }
 
 /// Restart an errored source with unchanged settings (replugged camera,
@@ -441,7 +480,7 @@ pub fn studio_add_filter(
     item_id: ItemId,
     kind: FilterKind,
 ) -> Result<FilterId, String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "addFilter", None, |collection| {
         collection.add_filter(scene_id, item_id, kind)
     })
 }
@@ -454,7 +493,7 @@ pub fn studio_remove_filter(
     item_id: ItemId,
     filter_id: FilterId,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "removeFilter", None, |collection| {
         collection.remove_filter(scene_id, item_id, filter_id)
     })
 }
@@ -468,7 +507,7 @@ pub fn studio_reorder_filter(
     filter_id: FilterId,
     to_index: usize,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "reorderFilter", None, |collection| {
         collection.reorder_filter(scene_id, item_id, filter_id, to_index)
     })
 }
@@ -482,9 +521,12 @@ pub fn studio_update_filter(
     filter_id: FilterId,
     kind: FilterKind,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
-        collection.update_filter(scene_id, item_id, filter_id, kind)
-    })
+    state.mutate_tracked(
+        &app,
+        "editFilter",
+        Some(coalesce_key("filterParams", filter_id)),
+        |collection| collection.update_filter(scene_id, item_id, filter_id, kind),
+    )
 }
 
 #[tauri::command]
@@ -496,7 +538,211 @@ pub fn studio_set_filter_enabled(
     filter_id: FilterId,
     enabled: bool,
 ) -> Result<(), String> {
-    state.mutate(&app, |collection| {
+    state.mutate_tracked(&app, "toggleFilter", None, |collection| {
         collection.set_filter_enabled(scene_id, item_id, filter_id, enabled)
+    })
+}
+
+/// Paste a copied filter chain onto an item (CAP-M05). Each copied filter is
+/// appended on top with a fresh id, keeping its kind + enabled state; the whole
+/// paste is one undo step. Returns how many filters were added.
+#[tauri::command]
+pub fn studio_paste_filters(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    filters: Vec<Filter>,
+) -> Result<usize, String> {
+    state.mutate_tracked(&app, "pasteFilters", None, |collection| {
+        collection.paste_filters(scene_id, item_id, filters)
+    })
+}
+
+// -- keying workbench (CAP-M26) ------------------------------------------------
+
+/// Open/update the keying workbench: render `item_id` in `mode` (with the
+/// `split` divider position for Split mode). Preview-only — nothing persists;
+/// the render thread publishes to the `workbench-preview` slot.
+#[tauri::command]
+pub fn studio_workbench_set(
+    state: State<'_, StudioState>,
+    item_id: ItemId,
+    mode: WorkbenchMode,
+    split: f32,
+) {
+    state.set_workbench(item_id, mode, split);
+}
+
+/// Close the keying workbench (clears its preview slot).
+#[tauri::command]
+pub fn studio_workbench_close(state: State<'_, StudioState>) {
+    state.close_workbench();
+}
+
+// -- multiview monitor (CAP-M06) ----------------------------------------------
+
+/// Open/close the multiview monitor: while `on`, the render loop keeps every
+/// scene's sources live and publishes per-scene thumbnails to `/multiview/<id>`.
+#[tauri::command]
+pub fn studio_multiview_set(state: State<'_, StudioState>, on: bool) {
+    state.set_multiview(on);
+}
+
+/// Grab a still frame (CAP-M08): a lossless PNG of the program or a single
+/// source, saved into the recordings folder. The render loop saves it on its
+/// next tick and emits `still-saved` (the path) or `still-error`.
+#[tauri::command]
+pub fn studio_capture_still(app: AppHandle, target: StillTarget) {
+    crate::studio::capture_still(&app, target);
+}
+
+// -- missing-file doctor (CAP-M03) --------------------------------------------
+
+/// One broken file reference, grouped by path — the same missing file used in
+/// several places is listed once with a `uses` count. Relinking is by path, so
+/// fixing it here repairs every use.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingFile {
+    pub path: String,
+    /// The kind of the first reference to this path (for an icon/label).
+    pub kind: FileRefKind,
+    /// The first source that uses it (context for the user).
+    pub source_name: String,
+    /// How many references across the collection share this path.
+    pub uses: usize,
+}
+
+/// A path we won't stat locally — a stream/URL, or a UNC network path. Statting
+/// a UNC path on Windows forces an SMB connection (and an NTLM handshake) to the
+/// host, so an imported collection referencing `\\attacker\share\x.png` must
+/// never be probed. Such paths are treated as "not missing" (never reported).
+fn is_remote(path: &str) -> bool {
+    path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
+}
+
+/// Collapse the collection's file references down to the ones that don't
+/// resolve on disk, grouped by path.
+fn missing_from(refs: Vec<FileRef>) -> Vec<MissingFile> {
+    let mut out: Vec<MissingFile> = Vec::new();
+    for r in refs {
+        if is_remote(&r.path) || std::path::Path::new(&r.path).exists() {
+            continue;
+        }
+        if let Some(existing) = out.iter_mut().find(|m| m.path == r.path) {
+            existing.uses += 1;
+        } else {
+            out.push(MissingFile {
+                path: r.path,
+                kind: r.kind,
+                source_name: r.source_name,
+                uses: 1,
+            });
+        }
+    }
+    out
+}
+
+/// The doctor's scan: every referenced file that is missing from disk. An empty
+/// list means every image/media/font/LUT/mask path resolves.
+#[tauri::command]
+pub fn collection_missing_files(state: State<'_, StudioState>) -> Vec<MissingFile> {
+    missing_from(state.with_collection(|c| c.file_refs()))
+}
+
+/// Repoint one broken path to a new one everywhere it appears; returns how many
+/// references changed. Undoable (one step).
+#[tauri::command]
+pub fn collection_relink(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    old_path: String,
+    new_path: String,
+) -> Result<usize, String> {
+    state.mutate_tracked(&app, "relinkFiles", None, |collection| {
+        Ok(collection.relink_file(&old_path, &new_path))
+    })
+}
+
+/// Bulk relink: for each still-missing file, look for a file of the same name
+/// in `folder`; repoint the ones found. Returns how many references changed.
+/// Undoable as a single step.
+#[tauri::command]
+pub fn collection_relink_folder(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    folder: String,
+) -> Result<usize, String> {
+    let plan: Vec<(String, String)> = missing_from(state.with_collection(|c| c.file_refs()))
+        .into_iter()
+        .filter_map(|missing| {
+            let name = std::path::Path::new(&missing.path).file_name()?;
+            let candidate = std::path::Path::new(&folder).join(name);
+            candidate
+                .is_file()
+                .then(|| (missing.path, candidate.to_string_lossy().into_owned()))
+        })
+        .collect();
+    if plan.is_empty() {
+        return Ok(0);
+    }
+    state.mutate_tracked(&app, "relinkFiles", None, |collection| {
+        Ok(plan
+            .iter()
+            .map(|(old, new)| collection.relink_file(old, new))
+            .sum())
+    })
+}
+
+// -- multi-item arrange + custom guides (CAP-M04 follow-on) --------------------
+
+/// One item's new transform in a batch arrange (align / distribute / group move).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransformChange {
+    pub item: ItemId,
+    pub transform: Transform,
+}
+
+/// Apply several item transforms as a **single** undo step — align-to-each-other,
+/// distribute, and group drags. `coalesce` folds a streaming group drag into one
+/// step; discrete arranges pass `false`.
+#[tauri::command]
+pub fn studio_set_item_transforms(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    changes: Vec<TransformChange>,
+    coalesce: bool,
+) -> Result<(), String> {
+    let key = coalesce.then(|| coalesce_key("arrange", scene_id));
+    state.mutate_tracked(&app, "arrangeItems", key, move |collection| {
+        // Validate every target first, so a partial batch can never leave the
+        // collection half-moved (an early Err records nothing on the undo stack).
+        for change in &changes {
+            collection
+                .scene(scene_id)
+                .and_then(|scene| scene.item(change.item))
+                .ok_or(fcap_scene::SceneError::ItemNotFound)?;
+        }
+        for change in &changes {
+            collection.set_item_transform(scene_id, change.item, change.transform)?;
+        }
+        Ok(())
+    })
+}
+
+/// Replace a scene's custom alignment guides (CAP-M04 follow-on). The UI manages
+/// add/move/delete locally and commits the whole list on drop — one undo step.
+#[tauri::command]
+pub fn studio_set_guides(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    guides: Vec<GuideLine>,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "editGuides", None, move |collection| {
+        collection.set_guides(scene_id, guides)
     })
 }

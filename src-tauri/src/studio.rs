@@ -19,20 +19,20 @@
 //! The collection persists as `scene-collection.json` in the OS config dir —
 //! atomic writes, debounced ~800 ms behind the last mutation, flushed on exit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use fcap_capture::{CaptureError, CaptureSession};
-use fcap_compositor::{parse_cube, Compositor, CompositorError, FilterResourceData};
+use fcap_compositor::{parse_cube, Compositor, CompositorError, FilterResourceData, ProgramFrame};
 use fcap_scene::{
-    AudioSettings, Collection, FilterId, FilterKind, SceneError, SceneId, SourceId, SourceSettings,
-    Transform,
+    AudioSettings, Collection, Crop, Filter, FilterId, FilterKind, History, HistoryState, ItemId,
+    Scene, SceneError, SceneId, SceneItem, SourceId, SourceSettings, Transform,
 };
 use fcap_sources::video_device::{self, VideoFormatInfo};
 use fcap_sources::{color, image, text};
@@ -44,6 +44,13 @@ const TICK: Duration = Duration::from_millis(16);
 const READBACK_INTERVAL: Duration = Duration::from_millis(33);
 const PROGRAM_EVENT_INTERVAL: Duration = Duration::from_secs(1);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(800);
+/// Multiview thumbnails (CAP-M06) refresh slower than the program — they don't
+/// need 30 fps — and only a few render per tick so no single tick stalls on all
+/// of them.
+const MULTIVIEW_INTERVAL: Duration = Duration::from_millis(150);
+const MULTIVIEW_BATCH: usize = 4;
+/// Multiview thumbnail width in px; height derives from the canvas aspect.
+const MULTIVIEW_THUMB_WIDTH: u32 = 320;
 /// Auto-recover backoff (OBS-style): the first re-attempt of an errored
 /// device/window capture fires this soon after it fails…
 const AUTO_RETRY_MIN: Duration = Duration::from_secs(3);
@@ -77,6 +84,8 @@ pub struct StudioDto {
     /// Studio Mode (Phase 5): present while enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub studio_mode: Option<StudioModeDto>,
+    /// Undo/redo availability + the viewable history list (CAP-M01).
+    pub history: HistoryState,
 }
 
 /// The Studio-Mode slice of the model (session state, never persisted).
@@ -115,6 +124,71 @@ pub(crate) struct TransitionFramePack {
     pub luma: Option<Arc<(u32, u32, Vec<u8>)>>,
 }
 
+/// Keying-workbench render mode (CAP-M26). The workbench shows one source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkbenchMode {
+    /// The raw source, no filters — the "before" view + eyedropper source.
+    Source,
+    /// The source with its full filter chain (the keyed "after").
+    Keyed,
+    /// The keyer's matte: alpha rendered as opaque grayscale.
+    Matte,
+    /// Raw source on the left, keyed on the right, split at `split`.
+    Split,
+}
+
+/// An open keying workbench: which item, how to render it, and (Split only) the
+/// divider position 0..1.
+#[derive(Debug, Clone, Copy)]
+struct Workbench {
+    item: ItemId,
+    mode: WorkbenchMode,
+    split: f32,
+}
+
+/// What a still-frame grab captures (CAP-M08).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum StillTarget {
+    /// The composed program frame.
+    Program,
+    /// A single source item, with or without its filter chain.
+    Source { item: ItemId, pre_filter: bool },
+}
+
+/// A still resolved against the model, ready for the render thread to grab.
+enum StillJob {
+    Program,
+    Source(SourceId, Vec<Filter>),
+}
+
+/// A projector's full-res render job for one due tick (CAP-M07 extension). The
+/// `String` is the preview-slot key (`"scene:<id>"` / `"source:<id>"`).
+enum ProjectorJob {
+    Scene(String, Scene),
+    Source(String, SourceId),
+}
+
+/// A scene or single source shown fullscreen by a projector window (CAP-M07
+/// extension). Program/preview projectors reuse existing slots, so only these
+/// two kinds need a dedicated full-res render each tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProjectorTarget {
+    Scene(SceneId),
+    Source(SourceId),
+}
+
+impl ProjectorTarget {
+    /// The preview-slot key: `"scene:<id>"` / `"source:<id>"`.
+    fn key(&self) -> String {
+        match self {
+            ProjectorTarget::Scene(id) => format!("scene:{}", id.0),
+            ProjectorTarget::Source(id) => format!("source:{}", id.0),
+        }
+    }
+}
+
 struct StudioCore {
     collection: Collection,
     revision: u64,
@@ -129,6 +203,23 @@ struct StudioCore {
     preview_scene: Option<SceneId>,
     /// The blend a commit is currently rendering, if any.
     transition: Option<ActiveTransition>,
+    /// Multi-step undo/redo for scene editing (CAP-M01). Snapshots ride
+    /// alongside the collection under the same lock; not persisted to disk.
+    undo: History,
+    /// Monotonic base for undo gesture-coalescing timestamps (see
+    /// [`History::edit`]). Not wall-clock — only elapsed millis matter.
+    epoch: Instant,
+    /// The open keying workbench, if any (CAP-M26). Render-only session state.
+    workbench: Option<Workbench>,
+    /// Whether a multiview monitor is open (CAP-M06): while true the render loop
+    /// keeps every scene's sources live and publishes per-scene thumbnails.
+    multiview: bool,
+    /// A pending still-frame grab (CAP-M08): the render loop fulfils it once and
+    /// clears it. The path is pre-computed by the command (which has settings).
+    still_request: Option<(StillTarget, PathBuf)>,
+    /// Open scene/source projectors (CAP-M07 extension): while non-empty the
+    /// render loop keeps their sources live and publishes their full-res slots.
+    projectors: HashSet<ProjectorTarget>,
 }
 
 /// The DTO for the current core state (one shape for every emit site).
@@ -140,7 +231,20 @@ fn dto_of(core: &StudioCore) -> StudioDto {
             preview_scene,
             transitioning: core.transition.is_some(),
         }),
+        history: core.undo.state(),
     }
+}
+
+/// Build an undo-coalesce key from an operation tag and the target it acts on,
+/// so every frame of one continuous gesture (a drag, a fader ride) on the same
+/// target folds into a single undo step. Different tags or targets never
+/// coalesce. See [`History::edit`].
+pub(crate) fn coalesce_key<T: std::hash::Hash>(tag: &str, target: T) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tag.hash(&mut hasher);
+    target.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Tauri-managed handle to the studio model.
@@ -173,6 +277,12 @@ impl StudioState {
                 retry_nonces: HashMap::new(),
                 preview_scene: None,
                 transition: None,
+                undo: History::new(),
+                epoch: Instant::now(),
+                workbench: None,
+                multiview: false,
+                still_request: None,
+                projectors: HashSet::new(),
             })),
         }
     }
@@ -199,6 +309,62 @@ impl StudioState {
     /// A snapshot for `studio_get` / event payloads.
     pub fn snapshot(&self) -> StudioDto {
         dto_of(&self.lock())
+    }
+
+    /// Read the live collection under the lock (CAP-M03 missing-file scans).
+    pub fn with_collection<T>(&self, f: impl FnOnce(&Collection) -> T) -> T {
+        f(&self.lock().collection)
+    }
+
+    /// Open/update the keying workbench (CAP-M26): render `item` in `mode`. No
+    /// model change and nothing emitted — the render thread picks it up and
+    /// publishes to the `workbench-preview` slot.
+    pub fn set_workbench(&self, item: ItemId, mode: WorkbenchMode, split: f32) {
+        self.lock().workbench = Some(Workbench {
+            item,
+            mode,
+            split: split.clamp(0.0, 1.0),
+        });
+    }
+
+    /// Close the keying workbench (the render loop clears the preview slot).
+    pub fn close_workbench(&self) {
+        self.lock().workbench = None;
+    }
+
+    /// Open/close the multiview monitor (CAP-M06). While open, the render loop
+    /// keeps every scene's sources live and publishes per-scene thumbnails to
+    /// the `/multiview/<id>` slots; closing it clears them.
+    pub fn set_multiview(&self, on: bool) {
+        self.lock().multiview = on;
+    }
+
+    /// Register/deregister a scene or source projector (CAP-M07 extension). The
+    /// render loop reads the set each tick to publish/retire the full-res slots.
+    /// Returns whether the set changed.
+    pub fn set_projector(&self, target: ProjectorTarget, on: bool) -> bool {
+        let mut core = self.lock();
+        if on {
+            core.projectors.insert(target)
+        } else {
+            core.projectors.remove(&target)
+        }
+    }
+
+    /// Whether a projector target still resolves in the current collection (used
+    /// to skip stale scene/source projectors when reopening on launch).
+    pub fn has_target(&self, target: ProjectorTarget) -> bool {
+        let core = self.lock();
+        match target {
+            ProjectorTarget::Scene(id) => core.collection.scene(id).is_some(),
+            ProjectorTarget::Source(id) => core.collection.source(id).is_some(),
+        }
+    }
+
+    /// Queue a still-frame grab (CAP-M08); the render loop saves it to `path`
+    /// on its next tick and emits `still-saved`/`still-error`.
+    pub fn request_still(&self, target: StillTarget, path: PathBuf) {
+        self.lock().still_request = Some((target, path));
     }
 
     /// Toggle Studio Mode: on = the preview side starts on the program scene;
@@ -402,6 +568,72 @@ impl StudioState {
         Ok(dto.0)
     }
 
+    /// Like [`Self::mutate`], but records the edit on the undo stack (CAP-M01):
+    /// a checkpoint is pushed only when `apply` actually changed the collection
+    /// (no-op edits and rejected ones leave history untouched), and continuous
+    /// gestures sharing a `Some(coalesce)` key within the coalesce window fold
+    /// into a single undo step. Discrete edits pass `None`.
+    ///
+    /// Use this for every *document* edit. The three live-routing writes that
+    /// choose what's on program right now — selecting the active scene,
+    /// center-view, and focus — deliberately go through the plain
+    /// [`Self::mutate`] instead, so Ctrl+Z reverses edits, not the live show.
+    pub fn mutate_tracked<R: Runtime, T>(
+        &self,
+        app: &AppHandle<R>,
+        label: &str,
+        coalesce: Option<u64>,
+        apply: impl FnOnce(&mut Collection) -> Result<T, SceneError>,
+    ) -> Result<T, String> {
+        let dto = {
+            let mut core = self.lock();
+            let now_ms = core.epoch.elapsed().as_millis() as u64;
+            // Split the borrow so the history can edit the collection in place.
+            let core = &mut *core;
+            let value = core
+                .undo
+                .edit(&mut core.collection, label, coalesce, now_ms, apply)
+                .map_err(|err| err.to_string())?;
+            core.revision += 1;
+            core.dirty_since.get_or_insert_with(Instant::now);
+            let dto = dto_of(core);
+            (value, dto)
+        };
+        let _ = app.emit("studio", &dto.1);
+        Ok(dto.0)
+    }
+
+    /// Undo the newest recorded edit and push the restored model to the UI.
+    /// Returns the reversed edit's label, or `None` when there is nothing to
+    /// undo (in which case nothing is emitted). The revision still climbs so
+    /// the UI's `revision >=` echo guard accepts the restore.
+    pub fn undo<R: Runtime>(&self, app: &AppHandle<R>) -> Option<String> {
+        let (label, dto) = {
+            let mut core = self.lock();
+            let core = &mut *core;
+            let label = core.undo.undo(&mut core.collection)?;
+            core.revision += 1;
+            core.dirty_since.get_or_insert_with(Instant::now);
+            (label, dto_of(core))
+        };
+        let _ = app.emit("studio", &dto);
+        Some(label)
+    }
+
+    /// Redo the most recently undone edit. Mirror of [`Self::undo`].
+    pub fn redo<R: Runtime>(&self, app: &AppHandle<R>) -> Option<String> {
+        let (label, dto) = {
+            let mut core = self.lock();
+            let core = &mut *core;
+            let label = core.undo.redo(&mut core.collection)?;
+            core.revision += 1;
+            core.dirty_since.get_or_insert_with(Instant::now);
+            (label, dto_of(core))
+        };
+        let _ = app.emit("studio", &dto);
+        Some(label)
+    }
+
     /// Persist immediately if dirty (exit path — never lose the last edit).
     pub fn save_now(&self) {
         let mut core = self.lock();
@@ -437,6 +669,8 @@ impl StudioState {
             core.preview_scene = None;
             core.transition = None;
             core.retry_nonces.clear();
+            // A different document loaded — undo must not cross the boundary.
+            core.undo.clear();
             core.revision += 1;
             dto_of(&core)
         };
@@ -796,6 +1030,16 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // Whether the Studio-Mode preview pane currently has a published frame
     // (so turning the mode off clears the slot exactly once).
     let mut studio_preview_live = false;
+    // Same, for the keying-workbench slot (CAP-M26).
+    let mut workbench_live = false;
+    // Multiview (CAP-M06): its own slow cadence, a round-robin cursor so no tick
+    // renders every scene at once, and a was-open flag to clear the slots on close.
+    let mut last_multiview = Instant::now();
+    let mut multiview_cursor = 0usize;
+    let mut multiview_was_on = false;
+    // Scene/source projectors (CAP-M07 extension): rendered at the readback
+    // cadence; closed targets' slots are retired by `retain_projectors`.
+    let mut last_projector = Instant::now() - READBACK_INTERVAL;
     // Per-source auto-recover backoff: source id → (next attempt time, last wait).
     let mut retry_schedule: HashMap<SourceId, (Instant, Duration)> = HashMap::new();
     let mut statuses_changed = true;
@@ -826,6 +1070,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let tick_started = Instant::now();
 
         // -- 1. Snapshot the model (brief lock) --------------------------------
+        let multiview_due = last_multiview.elapsed() >= MULTIVIEW_INTERVAL;
+        let projector_due = last_projector.elapsed() >= READBACK_INTERVAL;
         let mut transition_ended: Option<StudioDto> = None;
         let (
             revision,
@@ -838,6 +1084,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             vertical_pack,
             scene_pool_rebuild,
             scene_refs,
+            workbench_pack,
+            multiview_on,
+            multiview_scenes,
+            still_job,
+            projector_pack,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -901,6 +1152,88 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             if let Some((vertical_scene, _, _)) = &vertical_pack {
                 live_sources.extend(vertical_scene.items.iter().map(|item| item.source));
             }
+            // The keying workbench (CAP-M26) renders one item's source — keep it
+            // live even when its scene is off program.
+            let workbench_pack: Option<(SourceId, Vec<Filter>, WorkbenchMode, f32)> =
+                guard.workbench.and_then(|wb| {
+                    guard.collection.scenes.iter().find_map(|scene| {
+                        scene
+                            .item(wb.item)
+                            .map(|item| (item.source, item.filters.clone(), wb.mode, wb.split))
+                    })
+                });
+            if let Some((source, _, _, _)) = &workbench_pack {
+                live_sources.push(*source);
+            }
+            // Multiview (CAP-M06): while a monitor is open, keep every scene's
+            // sources live so off-program thumbnails render; clone the scenes for
+            // the thumbnail render only on a due tick.
+            let multiview_on = guard.multiview;
+            if multiview_on {
+                for scene in &guard.collection.scenes {
+                    live_sources.extend(scene.items.iter().map(|item| item.source));
+                }
+            }
+            let multiview_scenes: Option<Vec<Scene>> =
+                (multiview_on && multiview_due).then(|| guard.collection.scenes.clone());
+            // Scene/source projectors (CAP-M07 extension): keep their sources
+            // live every tick; clone the render jobs only on a due tick. The
+            // `live` key set lets the render loop retire closed targets' slots.
+            let projector_live: HashSet<String> =
+                guard.projectors.iter().map(ProjectorTarget::key).collect();
+            for target in guard.projectors.iter() {
+                match target {
+                    ProjectorTarget::Scene(id) => {
+                        if let Some(scene) = guard.collection.scene(*id) {
+                            live_sources.extend(scene.items.iter().map(|item| item.source));
+                        }
+                    }
+                    ProjectorTarget::Source(id) => {
+                        if guard.collection.source(*id).is_some() {
+                            live_sources.push(*id);
+                        }
+                    }
+                }
+            }
+            let projector_jobs: Option<Vec<ProjectorJob>> =
+                (!guard.projectors.is_empty() && projector_due).then(|| {
+                    guard
+                        .projectors
+                        .iter()
+                        .filter_map(|target| match target {
+                            ProjectorTarget::Scene(id) => guard
+                                .collection
+                                .scene(*id)
+                                .map(|scene| ProjectorJob::Scene(target.key(), scene.clone())),
+                            ProjectorTarget::Source(id) => guard
+                                .collection
+                                .source(*id)
+                                .map(|_| ProjectorJob::Source(target.key(), *id)),
+                        })
+                        .collect()
+                });
+            let projector_pack = (projector_live, projector_jobs);
+            // A pending still-frame grab (CAP-M08), resolved against the model and
+            // taken once so it fires exactly one frame.
+            let still_job: Option<(StillJob, PathBuf)> =
+                guard.still_request.take().and_then(|(target, path)| {
+                    let job = match target {
+                        StillTarget::Program => Some(StillJob::Program),
+                        StillTarget::Source { item, pre_filter } => {
+                            guard.collection.scenes.iter().find_map(|scene| {
+                                scene.item(item).map(|it| {
+                                    let filters = if pre_filter {
+                                        Vec::new()
+                                    } else {
+                                        it.filters.clone()
+                                    };
+                                    StillJob::Source(it.source, filters)
+                                })
+                            })
+                        }
+                    };
+                    job.map(|job| (job, path))
+                });
             // Nested scenes (Phase 6): the source→scene map, the pool the
             // compositor resolves against, and every transitively nested
             // scene's sources joining the live set.
@@ -967,6 +1300,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 vertical_pack,
                 scene_pool_rebuild,
                 scene_refs,
+                workbench_pack,
+                multiview_on,
+                multiview_scenes,
+                still_job,
+                projector_pack,
             )
         };
         if let Some(dto) = transition_ended {
@@ -1464,8 +1802,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 if native.is_visible() {
                     // The selection box + handles, drawn into the native frame
                     // (they'd sit hidden under the opaque surface otherwise).
-                    let overlay =
-                        native_selection_overlay(native.selection(), &scene, &compositor, canvas);
+                    let overlay = native_selection_overlay(
+                        native.selection(),
+                        &native.alignment_overlay(),
+                        &scene,
+                        &compositor,
+                        canvas,
+                    );
                     if let Some((surface, _)) = &mut native_surface {
                         match compositor.present_native(surface, overlay.as_ref()) {
                             Ok(_) => {}
@@ -1599,6 +1942,155 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             None => {}
         }
+
+        // -- 5d. The keying workbench (its own JPEG slot; CAP-M26) ---------------
+        if preview_due {
+            match &workbench_pack {
+                Some((source, filters, mode, split)) => {
+                    match render_workbench(
+                        &mut compositor,
+                        *source,
+                        filters,
+                        *mode,
+                        *split,
+                        canvas,
+                        started_at.elapsed().as_secs_f32(),
+                    ) {
+                        Ok(Some((width, height, data))) => {
+                            let jpeg = encode_program_jpeg(
+                                width,
+                                height,
+                                &data,
+                                PREVIEW_MAX_WIDTH,
+                                PREVIEW_MAX_HEIGHT,
+                                PREVIEW_JPEG_QUALITY,
+                            );
+                            preview.publish_workbench_preview(jpeg);
+                            workbench_live = true;
+                        }
+                        Ok(None) => {} // no source frame yet — keep the last shown
+                        Err(err) => eprintln!("studio: workbench compose failed: {err}"),
+                    }
+                }
+                None if workbench_live => {
+                    preview.publish_workbench_preview(None);
+                    workbench_live = false;
+                }
+                None => {}
+            }
+        }
+
+        // -- 5e. Multiview thumbnails (CAP-M06) ---------------------------------
+        if let Some(scenes) = &multiview_scenes {
+            if !scenes.is_empty() {
+                let (tw, th) = multiview_thumb_size(canvas);
+                let count = MULTIVIEW_BATCH.min(scenes.len());
+                let time = started_at.elapsed().as_secs_f32();
+                for offset in 0..count {
+                    let scene = &scenes[(multiview_cursor + offset) % scenes.len()];
+                    match compositor.render_thumbnail(scene, time, tw, th) {
+                        Ok(frame) => {
+                            let jpeg = encode_program_jpeg(
+                                frame.width,
+                                frame.height,
+                                &frame.data,
+                                tw,
+                                th,
+                                PREVIEW_JPEG_QUALITY,
+                            );
+                            preview.publish_multiview(&scene.id.0.to_string(), jpeg);
+                        }
+                        Err(err) => eprintln!("studio: multiview thumbnail failed: {err}"),
+                    }
+                }
+                multiview_cursor = (multiview_cursor + count) % scenes.len();
+            }
+            last_multiview = Instant::now();
+        }
+        // Clear every thumbnail slot once when the monitor closes.
+        if !multiview_on && multiview_was_on {
+            preview.clear_multiview();
+        }
+        multiview_was_on = multiview_on;
+
+        // -- 5f. Still-frame grab (CAP-M08) -------------------------------------
+        if let Some((job, path)) = &still_job {
+            let result = match job {
+                StillJob::Program => compositor.read_program(),
+                StillJob::Source(source, filters) => match compositor.source_size(*source) {
+                    Some((sw, sh)) => {
+                        let scene = workbench_scene(*source, filters.clone(), sw, sh, canvas);
+                        compositor.render_source_view(
+                            &scene,
+                            started_at.elapsed().as_secs_f32(),
+                            false,
+                        )
+                    }
+                    None => Err(CompositorError::BadFrame(
+                        "the source has no frame yet".into(),
+                    )),
+                },
+            };
+            match result {
+                Ok(frame) => match save_still_png(&frame, path) {
+                    Ok(()) => {
+                        let _ = app.emit("still-saved", path.to_string_lossy().to_string());
+                    }
+                    Err(err) => {
+                        eprintln!("studio: still save failed: {err}");
+                        let _ = app.emit("still-error", err);
+                    }
+                },
+                Err(err) => {
+                    eprintln!("studio: still render failed: {err}");
+                    let _ = app.emit("still-error", err.to_string());
+                }
+            }
+        }
+
+        // -- 5g. Scene/source projectors (CAP-M07 extension) --------------------
+        let (projector_live, projector_jobs) = projector_pack;
+        if let Some(jobs) = projector_jobs {
+            let time = started_at.elapsed().as_secs_f32();
+            for job in &jobs {
+                let (key, frame) = match job {
+                    ProjectorJob::Scene(key, scene) => {
+                        (key, compositor.render_preview_scene(scene, time))
+                    }
+                    ProjectorJob::Source(key, source) => match compositor.source_size(*source) {
+                        Some((sw, sh)) => {
+                            let scene = workbench_scene(*source, Vec::new(), sw, sh, canvas);
+                            (key, compositor.render_source_view(&scene, time, false))
+                        }
+                        None => (
+                            key,
+                            Err(CompositorError::BadFrame(
+                                "the source has no frame yet".into(),
+                            )),
+                        ),
+                    },
+                };
+                match frame {
+                    Ok(frame) => {
+                        // Full-res: max bounds = the frame size, so no downscale.
+                        let jpeg = encode_program_jpeg(
+                            frame.width,
+                            frame.height,
+                            &frame.data,
+                            frame.width,
+                            frame.height,
+                            PREVIEW_JPEG_QUALITY,
+                        );
+                        preview.publish_projector(key, jpeg);
+                    }
+                    Err(err) => eprintln!("studio: projector render failed: {err}"),
+                }
+            }
+            last_projector = Instant::now();
+        }
+        // Retire the slots of any projector target that has closed (an empty
+        // live set clears them all once the last projector window is gone).
+        preview.retain_projectors(&projector_live);
 
         // -- 7. The program event (1 Hz, or sooner on a state change) -----------
         if statuses_changed || last_program_event.elapsed() >= PROGRAM_EVENT_INTERVAL {
@@ -1755,24 +2247,162 @@ fn auto_recoverable(settings: &SourceSettings) -> bool {
 /// the program frame the recorder and stream read.
 fn native_selection_overlay(
     selection: Option<fcap_scene::ItemId>,
+    alignment: &crate::native_preview::AlignmentOverlay,
     scene: &fcap_scene::Scene,
     compositor: &Compositor,
     canvas: (u32, u32),
 ) -> Option<fcap_compositor::PreviewOverlay> {
-    let id = selection?;
-    let item = scene.items.iter().find(|it| it.id == id)?;
-    if item.pending_fit {
+    // The selected item's corners + lock state, when a usable item is selected.
+    let selection = selection.and_then(|id| {
+        let item = scene.items.iter().find(|it| it.id == id)?;
+        if item.pending_fit {
+            return None;
+        }
+        let (source_w, source_h) = compositor.source_size(item.source)?;
+        let (eff_w, eff_h) =
+            fcap_compositor::effective_source_size((source_w, source_h), &item.filters);
+        let content = fcap_compositor::transform::content_size(eff_w, eff_h, &item.transform.crop)?;
+        Some((
+            fcap_compositor::transform::corners(&item.transform, content),
+            item.locked,
+        ))
+    });
+    // The alignment aids (safe areas + guides) the UI pushed (CAP-M04).
+    let safe_areas: Vec<[f32; 4]> = alignment
+        .safe_areas
+        .iter()
+        .map(|rect| [rect.x, rect.y, rect.w, rect.h])
+        .collect();
+    let guides: Vec<[f32; 4]> = alignment
+        .guides
+        .iter()
+        .map(|guide| guide.segment())
+        .collect();
+    // Nothing to draw → no overlay (the blit runs alone).
+    if selection.is_none() && safe_areas.is_empty() && guides.is_empty() {
         return None;
     }
-    let (source_w, source_h) = compositor.source_size(item.source)?;
-    let (eff_w, eff_h) =
-        fcap_compositor::effective_source_size((source_w, source_h), &item.filters);
-    let content = fcap_compositor::transform::content_size(eff_w, eff_h, &item.transform.crop)?;
     Some(fcap_compositor::PreviewOverlay {
-        corners: fcap_compositor::transform::corners(&item.transform, content),
         canvas: (canvas.0 as f32, canvas.1 as f32),
-        locked: item.locked,
+        selection,
+        safe_areas,
+        guides,
     })
+}
+
+/// Queue a still-frame grab (CAP-M08): compute a timestamped PNG path in the
+/// recordings folder and hand it to the render thread. Shared by the command
+/// and the global hotkey.
+pub fn capture_still<R: Runtime>(app: &AppHandle<R>, target: StillTarget) {
+    let recording = app
+        .state::<crate::settings::SettingsStore>()
+        .get()
+        .recording;
+    let folder = crate::recording::recordings_folder(&recording);
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
+    let path = crate::recording::unique_recording_path(&folder, "Still", &timestamp, "png", false);
+    app.state::<StudioState>().request_still(target, path);
+}
+
+/// Save a tight RGBA frame as a lossless PNG (CAP-M08). `::image` names the
+/// crate — `image` alone is the `fcap_sources::image` module in this file.
+fn save_still_png(frame: &ProgramFrame, path: &std::path::Path) -> Result<(), String> {
+    let buffer: ::image::RgbaImage =
+        ::image::ImageBuffer::from_raw(frame.width, frame.height, frame.data.clone())
+            .ok_or_else(|| "still frame buffer size mismatch".to_string())?;
+    buffer.save(path).map_err(|err| err.to_string())
+}
+
+/// The multiview thumbnail size for a canvas — a fixed width, height matched to
+/// the canvas aspect so thumbnails are never distorted (CAP-M06).
+fn multiview_thumb_size(canvas: (u32, u32)) -> (u32, u32) {
+    let (cw, ch) = canvas;
+    let width = MULTIVIEW_THUMB_WIDTH;
+    let height = ((width as u64 * ch.max(1) as u64) / cw.max(1) as u64).max(1) as u32;
+    (width, height)
+}
+
+/// Build a one-item scene that fits `source` to the canvas — the keying
+/// workbench's synthetic scene (CAP-M26). `filters` are the item's chain
+/// (empty for the raw "Source" view).
+fn workbench_scene(
+    source: SourceId,
+    filters: Vec<Filter>,
+    sw: u32,
+    sh: u32,
+    canvas: (u32, u32),
+) -> Scene {
+    let scale = (canvas.0 as f32 / sw.max(1) as f32).min(canvas.1 as f32 / sh.max(1) as f32);
+    let mut item = SceneItem::new(source);
+    item.transform = Transform {
+        x: canvas.0 as f32 / 2.0,
+        y: canvas.1 as f32 / 2.0,
+        scale_x: scale,
+        scale_y: scale,
+        rotation: 0.0,
+        crop: Crop::default(),
+    };
+    item.pending_fit = false;
+    item.filters = filters;
+    let mut scene = Scene::new("workbench");
+    scene.items = vec![item];
+    scene
+}
+
+/// Stitch two same-sized frames into a left|right split at `split` (0..1) —
+/// the workbench's before/after view (CAP-M26).
+fn stitch_split(left: &ProgramFrame, right: &ProgramFrame, split: f32) -> Vec<u8> {
+    let (w, h) = (left.width, left.height);
+    let cut = ((split.clamp(0.0, 1.0) * w as f32) as u32).min(w);
+    let row_bytes = (w * 4) as usize;
+    let mut data = left.data.clone();
+    if right.data.len() == data.len() {
+        for y in 0..h as usize {
+            let row = y * row_bytes;
+            let start = row + (cut * 4) as usize;
+            let end = row + row_bytes;
+            data[start..end].copy_from_slice(&right.data[start..end]);
+        }
+    }
+    data
+}
+
+/// Render the keying workbench's single source (CAP-M26) in `mode`, returning
+/// `(width, height, RGBA)` — or `None` when the source has no frame yet.
+fn render_workbench(
+    compositor: &mut Compositor,
+    source: SourceId,
+    filters: &[Filter],
+    mode: WorkbenchMode,
+    split: f32,
+    canvas: (u32, u32),
+    time: f32,
+) -> Result<Option<(u32, u32, Vec<u8>)>, CompositorError> {
+    let Some((sw, sh)) = compositor.source_size(source) else {
+        return Ok(None);
+    };
+    let keyed = workbench_scene(source, filters.to_vec(), sw, sh, canvas);
+    let raw = workbench_scene(source, Vec::new(), sw, sh, canvas);
+    match mode {
+        WorkbenchMode::Source => {
+            let frame = compositor.render_source_view(&raw, time, false)?;
+            Ok(Some((frame.width, frame.height, frame.data)))
+        }
+        WorkbenchMode::Keyed => {
+            let frame = compositor.render_source_view(&keyed, time, false)?;
+            Ok(Some((frame.width, frame.height, frame.data)))
+        }
+        WorkbenchMode::Matte => {
+            let frame = compositor.render_source_view(&keyed, time, true)?;
+            Ok(Some((frame.width, frame.height, frame.data)))
+        }
+        WorkbenchMode::Split => {
+            let left = compositor.render_source_view(&raw, time, false)?;
+            let right = compositor.render_source_view(&keyed, time, false)?;
+            let data = stitch_split(&left, &right, split);
+            Ok(Some((left.width, left.height, data)))
+        }
+    }
 }
 
 /// A change-detection fingerprint of a source's settings.

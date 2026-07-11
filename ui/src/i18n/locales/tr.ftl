@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = yeni ad…
 workspace-new-name-label = Yeni { $title } adı
 workspace-create = Oluştur
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = OBS'den içe aktar…
+workspace-import-obs-hint = Bir OBS sahne koleksiyonunu (scenes.json dosyasını) içe aktarın. Mevcut koleksiyonunuz önce kaydedilir.
+workspace-import-busy = İçe aktarılıyor…
+workspace-import-title = "{ $name }" içe aktarıldı
+workspace-import-summary = { $scenes } sahne · { $sources } kaynak · { $items } öğe
+workspace-import-dismiss = Kapat
+workspace-import-clean = Her şey sorunsuz aktarıldı.
+workspace-import-geometry-caveat = Boyutlar ve konumlar OBS düzeninden uyarlanır — her sahneyi gözden geçirin ve yakalama aygıtlarını yeniden seçin.
+workspace-import-notes-title = Notlarla içe aktarıldı
+workspace-import-skipped-title = İçe aktarılmadı
+import-note-needsReselect = Aygıtı/monitörü/pencereyi yeniden seçin
+import-note-gameCaptureAsWindow = Oyun Yakalama → Pencere Yakalama
+import-note-referencesFile = Dosya yolunu kontrol edin
+import-note-filterDropped = Bazı filtreler desteklenmiyor
+import-note-geometryApproximated = Konum/boyut yaklaşık
+import-skip-unsupportedKind = Eşdeğer kaynak türü yok
+import-skip-group = Gruplar henüz desteklenmiyor
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Eksik dosyaları yeniden bağla…
+doctor-title = Eksik dosyalar
+doctor-scanning = Taranıyor…
+doctor-all-good = Başvurulan tüm dosyalar mevcut. Yeniden bağlanacak bir şey yok.
+doctor-intro = Başvurulan { $count } dosya bu bilgisayarda bulunamadı. Her birine yeni konumunu gösterin — onu kullanan her sahne aynı anda düzeltilir.
+doctor-relinked = { $count } başvuru yeniden bağlandı.
+doctor-uses = { $count }× kullanıldı
+doctor-locate = Bul…
+doctor-locate-folder = Klasörde ara…
+doctor-locate-folder-hint = Bir klasör seçin; her eksik dosya ada göre bulunup yeniden bağlanır.
+doctor-kind-image = görüntü
+doctor-kind-media = ortam
+doctor-kind-slideshow = slayt gösterisi
+doctor-kind-font = yazı tipi
+doctor-kind-lut = LUT
+doctor-kind-mask = maske
+history-relinkFiles = Dosyaları yeniden bağla
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Betikler (Lua)
 scripts-empty = Henüz betik yok — bir .lua dosyası ekleyin. API için scripts/sample.lua dosyasına bakın: yayına-geçme/sahne/kayıt olaylarına tepki verin ve uzak API ile aynı komutları çalıştırın.
@@ -1204,3 +1242,143 @@ announce-live-ended = Yayın sona erdi
 announce-reconnecting = Bağlantı koptu, yeniden bağlanılıyor
 announce-stream-failed = Yayın başarısız oldu
 announce-frames-dropped = { $count } kare düştü
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Geri al
+palette-redo = Yinele
+palette-edit-history = Düzenleme geçmişi…
+history-title = Düzenleme geçmişi
+history-empty = Henüz geri alınacak bir şey yok.
+history-current = Geçerli durum
+history-close = Kapat
+history-addScene = Sahne ekle
+history-renameScene = Sahneyi yeniden adlandır
+history-removeScene = Sahneyi kaldır
+history-reorderScene = Sahneleri yeniden sırala
+history-addSource = Kaynak ekle
+history-removeSource = Kaynağı kaldır
+history-reorderSource = Kaynakları yeniden sırala
+history-renameSource = Kaynağı yeniden adlandır
+history-transformSource = Kaynağı taşı
+history-toggleVisibility = Görünürlüğü değiştir
+history-toggleLock = Kilidi değiştir
+history-setBlendMode = Karışım modunu değiştir
+history-editSourceProperties = Özellikleri düzenle
+history-applyLayout = Düzeni yerleştir
+history-moveToSeat = Yerine taşı
+history-groupSources = Kaynakları grupla
+history-ungroupSources = Grubu çöz
+history-toggleGroupVisibility = Grubu değiştir
+history-setSceneAudio = Sahne sesi
+history-setVerticalCanvas = Dikey tuval
+history-addFilter = Filtre ekle
+history-removeFilter = Filtreyi kaldır
+history-reorderFilter = Filtreleri yeniden sırala
+history-editFilter = Filtreyi düzenle
+history-toggleFilter = Filtreyi değiştir
+history-setVolume = Sesi ayarla
+history-toggleMute = Sessizi değiştir
+history-setMonitor = İzlemeyi değiştir
+history-setTracks = Parçaları değiştir
+history-setSyncOffset = A/V senkronunu ayarla
+history-setAudioHotkeys = Ses kısayolları
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Hizalama yardımcıları
+settings-smart-guides = Akıllı kılavuzlar (sürüklerken yapış)
+settings-safe-areas = Güvenli alan katmanları
+settings-rulers = Cetveller
+align-group = Tuvale hizala
+align-left = Sola hizala
+align-hcenter = Yatayda ortala
+align-right = Sağa hizala
+align-top = Üste hizala
+align-vcenter = Dikeyde ortala
+align-bottom = Alta hizala
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Seçimi hizala ve dağıt
+arrange-left = Sol kenarları hizala
+arrange-hcenter = Yatayda ortala
+arrange-right = Sağ kenarları hizala
+arrange-top = Üst kenarları hizala
+arrange-vcenter = Dikeyde ortala
+arrange-bottom = Alt kenarları hizala
+distribute-h = Yatay dağıt
+distribute-v = Dikey dağıt
+guides-group = Kılavuzlar
+guides-add-v = Dikey kılavuz ekle
+guides-add-h = Yatay kılavuz ekle
+history-arrangeItems = Öğeleri düzenle
+history-editGuides = Kılavuzları düzenle
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Dönüşümü düzenle — { $name }
+transform-anchor = Sabit nokta
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Döndürme
+transform-crop = Kırpma
+transform-crop-left = Sol
+transform-crop-top = Üst
+transform-crop-right = Sağ
+transform-crop-bottom = Alt
+transform-no-size = Boyut ve kırpma, kaynak boyutlarını bildirdiğinde kullanılabilir olur.
+transform-copy = Dönüşümü kopyala
+transform-paste = Dönüşümü yapıştır
+transform-close = Kapat
+filters-copy = Filtreleri kopyala ({ $count })
+filters-paste = Filtreleri yapıştır ({ $count })
+palette-edit-transform = Dönüşümü düzenle…
+history-pasteFilters = Filtreleri yapıştır
+
+# CAP-M26 — keying workbench
+workbench-title = Anahtarlama tezgahı — { $name }
+workbench-mode-keyed = Anahtarlı
+workbench-mode-source = Kaynak
+workbench-mode-matte = Mat
+workbench-mode-split = Bölünmüş
+workbench-eyedropper = Damlalık
+workbench-eyedropper-hint = Anahtar rengini örneklemek için kaynağa tıklayın.
+workbench-loupe = Büyüteç
+workbench-split = Bölme
+workbench-preview-alt = Anahtarlama tezgahı önizlemesi
+workbench-tune = Ayarla
+workbench-close = Kapat
+
+# CAP-M06 — multiview monitor
+multiview-title = Çoklu görünüm
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Bir sahneye geçmek için ona tıklayın.
+multiview-hint-stage = Bir sahneyi önizlemede hazırlamak için ona tıklayın.
+palette-multiview = Çoklu görünüm monitörü
+
+# CAP-M07 — projectors
+projector-title = Projektör aç
+projector-source = Kaynak
+projector-target-program = Program
+projector-target-preview = Önizleme
+projector-target-scene = Sahne…
+projector-target-source = Kaynak…
+projector-target-multiview = Çoklu görünüm
+projector-which-scene = Hangi sahne
+projector-which-source = Hangi kaynak
+projector-none = Gösterilecek bir şey yok
+projector-display = Ekran
+projector-windowed = Yüzen pencere (bu ekran)
+projector-display-option = Ekran { $n } — { $w }×{ $h }
+projector-primary = (birincil)
+projector-open = Aç
+projector-cancel = İptal
+projector-exit-hint = Çıkmak için Esc'e basın
+palette-projector = Projektör aç…
+
+# CAP-M08 — still-frame grab
+palette-still = Kare yakala…
+still-saved-toast = Kare kaydedildi: { $name }
+still-failed-toast = Kare yakalama başarısız: { $error }
+hotkeys-still = Kare yakala
+hotkeys-still-placeholder = örn. Ctrl+Shift+P

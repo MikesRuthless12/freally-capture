@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = nouveau nom…
 workspace-new-name-label = Nouveau nom de { $title }
 workspace-create = Créer
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Importer depuis OBS…
+workspace-import-obs-hint = Importez une collection de scènes OBS (son scenes.json). Votre collection actuelle est d'abord enregistrée.
+workspace-import-busy = Importation…
+workspace-import-title = « { $name } » importée
+workspace-import-summary = { $scenes } scènes · { $sources } sources · { $items } éléments
+workspace-import-dismiss = Fermer
+workspace-import-clean = Tout a été importé correctement.
+workspace-import-geometry-caveat = Les tailles et positions sont ajustées d'après la disposition OBS — vérifiez chaque scène et resélectionnez les périphériques de capture.
+workspace-import-notes-title = Importé avec remarques
+workspace-import-skipped-title = Non importé
+import-note-needsReselect = Resélectionner l'appareil/l'écran/la fenêtre
+import-note-gameCaptureAsWindow = Capture de jeu → Capture de fenêtre
+import-note-referencesFile = Vérifier le chemin du fichier
+import-note-filterDropped = Certains filtres non pris en charge
+import-note-geometryApproximated = Position/taille approximées
+import-skip-unsupportedKind = Aucun type de source équivalent
+import-skip-group = Les groupes ne sont pas encore pris en charge
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Relier les fichiers manquants…
+doctor-title = Fichiers manquants
+doctor-scanning = Analyse…
+doctor-all-good = Tous les fichiers référencés sont présents. Rien à relier.
+doctor-intro = { $count } fichiers référencés sont introuvables sur cet ordinateur. Indiquez le nouvel emplacement de chacun — chaque scène qui l'utilise est corrigée d'un coup.
+doctor-relinked = { $count } références reliées.
+doctor-uses = utilisé { $count }×
+doctor-locate = Localiser…
+doctor-locate-folder = Chercher dans un dossier…
+doctor-locate-folder-hint = Choisissez un dossier ; chaque fichier manquant est retrouvé par son nom et relié.
+doctor-kind-image = image
+doctor-kind-media = média
+doctor-kind-slideshow = diaporama
+doctor-kind-font = police
+doctor-kind-lut = LUT
+doctor-kind-mask = masque
+history-relinkFiles = Relier les fichiers
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Scripts (Lua)
 scripts-empty = Aucun script pour l'instant — ajoutez un fichier .lua. Voir scripts/sample.lua pour l'API : réagissez aux événements de passage en direct/scène/enregistrement et pilotez les mêmes commandes que l'API distante.
@@ -1204,3 +1242,143 @@ announce-live-ended = Diffusion terminée
 announce-reconnecting = Connexion perdue, reconnexion en cours
 announce-stream-failed = Échec de la diffusion
 announce-frames-dropped = Images perdues : { $count }
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Annuler
+palette-redo = Rétablir
+palette-edit-history = Historique des modifications…
+history-title = Historique des modifications
+history-empty = Rien à annuler pour l’instant.
+history-current = État actuel
+history-close = Fermer
+history-addScene = Ajouter une scène
+history-renameScene = Renommer la scène
+history-removeScene = Supprimer la scène
+history-reorderScene = Réorganiser les scènes
+history-addSource = Ajouter une source
+history-removeSource = Supprimer la source
+history-reorderSource = Réorganiser les sources
+history-renameSource = Renommer la source
+history-transformSource = Déplacer la source
+history-toggleVisibility = Basculer la visibilité
+history-toggleLock = Basculer le verrouillage
+history-setBlendMode = Changer le mode de fusion
+history-editSourceProperties = Modifier les propriétés
+history-applyLayout = Organiser la disposition
+history-moveToSeat = Placer à l’emplacement
+history-groupSources = Grouper les sources
+history-ungroupSources = Dégrouper les sources
+history-toggleGroupVisibility = Basculer le groupe
+history-setSceneAudio = Audio de la scène
+history-setVerticalCanvas = Canevas vertical
+history-addFilter = Ajouter un filtre
+history-removeFilter = Supprimer le filtre
+history-reorderFilter = Réorganiser les filtres
+history-editFilter = Modifier le filtre
+history-toggleFilter = Basculer le filtre
+history-setVolume = Ajuster le volume
+history-toggleMute = Basculer la sourdine
+history-setMonitor = Changer le monitoring
+history-setTracks = Changer les pistes
+history-setSyncOffset = Ajuster la synchro A/V
+history-setAudioHotkeys = Raccourcis audio
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Aides d’alignement
+settings-smart-guides = Repères intelligents (aimantation au déplacement)
+settings-safe-areas = Zones de sécurité
+settings-rulers = Règles
+align-group = Aligner sur le canevas
+align-left = Aligner à gauche
+align-hcenter = Centrer horizontalement
+align-right = Aligner à droite
+align-top = Aligner en haut
+align-vcenter = Centrer verticalement
+align-bottom = Aligner en bas
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Aligner et répartir la sélection
+arrange-left = Aligner les bords gauches
+arrange-hcenter = Centrer horizontalement
+arrange-right = Aligner les bords droits
+arrange-top = Aligner les bords supérieurs
+arrange-vcenter = Centrer verticalement
+arrange-bottom = Aligner les bords inférieurs
+distribute-h = Répartir horizontalement
+distribute-v = Répartir verticalement
+guides-group = Repères
+guides-add-v = Ajouter un repère vertical
+guides-add-h = Ajouter un repère horizontal
+history-arrangeItems = Organiser les éléments
+history-editGuides = Modifier les repères
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Modifier la transformation — { $name }
+transform-anchor = Ancre
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Rotation
+transform-crop = Rognage
+transform-crop-left = Gauche
+transform-crop-top = Haut
+transform-crop-right = Droite
+transform-crop-bottom = Bas
+transform-no-size = La taille et le rognage seront disponibles dès que la source communiquera ses dimensions.
+transform-copy = Copier la transformation
+transform-paste = Coller la transformation
+transform-close = Fermer
+filters-copy = Copier les filtres ({ $count })
+filters-paste = Coller les filtres ({ $count })
+palette-edit-transform = Modifier la transformation…
+history-pasteFilters = Coller les filtres
+
+# CAP-M26 — keying workbench
+workbench-title = Atelier d'incrustation — { $name }
+workbench-mode-keyed = Incrusté
+workbench-mode-source = Source
+workbench-mode-matte = Cache
+workbench-mode-split = Partagé
+workbench-eyedropper = Pipette
+workbench-eyedropper-hint = Cliquez sur la source pour prélever la couleur d'incrustation.
+workbench-loupe = Loupe
+workbench-split = Partage
+workbench-preview-alt = Aperçu de l'atelier d'incrustation
+workbench-tune = Régler
+workbench-close = Fermer
+
+# CAP-M06 — multiview monitor
+multiview-title = Multiview
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Cliquez sur une scène pour y couper.
+multiview-hint-stage = Cliquez sur une scène pour la préparer en aperçu.
+palette-multiview = Moniteur multiview
+
+# CAP-M07 — projectors
+projector-title = Ouvrir un projecteur
+projector-source = Source
+projector-target-program = Programme
+projector-target-preview = Aperçu
+projector-target-scene = Scène…
+projector-target-source = Source…
+projector-target-multiview = Multiview
+projector-which-scene = Quelle scène
+projector-which-source = Quelle source
+projector-none = Rien à afficher
+projector-display = Écran
+projector-windowed = Fenêtre flottante (cet écran)
+projector-display-option = Écran { $n } — { $w }×{ $h }
+projector-primary = (principal)
+projector-open = Ouvrir
+projector-cancel = Annuler
+projector-exit-hint = Appuyez sur Échap pour quitter
+palette-projector = Ouvrir un projecteur…
+
+# CAP-M08 — still-frame grab
+palette-still = Capturer une image…
+still-saved-toast = Image enregistrée : { $name }
+still-failed-toast = Échec de la capture d'image : { $error }
+hotkeys-still = Capturer une image
+hotkeys-still-placeholder = p. ex. Ctrl+Shift+P

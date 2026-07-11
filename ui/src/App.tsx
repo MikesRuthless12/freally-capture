@@ -21,10 +21,22 @@ import {
   studioSetItemVisible,
   studioSelectScene,
   studioTransition,
+  studioUndo,
+  studioRedo,
+  studioSetItemTransforms,
+  captureStill,
+  collectionMissingFiles,
   replaySave,
   recordingAddMarker,
 } from "./api/commands";
-import { onAudio, onProgram, onRemoteInvite, onStudio } from "./api/events";
+import {
+  onAudio,
+  onProgram,
+  onRemoteInvite,
+  onStillError,
+  onStillSaved,
+  onStudio,
+} from "./api/events";
 import type {
   AudioLevelsPayload,
   EulaStatus,
@@ -39,6 +51,7 @@ import type {
 } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
+import { EditTransformDialog } from "./components/EditTransformDialog";
 import { StatusAnnouncer } from "./components/StatusAnnouncer";
 import type { Command } from "./lib/commands";
 import { FiltersDialog } from "./components/FiltersDialog";
@@ -54,6 +67,10 @@ import { ScenesRail } from "./panels/ScenesRail";
 import { SourcesRail } from "./panels/SourcesRail";
 import { StatsDock } from "./panels/StatsDock";
 import { StudioPreviewPane } from "./panels/StudioPreviewPane";
+import { HistoryDialog } from "./panels/HistoryDialog";
+import { MissingFilesDialog } from "./panels/MissingFilesDialog";
+import { MultiviewDialog } from "./panels/MultiviewDialog";
+import { ProjectorDialog } from "./panels/ProjectorDialog";
 import { VerticalCanvasDialog } from "./panels/VerticalCanvasDialog";
 
 type OpenDialog =
@@ -61,6 +78,11 @@ type OpenDialog =
   | { kind: "properties"; sourceId: SourceId }
   | { kind: "audioFilters"; sourceId: SourceId }
   | { kind: "vertical" }
+  | { kind: "history" }
+  | { kind: "editTransform"; itemId: ItemId }
+  | { kind: "multiview" }
+  | { kind: "projector" }
+  | { kind: "missingFiles" }
   | null;
 
 /** The Freally Capture studio shell: preview + rails + bottom docks. */
@@ -77,11 +99,23 @@ export default function App() {
   // a persisted "off" never flashes visible on launch.
   const [settingsSettled, setSettingsSettled] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // A transient still-frame-grab confirmation (CAP-M08).
+  const [stillToast, setStillToast] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [studio, setStudio] = useState<StudioDto | null>(null);
   const [program, setProgram] = useState<ProgramStatus | null>(null);
   const [audio, setAudio] = useState<AudioLevelsPayload | null>(null);
-  const [selectedItem, setSelectedItem] = useState<ItemId | null>(null);
+  // Multi-selection (CAP-M04 follow-on): an ordered list of item ids; the
+  // last-clicked is the "primary" that carries the transform handles. A plain
+  // single selection is just a one-element list.
+  const [selection, setSelection] = useState<ItemId[]>([]);
+  const selectSingle = useCallback((id: ItemId | null) => setSelection(id ? [id] : []), []);
+  const toggleSelect = useCallback(
+    (id: ItemId) =>
+      setSelection((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id])),
+    [],
+  );
+  const selectMany = useCallback((ids: ItemId[]) => setSelection(ids), []);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // The wizard is dismissible from its own close button, so its visibility is
@@ -159,6 +193,13 @@ export default function App() {
     const unlistenInvite = onRemoteInvite((url) => {
       if (!cancelled) spikeSetJoinPrefill(url);
     }).catch(() => undefined);
+    // Still-frame grab (CAP-M08) confirmations.
+    const unlistenStillSaved = onStillSaved((path) => {
+      if (!cancelled) setStillToast({ ok: true, text: path.split(/[\\/]/).pop() ?? path });
+    }).catch(() => undefined);
+    const unlistenStillError = onStillError((message) => {
+      if (!cancelled) setStillToast({ ok: false, text: message });
+    }).catch(() => undefined);
     // A cold-start invite (the link LAUNCHED the app) fired before this
     // listener existed — pick it up once.
     remotePendingInvite()
@@ -172,8 +213,25 @@ export default function App() {
       void unlistenProgram.then((fn) => fn?.());
       void unlistenAudio.then((fn) => fn?.());
       void unlistenInvite.then((fn) => fn?.());
+      void unlistenStillSaved.then((fn) => fn?.());
+      void unlistenStillError.then((fn) => fn?.());
     };
   }, []);
+
+  // "Before load" (CAP-M03): once the studio is up and past onboarding, scan the
+  // active collection for broken file references and surface the doctor if any.
+  // One-shot per session, and never over the wizard or an already-open dialog.
+  const checkedMissing = useRef(false);
+  useEffect(() => {
+    if (checkedMissing.current || !studio || !settingsSettled) return;
+    if (settings && !settings.completedOnboarding && !wizardDismissed) return;
+    checkedMissing.current = true;
+    collectionMissingFiles()
+      .then((list) => {
+        if (list.length > 0) setDialog((current) => current ?? { kind: "missingFiles" });
+      })
+      .catch(() => undefined);
+  }, [studio, settingsSettled, settings, wizardDismissed]);
 
   const collection = studio?.collection ?? null;
   const studioMode = studio?.studioMode ?? null;
@@ -184,10 +242,16 @@ export default function App() {
 
   // Selection follows reality (derived, not synced): it only counts while it
   // names an item of the active scene.
+  const selectedItem = selection.length ? selection[selection.length - 1] : null;
   const effectiveSelection =
     selectedItem && activeScene?.items.some((item) => item.id === selectedItem)
       ? selectedItem
       : null;
+  // The multi-selection that actually exists in the active scene (order kept).
+  const effectiveSelectionList = useMemo(
+    () => selection.filter((id) => activeScene?.items.some((item) => item.id === id)),
+    [selection, activeScene],
+  );
 
   /**
    * What the palette can reach (TASK-904). Scenes and sources come from the live
@@ -216,11 +280,68 @@ export default function App() {
         group: t("palette-group-sources"),
         label: source?.name ?? item.id,
         keywords: "source select",
-        run: () => setSelectedItem(item.id),
+        run: () => selectSingle(item.id),
       });
     }
 
     list.push(
+      {
+        id: "action-undo",
+        group: t("palette-group-actions"),
+        label: t("palette-undo"),
+        keywords: "undo revert history",
+        run: () => {
+          studioUndo().catch((err) => console.error("undo failed:", err));
+        },
+      },
+      {
+        id: "action-redo",
+        group: t("palette-group-actions"),
+        label: t("palette-redo"),
+        keywords: "redo history",
+        run: () => {
+          studioRedo().catch((err) => console.error("redo failed:", err));
+        },
+      },
+      {
+        id: "action-history",
+        group: t("palette-group-actions"),
+        label: t("palette-edit-history"),
+        keywords: "history undo redo edits",
+        run: () => setDialog({ kind: "history" }),
+      },
+      {
+        id: "action-multiview",
+        group: t("palette-group-actions"),
+        label: t("palette-multiview"),
+        keywords: "multiview monitor grid tally scenes",
+        run: () => setDialog({ kind: "multiview" }),
+      },
+      {
+        id: "action-projector",
+        group: t("palette-group-actions"),
+        label: t("palette-projector"),
+        keywords: "projector fullscreen display monitor output",
+        run: () => setDialog({ kind: "projector" }),
+      },
+      {
+        id: "action-doctor",
+        group: t("palette-group-actions"),
+        label: t("palette-doctor"),
+        keywords: "missing files doctor relink media images broken paths locate",
+        run: () => setDialog({ kind: "missingFiles" }),
+      },
+      {
+        id: "action-still",
+        group: t("palette-group-actions"),
+        label: t("palette-still"),
+        keywords: "still screenshot png grab capture frame",
+        run: () => {
+          captureStill({ kind: "program" }).catch((err) =>
+            console.error("still grab failed:", err),
+          );
+        },
+      },
       {
         id: "action-studio-mode",
         group: t("palette-group-actions"),
@@ -263,8 +384,18 @@ export default function App() {
       },
     );
 
+    if (effectiveSelection) {
+      list.push({
+        id: "action-edit-transform",
+        group: t("palette-group-actions"),
+        label: t("palette-edit-transform"),
+        keywords: "transform position size rotation crop",
+        run: () => setDialog({ kind: "editTransform", itemId: effectiveSelection }),
+      });
+    }
+
     return list;
-  }, [collection, activeScene, studioMode, t]);
+  }, [collection, activeScene, studioMode, effectiveSelection, selectSingle, t]);
 
   // Highlight Speaker keyboard toggle: "F" focuses the selected item (fills
   // the canvas) or, when a focus is active, restores the layout — never while
@@ -303,24 +434,74 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Undo / redo (CAP-M01). Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl+Y
+  // redoes. Suppressed while a text field is focused so the browser's own
+  // text undo keeps working inside a rename/properties box.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      )
+        return;
+      const redo = key === "y" || event.shiftKey;
+      event.preventDefault();
+      (redo ? studioRedo() : studioUndo()).catch((err) => console.error("undo/redo failed:", err));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Ctrl/Cmd+E opens Edit Transform for the selected item (CAP-M05, OBS parity).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "e" && event.key !== "E") return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      )
+        return;
+      if (!effectiveSelection) return;
+      event.preventDefault();
+      setDialog({ kind: "editTransform", itemId: effectiveSelection });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [effectiveSelection]);
+
+  // The still-frame toast fades on its own.
+  useEffect(() => {
+    if (!stillToast) return;
+    const timer = setTimeout(() => setStillToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [stillToast]);
+
   const addItem = useCallback(
     (settings: SourceSettings, name?: string) => {
       if (!activeScene) return;
       studioAddItem(activeScene.id, settings, name)
-        .then((added) => setSelectedItem(added.itemId))
+        .then((added) => selectSingle(added.itemId))
         .catch((err) => console.error("add item failed:", err));
     },
-    [activeScene],
+    [activeScene, selectSingle],
   );
 
   const addExisting = useCallback(
     (sourceId: SourceId) => {
       if (!activeScene) return;
       studioAddExistingSource(activeScene.id, sourceId)
-        .then((itemId) => setSelectedItem(itemId))
+        .then((itemId) => selectSingle(itemId))
         .catch((err) => console.error("add existing source failed:", err));
     },
-    [activeScene],
+    [activeScene, selectSingle],
   );
 
   const removeItem = useCallback(
@@ -395,6 +576,42 @@ export default function App() {
     [activeScene],
   );
 
+  // Batch transform for align-to-each-other, distribute, and group drags
+  // (CAP-M04 follow-on). Optimistically patches every changed item at once and
+  // commits them as a single undo step; `coalesce` folds a streaming group drag.
+  const setItemsTransform = useCallback(
+    (changes: { item: ItemId; transform: Transform }[], coalesce: boolean) => {
+      if (!activeScene || changes.length === 0) return;
+      const sceneId = activeScene.id;
+      const byId = new Map(changes.map((c) => [c.item, c.transform]));
+      localRevision.current += 1;
+      setStudio((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          collection: {
+            ...current.collection,
+            scenes: current.collection.scenes.map((scene) =>
+              scene.id === sceneId
+                ? {
+                    ...scene,
+                    items: scene.items.map((item) => {
+                      const next = byId.get(item.id);
+                      return next ? { ...item, transform: next, pendingFit: false } : item;
+                    }),
+                  }
+                : scene,
+            ),
+          },
+        };
+      });
+      studioSetItemTransforms(sceneId, changes, coalesce).catch((err) =>
+        console.error("batch transform failed:", err),
+      );
+    },
+    [activeScene],
+  );
+
   const showStats = settingsSettled && (settings?.showStatsDock ?? true);
 
   const toggleStatsDock = () => {
@@ -413,6 +630,10 @@ export default function App() {
 
   const dialogItem =
     dialog?.kind === "filters"
+      ? (activeScene?.items.find((item) => item.id === dialog.itemId) ?? null)
+      : null;
+  const transformItem =
+    dialog?.kind === "editTransform"
       ? (activeScene?.items.find((item) => item.id === dialog.itemId) ?? null)
       : null;
   const dialogSource =
@@ -531,8 +752,15 @@ export default function App() {
                 scene={activeScene}
                 program={program}
                 selectedItem={effectiveSelection}
-                onSelect={setSelectedItem}
+                selectedItems={effectiveSelectionList}
+                onSelect={selectSingle}
+                onToggleSelect={toggleSelect}
+                onSelectMany={selectMany}
                 onItemTransform={setItemTransform}
+                onItemsTransform={setItemsTransform}
+                alignment={
+                  settings?.alignment ?? { smartGuides: true, safeAreas: false, rulers: false }
+                }
               />
             </div>
           </div>
@@ -543,7 +771,7 @@ export default function App() {
             audio={audio}
             os={core?.os}
             selectedItem={effectiveSelection}
-            onSelect={setSelectedItem}
+            onSelect={selectSingle}
             onAdd={addItem}
             onAddExisting={addExisting}
             onRemove={removeItem}
@@ -574,6 +802,42 @@ export default function App() {
 
       {dialog?.kind === "vertical" && (
         <VerticalCanvasDialog studio={studio} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "history" && (
+        <HistoryDialog studio={studio} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "multiview" && (
+        <MultiviewDialog studio={studio} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "projector" && (
+        <ProjectorDialog collection={collection} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "missingFiles" && <MissingFilesDialog onClose={() => setDialog(null)} />}
+      {stillToast && (
+        <div
+          role="status"
+          className={`pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-md border bg-black/80 px-3 py-1.5 text-xs ${
+            stillToast.ok ? "border-white/10 text-havoc-text" : "border-red-500/50 text-red-300"
+          }`}
+        >
+          {stillToast.ok
+            ? t("still-saved-toast", { name: stillToast.text })
+            : t("still-failed-toast", { error: stillToast.text })}
+        </div>
+      )}
+      {dialog?.kind === "editTransform" && activeScene && transformItem && (
+        <EditTransformDialog
+          sceneId={activeScene.id}
+          item={transformItem}
+          sourceName={
+            collection?.sources.find((source) => source.id === transformItem.source)?.name ??
+            t("filters-source-fallback")
+          }
+          program={program}
+          canvasW={collection?.canvasWidth ?? 1920}
+          canvasH={collection?.canvasHeight ?? 1080}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "filters" && activeScene && dialogItem && (
         <FiltersDialog

@@ -23,6 +23,7 @@ mod native_preview;
 mod openfile;
 mod preview;
 mod profiles;
+mod projector;
 mod reactions;
 mod recording;
 mod remote;
@@ -153,6 +154,27 @@ fn main() {
                 .state::<PreviewState>()
                 .protocol_response(origin, &path)
         })
+        .on_window_event(|window, event| match event {
+            // Closing the main studio window quits the app — and does it while the
+            // projector windows are still alive, so `ExitRequested` can remember
+            // them (on the default last-window-closes path they would be destroyed
+            // first, and the session snapshot would be empty). CAP-M07 extension.
+            tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
+                api.prevent_close();
+                window.app_handle().exit(0);
+            }
+            // When a scene/source projector window closes (its own Esc, or the OS),
+            // tell the render loop to stop rendering its slot (CAP-M07 extension).
+            tauri::WindowEvent::Destroyed => {
+                if let Some(target) = projector::parse_target(window.label()) {
+                    window
+                        .app_handle()
+                        .state::<StudioState>()
+                        .set_projector(target, false);
+                }
+            }
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::integrations_status,
@@ -167,6 +189,9 @@ fn main() {
             commands::video_device_formats,
             commands::open_privacy_settings,
             docks::browser_dock_open,
+            projector::list_displays,
+            projector::aux_window_open,
+            projector::aux_window_close,
             autoconfig::autoconfig_suggest,
             commands::settings_complete_onboarding,
             buildinfo::build_info,
@@ -174,6 +199,8 @@ fn main() {
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,
             commands::studio::studio_get,
+            commands::studio::studio_undo,
+            commands::studio::studio_redo,
             commands::studio::studio_add_scene,
             commands::studio::studio_rename_scene,
             commands::studio::studio_remove_scene,
@@ -209,6 +236,16 @@ fn main() {
             commands::studio::studio_reorder_filter,
             commands::studio::studio_update_filter,
             commands::studio::studio_set_filter_enabled,
+            commands::studio::studio_paste_filters,
+            commands::studio::studio_workbench_set,
+            commands::studio::studio_workbench_close,
+            commands::studio::studio_multiview_set,
+            commands::studio::studio_capture_still,
+            commands::studio::collection_missing_files,
+            commands::studio::collection_relink,
+            commands::studio::collection_relink_folder,
+            commands::studio::studio_set_item_transforms,
+            commands::studio::studio_set_guides,
             remote::remote_guest_push_frame,
             remote::remote_guest_push_audio,
             remote::remote_pending_invite,
@@ -226,6 +263,7 @@ fn main() {
             profiles::collections_list,
             profiles::collection_create,
             profiles::collection_switch,
+            profiles::collection_import_obs,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
             commands::audio::app_audio_apps,
@@ -264,7 +302,8 @@ fn main() {
             openfile::open_frec_pending,
             commands::native_preview_set_region,
             commands::native_preview_active,
-            commands::native_preview_set_selection
+            commands::native_preview_set_selection,
+            commands::native_preview_set_overlay
         ])
         .setup(|app| {
             println!("init: setup entered");
@@ -344,6 +383,9 @@ fn main() {
             if std::env::var_os("FCAP_SMOKE").is_some() {
                 studio::seed_smoke_scene(app.handle());
             }
+            // Reopen the projectors that were open last session (CAP-M07
+            // extension) — stale scene/source targets are skipped.
+            projector::reopen_saved(app.handle());
             println!("init: setup complete");
             Ok(())
         })
@@ -351,11 +393,15 @@ fn main() {
         .expect("error while building Freally Capture");
     println!("init: build() returned — entering the event loop");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        // While the windows are still alive, remember which projectors are open
+        // so they reopen next launch (CAP-M07 extension).
+        tauri::RunEvent::ExitRequested { .. } => projector::remember_open(app_handle),
+        tauri::RunEvent::Exit => {
             // Never lose the last edit: the autosave debounce may still be
             // pending when the user quits.
             app_handle.state::<StudioState>().save_now();
         }
+        _ => {}
     });
 }

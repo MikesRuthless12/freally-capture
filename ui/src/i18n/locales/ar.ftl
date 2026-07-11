@@ -1003,6 +1003,44 @@ workspace-new-name-placeholder = اسم جديد…
 workspace-new-name-label = اسم { $title } الجديد
 workspace-create = إنشاء
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = استيراد من OBS…
+workspace-import-obs-hint = استورد مجموعة مشاهد OBS (ملف scenes.json الخاص بها). تُحفظ مجموعتك الحالية أولاً.
+workspace-import-busy = جارٍ الاستيراد…
+workspace-import-title = تم استيراد «{ $name }»
+workspace-import-summary = { $scenes } مشهد · { $sources } مصدر · { $items } عنصر
+workspace-import-dismiss = إغلاق
+workspace-import-clean = تم استيراد كل شيء بنجاح.
+workspace-import-geometry-caveat = تُضبط الأحجام والمواضع من تخطيط OBS — راجع كل مشهد وأعد اختيار أجهزة الالتقاط.
+workspace-import-notes-title = مستورد مع ملاحظات
+workspace-import-skipped-title = لم يُستورد
+import-note-needsReselect = أعد اختيار الجهاز/الشاشة/النافذة
+import-note-gameCaptureAsWindow = التقاط اللعبة → التقاط النافذة
+import-note-referencesFile = تحقق من مسار الملف
+import-note-filterDropped = بعض المرشحات غير مدعومة
+import-note-geometryApproximated = الموضع/الحجم تقريبي
+import-skip-unsupportedKind = لا يوجد نوع مصدر مكافئ
+import-skip-group = المجموعات غير مدعومة بعد
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = إعادة ربط الملفات المفقودة…
+doctor-title = ملفات مفقودة
+doctor-scanning = جارٍ الفحص…
+doctor-all-good = جميع الملفات المشار إليها موجودة. لا شيء لإعادة ربطه.
+doctor-intro = تعذّر العثور على { $count } من الملفات المشار إليها على هذا الحاسوب. حدّد الموقع الجديد لكلٍّ منها — يُصلَح كل مشهد يستخدمه دفعة واحدة.
+doctor-relinked = تمت إعادة ربط { $count } مرجعًا.
+doctor-uses = استُخدم { $count }×
+doctor-locate = تحديد الموقع…
+doctor-locate-folder = البحث في مجلد…
+doctor-locate-folder-hint = اختر مجلدًا؛ يُطابَق كل ملف مفقود بالاسم ويُعاد ربطه.
+doctor-kind-image = صورة
+doctor-kind-media = وسائط
+doctor-kind-slideshow = عرض شرائح
+doctor-kind-font = خط
+doctor-kind-lut = LUT
+doctor-kind-mask = قناع
+history-relinkFiles = إعادة ربط الملفات
+
 # --- ScriptsDialog.tsx ---
 scripts-title = النصوص (Lua)
 scripts-empty = لا نصوص بعد — أضف ملف .lua. راجع scripts/sample.lua للواجهة البرمجية: تفاعل مع أحداث البث المباشر/المشهد/التسجيل وقُد الأوامر نفسها كالواجهة عن بُعد.
@@ -1168,3 +1206,143 @@ announce-live-ended = انتهى البث المباشر
 announce-reconnecting = انقطع الاتصال، جارٍ إعادة الاتصال
 announce-stream-failed = فشل البث المباشر
 announce-frames-dropped = أسقط { $count } من الإطارات
+
+# CAP-M01 — undo/redo edit history
+palette-undo = تراجع
+palette-redo = إعادة
+palette-edit-history = سجل التعديلات…
+history-title = سجل التعديلات
+history-empty = لا يوجد ما يمكن التراجع عنه بعد.
+history-current = الحالة الحالية
+history-close = إغلاق
+history-addScene = إضافة مشهد
+history-renameScene = إعادة تسمية المشهد
+history-removeScene = إزالة المشهد
+history-reorderScene = إعادة ترتيب المشاهد
+history-addSource = إضافة مصدر
+history-removeSource = إزالة المصدر
+history-reorderSource = إعادة ترتيب المصادر
+history-renameSource = إعادة تسمية المصدر
+history-transformSource = نقل المصدر
+history-toggleVisibility = تبديل الظهور
+history-toggleLock = تبديل القفل
+history-setBlendMode = تغيير وضع المزج
+history-editSourceProperties = تعديل الخصائص
+history-applyLayout = ترتيب التخطيط
+history-moveToSeat = النقل إلى الموضع
+history-groupSources = تجميع المصادر
+history-ungroupSources = فك تجميع المصادر
+history-toggleGroupVisibility = تبديل المجموعة
+history-setSceneAudio = صوت المشهد
+history-setVerticalCanvas = لوحة عمودية
+history-addFilter = إضافة مرشِّح
+history-removeFilter = إزالة المرشِّح
+history-reorderFilter = إعادة ترتيب المرشِّحات
+history-editFilter = تعديل المرشِّح
+history-toggleFilter = تبديل المرشِّح
+history-setVolume = ضبط مستوى الصوت
+history-toggleMute = تبديل الكتم
+history-setMonitor = تغيير المراقبة
+history-setTracks = تغيير المسارات
+history-setSyncOffset = ضبط تزامن الصوت/الصورة
+history-setAudioHotkeys = اختصارات الصوت
+
+# CAP-M04 — alignment aids
+settings-alignment-section = أدوات المحاذاة
+settings-smart-guides = خطوط إرشادية ذكية (محاذاة أثناء السحب)
+settings-safe-areas = تراكبات المنطقة الآمنة
+settings-rulers = المساطر
+align-group = محاذاة إلى اللوحة
+align-left = محاذاة لليسار
+align-hcenter = توسيط أفقي
+align-right = محاذاة لليمين
+align-top = محاذاة للأعلى
+align-vcenter = توسيط رأسي
+align-bottom = محاذاة للأسفل
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = محاذاة وتوزيع المحدد
+arrange-left = محاذاة الحواف اليسرى
+arrange-hcenter = توسيط أفقيًا
+arrange-right = محاذاة الحواف اليمنى
+arrange-top = محاذاة الحواف العلوية
+arrange-vcenter = توسيط رأسيًا
+arrange-bottom = محاذاة الحواف السفلية
+distribute-h = توزيع أفقيًا
+distribute-v = توزيع رأسيًا
+guides-group = الأدلة
+guides-add-v = إضافة دليل رأسي
+guides-add-h = إضافة دليل أفقي
+history-arrangeItems = ترتيب العناصر
+history-editGuides = تحرير الأدلة
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = تعديل التحويل — { $name }
+transform-anchor = نقطة الارتكاز
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = التدوير
+transform-crop = الاقتصاص
+transform-crop-left = يسار
+transform-crop-top = أعلى
+transform-crop-right = يمين
+transform-crop-bottom = أسفل
+transform-no-size = يتوفر الحجم والاقتصاص بمجرد أن يبلغ المصدر عن أبعاده.
+transform-copy = نسخ التحويل
+transform-paste = لصق التحويل
+transform-close = إغلاق
+filters-copy = نسخ المرشِّحات ({ $count })
+filters-paste = لصق المرشِّحات ({ $count })
+palette-edit-transform = تعديل التحويل…
+history-pasteFilters = لصق المرشِّحات
+
+# CAP-M26 — keying workbench
+workbench-title = طاولة إزالة الخلفية — { $name }
+workbench-mode-keyed = بعد الإزالة
+workbench-mode-source = المصدر
+workbench-mode-matte = القناع
+workbench-mode-split = مقسَّم
+workbench-eyedropper = قطارة
+workbench-eyedropper-hint = انقر على المصدر لأخذ عينة من لون المفتاح.
+workbench-loupe = عدسة مكبِّرة
+workbench-split = التقسيم
+workbench-preview-alt = معاينة طاولة إزالة الخلفية
+workbench-tune = ضبط
+workbench-close = إغلاق
+
+# CAP-M06 — multiview monitor
+multiview-title = العرض المتعدد
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = انقر على مشهد للانتقال إليه.
+multiview-hint-stage = انقر على مشهد لتحضيره في المعاينة.
+palette-multiview = شاشة العرض المتعدد
+
+# CAP-M07 — projectors
+projector-title = فتح جهاز العرض
+projector-source = المصدر
+projector-target-program = البرنامج
+projector-target-preview = المعاينة
+projector-target-scene = مشهد…
+projector-target-source = مصدر…
+projector-target-multiview = العرض المتعدد
+projector-which-scene = أي مشهد
+projector-which-source = أي مصدر
+projector-none = لا شيء لعرضه
+projector-display = الشاشة
+projector-windowed = نافذة عائمة (هذه الشاشة)
+projector-display-option = الشاشة { $n } — { $w }×{ $h }
+projector-primary = (رئيسية)
+projector-open = فتح
+projector-cancel = إلغاء
+projector-exit-hint = اضغط Esc للخروج
+palette-projector = فتح جهاز العرض…
+
+# CAP-M08 — still-frame grab
+palette-still = التقاط إطار ثابت…
+still-saved-toast = تم حفظ الإطار: { $name }
+still-failed-toast = فشل التقاط الإطار: { $error }
+hotkeys-still = التقاط إطار ثابت
+hotkeys-still-placeholder = مثال: Ctrl+Shift+P

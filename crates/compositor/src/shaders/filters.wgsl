@@ -88,6 +88,16 @@ fn fs_luma_key(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(color.rgb, color.a * above * below);
 }
 
+// -- Matte (CAP-M26 keying workbench) ----------------------------------------
+// Preview-only: render the incoming alpha as opaque grayscale so a keyer's
+// matte is visible (white = kept, black = keyed out). Appended after the key
+// pass by the workbench render; never part of a user filter chain.
+@fragment
+fn fs_matte(in: VsOut) -> @location(0) vec4<f32> {
+    let a = textureSample(t_in, s_clamp, in.uv).a;
+    return vec4<f32>(a, a, a, 1.0);
+}
+
 // -- Color correction ---------------------------------------------------------
 // m0..m2 = combined contrast/brightness/saturation/hue affine matrix;
 // p0 = (gamma_exponent, opacity, 0, 0)

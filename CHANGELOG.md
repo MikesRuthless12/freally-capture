@@ -13,7 +13,56 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 ## [Unreleased]
 
 > The next rungs toward **1.0.0** are the 26 CAP-M must-haves, run as three themed batches
-> (0.97.0 / 0.98.0 / 0.99.0).
+> (0.97.0 / 0.98.0 / 0.99.0). **0.97.0 is the first batch** — scene authoring & monitoring.
+
+## [0.97.0] — 2026-07-11 (Scene authoring & monitoring — CAP-M Batch 1)
+
+> The first of the three must-have batches on the road to 1.0.0. The compositor learns to be *edited*
+> like a studio, not just driven: an undo history behind every scene edit, a multi-select with
+> align-and-distribute and pull-out guides, precise transforms you can copy between items, and a
+> keying workbench that shows you the matte. And it learns to be *watched*: a multiview of every
+> scene, fullscreen projectors for any scene / source / program / preview on any display, and a
+> one-key lossless still grab. Finally, it opens up to the world it came from — importing an OBS
+> scene collection, and finding the media that moved.
+
+### Added
+- **Multi-step undo/redo for every scene edit** (CAP-M01). A bounded, labelled snapshot history rides
+  under the same lock as the collection; a continuous gesture (a drag, a fader ride) folds into one
+  step; `Ctrl`/`Cmd`+`Z` reverses edits — never the live show (selecting the program scene, center
+  view, and focus stay off the stack). A viewable history list shows exactly what each step will undo.
+- **An OBS scene-collection importer** (CAP-M02). Point it at an OBS `scenes.json` and it maps the
+  scenes, z-order, per-item visibility/lock/blend, colour/text/image/media sources, display/window/
+  camera/audio captures, nested scenes, and the video **and** audio filters it recognizes — then hands
+  back an **honest per-source report**: what came across clean, what needs its capture device re-picked,
+  what references a file to check, and what had no equivalent and was skipped. Item sizes and positions
+  are fitted from OBS's layout (a scene file carries neither native source sizes nor the canvas), so the
+  report says so.
+- **A missing-file doctor** (CAP-M03). On load — or on demand from the palette — it scans the collection
+  for image / media / font / LUT / mask paths that no longer resolve and offers to relink each. Fixing
+  one broken path repairs every scene that used it; "Locate in folder…" bulk-matches by name.
+- **Alignment gets a full multi-select** (CAP-M04). Shift-click and a rubber-band marquee select many
+  items; drag any of them to move the group (snapped as one box); align their edges/centers to each
+  other or distribute them evenly. And you can pull out your own **guide lines** — drag to move, drag
+  off-canvas to delete — that dragged items snap to, drawn over both the JPEG and the native GPU preview.
+- **A precision transform panel with copy/paste** (CAP-M05). Type an item's anchor-relative position,
+  size, rotation and crop; copy a transform or a whole filter chain and paste it onto another item as a
+  single undo step.
+- **A keying workbench** (CAP-M26). Tune a chroma/colour/luma key against a live single-source view with
+  a matte mode (alpha → grey), an eyedropper, a loupe, and a draggable before/after split.
+- **A multiview monitor** (CAP-M06) — a live grid of every scene with red (program) / green (preview)
+  tally, click to cut or (in Studio Mode) stage. It can open as its own window on any display.
+- **Projectors for anything, anywhere** (CAP-M07) — fullscreen the program, the Studio-Mode preview, a
+  **specific scene**, or a **single source** on any connected display (or a floating window). Projectors
+  reopen where you left them next launch.
+- **A one-key still grab** (CAP-M08) — a lossless PNG of the program (or a single source, pre/post
+  filter) into the recordings folder, bindable to a global hotkey.
+
+### Changed
+- Scene selection is now a first-class multi-selection throughout the preview; a batch transform commits
+  align / distribute / group moves as a single undo step.
+- The `preview://` pipe grew per-target full-res projector slots and per-scene projector routing
+  alongside the existing program / preview / vertical / workbench / multiview slots; CORS stays pinned to
+  the app's own origins.
 
 ## [0.96.0] — 2026-07-10 (Accessibility, 18 languages, onboarding & themes)
 

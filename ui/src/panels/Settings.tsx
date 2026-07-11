@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { settingsGet, settingsSet } from "../api/commands";
-import type { Settings, ThemeMode } from "../api/types";
+import type { AlignmentSettings, Settings, ThemeMode } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { AUTO_LOCALE, LOCALES, isLocaleCode } from "../i18n/locales";
 import { initLocale, setLocale, useT } from "../i18n/t";
@@ -80,6 +80,9 @@ export function SettingsDialog({
   const changeStatsDock = (show: boolean) =>
     save({ ...settings, showStatsDock: show }, () => undefined);
 
+  const changeAlignment = (patch: Partial<AlignmentSettings>) =>
+    save({ ...settings, alignment: { ...settings.alignment, ...patch } }, () => undefined);
+
   return (
     <PickerShell title={t("settings-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-4 text-xs text-havoc-text">
@@ -149,6 +152,33 @@ export function SettingsDialog({
               onChange={(event) => changeStatsDock(event.target.checked)}
             />
             {t("settings-show-stats-dock")}
+          </label>
+        </Section>
+
+        <Section title={t("settings-alignment-section")}>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={settings.alignment.smartGuides}
+              onChange={(event) => changeAlignment({ smartGuides: event.target.checked })}
+            />
+            {t("settings-smart-guides")}
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={settings.alignment.safeAreas}
+              onChange={(event) => changeAlignment({ safeAreas: event.target.checked })}
+            />
+            {t("settings-safe-areas")}
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={settings.alignment.rulers}
+              onChange={(event) => changeAlignment({ rulers: event.target.checked })}
+            />
+            {t("settings-rulers")}
           </label>
         </Section>
 

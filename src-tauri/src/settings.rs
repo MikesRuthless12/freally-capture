@@ -74,6 +74,31 @@ impl ThemeSettings {
     }
 }
 
+/// Preview alignment aids (CAP-M04): smart snapping guides, safe-area
+/// overlays, and rulers. All are preview-only chrome — none touch the model or
+/// the composed output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AlignmentSettings {
+    /// Snap a dragged item to canvas + other-item edges/centers (on by default,
+    /// like a design tool). Holding a modifier during the drag bypasses it.
+    pub smart_guides: bool,
+    /// Draw action-safe + title-safe rectangles over the preview.
+    pub safe_areas: bool,
+    /// Draw px rulers in the gutter around the preview.
+    pub rulers: bool,
+}
+
+impl Default for AlignmentSettings {
+    fn default() -> Self {
+        Self {
+            smart_guides: true,
+            safe_areas: false,
+            rulers: false,
+        }
+    }
+}
+
 /// `Settings::language` sentinel: follow the operating system's preferred
 /// languages instead of a fixed choice. Fresh installs start here, so a Japanese
 /// user does not have to find a picker to stop reading English. Kept in step
@@ -98,6 +123,8 @@ pub struct Settings {
     pub mixer_layout: MixerLayout,
     /// Appearance: palette + custom accent (Phase 9, TASK-906).
     pub theme: ThemeSettings,
+    /// Preview alignment aids: smart guides, safe areas, rulers (CAP-M04).
+    pub alignment: AlignmentSettings,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
     /// Remote Guests networking (Phase R).
@@ -134,6 +161,7 @@ impl Default for Settings {
             monitor_device: None,
             mixer_layout: MixerLayout::default(),
             theme: ThemeSettings::default(),
+            alignment: AlignmentSettings::default(),
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
@@ -256,6 +284,8 @@ pub struct HotkeySettings {
     pub save_replay: Option<String>,
     /// Drop a chapter marker into the active recording (Phase 6).
     pub add_marker: Option<String>,
+    /// Grab a still frame of the program (CAP-M08).
+    pub still: Option<String>,
 }
 
 impl HotkeySettings {
@@ -1090,6 +1120,11 @@ mod tests {
                 mode: ThemeMode::Custom,
                 accent: "#00d4ff".to_owned(),
             },
+            alignment: AlignmentSettings {
+                smart_guides: false,
+                safe_areas: true,
+                rulers: true,
+            },
             recording: RecordingSettings {
                 container: Container::Mkv,
                 split_minutes: 30,
@@ -1132,6 +1167,7 @@ mod tests {
                 transition: Some("F13".to_owned()),
                 save_replay: Some("Ctrl+Shift+S".to_owned()),
                 add_marker: None,
+                still: Some("Ctrl+Shift+P".to_owned()),
             },
             remote_control: RemoteControlSettings {
                 enabled: true,

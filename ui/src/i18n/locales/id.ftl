@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = nama baru…
 workspace-new-name-label = Nama { $title } baru
 workspace-create = Buat
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Impor dari OBS…
+workspace-import-obs-hint = Bawa masuk koleksi scene OBS (scenes.json miliknya). Koleksi Anda saat ini disimpan lebih dulu.
+workspace-import-busy = Mengimpor…
+workspace-import-title = "{ $name }" diimpor
+workspace-import-summary = { $scenes } scene · { $sources } sumber · { $items } item
+workspace-import-dismiss = Tutup
+workspace-import-clean = Semuanya terimpor dengan baik.
+workspace-import-geometry-caveat = Ukuran dan posisi disesuaikan dari tata letak OBS — periksa tiap scene dan pilih ulang perangkat tangkapan.
+workspace-import-notes-title = Diimpor dengan catatan
+workspace-import-skipped-title = Tidak diimpor
+import-note-needsReselect = Pilih ulang perangkat/monitor/jendela
+import-note-gameCaptureAsWindow = Game Capture → Window Capture
+import-note-referencesFile = Periksa jalur berkas
+import-note-filterDropped = Beberapa filter tidak didukung
+import-note-geometryApproximated = Posisi/ukuran diperkirakan
+import-skip-unsupportedKind = Tidak ada tipe sumber setara
+import-skip-group = Grup belum didukung
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Tautkan ulang berkas yang hilang…
+doctor-title = Berkas hilang
+doctor-scanning = Memindai…
+doctor-all-good = Semua berkas yang dirujuk ada. Tidak ada yang perlu ditautkan ulang.
+doctor-intro = { $count } berkas yang dirujuk tidak ditemukan di komputer ini. Tunjukkan lokasi baru masing-masing — setiap scene yang memakainya diperbaiki sekaligus.
+doctor-relinked = { $count } rujukan ditautkan ulang.
+doctor-uses = dipakai { $count }×
+doctor-locate = Temukan…
+doctor-locate-folder = Cari di folder…
+doctor-locate-folder-hint = Pilih folder; setiap berkas hilang dicocokkan berdasarkan nama dan ditautkan ulang.
+doctor-kind-image = gambar
+doctor-kind-media = media
+doctor-kind-slideshow = tayangan slaid
+doctor-kind-font = fon
+doctor-kind-lut = LUT
+doctor-kind-mask = topeng
+history-relinkFiles = Tautkan ulang berkas
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Skrip (Lua)
 scripts-empty = Belum ada skrip — tambahkan berkas .lua. Lihat scripts/sample.lua untuk API-nya: bereaksi terhadap peristiwa go-live/scene/rekaman dan jalankan perintah yang sama dengan API remote.
@@ -1203,3 +1241,143 @@ announce-live-ended = Siaran berakhir
 announce-reconnecting = Koneksi terputus, menyambung ulang
 announce-stream-failed = Siaran gagal
 announce-frames-dropped = { $count } frame terjatuh
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Urungkan
+palette-redo = Ulangi
+palette-edit-history = Riwayat penyuntingan…
+history-title = Riwayat penyuntingan
+history-empty = Belum ada yang bisa diurungkan.
+history-current = Keadaan saat ini
+history-close = Tutup
+history-addScene = Tambah adegan
+history-renameScene = Ganti nama adegan
+history-removeScene = Hapus adegan
+history-reorderScene = Susun ulang adegan
+history-addSource = Tambah sumber
+history-removeSource = Hapus sumber
+history-reorderSource = Susun ulang sumber
+history-renameSource = Ganti nama sumber
+history-transformSource = Pindahkan sumber
+history-toggleVisibility = Alihkan visibilitas
+history-toggleLock = Alihkan kunci
+history-setBlendMode = Ubah mode campuran
+history-editSourceProperties = Edit properti
+history-applyLayout = Atur tata letak
+history-moveToSeat = Pindah ke tempat
+history-groupSources = Kelompokkan sumber
+history-ungroupSources = Pisahkan grup
+history-toggleGroupVisibility = Alihkan grup
+history-setSceneAudio = Audio adegan
+history-setVerticalCanvas = Kanvas vertikal
+history-addFilter = Tambah filter
+history-removeFilter = Hapus filter
+history-reorderFilter = Susun ulang filter
+history-editFilter = Edit filter
+history-toggleFilter = Alihkan filter
+history-setVolume = Sesuaikan volume
+history-toggleMute = Alihkan bisu
+history-setMonitor = Ubah pemantauan
+history-setTracks = Ubah trek
+history-setSyncOffset = Sesuaikan sinkron A/V
+history-setAudioHotkeys = Pintasan audio
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Bantuan perataan
+settings-smart-guides = Panduan cerdas (jepret saat menyeret)
+settings-safe-areas = Hamparan area aman
+settings-rulers = Penggaris
+align-group = Ratakan ke kanvas
+align-left = Ratakan kiri
+align-hcenter = Tengahkan horizontal
+align-right = Ratakan kanan
+align-top = Ratakan atas
+align-vcenter = Tengahkan vertikal
+align-bottom = Ratakan bawah
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Ratakan & distribusikan pilihan
+arrange-left = Ratakan tepi kiri
+arrange-hcenter = Tengahkan horizontal
+arrange-right = Ratakan tepi kanan
+arrange-top = Ratakan tepi atas
+arrange-vcenter = Tengahkan vertikal
+arrange-bottom = Ratakan tepi bawah
+distribute-h = Distribusikan horizontal
+distribute-v = Distribusikan vertikal
+guides-group = Panduan
+guides-add-v = Tambah panduan vertikal
+guides-add-h = Tambah panduan horizontal
+history-arrangeItems = Susun item
+history-editGuides = Edit panduan
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Edit transformasi — { $name }
+transform-anchor = Jangkar
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Rotasi
+transform-crop = Pangkas
+transform-crop-left = Kiri
+transform-crop-top = Atas
+transform-crop-right = Kanan
+transform-crop-bottom = Bawah
+transform-no-size = Ukuran dan pangkas tersedia setelah sumber melaporkan dimensinya.
+transform-copy = Salin transformasi
+transform-paste = Tempel transformasi
+transform-close = Tutup
+filters-copy = Salin filter ({ $count })
+filters-paste = Tempel filter ({ $count })
+palette-edit-transform = Edit transformasi…
+history-pasteFilters = Tempel filter
+
+# CAP-M26 — keying workbench
+workbench-title = Meja keying — { $name }
+workbench-mode-keyed = Ter-key
+workbench-mode-source = Sumber
+workbench-mode-matte = Matte
+workbench-mode-split = Terbagi
+workbench-eyedropper = Pipet
+workbench-eyedropper-hint = Klik sumber untuk mengambil warna kunci.
+workbench-loupe = Lup
+workbench-split = Pembagian
+workbench-preview-alt = Pratinjau meja keying
+workbench-tune = Setel
+workbench-close = Tutup
+
+# CAP-M06 — multiview monitor
+multiview-title = Multiview
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Klik adegan untuk beralih ke sana.
+multiview-hint-stage = Klik adegan untuk menyiapkannya di pratinjau.
+palette-multiview = Monitor multiview
+
+# CAP-M07 — projectors
+projector-title = Buka proyektor
+projector-source = Sumber
+projector-target-program = Program
+projector-target-preview = Pratinjau
+projector-target-scene = Scene…
+projector-target-source = Sumber…
+projector-target-multiview = Multiview
+projector-which-scene = Scene mana
+projector-which-source = Sumber mana
+projector-none = Tidak ada yang ditampilkan
+projector-display = Layar
+projector-windowed = Jendela mengambang (layar ini)
+projector-display-option = Layar { $n } — { $w }×{ $h }
+projector-primary = (utama)
+projector-open = Buka
+projector-cancel = Batal
+projector-exit-hint = Tekan Esc untuk keluar
+palette-projector = Buka proyektor…
+
+# CAP-M08 — still-frame grab
+palette-still = Ambil bingkai…
+still-saved-toast = Bingkai disimpan: { $name }
+still-failed-toast = Gagal mengambil bingkai: { $error }
+hotkeys-still = Ambil bingkai
+hotkeys-still-placeholder = mis. Ctrl+Shift+P

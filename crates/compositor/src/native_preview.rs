@@ -27,12 +27,15 @@ use crate::CompositorError;
 /// canvas onto the whole surface, so the same corners map straight to the
 /// surface.
 pub struct PreviewOverlay {
-    /// The item's four content corners, canvas px, order `(0,0)(w,0)(0,h)(w,h)`.
-    pub corners: [[f32; 2]; 4],
-    /// The canvas size those corners are expressed in.
+    /// The canvas size all coordinates below are expressed in (px).
     pub canvas: (f32, f32),
-    /// Locked items show the box but no interactive handles.
-    pub locked: bool,
+    /// The selected item's four content corners (order `(0,0)(w,0)(0,h)(w,h)`)
+    /// plus its locked flag, when an item is selected. `None` draws no chrome.
+    pub selection: Option<([[f32; 2]; 4], bool)>,
+    /// Safe-area rectangles (canvas px): each `[x, y, w, h]` (CAP-M04).
+    pub safe_areas: Vec<[f32; 4]>,
+    /// Smart-guide line segments (canvas px): each `[x0, y0, x1, y1]` (CAP-M04).
+    pub guides: Vec<[f32; 4]>,
 }
 
 /// One overlay vertex: a clip-space (NDC) position + an opaque RGBA color.
@@ -48,9 +51,11 @@ struct OverlayVertex {
 const HANDLE_HALF_PX: f32 = 5.0;
 /// Rotate-handle distance out from the top-edge midpoint, surface px.
 const ROTATE_OFFSET_PX: f32 = 24.0;
-/// Vertex-buffer capacities. Worst case: 5 line segments = 10 verts; 9 handle
-/// squares × 6 = 54 verts. Rounded up.
-const OVERLAY_LINE_CAP: u64 = 16;
+/// Vertex-buffer capacities. Lines worst case: safe areas (≤4 rects × 4 edges ×
+/// 2 = 32) + guides (≤16 × 2 = 32) + selection box/rotate (10) = 74; triangles:
+/// 9 handle squares × 6 = 54. Rounded up; the state setter clamps the untrusted
+/// safe-area/guide counts to those bounds so this can never be overrun.
+const OVERLAY_LINE_CAP: u64 = 96;
 const OVERLAY_TRI_CAP: u64 = 64;
 
 // Overlay colors (written to a non-sRGB Unorm surface, so these are the on-
@@ -58,6 +63,10 @@ const OVERLAY_TRI_CAP: u64 = 64;
 const BOX_BLUE: [f32; 4] = [0.29, 0.62, 1.0, 1.0];
 const HANDLE_WHITE: [f32; 4] = [0.95, 0.97, 1.0, 1.0];
 const ROTATE_CYAN: [f32; 4] = [0.0, 0.83, 1.0, 1.0];
+/// Safe-area rectangles: translucent white. Guide lines: the smart-guide pink
+/// (#ff3ea5), matching the SVG path.
+const SAFE_AREA_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.4];
+const GUIDE_PINK: [f32; 4] = [1.0, 0.24, 0.65, 1.0];
 
 /// A window surface the program frame is blitted onto.
 pub struct NativePreview {
@@ -352,11 +361,35 @@ fn overlay_vertices(
         ]
     };
 
+    // Safe-area rectangles (CAP-M04): a translucent-white line loop each.
+    for rect in &overlay.safe_areas {
+        let (x, y, w, h) = (rect[0], rect[1], rect[2], rect[3]);
+        let tl = to_surface([x, y]);
+        let tr = to_surface([x + w, y]);
+        let br = to_surface([x + w, y + h]);
+        let bl = to_surface([x, y + h]);
+        lines.extend_from_slice(&seg(tl, tr, SAFE_AREA_COLOR));
+        lines.extend_from_slice(&seg(tr, br, SAFE_AREA_COLOR));
+        lines.extend_from_slice(&seg(br, bl, SAFE_AREA_COLOR));
+        lines.extend_from_slice(&seg(bl, tl, SAFE_AREA_COLOR));
+    }
+
+    // Smart-guide lines (CAP-M04).
+    for guide in &overlay.guides {
+        let a = to_surface([guide[0], guide[1]]);
+        let b = to_surface([guide[2], guide[3]]);
+        lines.extend_from_slice(&seg(a, b, GUIDE_PINK));
+    }
+
+    // The selection box + handles, when an item is selected.
+    let Some((corners, locked)) = overlay.selection else {
+        return;
+    };
     let c = [
-        to_surface(overlay.corners[0]),
-        to_surface(overlay.corners[1]),
-        to_surface(overlay.corners[2]),
-        to_surface(overlay.corners[3]),
+        to_surface(corners[0]),
+        to_surface(corners[1]),
+        to_surface(corners[2]),
+        to_surface(corners[3]),
     ];
 
     // Box edges: (0,0)-(w,0)-(w,h)-(0,h)-(0,0) → corners 0,1,3,2.
@@ -365,7 +398,7 @@ fn overlay_vertices(
     lines.extend_from_slice(&seg(c[3], c[2], BOX_BLUE));
     lines.extend_from_slice(&seg(c[2], c[0], BOX_BLUE));
 
-    if overlay.locked {
+    if locked {
         return;
     }
 
@@ -524,9 +557,10 @@ mod tests {
 
     fn overlay(corners: [[f32; 2]; 4], locked: bool) -> PreviewOverlay {
         PreviewOverlay {
-            corners,
             canvas: (100.0, 100.0),
-            locked,
+            selection: Some((corners, locked)),
+            safe_areas: Vec::new(),
+            guides: Vec::new(),
         }
     }
 
@@ -567,13 +601,50 @@ mod tests {
     #[test]
     fn degenerate_canvas_emits_nothing() {
         let ov = PreviewOverlay {
-            corners: [[0.0, 0.0]; 4],
             canvas: (0.0, 0.0),
-            locked: false,
+            selection: Some(([[0.0, 0.0]; 4], false)),
+            safe_areas: Vec::new(),
+            guides: Vec::new(),
         };
         let mut lines = Vec::new();
         let mut tris = Vec::new();
         overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
         assert!(lines.is_empty() && tris.is_empty());
+    }
+
+    #[test]
+    fn safe_areas_and_guides_emit_lines_without_a_selection() {
+        // No selection, one safe-area rect + one guide line.
+        let ov = PreviewOverlay {
+            canvas: (100.0, 100.0),
+            selection: None,
+            safe_areas: vec![[5.0, 5.0, 90.0, 90.0]],
+            guides: vec![[50.0, 0.0, 50.0, 100.0]],
+        };
+        let mut lines = Vec::new();
+        let mut tris = Vec::new();
+        overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
+        // 4 rect edges (8 verts) + 1 guide (2 verts); no selection chrome.
+        assert_eq!(lines.len(), 10);
+        assert!(tris.is_empty());
+    }
+
+    #[test]
+    fn selection_draws_over_safe_areas_and_guides() {
+        let ov = PreviewOverlay {
+            canvas: (100.0, 100.0),
+            selection: Some((
+                [[40.0, 40.0], [60.0, 40.0], [40.0, 60.0], [60.0, 60.0]],
+                false,
+            )),
+            safe_areas: vec![[5.0, 5.0, 90.0, 90.0]],
+            guides: vec![[50.0, 0.0, 50.0, 100.0]],
+        };
+        let mut lines = Vec::new();
+        let mut tris = Vec::new();
+        overlay_vertices(&ov, 200.0, 200.0, &mut lines, &mut tris);
+        // safe area (8) + guide (2) + box (8) + rotate stem (2) = 20 line verts.
+        assert_eq!(lines.len(), 20);
+        assert_eq!(tris.len(), 9 * 6);
     }
 }

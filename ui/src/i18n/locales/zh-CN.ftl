@@ -1022,6 +1022,44 @@ workspace-new-name-placeholder = 新名称…
 workspace-new-name-label = 新的 { $title } 名称
 workspace-create = 创建
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = 从 OBS 导入…
+workspace-import-obs-hint = 导入一个 OBS 场景集合（其 scenes.json）。当前集合会先被保存。
+workspace-import-busy = 正在导入…
+workspace-import-title = 已导入"{ $name }"
+workspace-import-summary = { $scenes } 个场景 · { $sources } 个源 · { $items } 个项目
+workspace-import-dismiss = 关闭
+workspace-import-clean = 全部顺利导入。
+workspace-import-geometry-caveat = 大小和位置根据 OBS 布局进行适配——请检查每个场景，并重新选择采集设备。
+workspace-import-notes-title = 导入（含提示）
+workspace-import-skipped-title = 未导入
+import-note-needsReselect = 重新选择设备/显示器/窗口
+import-note-gameCaptureAsWindow = 游戏捕获 → 窗口捕获
+import-note-referencesFile = 检查文件路径
+import-note-filterDropped = 部分滤镜不受支持
+import-note-geometryApproximated = 位置/大小为近似值
+import-skip-unsupportedKind = 无对应的源类型
+import-skip-group = 暂不支持分组
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = 重新链接缺失文件…
+doctor-title = 缺失文件
+doctor-scanning = 正在扫描…
+doctor-all-good = 所有引用的文件都存在，无需重新链接。
+doctor-intro = 在这台电脑上找不到 { $count } 个被引用的文件。为每个指定新位置——使用它的每个场景都会一次性修复。
+doctor-relinked = 已重新链接 { $count } 处引用。
+doctor-uses = 使用 { $count } 次
+doctor-locate = 定位…
+doctor-locate-folder = 在文件夹中查找…
+doctor-locate-folder-hint = 选择一个文件夹；每个缺失文件按名称匹配并重新链接。
+doctor-kind-image = 图像
+doctor-kind-media = 媒体
+doctor-kind-slideshow = 幻灯片
+doctor-kind-font = 字体
+doctor-kind-lut = LUT
+doctor-kind-mask = 遮罩
+history-relinkFiles = 重新链接文件
+
 # --- ScriptsDialog.tsx ---
 scripts-title = 脚本（Lua）
 scripts-empty = 尚无脚本 — 添加一个 .lua 文件。API 见 scripts/sample.lua：响应开始直播/场景/录制事件，并驱动与远程 API 相同的命令。
@@ -1187,3 +1225,143 @@ announce-live-ended = 直播已结束
 announce-reconnecting = 连接已断开，正在重新连接
 announce-stream-failed = 直播失败
 announce-frames-dropped = 丢失了 { $count } 帧
+
+# CAP-M01 — undo/redo edit history
+palette-undo = 撤销
+palette-redo = 重做
+palette-edit-history = 编辑历史…
+history-title = 编辑历史
+history-empty = 暂无可撤销的编辑。
+history-current = 当前状态
+history-close = 关闭
+history-addScene = 添加场景
+history-renameScene = 重命名场景
+history-removeScene = 删除场景
+history-reorderScene = 重新排序场景
+history-addSource = 添加源
+history-removeSource = 删除源
+history-reorderSource = 重新排序源
+history-renameSource = 重命名源
+history-transformSource = 移动源
+history-toggleVisibility = 切换可见性
+history-toggleLock = 切换锁定
+history-setBlendMode = 更改混合模式
+history-editSourceProperties = 编辑属性
+history-applyLayout = 排列布局
+history-moveToSeat = 移动到位置
+history-groupSources = 编组源
+history-ungroupSources = 取消编组
+history-toggleGroupVisibility = 切换编组
+history-setSceneAudio = 场景音频
+history-setVerticalCanvas = 竖版画布
+history-addFilter = 添加滤镜
+history-removeFilter = 删除滤镜
+history-reorderFilter = 重新排序滤镜
+history-editFilter = 编辑滤镜
+history-toggleFilter = 切换滤镜
+history-setVolume = 调整音量
+history-toggleMute = 切换静音
+history-setMonitor = 更改监听
+history-setTracks = 更改音轨
+history-setSyncOffset = 调整音视频同步
+history-setAudioHotkeys = 音频快捷键
+
+# CAP-M04 — alignment aids
+settings-alignment-section = 对齐辅助
+settings-smart-guides = 智能参考线（拖动时吸附）
+settings-safe-areas = 安全区叠加
+settings-rulers = 标尺
+align-group = 对齐到画布
+align-left = 左对齐
+align-hcenter = 水平居中
+align-right = 右对齐
+align-top = 顶部对齐
+align-vcenter = 垂直居中
+align-bottom = 底部对齐
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = 对齐并分布所选
+arrange-left = 左边缘对齐
+arrange-hcenter = 水平居中
+arrange-right = 右边缘对齐
+arrange-top = 上边缘对齐
+arrange-vcenter = 垂直居中
+arrange-bottom = 下边缘对齐
+distribute-h = 水平分布
+distribute-v = 垂直分布
+guides-group = 参考线
+guides-add-v = 添加垂直参考线
+guides-add-h = 添加水平参考线
+history-arrangeItems = 排列项目
+history-editGuides = 编辑参考线
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = 编辑变换 — { $name }
+transform-anchor = 锚点
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = 旋转
+transform-crop = 裁剪
+transform-crop-left = 左
+transform-crop-top = 上
+transform-crop-right = 右
+transform-crop-bottom = 下
+transform-no-size = 源报告其尺寸后，大小和裁剪即可使用。
+transform-copy = 复制变换
+transform-paste = 粘贴变换
+transform-close = 关闭
+filters-copy = 复制滤镜 ({ $count })
+filters-paste = 粘贴滤镜 ({ $count })
+palette-edit-transform = 编辑变换…
+history-pasteFilters = 粘贴滤镜
+
+# CAP-M26 — keying workbench
+workbench-title = 抠像工作台 — { $name }
+workbench-mode-keyed = 已抠像
+workbench-mode-source = 源
+workbench-mode-matte = 蒙版
+workbench-mode-split = 分屏
+workbench-eyedropper = 吸管
+workbench-eyedropper-hint = 点击源以取样键控颜色。
+workbench-loupe = 放大镜
+workbench-split = 分屏
+workbench-preview-alt = 抠像工作台预览
+workbench-tune = 调整
+workbench-close = 关闭
+
+# CAP-M06 — multiview monitor
+multiview-title = 多画面预监
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = 点击场景切换到该场景。
+multiview-hint-stage = 点击场景将其放入预览。
+palette-multiview = 多画面预监
+
+# CAP-M07 — projectors
+projector-title = 打开投影
+projector-source = 源
+projector-target-program = 节目
+projector-target-preview = 预览
+projector-target-scene = 场景…
+projector-target-source = 源…
+projector-target-multiview = 多画面
+projector-which-scene = 哪个场景
+projector-which-source = 哪个源
+projector-none = 没有可显示的内容
+projector-display = 显示器
+projector-windowed = 浮动窗口（当前屏幕）
+projector-display-option = 显示器 { $n } — { $w }×{ $h }
+projector-primary = （主）
+projector-open = 打开
+projector-cancel = 取消
+projector-exit-hint = 按 Esc 退出
+palette-projector = 打开投影…
+
+# CAP-M08 — still-frame grab
+palette-still = 抓取静帧…
+still-saved-toast = 静帧已保存：{ $name }
+still-failed-toast = 静帧抓取失败：{ $error }
+hotkeys-still = 抓取静帧
+hotkeys-still-placeholder = 例如 Ctrl+Shift+P

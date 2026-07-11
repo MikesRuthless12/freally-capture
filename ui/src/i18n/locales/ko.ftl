@@ -1016,6 +1016,44 @@ workspace-new-name-placeholder = 새 이름…
 workspace-new-name-label = 새 { $title } 이름
 workspace-create = 만들기
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = OBS에서 가져오기…
+workspace-import-obs-hint = OBS 장면 모음(해당 scenes.json)을 가져옵니다. 현재 모음은 먼저 저장됩니다.
+workspace-import-busy = 가져오는 중…
+workspace-import-title = "{ $name }" 가져옴
+workspace-import-summary = 장면 { $scenes }개 · 소스 { $sources }개 · 항목 { $items }개
+workspace-import-dismiss = 닫기
+workspace-import-clean = 모두 문제없이 가져왔습니다.
+workspace-import-geometry-caveat = 크기와 위치는 OBS 레이아웃에서 맞춰집니다 — 각 장면을 확인하고 캡처 장치를 다시 선택하세요.
+workspace-import-notes-title = 참고 사항과 함께 가져옴
+workspace-import-skipped-title = 가져오지 않음
+import-note-needsReselect = 장치/모니터/창 다시 선택
+import-note-gameCaptureAsWindow = 게임 캡처 → 창 캡처
+import-note-referencesFile = 파일 경로 확인
+import-note-filterDropped = 일부 필터 미지원
+import-note-geometryApproximated = 위치/크기 근사
+import-skip-unsupportedKind = 동등한 소스 유형 없음
+import-skip-group = 그룹은 아직 지원되지 않음
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = 누락된 파일 다시 연결…
+doctor-title = 누락된 파일
+doctor-scanning = 검사 중…
+doctor-all-good = 참조된 모든 파일이 있습니다. 다시 연결할 것이 없습니다.
+doctor-intro = 참조된 파일 { $count }개를 이 컴퓨터에서 찾을 수 없습니다. 각각의 새 위치를 지정하세요 — 이를 사용하는 모든 장면이 한 번에 고쳐집니다.
+doctor-relinked = 참조 { $count }개를 다시 연결했습니다.
+doctor-uses = { $count }회 사용
+doctor-locate = 찾기…
+doctor-locate-folder = 폴더에서 찾기…
+doctor-locate-folder-hint = 폴더를 선택하면 각 누락 파일을 이름으로 찾아 다시 연결합니다.
+doctor-kind-image = 이미지
+doctor-kind-media = 미디어
+doctor-kind-slideshow = 슬라이드쇼
+doctor-kind-font = 글꼴
+doctor-kind-lut = LUT
+doctor-kind-mask = 마스크
+history-relinkFiles = 파일 다시 연결
+
 # --- ScriptsDialog.tsx ---
 scripts-title = 스크립트 (Lua)
 scripts-empty = 아직 스크립트가 없습니다 — .lua 파일을 추가하세요. API는 scripts/sample.lua를 참고하세요: 라이브/장면/녹화 이벤트에 반응하고 원격 API와 동일한 명령을 실행합니다.
@@ -1181,3 +1219,143 @@ announce-live-ended = 방송이 종료되었습니다
 announce-reconnecting = 연결이 끊겨 다시 연결하는 중입니다
 announce-stream-failed = 방송에 실패했습니다
 announce-frames-dropped = 프레임 { $count }개가 누락되었습니다
+
+# CAP-M01 — undo/redo edit history
+palette-undo = 실행 취소
+palette-redo = 다시 실행
+palette-edit-history = 편집 기록…
+history-title = 편집 기록
+history-empty = 취소할 편집이 아직 없습니다.
+history-current = 현재 상태
+history-close = 닫기
+history-addScene = 장면 추가
+history-renameScene = 장면 이름 변경
+history-removeScene = 장면 제거
+history-reorderScene = 장면 순서 변경
+history-addSource = 소스 추가
+history-removeSource = 소스 제거
+history-reorderSource = 소스 순서 변경
+history-renameSource = 소스 이름 변경
+history-transformSource = 소스 이동
+history-toggleVisibility = 표시 전환
+history-toggleLock = 잠금 전환
+history-setBlendMode = 혼합 모드 변경
+history-editSourceProperties = 속성 편집
+history-applyLayout = 레이아웃 배치
+history-moveToSeat = 자리로 이동
+history-groupSources = 소스 그룹화
+history-ungroupSources = 그룹 해제
+history-toggleGroupVisibility = 그룹 전환
+history-setSceneAudio = 장면 오디오
+history-setVerticalCanvas = 세로 캔버스
+history-addFilter = 필터 추가
+history-removeFilter = 필터 제거
+history-reorderFilter = 필터 순서 변경
+history-editFilter = 필터 편집
+history-toggleFilter = 필터 전환
+history-setVolume = 볼륨 조정
+history-toggleMute = 음소거 전환
+history-setMonitor = 모니터링 변경
+history-setTracks = 트랙 변경
+history-setSyncOffset = A/V 동기화 조정
+history-setAudioHotkeys = 오디오 단축키
+
+# CAP-M04 — alignment aids
+settings-alignment-section = 정렬 보조
+settings-smart-guides = 스마트 가이드(드래그 시 스냅)
+settings-safe-areas = 안전 영역 오버레이
+settings-rulers = 눈금자
+align-group = 캔버스에 정렬
+align-left = 왼쪽 정렬
+align-hcenter = 가로 가운데 정렬
+align-right = 오른쪽 정렬
+align-top = 위쪽 정렬
+align-vcenter = 세로 가운데 정렬
+align-bottom = 아래쪽 정렬
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = 선택 항목 정렬 및 분포
+arrange-left = 왼쪽 가장자리 정렬
+arrange-hcenter = 가로 가운데 정렬
+arrange-right = 오른쪽 가장자리 정렬
+arrange-top = 위쪽 가장자리 정렬
+arrange-vcenter = 세로 가운데 정렬
+arrange-bottom = 아래쪽 가장자리 정렬
+distribute-h = 가로로 분포
+distribute-v = 세로로 분포
+guides-group = 안내선
+guides-add-v = 세로 안내선 추가
+guides-add-h = 가로 안내선 추가
+history-arrangeItems = 항목 정렬
+history-editGuides = 안내선 편집
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = 변형 편집 — { $name }
+transform-anchor = 기준점
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = 회전
+transform-crop = 자르기
+transform-crop-left = 왼쪽
+transform-crop-top = 위
+transform-crop-right = 오른쪽
+transform-crop-bottom = 아래
+transform-no-size = 크기와 자르기는 소스가 크기를 보고하면 사용할 수 있습니다.
+transform-copy = 변형 복사
+transform-paste = 변형 붙여넣기
+transform-close = 닫기
+filters-copy = 필터 복사 ({ $count })
+filters-paste = 필터 붙여넣기 ({ $count })
+palette-edit-transform = 변형 편집…
+history-pasteFilters = 필터 붙여넣기
+
+# CAP-M26 — keying workbench
+workbench-title = 키잉 작업대 — { $name }
+workbench-mode-keyed = 키 적용
+workbench-mode-source = 소스
+workbench-mode-matte = 매트
+workbench-mode-split = 분할
+workbench-eyedropper = 스포이트
+workbench-eyedropper-hint = 소스를 클릭하여 키 색상을 추출합니다.
+workbench-loupe = 루페
+workbench-split = 분할
+workbench-preview-alt = 키잉 작업대 미리보기
+workbench-tune = 조정
+workbench-close = 닫기
+
+# CAP-M06 — multiview monitor
+multiview-title = 멀티뷰
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = 장면을 클릭하여 전환합니다.
+multiview-hint-stage = 장면을 클릭하여 미리보기에 준비합니다.
+palette-multiview = 멀티뷰 모니터
+
+# CAP-M07 — projectors
+projector-title = 프로젝터 열기
+projector-source = 소스
+projector-target-program = 프로그램
+projector-target-preview = 미리보기
+projector-target-scene = 장면…
+projector-target-source = 소스…
+projector-target-multiview = 멀티뷰
+projector-which-scene = 어느 장면
+projector-which-source = 어느 소스
+projector-none = 표시할 항목 없음
+projector-display = 디스플레이
+projector-windowed = 떠 있는 창(이 화면)
+projector-display-option = 디스플레이 { $n } — { $w }×{ $h }
+projector-primary = (기본)
+projector-open = 열기
+projector-cancel = 취소
+projector-exit-hint = 종료하려면 Esc를 누르세요
+palette-projector = 프로젝터 열기…
+
+# CAP-M08 — still-frame grab
+palette-still = 스틸 프레임 캡처…
+still-saved-toast = 스틸 저장됨: { $name }
+still-failed-toast = 스틸 캡처 실패: { $error }
+hotkeys-still = 스틸 캡처
+hotkeys-still-placeholder = 예: Ctrl+Shift+P

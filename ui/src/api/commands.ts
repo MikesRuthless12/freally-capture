@@ -19,12 +19,15 @@ import type {
   CaptureSource,
   CefStatus,
   CornerSlot,
+  DisplayInfo,
   EncoderCatalog,
   EulaStatus,
   FfmpegStatus,
+  Filter,
   FilterId,
   FilterKind,
   GameCaptureStatus,
+  GuideLine,
   Health,
   IntegrationsStatus,
   ItemId,
@@ -38,12 +41,14 @@ import type {
   Settings,
   SourceId,
   SourceSettings,
+  StillTarget,
   StreamStatus,
   StudioDto,
   Transform,
   VerticalCanvas,
   VideoDevice,
   VideoFormat,
+  WorkbenchMode,
 } from "./types";
 
 /** Bridge liveness probe: app version + linked core crates. */
@@ -151,6 +156,62 @@ export function collectionSwitch(name: string): Promise<NamedList> {
   return invoke<NamedList>("collection_switch", { name });
 }
 
+/** A caveat on one imported source (CAP-M02). Mirrors `ImportNote` in Rust. */
+export type ImportNote =
+  | "needsReselect"
+  | "gameCaptureAsWindow"
+  | "referencesFile"
+  | "filterDropped"
+  | "geometryApproximated";
+
+/** Why an OBS source could not be imported. Mirrors `SkipReason`. */
+export type SkipReason = "unsupportedKind" | "group";
+
+/** One imported source and its caveats. Mirrors `ImportedSource`. */
+export type ImportedSource = { name: string; obsKind: string; notes: ImportNote[] };
+
+/** One source that was dropped. Mirrors `SkippedSource`. */
+export type SkippedSource = { name: string; obsKind: string; reason: SkipReason };
+
+/** The honest per-source account of an OBS import. Mirrors `ImportReport`. */
+export type ImportReport = {
+  name: string;
+  sceneCount: number;
+  sourceCount: number;
+  itemCount: number;
+  notes: ImportedSource[];
+  skipped: SkippedSource[];
+};
+
+/** Import an OBS scene collection (`scenes.json`) as a new collection and
+ * switch to it; resolves to the honest per-source report. */
+export function collectionImportObs(path: string): Promise<ImportReport> {
+  return invoke<ImportReport>("collection_import_obs", { path });
+}
+
+/** What references a file (CAP-M03). Mirrors `FileRefKind` in Rust. */
+export type FileRefKind = "image" | "media" | "slideshow" | "font" | "lut" | "mask";
+
+/** One broken file reference, grouped by path. Mirrors `MissingFile`. */
+export type MissingFile = { path: string; kind: FileRefKind; sourceName: string; uses: number };
+
+/** The missing-file doctor's scan: every referenced file that isn't on disk. */
+export function collectionMissingFiles(): Promise<MissingFile[]> {
+  return invoke<MissingFile[]>("collection_missing_files");
+}
+
+/** Repoint one broken path to a new one everywhere it appears; returns the
+ * number of references changed. */
+export function collectionRelink(oldPath: string, newPath: string): Promise<number> {
+  return invoke<number>("collection_relink", { oldPath, newPath });
+}
+
+/** Bulk relink: find each missing file by name in `folder` and repoint it;
+ * returns the number of references changed. */
+export function collectionRelinkFolder(folder: string): Promise<number> {
+  return invoke<number>("collection_relink_folder", { folder });
+}
+
 /** Replace and persist the settings. */
 export function settingsSet(settings: Settings): Promise<void> {
   return invoke("settings_set", { settings });
@@ -200,6 +261,20 @@ export function openPrivacySettings(pane: "screenRecording" | "camera"): Promise
 /** The whole current model (initial load). */
 export function studioGet(): Promise<StudioDto> {
   return invoke<StudioDto>("studio_get");
+}
+
+/**
+ * Undo the newest scene edit (CAP-M01). Resolves to the reversed edit's label
+ * (a stable `history.<label>` key), or `null` when there was nothing to undo.
+ * The restored model arrives on the `studio` event like any mutation.
+ */
+export function studioUndo(): Promise<string | null> {
+  return invoke<string | null>("studio_undo");
+}
+
+/** Redo the most recently undone scene edit. Mirror of {@link studioUndo}. */
+export function studioRedo(): Promise<string | null> {
+  return invoke<string | null>("studio_redo");
 }
 
 export function studioAddScene(name: string): Promise<SceneId> {
@@ -254,6 +329,21 @@ export function studioSetItemTransform(
   transform: Transform,
 ): Promise<void> {
   return invoke("studio_set_item_transform", { sceneId, itemId, transform });
+}
+
+/** Apply several item transforms as one undo step — align/distribute/group-move
+ * (CAP-M04 follow-on). `coalesce` folds a streaming group drag into one step. */
+export function studioSetItemTransforms(
+  sceneId: SceneId,
+  changes: { item: ItemId; transform: Transform }[],
+  coalesce: boolean,
+): Promise<void> {
+  return invoke("studio_set_item_transforms", { sceneId, changes, coalesce });
+}
+
+/** Replace a scene's custom alignment guides (CAP-M04 follow-on). */
+export function studioSetGuides(sceneId: SceneId, guides: GuideLine[]): Promise<void> {
+  return invoke("studio_set_guides", { sceneId, guides });
 }
 
 export function studioSetItemVisible(
@@ -431,6 +521,71 @@ export function studioSetFilterEnabled(
   enabled: boolean,
 ): Promise<void> {
   return invoke("studio_set_filter_enabled", { sceneId, itemId, filterId, enabled });
+}
+
+/** Paste a copied filter chain onto an item (CAP-M05) — each filter is appended
+ * with a fresh id, keeping its kind + enabled state. Resolves to how many were
+ * added; the whole paste is a single undo step. */
+export function studioPasteFilters(
+  sceneId: SceneId,
+  itemId: ItemId,
+  filters: Filter[],
+): Promise<number> {
+  return invoke<number>("studio_paste_filters", { sceneId, itemId, filters });
+}
+
+/** Open/update the keying workbench (CAP-M26): render `itemId` in `mode`, with
+ * `split` (0..1) the before/after divider for Split mode. Preview-only; the
+ * frame arrives on the `workbench-preview` pipe. */
+export function studioWorkbenchSet(
+  itemId: ItemId,
+  mode: WorkbenchMode,
+  split: number,
+): Promise<void> {
+  return invoke("studio_workbench_set", { itemId, mode, split });
+}
+
+/** Close the keying workbench (clears its preview slot). */
+export function studioWorkbenchClose(): Promise<void> {
+  return invoke("studio_workbench_close");
+}
+
+/** Open/close the multiview monitor (CAP-M06): while on, the render loop keeps
+ * every scene's sources live and publishes per-scene thumbnails to
+ * `/multiview/<id>`. */
+export function studioMultiviewSet(on: boolean): Promise<void> {
+  return invoke("studio_multiview_set", { on });
+}
+
+/** Grab a still frame (CAP-M08): a lossless PNG of the program or a single
+ * source, saved into the recordings folder. Resolves once queued; the saved
+ * path arrives on the `still-saved` event (or `still-error`). */
+export function captureStill(target: StillTarget): Promise<void> {
+  return invoke("studio_capture_still", { target });
+}
+
+// -- Projectors + aux windows (CAP-M07) ---------------------------------------
+
+/** Enumerate the connected displays for the projector "open on…" picker. */
+export function listDisplays(): Promise<DisplayInfo[]> {
+  return invoke<DisplayInfo[]>("list_displays");
+}
+
+/** Open (or focus) an auxiliary window on a display. `label` says what it shows
+ * (`projector-program`, `projector-preview`, `multiview`); `display` positions
+ * it on that monitor; `fullscreen` fullscreens it, else it floats on top. */
+export function auxWindowOpen(
+  label: string,
+  title: string,
+  display: number | null,
+  fullscreen: boolean,
+): Promise<void> {
+  return invoke("aux_window_open", { label, title, display, fullscreen });
+}
+
+/** Close an auxiliary window by label. */
+export function auxWindowClose(label: string): Promise<void> {
+  return invoke("aux_window_close", { label });
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +787,18 @@ export function nativePreviewSetRegion(
  */
 export function nativePreviewSetSelection(item: ItemId | null): Promise<void> {
   return invoke("native_preview_set_selection", { item });
+}
+
+/** Alignment overlay drawn into the native GPU frame (CAP-M04): safe-area
+ * rectangles + guide lines, in canvas px. Mirrors {@link nativePreviewSetSelection} —
+ * the SVG path renders the same model; a no-op off the native path. */
+export type PreviewOverlay = {
+  safeAreas: { x: number; y: number; w: number; h: number }[];
+  guides: { orientation: "v" | "h"; position: number; from: number; to: number }[];
+};
+
+export function nativePreviewSetOverlay(overlay: PreviewOverlay): Promise<void> {
+  return invoke("native_preview_set_overlay", { overlay });
 }
 
 // ---------------------------------------------------------------------------

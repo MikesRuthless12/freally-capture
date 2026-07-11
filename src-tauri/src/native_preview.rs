@@ -15,7 +15,62 @@ use std::sync::Mutex;
 
 use fcap_preview::{Bounds, CompositionHandle, CompositionOverlay};
 use fcap_scene::ItemId;
+use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
+
+/// Untrusted-count clamps for the webview-supplied alignment overlay, matching
+/// the compositor's overlay vertex-buffer capacity so a malformed command can
+/// never overrun it.
+const MAX_SAFE_AREAS: usize = 4;
+const MAX_GUIDES: usize = 16;
+
+/// A safe-area rectangle from the UI (canvas px).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Whether a guide is a vertical (constant x) or horizontal (constant y) line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Orientation {
+    V,
+    H,
+}
+
+/// A smart-guide line from the UI (canvas px).
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayGuide {
+    pub orientation: Orientation,
+    pub position: f32,
+    pub from: f32,
+    pub to: f32,
+}
+
+impl OverlayGuide {
+    /// This guide as an `[x0, y0, x1, y1]` segment in canvas px.
+    pub fn segment(&self) -> [f32; 4] {
+        match self.orientation {
+            Orientation::V => [self.position, self.from, self.position, self.to],
+            Orientation::H => [self.from, self.position, self.to, self.position],
+        }
+    }
+}
+
+/// The preview alignment overlay the UI pushes each frame (CAP-M04): safe-area
+/// rectangles + live smart-guide lines, in canvas px. Drawn into the native
+/// frame (the SVG below is occluded); a no-op off the native path.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlignmentOverlay {
+    pub safe_areas: Vec<OverlayRect>,
+    pub guides: Vec<OverlayGuide>,
+}
 // `Manager` (for `app.state` / `app.get_webview_window`) is only needed by the
 // native overlay bring-up in `try_create` (Windows, macOS, Linux/X11).
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
@@ -42,6 +97,8 @@ pub struct NativePreviewState {
     viable: AtomicBool,
     /// The UI's selected item — drawn as the native preview's selection box.
     selection: Mutex<Option<ItemId>>,
+    /// The UI's alignment overlay — safe areas + guides drawn into the frame.
+    alignment_overlay: Mutex<AlignmentOverlay>,
 }
 
 impl NativePreviewState {
@@ -54,6 +111,7 @@ impl NativePreviewState {
             visible: AtomicBool::new(false),
             viable: AtomicBool::new(false),
             selection: Mutex::new(None),
+            alignment_overlay: Mutex::new(AlignmentOverlay::default()),
         }
     }
 
@@ -120,6 +178,26 @@ impl NativePreviewState {
             .selection
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = item;
+    }
+
+    /// The UI's alignment overlay (safe areas + guides), read by the render
+    /// thread each tick. Cloned so the render thread never holds the lock.
+    pub fn alignment_overlay(&self) -> AlignmentOverlay {
+        self.alignment_overlay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The UI pushed a new alignment overlay (CAP-M04). Counts are clamped —
+    /// the payload is untrusted webview input and feeds a fixed-size GPU buffer.
+    pub fn set_overlay(&self, mut overlay: AlignmentOverlay) {
+        overlay.safe_areas.truncate(MAX_SAFE_AREAS);
+        overlay.guides.truncate(MAX_GUIDES);
+        *self
+            .alignment_overlay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = overlay;
     }
 
     /// Whether the region is currently visible (the render thread only presents

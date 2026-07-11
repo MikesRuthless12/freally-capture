@@ -20,8 +20,41 @@
     </header>
 
     <main>
-      <!-- 0.96.0 — accessibility, 18 languages, onboarding & themes -->
+      <!-- 0.97.0 — scene authoring & monitoring (CAP-M Batch 1) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.97.0</span>
+            <span class="date">Jul 11, 2026 · Scene authoring &amp; monitoring — CAP-M Batch 1</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.97.0">Download</a>
+        </div>
+
+        <h2>0.97.0 — Scene authoring &amp; monitoring (CAP-M Batch 1)</h2>
+        <p class="summary">
+          The first of the three must-have batches on the road to 1.0.0. The compositor learns to be
+          <em>edited</em> like a studio — undo behind every scene edit, a real multi-select with
+          align/distribute and pull-out guides, precise copy-paste transforms, and a keying workbench
+          that shows the matte — and to be <em>watched</em>: a multiview of every scene, fullscreen
+          projectors for any scene, source, program or preview on any display, and a one-key still grab.
+          It also opens up to the world it came from — importing an OBS scene collection and finding the
+          media that moved.
+        </p>
+        <ul class="features">
+          <li><strong>Multi-step undo/redo</strong> behind every scene edit — a labelled history where a continuous drag folds into one step, and <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd> reverses edits, never the live show.</li>
+          <li><strong>An OBS scene-collection importer</strong> — map an OBS <code>scenes.json</code> (scenes, z-order, sources, filters, nested scenes) into a native collection, with an honest per-source report of what came across, what needs a device re-picked, and what had no equivalent.</li>
+          <li><strong>A missing-file doctor</strong> — on load or on demand, find image/media/font/LUT/mask paths that no longer resolve and relink them; fixing one path repairs every scene that used it.</li>
+          <li><strong>A full multi-select for alignment</strong> — shift-click and marquee, move the group together, align edges/centres to each other or distribute evenly, plus your own draggable guide lines that items snap to.</li>
+          <li><strong>A precision transform panel with copy/paste</strong> of transforms and whole filter chains, each landing as a single undo step.</li>
+          <li><strong>A keying workbench</strong> — tune a chroma/colour/luma key against a live single-source view with a matte mode, eyedropper, loupe, and a draggable before/after split.</li>
+          <li><strong>A multiview monitor</strong> — a live grid of every scene with red (program) / green (preview) tally; click to cut or stage. Opens on any display.</li>
+          <li><strong>Projectors for anything, anywhere</strong> — fullscreen the program, the preview, a specific scene, or a single source on any connected display; they reopen where you left them next launch.</li>
+          <li><strong>A one-key still grab</strong> — a lossless PNG of the program (or a single source) into your recordings folder, bindable to a global hotkey.</li>
+        </ul>
+      </article>
+
+      <!-- 0.96.0 — accessibility, 18 languages, onboarding & themes -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.96.0</span>

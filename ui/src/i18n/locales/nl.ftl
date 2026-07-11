@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = nieuwe naam…
 workspace-new-name-label = Nieuwe naam voor { $title }
 workspace-create = Maken
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = Importeren uit OBS…
+workspace-import-obs-hint = Haal een OBS-scènecollectie binnen (de scenes.json). Je huidige collectie wordt eerst opgeslagen.
+workspace-import-busy = Importeren…
+workspace-import-title = "{ $name }" geïmporteerd
+workspace-import-summary = { $scenes } scènes · { $sources } bronnen · { $items } items
+workspace-import-dismiss = Sluiten
+workspace-import-clean = Alles is netjes geïmporteerd.
+workspace-import-geometry-caveat = Groottes en posities worden aangepast op basis van de OBS-indeling — controleer elke scène en kies opnameapparaten opnieuw.
+workspace-import-notes-title = Geïmporteerd met opmerkingen
+workspace-import-skipped-title = Niet geïmporteerd
+import-note-needsReselect = Kies apparaat/monitor/venster opnieuw
+import-note-gameCaptureAsWindow = Spelopname → Vensteropname
+import-note-referencesFile = Controleer het bestandspad
+import-note-filterDropped = Sommige filters niet ondersteund
+import-note-geometryApproximated = Positie/grootte benaderd
+import-skip-unsupportedKind = Geen gelijkwaardig brontype
+import-skip-group = Groepen worden nog niet ondersteund
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = Ontbrekende bestanden opnieuw koppelen…
+doctor-title = Ontbrekende bestanden
+doctor-scanning = Scannen…
+doctor-all-good = Alle bestanden waarnaar wordt verwezen bestaan. Niets om te koppelen.
+doctor-intro = { $count } bestanden waarnaar wordt verwezen zijn niet op deze computer gevonden. Wijs elk een nieuwe locatie toe — elke scène die het gebruikt wordt meteen hersteld.
+doctor-relinked = { $count } verwijzingen opnieuw gekoppeld.
+doctor-uses = { $count }× gebruikt
+doctor-locate = Zoeken…
+doctor-locate-folder = In map zoeken…
+doctor-locate-folder-hint = Kies een map; elk ontbrekend bestand wordt op naam gevonden en opnieuw gekoppeld.
+doctor-kind-image = afbeelding
+doctor-kind-media = media
+doctor-kind-slideshow = diavoorstelling
+doctor-kind-font = lettertype
+doctor-kind-lut = LUT
+doctor-kind-mask = masker
+history-relinkFiles = Bestanden opnieuw koppelen
+
 # --- ScriptsDialog.tsx ---
 scripts-title = Scripts (Lua)
 scripts-empty = Nog geen scripts — voeg een .lua-bestand toe. Zie scripts/sample.lua voor de API: reageer op go-live-/scène-/opname-events en bestuur dezelfde commando's als de remote-API.
@@ -1204,3 +1242,143 @@ announce-live-ended = Stream beëindigd
 announce-reconnecting = Verbinding verbroken, opnieuw verbinden
 announce-stream-failed = Stream mislukt
 announce-frames-dropped = { $count } frames verloren
+
+# CAP-M01 — undo/redo edit history
+palette-undo = Ongedaan maken
+palette-redo = Opnieuw
+palette-edit-history = Bewerkingsgeschiedenis…
+history-title = Bewerkingsgeschiedenis
+history-empty = Nog niets om ongedaan te maken.
+history-current = Huidige staat
+history-close = Sluiten
+history-addScene = Scène toevoegen
+history-renameScene = Scène hernoemen
+history-removeScene = Scène verwijderen
+history-reorderScene = Scènes herschikken
+history-addSource = Bron toevoegen
+history-removeSource = Bron verwijderen
+history-reorderSource = Bronnen herschikken
+history-renameSource = Bron hernoemen
+history-transformSource = Bron verplaatsen
+history-toggleVisibility = Zichtbaarheid wisselen
+history-toggleLock = Vergrendeling wisselen
+history-setBlendMode = Mengmodus wijzigen
+history-editSourceProperties = Eigenschappen bewerken
+history-applyLayout = Lay-out schikken
+history-moveToSeat = Naar plek verplaatsen
+history-groupSources = Bronnen groeperen
+history-ungroupSources = Groepering opheffen
+history-toggleGroupVisibility = Groep wisselen
+history-setSceneAudio = Scène-audio
+history-setVerticalCanvas = Verticaal canvas
+history-addFilter = Filter toevoegen
+history-removeFilter = Filter verwijderen
+history-reorderFilter = Filters herschikken
+history-editFilter = Filter bewerken
+history-toggleFilter = Filter wisselen
+history-setVolume = Volume aanpassen
+history-toggleMute = Demping wisselen
+history-setMonitor = Monitoring wijzigen
+history-setTracks = Sporen wijzigen
+history-setSyncOffset = A/V-sync aanpassen
+history-setAudioHotkeys = Audio-sneltoetsen
+
+# CAP-M04 — alignment aids
+settings-alignment-section = Uitlijnhulpen
+settings-smart-guides = Slimme hulplijnen (uitlijnen tijdens slepen)
+settings-safe-areas = Veilige-zone-overlays
+settings-rulers = Linialen
+align-group = Uitlijnen op canvas
+align-left = Links uitlijnen
+align-hcenter = Horizontaal centreren
+align-right = Rechts uitlijnen
+align-top = Boven uitlijnen
+align-vcenter = Verticaal centreren
+align-bottom = Onder uitlijnen
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = Selectie uitlijnen & verdelen
+arrange-left = Linkerranden uitlijnen
+arrange-hcenter = Horizontaal centreren
+arrange-right = Rechterranden uitlijnen
+arrange-top = Bovenranden uitlijnen
+arrange-vcenter = Verticaal centreren
+arrange-bottom = Onderranden uitlijnen
+distribute-h = Horizontaal verdelen
+distribute-v = Verticaal verdelen
+guides-group = Hulplijnen
+guides-add-v = Verticale hulplijn toevoegen
+guides-add-h = Horizontale hulplijn toevoegen
+history-arrangeItems = Items schikken
+history-editGuides = Hulplijnen bewerken
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = Transformatie bewerken — { $name }
+transform-anchor = Anker
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = Rotatie
+transform-crop = Bijsnijden
+transform-crop-left = Links
+transform-crop-top = Boven
+transform-crop-right = Rechts
+transform-crop-bottom = Onder
+transform-no-size = Grootte en bijsnijden komen beschikbaar zodra de bron zijn afmetingen meldt.
+transform-copy = Transformatie kopiëren
+transform-paste = Transformatie plakken
+transform-close = Sluiten
+filters-copy = Filters kopiëren ({ $count })
+filters-paste = Filters plakken ({ $count })
+palette-edit-transform = Transformatie bewerken…
+history-pasteFilters = Filters plakken
+
+# CAP-M26 — keying workbench
+workbench-title = Keying-werkbank — { $name }
+workbench-mode-keyed = Gekeyd
+workbench-mode-source = Bron
+workbench-mode-matte = Matte
+workbench-mode-split = Gesplitst
+workbench-eyedropper = Pipet
+workbench-eyedropper-hint = Klik op de bron om de sleutelkleur te bemonsteren.
+workbench-loupe = Loep
+workbench-split = Splitsing
+workbench-preview-alt = Voorbeeld van keying-werkbank
+workbench-tune = Afstellen
+workbench-close = Sluiten
+
+# CAP-M06 — multiview monitor
+multiview-title = Multiview
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = Klik op een scène om ernaar te schakelen.
+multiview-hint-stage = Klik op een scène om deze in preview te zetten.
+palette-multiview = Multiview-monitor
+
+# CAP-M07 — projectors
+projector-title = Projector openen
+projector-source = Bron
+projector-target-program = Programma
+projector-target-preview = Voorbeeld
+projector-target-scene = Scène…
+projector-target-source = Bron…
+projector-target-multiview = Multiview
+projector-which-scene = Welke scène
+projector-which-source = Welke bron
+projector-none = Niets om te tonen
+projector-display = Scherm
+projector-windowed = Zwevend venster (dit scherm)
+projector-display-option = Scherm { $n } — { $w }×{ $h }
+projector-primary = (primair)
+projector-open = Openen
+projector-cancel = Annuleren
+projector-exit-hint = Druk op Esc om af te sluiten
+palette-projector = Projector openen…
+
+# CAP-M08 — still-frame grab
+palette-still = Stilstaand beeld vastleggen…
+still-saved-toast = Beeld opgeslagen: { $name }
+still-failed-toast = Beeld vastleggen mislukt: { $error }
+hotkeys-still = Beeld vastleggen
+hotkeys-still-placeholder = bijv. Ctrl+Shift+P

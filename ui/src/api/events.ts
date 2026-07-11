@@ -50,6 +50,16 @@ export function onStudio(handler: (studio: StudioDto) => void): Promise<Unlisten
   return listen<StudioDto>("studio", (event) => handler(event.payload));
 }
 
+/** Subscribe to saved still-frame confirmations (the path). CAP-M08. */
+export function onStillSaved(handler: (path: string) => void): Promise<UnlistenFn> {
+  return listen<string>("still-saved", (event) => handler(event.payload));
+}
+
+/** Subscribe to still-frame grab failures (a message). CAP-M08. */
+export function onStillError(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("still-error", (event) => handler(event.payload));
+}
+
 /** Subscribe to compose-loop health + per-source states (≥1 Hz). */
 export function onProgram(handler: (status: ProgramStatus) => void): Promise<UnlistenFn> {
   return listen<ProgramStatus>("program", (event) => handler(event.payload));

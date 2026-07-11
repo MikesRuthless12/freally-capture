@@ -1039,6 +1039,44 @@ workspace-new-name-placeholder = 新しい名前…
 workspace-new-name-label = 新しい { $title } の名前
 workspace-create = 作成
 
+# --- OBS import (CAP-M02) ---
+workspace-import-obs = OBS からインポート…
+workspace-import-obs-hint = OBS のシーンコレクション（その scenes.json）を取り込みます。現在のコレクションは先に保存されます。
+workspace-import-busy = インポート中…
+workspace-import-title = 「{ $name }」をインポートしました
+workspace-import-summary = シーン { $scenes } · ソース { $sources } · アイテム { $items }
+workspace-import-dismiss = 閉じる
+workspace-import-clean = すべて問題なく取り込まれました。
+workspace-import-geometry-caveat = サイズと位置は OBS のレイアウトから合わせています。各シーンを確認し、キャプチャデバイスを選び直してください。
+workspace-import-notes-title = 注意付きでインポート
+workspace-import-skipped-title = 未インポート
+import-note-needsReselect = デバイス/モニター/ウィンドウを選び直す
+import-note-gameCaptureAsWindow = ゲームキャプチャ → ウィンドウキャプチャ
+import-note-referencesFile = ファイルパスを確認
+import-note-filterDropped = 一部のフィルターは非対応
+import-note-geometryApproximated = 位置/サイズは近似
+import-skip-unsupportedKind = 相当するソースがありません
+import-skip-group = グループは未対応です
+
+# --- Missing-file doctor (CAP-M03) ---
+palette-doctor = 不明なファイルを再リンク…
+doctor-title = 不明なファイル
+doctor-scanning = スキャン中…
+doctor-all-good = 参照されているファイルはすべて見つかりました。再リンクは不要です。
+doctor-intro = 参照されている { $count } 個のファイルがこのコンピューターで見つかりません。それぞれの新しい場所を指定してください。使用中のすべてのシーンが一度に修正されます。
+doctor-relinked = { $count } 件の参照を再リンクしました。
+doctor-uses = { $count }× 使用
+doctor-locate = 場所を指定…
+doctor-locate-folder = フォルダー内を検索…
+doctor-locate-folder-hint = フォルダーを選ぶと、各ファイルを名前で照合して再リンクします。
+doctor-kind-image = 画像
+doctor-kind-media = メディア
+doctor-kind-slideshow = スライドショー
+doctor-kind-font = フォント
+doctor-kind-lut = LUT
+doctor-kind-mask = マスク
+history-relinkFiles = ファイルを再リンク
+
 # --- ScriptsDialog.tsx ---
 scripts-title = スクリプト（Lua）
 scripts-empty = まだスクリプトがありません — .lua ファイルを追加してください。APIは scripts/sample.lua を参照: 配信開始/シーン/録画イベントに反応し、リモートAPIと同じコマンドを操作します。
@@ -1204,3 +1242,143 @@ announce-live-ended = 配信を終了しました
 announce-reconnecting = 接続が切れたため再接続しています
 announce-stream-failed = 配信に失敗しました
 announce-frames-dropped = { $count } フレームをドロップしました
+
+# CAP-M01 — undo/redo edit history
+palette-undo = 元に戻す
+palette-redo = やり直す
+palette-edit-history = 編集履歴…
+history-title = 編集履歴
+history-empty = 元に戻す操作はまだありません。
+history-current = 現在の状態
+history-close = 閉じる
+history-addScene = シーンを追加
+history-renameScene = シーン名を変更
+history-removeScene = シーンを削除
+history-reorderScene = シーンを並べ替え
+history-addSource = ソースを追加
+history-removeSource = ソースを削除
+history-reorderSource = ソースを並べ替え
+history-renameSource = ソース名を変更
+history-transformSource = ソースを移動
+history-toggleVisibility = 表示を切り替え
+history-toggleLock = ロックを切り替え
+history-setBlendMode = ブレンドモードを変更
+history-editSourceProperties = プロパティを編集
+history-applyLayout = レイアウトを配置
+history-moveToSeat = 位置に移動
+history-groupSources = ソースをグループ化
+history-ungroupSources = グループを解除
+history-toggleGroupVisibility = グループを切り替え
+history-setSceneAudio = シーン音声
+history-setVerticalCanvas = 縦型キャンバス
+history-addFilter = フィルターを追加
+history-removeFilter = フィルターを削除
+history-reorderFilter = フィルターを並べ替え
+history-editFilter = フィルターを編集
+history-toggleFilter = フィルターを切り替え
+history-setVolume = 音量を調整
+history-toggleMute = ミュートを切り替え
+history-setMonitor = モニタリングを変更
+history-setTracks = トラックを変更
+history-setSyncOffset = A/V同期を調整
+history-setAudioHotkeys = 音声ショートカット
+
+# CAP-M04 — alignment aids
+settings-alignment-section = 整列補助
+settings-smart-guides = スマートガイド（ドラッグ時にスナップ）
+settings-safe-areas = セーフエリア表示
+settings-rulers = ルーラー
+align-group = キャンバスに整列
+align-left = 左に整列
+align-hcenter = 水平方向に中央揃え
+align-right = 右に整列
+align-top = 上に整列
+align-vcenter = 垂直方向に中央揃え
+align-bottom = 下に整列
+
+# --- Arrange + custom guides (CAP-M04 follow-on) ---
+arrange-group = 選択を整列・分布
+arrange-left = 左端を揃える
+arrange-hcenter = 水平方向に中央揃え
+arrange-right = 右端を揃える
+arrange-top = 上端を揃える
+arrange-vcenter = 垂直方向に中央揃え
+arrange-bottom = 下端を揃える
+distribute-h = 水平方向に分布
+distribute-v = 垂直方向に分布
+guides-group = ガイド
+guides-add-v = 垂直ガイドを追加
+guides-add-h = 水平ガイドを追加
+history-arrangeItems = アイテムを整列
+history-editGuides = ガイドを編集
+
+# CAP-M05 — edit transform + copy/paste
+transform-title = 変形を編集 — { $name }
+transform-anchor = アンカー
+transform-x = X
+transform-y = Y
+transform-w = W
+transform-h = H
+transform-rotation = 回転
+transform-crop = クロップ
+transform-crop-left = 左
+transform-crop-top = 上
+transform-crop-right = 右
+transform-crop-bottom = 下
+transform-no-size = サイズとクロップは、ソースが寸法を報告すると利用できます。
+transform-copy = 変形をコピー
+transform-paste = 変形を貼り付け
+transform-close = 閉じる
+filters-copy = フィルターをコピー ({ $count })
+filters-paste = フィルターを貼り付け ({ $count })
+palette-edit-transform = 変形を編集…
+history-pasteFilters = フィルターを貼り付け
+
+# CAP-M26 — keying workbench
+workbench-title = キーイング作業台 — { $name }
+workbench-mode-keyed = キー適用
+workbench-mode-source = ソース
+workbench-mode-matte = マット
+workbench-mode-split = 分割
+workbench-eyedropper = スポイト
+workbench-eyedropper-hint = ソースをクリックしてキー色を取得します。
+workbench-loupe = ルーペ
+workbench-split = 分割
+workbench-preview-alt = キーイング作業台のプレビュー
+workbench-tune = 調整
+workbench-close = 閉じる
+
+# CAP-M06 — multiview monitor
+multiview-title = マルチビュー
+multiview-program = PGM
+multiview-preview = PVW
+multiview-hint-cut = シーンをクリックして切り替えます。
+multiview-hint-stage = シーンをクリックしてプレビューに準備します。
+palette-multiview = マルチビューモニター
+
+# CAP-M07 — projectors
+projector-title = プロジェクターを開く
+projector-source = ソース
+projector-target-program = プログラム
+projector-target-preview = プレビュー
+projector-target-scene = シーン…
+projector-target-source = ソース…
+projector-target-multiview = マルチビュー
+projector-which-scene = どのシーン
+projector-which-source = どのソース
+projector-none = 表示するものがありません
+projector-display = ディスプレイ
+projector-windowed = フローティングウィンドウ（この画面）
+projector-display-option = ディスプレイ { $n } — { $w }×{ $h }
+projector-primary = （メイン）
+projector-open = 開く
+projector-cancel = キャンセル
+projector-exit-hint = Esc キーで終了
+palette-projector = プロジェクターを開く…
+
+# CAP-M08 — still-frame grab
+palette-still = 静止画をキャプチャ…
+still-saved-toast = 静止画を保存しました: { $name }
+still-failed-toast = 静止画のキャプチャに失敗しました: { $error }
+hotkeys-still = 静止画をキャプチャ
+hotkeys-still-placeholder = 例: Ctrl+Shift+P

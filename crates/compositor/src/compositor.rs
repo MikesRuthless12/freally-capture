@@ -172,6 +172,10 @@ pub struct Compositor {
     /// The optional second output canvas (Phase 6: e.g. vertical 9:16),
     /// rendered on demand from its own scene.
     vertical: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// A small reusable target for multiview thumbnails (CAP-M06) — composing
+    /// at full canvas dims into a tiny texture just downscales, so the readback
+    /// (which dominates) is ~36× cheaper than a full-res program readback.
+    thumbnail: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     /// Readback staging per target size (program / vertical) — keyed so the
     /// two canvases never thrash one buffer.
     readback: HashMap<(u32, u32), wgpu::Buffer>,
@@ -454,6 +458,7 @@ impl Compositor {
             program,
             program_view,
             vertical: None,
+            thumbnail: None,
             readback: HashMap::new(),
             sampler,
             repeat_sampler,
@@ -693,7 +698,13 @@ impl Compositor {
             })?;
             (texture.clone(), view.clone(), *width, *height)
         };
-        self.render_to(scene, time_seconds, view, (width as f32, height as f32))?;
+        self.render_to(
+            scene,
+            time_seconds,
+            view,
+            (width as f32, height as f32),
+            false,
+        )?;
         self.read_texture(&texture)
     }
 
@@ -906,8 +917,8 @@ impl Compositor {
             (rig.scratch[0].1.clone(), rig.scratch[1].1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(from, time_seconds, from_view, canvas)?;
-        self.render_to(to, time_seconds, to_view, canvas)?;
+        self.render_to(from, time_seconds, from_view, canvas, false)?;
+        self.render_to(to, time_seconds, to_view, canvas, false)?;
 
         let rig = self.transition.as_ref().expect("ensured above");
         self.gpu.queue.write_buffer(
@@ -1380,7 +1391,60 @@ impl Compositor {
             (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, view, canvas)?;
+        self.render_to(scene, time_seconds, view, canvas, false)?;
+        self.read_texture(&texture)
+    }
+
+    /// Compose a **single-source** workbench scene (CAP-M26) into the preview
+    /// scratch and read it back. `matte` appends the alpha→grayscale pass so the
+    /// keyer's matte shows instead of the keyed image. The caller builds a
+    /// synthetic one-item scene (the source fit to the canvas, optionally with
+    /// its filters); reuses the Studio-Mode preview scratch, so it must not run
+    /// in the same breath as `render_preview_scene`.
+    pub fn render_source_view(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        matte: bool,
+    ) -> Result<ProgramFrame, CompositorError> {
+        self.ensure_transition_rig();
+        let (texture, view) = {
+            let rig = self.transition.as_ref().expect("ensured above");
+            (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
+        };
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, view, canvas, matte)?;
+        self.read_texture(&texture)
+    }
+
+    /// Compose `scene` into a small `width`×`height` thumbnail (CAP-M06
+    /// multiview) and read it back. Item transforms are in full canvas px, so
+    /// composing at the canvas dims into a tiny target just downscales — the
+    /// readback shrinks with the target. Reuses one thumbnail texture; must not
+    /// interleave with `render_preview_scene`/`render_source_view` (shared work,
+    /// but a distinct target here).
+    pub fn render_thumbnail(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        width: u32,
+        height: u32,
+    ) -> Result<ProgramFrame, CompositorError> {
+        let (width, height) = (width.max(1), height.max(1));
+        let needs_rebuild = match &self.thumbnail {
+            Some((_, _, w, h)) => *w != width || *h != height,
+            None => true,
+        };
+        if needs_rebuild {
+            let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+            self.thumbnail = Some((texture, view, width, height));
+        }
+        let (texture, view) = {
+            let thumb = self.thumbnail.as_ref().expect("ensured above");
+            (thumb.0.clone(), thumb.1.clone())
+        };
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, view, canvas, false)?;
         self.read_texture(&texture)
     }
 
@@ -1565,7 +1629,7 @@ impl Compositor {
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
         let target = self.program_view.clone();
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, target, canvas)
+        self.render_to(scene, time_seconds, target, canvas, false)
     }
 
     /// The scenes a nested-scene source can reference + the source→scene
@@ -1642,7 +1706,13 @@ impl Compositor {
                 .expect("ensured above")
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
-            self.compose_scene(&inner, time_seconds, view, (width as f32, height as f32))?;
+            self.compose_scene(
+                &inner,
+                time_seconds,
+                view,
+                (width as f32, height as f32),
+                false,
+            )?;
         }
         Ok(())
     }
@@ -1658,18 +1728,24 @@ impl Compositor {
         time_seconds: f32,
         target: wgpu::TextureView,
         canvas: (f32, f32),
+        matte: bool,
     ) -> Result<(), CompositorError> {
         self.ensure_nested(scene, time_seconds, 0)?;
-        self.compose_scene(scene, time_seconds, target, canvas)
+        self.compose_scene(scene, time_seconds, target, canvas, matte)
     }
 
     /// One scene → one target, no nested pre-pass (callers ensure it).
+    ///
+    /// `matte` (CAP-M26, keying-workbench only) appends an alpha→grayscale pass
+    /// to every item's chain so the composite shows the keyer's matte instead of
+    /// the keyed image. Always `false` on the program/preview/vertical paths.
     fn compose_scene(
         &mut self,
         scene: &Scene,
         time_seconds: f32,
         target: wgpu::TextureView,
         canvas: (f32, f32),
+        matte: bool,
     ) -> Result<(), CompositorError> {
         let started = Instant::now();
 
@@ -1704,6 +1780,13 @@ impl Compositor {
                     chain_size = passes.last().expect("plans are non-empty").out;
                     plans.extend(passes);
                 }
+            }
+            // Workbench matte view: append an alpha→grayscale pass so the
+            // composite shows the keyer's matte (CAP-M26).
+            if matte {
+                let matte_plan = crate::filters::plan_matte(chain_size);
+                chain_size = matte_plan.out;
+                plans.push(matte_plan);
             }
 
             // The composite sees the chain's output (or the raw source).
