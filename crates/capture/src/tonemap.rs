@@ -83,7 +83,10 @@ pub fn set_tone_map(id: &str, config: ToneMapConfig) {
         .insert(id.to_string(), config);
 }
 
-/// The capture thread's per-frame lookup.
+/// The capture thread's per-frame lookup. Only the Windows DXGI FP16 path
+/// reads it (HDR capture is Windows-only), so it is dormant elsewhere — the
+/// registry writer `set_tone_map` and the tests stay cross-platform.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn tone_map_for(id: &str) -> ToneMapConfig {
     registry()
         .lock()
