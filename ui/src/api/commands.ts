@@ -16,6 +16,9 @@ import type {
   AudioFilterKind,
   BlendMode,
   BugReportContext,
+  CalibrationResult,
+  CalibrationStatus,
+  CameraControl,
   CaptureSource,
   CefStatus,
   CornerSlot,
@@ -29,6 +32,7 @@ import type {
   GameCaptureStatus,
   GuideLine,
   Health,
+  HotkeyAuditEntry,
   IntegrationsStatus,
   ItemId,
   LoopbackDevices,
@@ -310,6 +314,40 @@ export function studioAddItem(
   name?: string,
 ): Promise<AddedItem> {
   return invoke<AddedItem>("studio_add_item", { sceneId, name: name ?? null, settings });
+}
+
+/** CAP-M18: the controls a RUNNING device reports (empty = not streaming
+ * or a backend without control support). */
+export function cameraControlsList(deviceId: string): Promise<CameraControl[]> {
+  return invoke<CameraControl[]>("camera_controls_list", { deviceId });
+}
+
+/** CAP-M18: set one control now AND save it into the device's profile. */
+export function cameraControlSet(deviceId: string, control: string, value: number): Promise<void> {
+  return invoke("camera_control_set", { deviceId, control, value: Math.round(value) });
+}
+
+/** CAP-M18: clear the saved profile + restore the backend defaults. */
+export function cameraProfileReset(deviceId: string): Promise<void> {
+  return invoke("camera_profile_reset", { deviceId });
+}
+
+/** CAP-M14: every hotkey binding in the studio, with conflict analysis. */
+export function hotkeyAudit(): Promise<HotkeyAuditEntry[]> {
+  return invoke<HotkeyAuditEntry[]>("hotkey_audit");
+}
+
+/** CAP-M14: save the composed cheat sheet to Downloads; returns the path. */
+export function hotkeyCheatsheetSave(content: string): Promise<string> {
+  return invoke<string>("hotkey_cheatsheet_save", { content });
+}
+
+/** CAP-M15: drive a timer source's run state. Runtime-only (no undo). */
+export function studioTimerControl(
+  sourceId: SourceId,
+  action: "start" | "pause" | "toggle" | "reset",
+): Promise<void> {
+  return invoke("studio_timer_control", { sourceId, action });
 }
 
 /** Place an existing pool source on top of a scene (source sharing). */
@@ -705,8 +743,43 @@ export function studioSetAudioTracks(sourceId: SourceId, tracks: number): Promis
   return invoke("studio_set_audio_tracks", { sourceId, tracks });
 }
 
+/** CAP-M19: stereo balance, −1..=1 (0 = untouched). */
+export function studioSetAudioPan(sourceId: SourceId, pan: number): Promise<void> {
+  return invoke("studio_set_audio_pan", { sourceId, pan });
+}
+
+/** CAP-M19: PFL solo — monitor routing only. */
+export function studioSetAudioSolo(sourceId: SourceId, solo: boolean): Promise<void> {
+  return invoke("studio_set_audio_solo", { sourceId, solo });
+}
+
+/** CAP-M19: mono downmix. */
+export function studioSetAudioMono(sourceId: SourceId, mono: boolean): Promise<void> {
+  return invoke("studio_set_audio_mono", { sourceId, mono });
+}
+
 export function studioSetAudioSyncOffset(sourceId: SourceId, syncOffsetMs: number): Promise<void> {
   return invoke("studio_set_audio_sync_offset", { sourceId, syncOffsetMs });
+}
+
+/** CAP-M20: arm both sync-workbench probes (one shared zero instant backend-side). */
+export function calibrationStart(videoSource: SourceId, audioSource: SourceId): Promise<void> {
+  return invoke("calibration_start", { videoSource, audioSource });
+}
+
+/** CAP-M20: disarm both probes (cancel / dialog closed). */
+export function calibrationStop(): Promise<void> {
+  return invoke("calibration_stop");
+}
+
+/** CAP-M20: live "seeing flashes / hearing beeps" feedback while measuring. */
+export function calibrationStatus(): Promise<CalibrationStatus> {
+  return invoke<CalibrationStatus>("calibration_status");
+}
+
+/** CAP-M20: take the series, disarm, and estimate the offset. */
+export function calibrationFinish(): Promise<CalibrationResult> {
+  return invoke<CalibrationResult>("calibration_finish");
 }
 
 /** Bind/clear PTT + PTM hotkeys (accelerator strings, e.g. "Ctrl+Shift+T"). */

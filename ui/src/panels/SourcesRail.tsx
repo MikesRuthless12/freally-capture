@@ -41,6 +41,7 @@ import type {
   Settings,
   SourceId,
   SourceSettings,
+  TimerMode,
   VideoDevice,
   VideoFormat,
 } from "../api/types";
@@ -103,6 +104,8 @@ type PickerMode =
   | "audioOutput"
   | "appAudio"
   | "gameCapture"
+  | "testSignal"
+  | "timer"
   | "existing";
 
 // Values are i18n keys, resolved with `t(...)` at each render site so a
@@ -123,6 +126,12 @@ const KIND_BADGE: Record<string, string> = {
   audioInput: "sources-badge-audio-in",
   audioOutput: "sources-badge-audio-out",
   appAudio: "sources-badge-app-audio",
+  testBars: "sources-badge-test-bars",
+  testGrid: "sources-badge-test-grid",
+  testSweep: "sources-badge-test-sweep",
+  testTone: "sources-badge-test-tone",
+  testFlashBeep: "sources-badge-test-sync",
+  timer: "sources-badge-timer",
 };
 
 // Values are i18n keys (see KIND_BADGE).
@@ -136,9 +145,11 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["remoteGuest", "sources-add-remote-guest"],
   ["color", "sources-add-color"],
   ["text", "sources-add-text"],
+  ["timer", "sources-add-timer"],
   ["nestedScene", "sources-add-nested-scene"],
   ["slideshow", "sources-add-slideshow"],
   ["chatOverlay", "sources-add-chat-overlay"],
+  ["testSignal", "sources-add-test-signal"],
   ["audioInput", "sources-add-audio-input"],
   ["audioOutput", "sources-add-audio-output"],
   ["appAudio", "sources-add-app-audio"],
@@ -282,7 +293,11 @@ export function SourcesRail({
               <div
                 role="menu"
                 aria-label={t("sources-add-source")}
-                className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+                // Scrolls within its own panel: the rail's stacking context
+                // caps the menu, so a taller list would poke past the panel,
+                // render UNDER the docks, and eat clicks (Playwright caught
+                // this when the CAP-M15/M21 entries lengthened the menu).
+                className="absolute right-0 z-20 mt-1 max-h-72 w-48 overflow-y-auto rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
                 {ADD_MENU.map(([mode, label]) => (
                   <button
@@ -668,6 +683,10 @@ export function SourcesRail({
         <ChatOverlayForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "slideshow" ? (
         <SlideshowForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "testSignal" ? (
+        <TestSignalForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "timer" ? (
+        <TimerForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "nestedScene" ? (
         <NestedSceneForm
           collection={collection}
@@ -1279,7 +1298,16 @@ function WebcamPicker({
     if (!selected) return;
     const index = formatRef.current ? Number(formatRef.current.value) : -1;
     const format = formats && index >= 0 ? formats[index] : null;
-    onPick({ kind: "videoDevice", deviceId: selected.id, format }, selected.name);
+    onPick(
+      {
+        kind: "videoDevice",
+        deviceId: selected.id,
+        format,
+        deinterlace: "off",
+        fieldOrder: "topFirst",
+      },
+      selected.name,
+    );
   };
 
   return (
@@ -2258,6 +2286,144 @@ function ColorForm({
   );
 }
 
+/** The five CAP-M15 timer faces, in menu order. Values are i18n keys. */
+const TIMER_MODES: Array<[TimerMode, string]> = [
+  ["wallClock", "sources-timer-wall-clock"],
+  ["countdown", "sources-timer-countdown"],
+  ["stopwatch", "sources-timer-stopwatch"],
+  ["sinceLive", "sources-timer-since-live"],
+  ["sinceRecording", "sources-timer-since-recording"],
+];
+
+function TimerForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [mode, setMode] = useState<TimerMode>("wallClock");
+  return (
+    <PickerShell title={t("sources-timer-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-timer-mode-label")}
+          <select
+            value={mode}
+            onChange={(event) => setMode(event.target.value as TimerMode)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            {TIMER_MODES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-timer-note")}</p>
+        <button
+          type="button"
+          onClick={() =>
+            onPick({
+              kind: "timer",
+              mode,
+              format: "",
+              utcOffsetMin: null,
+              countdownMs: 5 * 60 * 1000,
+              target: "",
+              endAction: "none",
+              endScene: null,
+              fontFamily: null,
+              fontFile: null,
+              sizePx: 96,
+              color: { r: 255, g: 255, b: 255, a: 255 },
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-timer-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+const TEST_PATTERNS: Array<
+  ["testBars" | "testGrid" | "testSweep" | "testTone" | "testFlashBeep", string]
+> = [
+  ["testBars", "sources-testsignal-bars"],
+  ["testGrid", "sources-testsignal-grid"],
+  ["testSweep", "sources-testsignal-sweep"],
+  ["testTone", "sources-testsignal-tone"],
+  ["testFlashBeep", "sources-testsignal-flash-beep"],
+];
+
+function TestSignalForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [pattern, setPattern] = useState<(typeof TEST_PATTERNS)[number][0]>("testBars");
+  const [width, setWidth] = useState(1920);
+  const [height, setHeight] = useState(1080);
+  return (
+    <PickerShell title={t("sources-testsignal-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-testsignal-pattern-label")}
+          <select
+            value={pattern}
+            onChange={(event) => setPattern(event.target.value as typeof pattern)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            {TEST_PATTERNS.map(([kind, label]) => (
+              <option key={kind} value={kind}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {pattern !== "testTone" && (
+          <div className="flex gap-2">
+            <NumberField
+              label={t("sources-color-width-label")}
+              value={width}
+              min={1}
+              max={16384}
+              onCommit={setWidth}
+              className="flex-1"
+            />
+            <NumberField
+              label={t("sources-color-height-label")}
+              value={height}
+              min={1}
+              max={16384}
+              onCommit={setHeight}
+              className="flex-1"
+            />
+          </div>
+        )}
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-testsignal-note")}
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            onPick(pattern === "testTone" ? { kind: "testTone" } : { kind: pattern, width, height })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-testsignal-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
 function TextForm({
   onClose,
   onPick,
@@ -2318,6 +2484,11 @@ function TextForm({
                 lineSpacing: 1.0,
                 forceRtl: false,
                 wrapWidth: null,
+                sourceFile: "",
+                binding: "whole",
+                csvRow: 1,
+                csvColumn: "",
+                jsonPointer: "",
               },
               text.length > 24 ? `${text.slice(0, 24)}…` : text,
             )

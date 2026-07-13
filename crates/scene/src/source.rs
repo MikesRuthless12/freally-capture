@@ -150,6 +150,13 @@ pub enum SourceSettings {
         /// `None` = auto (highest resolution).
         #[serde(default)]
         format: Option<VideoDeviceFormat>,
+        /// Deinterlacing (CAP-M17) for interlaced feeds; off by default.
+        /// Changing it restarts the device (like a format change).
+        #[serde(default)]
+        deinterlace: DeinterlaceMode,
+        /// Which field is dominant when deinterlacing.
+        #[serde(default)]
+        field_order: FieldOrder,
     },
     /// A still image file (PNG/JPEG/BMP/GIF-first-frame/WebP…).
     Image {
@@ -295,7 +302,165 @@ pub enum SourceSettings {
         /// Word-wrap width in px; `None`/0 = never wrap.
         #[serde(default)]
         wrap_width: Option<u32>,
+        /// Bind the content to a watched local file (CAP-M16); `""` = the
+        /// `text` field is used. The render loop polls it and re-renders on
+        /// change, tolerating atomic-write gaps (temp+rename) by holding the
+        /// last good content.
+        #[serde(default)]
+        source_file: String,
+        /// How the bound file parses into the shown text.
+        #[serde(default)]
+        binding: FileBinding,
+        /// CSV: the 1-based data row ([`FileBinding::CsvCell`]).
+        #[serde(default = "default_csv_row")]
+        csv_row: u32,
+        /// CSV: the column, by header name or 1-based index.
+        #[serde(default)]
+        csv_column: String,
+        /// JSON: an RFC 6901 pointer, e.g. `/teams/0/score`.
+        #[serde(default)]
+        json_pointer: String,
     },
+    /// SMPTE-style color bars (CAP-M21) — verify scenes, encoders,
+    /// projectors, and stream targets with no camera plugged in.
+    TestBars {
+        #[serde(default = "default_color_size")]
+        width: u32,
+        #[serde(default = "default_color_height")]
+        height: u32,
+    },
+    /// Calibration grid / crosshatch (CAP-M21) — projector alignment,
+    /// overscan and geometry checks.
+    TestGrid {
+        #[serde(default = "default_color_size")]
+        width: u32,
+        #[serde(default = "default_color_height")]
+        height: u32,
+    },
+    /// Motion sweep (CAP-M21) — a bar crossing at constant speed to expose
+    /// judder, tearing, and encoder motion handling.
+    TestSweep {
+        #[serde(default = "default_color_size")]
+        width: u32,
+        #[serde(default = "default_color_height")]
+        height: u32,
+    },
+    /// The 1 kHz lineup tone at −20 dBFS (CAP-M21). Audio-only.
+    TestTone {},
+    /// The combined A/V sync flash+beep pattern (CAP-M21): a white flash and
+    /// a 1 kHz beep from one clock — CAP-M20's workbench measures against it.
+    TestFlashBeep {
+        #[serde(default = "default_color_size")]
+        width: u32,
+        #[serde(default = "default_color_height")]
+        height: u32,
+    },
+    /// The timer & clock text family (CAP-M15): wall clock / countdown /
+    /// stopwatch / time since live / time since recording. The render loop
+    /// repaints the face only when its text changes (~1 Hz); run state
+    /// (start/pause/reset) is runtime-only and never persisted.
+    Timer {
+        #[serde(default)]
+        mode: TimerMode,
+        /// Wall clock: a strftime pattern; `""` = `%H:%M:%S`.
+        #[serde(default)]
+        format: String,
+        /// Wall clock: fixed UTC offset in minutes; `None` = local time.
+        #[serde(default)]
+        utc_offset_min: Option<i32>,
+        /// Countdown: the duration, ms (used while `target` is empty).
+        #[serde(default = "default_countdown_ms")]
+        countdown_ms: u64,
+        /// Countdown: a `"HH:MM"` local wall target; `""` = use the duration.
+        #[serde(default)]
+        target: String,
+        #[serde(default)]
+        end_action: CountdownEnd,
+        /// The scene [`CountdownEnd::SwitchScene`] jumps to.
+        #[serde(default)]
+        end_scene: Option<crate::scene::SceneId>,
+        /// System font family; `None` = the platform default face.
+        #[serde(default)]
+        font_family: Option<String>,
+        /// Explicit font file — overrides `font_family` when set.
+        #[serde(default)]
+        font_file: Option<String>,
+        #[serde(default = "default_timer_size")]
+        size_px: f32,
+        #[serde(default = "Rgba::default_text")]
+        color: Rgba,
+    },
+}
+
+/// Which face a [`SourceSettings::Timer`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimerMode {
+    #[default]
+    WallClock,
+    Countdown,
+    Stopwatch,
+    SinceLive,
+    SinceRecording,
+}
+
+/// What a countdown does when it reaches zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CountdownEnd {
+    #[default]
+    None,
+    /// The face flashes for a few seconds.
+    Flash,
+    /// The program switches to `end_scene`.
+    SwitchScene,
+}
+
+fn default_countdown_ms() -> u64 {
+    5 * 60 * 1_000
+}
+
+fn default_csv_row() -> u32 {
+    1
+}
+
+/// A device source's deinterlace mode (CAP-M17) — the classic algorithms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeinterlaceMode {
+    #[default]
+    Off,
+    Discard,
+    Bob,
+    Linear,
+    Blend,
+    MotionAdaptive,
+}
+
+/// Which field an interlaced feed shot first (CAP-M17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FieldOrder {
+    #[default]
+    TopFirst,
+    BottomFirst,
+}
+
+/// How a Text source's bound file (CAP-M16) parses into the shown text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileBinding {
+    /// The whole file, trailing whitespace trimmed.
+    #[default]
+    Whole,
+    /// One CSV cell (`csv_row` × `csv_column`).
+    CsvCell,
+    /// One JSON value at `json_pointer`.
+    JsonPointer,
+}
+
+fn default_timer_size() -> f32 {
+    96.0
 }
 
 impl Rgba {
@@ -328,6 +493,12 @@ impl SourceSettings {
             SourceSettings::Slideshow { .. } => "slideshow",
             SourceSettings::ChatOverlay { .. } => "chatOverlay",
             SourceSettings::Text { .. } => "text",
+            SourceSettings::TestBars { .. } => "testBars",
+            SourceSettings::TestGrid { .. } => "testGrid",
+            SourceSettings::TestSweep { .. } => "testSweep",
+            SourceSettings::TestTone {} => "testTone",
+            SourceSettings::TestFlashBeep { .. } => "testFlashBeep",
+            SourceSettings::Timer { .. } => "timer",
         }
     }
 
@@ -349,11 +520,18 @@ impl SourceSettings {
             SourceSettings::Slideshow { .. } => "Image Slideshow",
             SourceSettings::ChatOverlay { .. } => "Live Chat",
             SourceSettings::Text { .. } => "Text",
+            SourceSettings::TestBars { .. } => "SMPTE Bars",
+            SourceSettings::TestGrid { .. } => "Calibration Grid",
+            SourceSettings::TestSweep { .. } => "Motion Sweep",
+            SourceSettings::TestTone {} => "1 kHz Tone",
+            SourceSettings::TestFlashBeep { .. } => "A/V Sync Pattern",
+            SourceSettings::Timer { .. } => "Timer",
         }
     }
 
     /// Whether this kind produces audio (and so carries [`AudioSettings`]).
-    /// Media has both video and audio — it mixes *and* composes.
+    /// Media has both video and audio — it mixes *and* composes; so does the
+    /// flash+beep test pattern.
     pub fn has_audio(&self) -> bool {
         matches!(
             self,
@@ -362,6 +540,8 @@ impl SourceSettings {
                 | SourceSettings::AppAudio { .. }
                 | SourceSettings::Media { .. }
                 | SourceSettings::RemoteGuest { .. }
+                | SourceSettings::TestTone {}
+                | SourceSettings::TestFlashBeep { .. }
         )
     }
 
@@ -373,6 +553,7 @@ impl SourceSettings {
             SourceSettings::AudioInput { .. }
                 | SourceSettings::AudioOutput { .. }
                 | SourceSettings::AppAudio { .. }
+                | SourceSettings::TestTone {}
         )
     }
 

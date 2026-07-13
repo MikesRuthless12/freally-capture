@@ -19,13 +19,17 @@
 
 #![forbid(unsafe_code)]
 
+pub mod camera_controls;
 pub mod chat;
 pub mod color;
+pub mod deinterlace;
 pub mod image;
 pub mod media;
 pub mod slideshow;
 pub mod static_source;
+pub mod testsignal;
 pub mod text;
+pub mod textfile;
 pub mod video_device;
 
 pub use static_source::{StaticSourceError, MAX_STATIC_DIMENSION};

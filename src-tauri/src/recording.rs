@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -101,6 +101,9 @@ pub struct RecordingState {
     /// Encoder failover (CAP-M12): the session's ladder, consulted by the
     /// watchdog when the sink dies. `None` for .frec (no wire encoder).
     failover: Mutex<Option<fcap_encode::FailoverLadder>>,
+    /// When the current session started — the CAP-M15 "time since recording"
+    /// clock. Read gated on `active`, so a stale instant is harmless.
+    since: Mutex<Option<Instant>>,
 }
 
 impl RecordingState {
@@ -115,7 +118,19 @@ impl RecordingState {
             last: Mutex::new((Vec::new(), None)),
             markers: Mutex::new(Vec::new()),
             failover: Mutex::new(None),
+            since: Mutex::new(None),
         }
+    }
+
+    /// When the running session started; `None` while idle.
+    pub fn recording_since(&self) -> Option<Instant> {
+        if !self.active.load(Ordering::Relaxed) {
+            return None;
+        }
+        *self
+            .since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_inner(&self) -> std::sync::MutexGuard<'_, Option<Active>> {
@@ -586,6 +601,10 @@ pub(crate) fn start_with<R: Runtime>(
         tracks: track_count,
         finalizing: false,
     });
+    *state
+        .since
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     state.active.store(true, Ordering::Relaxed);
     state
         .markers

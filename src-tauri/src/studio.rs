@@ -62,6 +62,13 @@ const AUTO_RETRY_MAX: Duration = Duration::from_secs(60);
 const PREVIEW_MAX_WIDTH: u32 = 1280;
 const PREVIEW_MAX_HEIGHT: u32 = 720;
 const PREVIEW_JPEG_QUALITY: u8 = 75;
+/// How long a finished countdown's face flashes (CAP-M15).
+const TIMER_FLASH_WINDOW: Duration = Duration::from_secs(5);
+/// The flash highlight color (straight RGBA) a finished countdown blinks in.
+const TIMER_FLASH_COLOR: [u8; 4] = [239, 68, 68, 255];
+/// How often a bound Text source's file is polled (CAP-M16) — one stat per
+/// poll while unchanged; OBS-comparable freshness.
+const BOUND_TEXT_POLL: Duration = Duration::from_millis(500);
 /// The system emoji face reaction sprites rasterize from (monochrome
 /// outlines tinted per emoji — we own no color-emoji rasterizer, honestly).
 #[cfg(target_os = "windows")]
@@ -227,6 +234,10 @@ struct StudioCore {
     /// slate instead of the program, every capture stops, and the audio
     /// engine runs no sources. Session state, never persisted.
     panic: Option<PanicPack>,
+    /// Timer run state (CAP-M15): per-source countdown/stopwatch clocks,
+    /// driven by commands/hotkeys and read by the render loop each tick.
+    /// Session state, never persisted — a relaunch resets timers, honestly.
+    timers: HashMap<SourceId, crate::timers::TimerRun>,
 }
 
 /// The frozen slate composition an engaged panic renders (CAP-M22): built
@@ -332,6 +343,28 @@ pub(crate) fn coalesce_key<T: std::hash::Hash>(tag: &str, target: T) -> u64 {
     hasher.finish()
 }
 
+/// A timer-control action (CAP-M15) — commands and hotkeys both drive these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimerCmd {
+    Start,
+    Pause,
+    Toggle,
+    Reset,
+}
+
+impl TimerCmd {
+    /// Parse the wire form the UI sends.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "start" => Some(TimerCmd::Start),
+            "pause" => Some(TimerCmd::Pause),
+            "toggle" => Some(TimerCmd::Toggle),
+            "reset" => Some(TimerCmd::Reset),
+            _ => None,
+        }
+    }
+}
+
 /// Tauri-managed handle to the studio model.
 pub struct StudioState {
     core: Arc<Mutex<StudioCore>>,
@@ -369,6 +402,7 @@ impl StudioState {
                 still_request: None,
                 projectors: HashSet::new(),
                 panic: None,
+                timers: HashMap::new(),
             })),
         }
     }
@@ -486,6 +520,47 @@ impl StudioState {
     /// on its next tick and emits `still-saved`/`still-error`.
     pub fn request_still(&self, target: StillTarget, path: PathBuf) {
         self.lock().still_request = Some((target, path));
+    }
+
+    /// Drive one timer source's run state (CAP-M15). Runtime-only — no model
+    /// change, no undo history, nothing emitted; the render loop repaints the
+    /// face on its next tick. Unknown ids are a quiet no-op.
+    pub fn timer_control(&self, source: SourceId, cmd: TimerCmd) {
+        let now = Instant::now();
+        let mut core = self.lock();
+        if core.collection.source(source).is_none() {
+            return;
+        }
+        let run = core.timers.entry(source).or_default();
+        match cmd {
+            TimerCmd::Start => run.start(now),
+            TimerCmd::Pause => run.pause(now),
+            TimerCmd::Toggle => run.toggle(now),
+            TimerCmd::Reset => run.reset(),
+        }
+    }
+
+    /// Drive EVERY timer source at once — the global hotkeys' semantics
+    /// (a hotkey can't name a source; the settings row says "all timers").
+    pub fn timer_control_all(&self, cmd: TimerCmd) {
+        let now = Instant::now();
+        let mut core = self.lock();
+        let ids: Vec<SourceId> = core
+            .collection
+            .sources
+            .iter()
+            .filter(|source| matches!(source.settings, SourceSettings::Timer { .. }))
+            .map(|source| source.id)
+            .collect();
+        for id in ids {
+            let run = core.timers.entry(id).or_default();
+            match cmd {
+                TimerCmd::Start => run.start(now),
+                TimerCmd::Pause => run.pause(now),
+                TimerCmd::Toggle => run.toggle(now),
+                TimerCmd::Reset => run.reset(),
+            }
+        }
     }
 
     /// Toggle Studio Mode: on = the preview side starts on the program scene;
@@ -1072,6 +1147,18 @@ pub fn spawn_studio_thread<R: Runtime>(app: AppHandle<R>, state: &StudioState) {
         .expect("studio thread spawns");
 }
 
+/// One bound Text source's poll state (CAP-M16).
+#[derive(Default)]
+struct BoundTextState {
+    /// (modified, len) of the last successfully read file.
+    fingerprint: Option<(Option<std::time::SystemTime>, u64)>,
+    /// The last successfully painted content — atomic-write tolerance: a
+    /// failed stat/read (mid temp+rename) keeps this on screen.
+    last_good: Option<String>,
+    /// The next poll is due at this instant.
+    next_poll: Option<Instant>,
+}
+
 /// Everything the loop tracks per capture-backed source.
 struct SessionSlot {
     session: CaptureSession,
@@ -1188,6 +1275,21 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut statuses_changed = true;
     // Black/frozen program watch (CAP-M10), fed by the readback below.
     let mut video_watch = crate::alarms::VideoWatch::default();
+    // Timer & clock faces (CAP-M15): the live timer set (rebuilt at reconcile),
+    // the last face painted per source (repaint only on change), the fire-once
+    // guard for end-of-countdown actions, and the flash window per fired timer.
+    let mut timer_sources: HashMap<SourceId, SourceSettings> = HashMap::new();
+    let mut timer_specs: HashMap<SourceId, String> = HashMap::new();
+    let mut timer_faces: HashMap<SourceId, (String, bool)> = HashMap::new();
+    let mut timer_done: HashSet<SourceId> = HashSet::new();
+    let mut timer_flash: HashMap<SourceId, Instant> = HashMap::new();
+    // Reset generations seen per timer — a Reset re-arms a latched wall
+    // countdown (and clears its flash) without a model revision.
+    let mut timer_resets: HashMap<SourceId, u32> = HashMap::new();
+    // Bound Text sources (CAP-M16): the live set + per-source poll state.
+    let mut bound_texts: HashMap<SourceId, SourceSettings> = HashMap::new();
+    let mut bound_specs: HashMap<SourceId, String> = HashMap::new();
+    let mut bound_states: HashMap<SourceId, BoundTextState> = HashMap::new();
 
     // The native preview surface (the "OBS feel" path): created lazily once
     // the UI reports a non-zero preview region, then presented every frame
@@ -1235,6 +1337,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             still_job,
             projector_pack,
             panic_active,
+            timers_snapshot,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -1482,6 +1585,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 ),
                 None => projector_pack,
             };
+            // Timer runs (CAP-M15) follow their sources out of the collection.
+            if guard.revision != seen_revision && !guard.timers.is_empty() {
+                let live: HashSet<SourceId> =
+                    guard.collection.sources.iter().map(|s| s.id).collect();
+                guard.timers.retain(|id, _| live.contains(id));
+            }
             (
                 guard.revision,
                 scene,
@@ -1502,6 +1611,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 still_job,
                 projector_pack,
                 panic_pack.is_some(),
+                guard.timers.clone(),
             )
         };
         if let Some(dto) = transition_ended {
@@ -1523,6 +1633,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
             // Stop sessions whose source left the scene or changed settings.
             let mut keep_ids: Vec<SourceId> = Vec::new();
+            // Which sources took the Timer / bound-text branch THIS pass. A
+            // kind flip (Timer → Color, or a cleared file binding) keeps the
+            // id in `keep_ids` via its new branch, so retaining on keep_ids
+            // alone would strand the old face and keep painting a ghost.
+            let mut timer_seen: HashSet<SourceId> = HashSet::new();
+            let mut bound_seen: HashSet<SourceId> = HashSet::new();
             for source in &scene_sources {
                 // Audio-only sources belong to the audio engine (their state
                 // rides the `audio` event) — shed any stale video pipeline
@@ -1539,6 +1655,62 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         statuses_changed = true;
                     }
                     compositor.remove_source(source.id);
+                    continue;
+                }
+                // Timer & clock faces (CAP-M15) paint from the per-tick
+                // refresh step (§5b) — no OS pipeline. The spec fingerprint
+                // gates the cache drop: an UNRELATED model edit (a fader, a
+                // rename elsewhere) bumps the revision and lands here too, and
+                // must NOT force a repaint of every face.
+                if matches!(source.settings, SourceSettings::Timer { .. }) {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    let face_spec = source_spec(&source.settings);
+                    if timer_specs.get(&source.id) != Some(&face_spec) {
+                        timer_specs.insert(source.id, face_spec);
+                        timer_sources.insert(source.id, source.settings.clone());
+                        timer_faces.remove(&source.id);
+                    }
+                    timer_seen.insert(source.id);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        statuses.entry(source.id)
+                    {
+                        slot.insert(SourceRuntime::waiting());
+                        statuses_changed = true;
+                    }
+                    keep_ids.push(source.id);
+                    continue;
+                }
+                // Text bound to a watched file (CAP-M16) paints from the
+                // poll step (§5c). Same fingerprint gate: dropping the poll
+                // state on an unrelated edit would re-stat every bound file
+                // and, worse, discard `last_good` — so a file caught mid
+                // atomic rename would flash "not found" on air.
+                if is_bound_text(&source.settings) {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    let bind_spec = source_spec(&source.settings);
+                    if bound_specs.get(&source.id) != Some(&bind_spec) {
+                        bound_specs.insert(source.id, bind_spec);
+                        bound_texts.insert(source.id, source.settings.clone());
+                        bound_states.remove(&source.id);
+                    }
+                    bound_seen.insert(source.id);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        statuses.entry(source.id)
+                    {
+                        slot.insert(SourceRuntime::waiting());
+                        statuses_changed = true;
+                    }
+                    keep_ids.push(source.id);
                     continue;
                 }
                 // Nested scenes need no OS pipeline: the compositor composes
@@ -1575,7 +1747,21 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         static_specs.remove(&source.id);
                         compositor.remove_source(source.id);
                         capture_specs.insert(source.id, spec);
-                        start_session(source.id, &source.settings, &mut starting, &reactions_queue);
+                        // CAP-M18: the saved control profile rides into every
+                        // device (re)open — hotplug/auto-recover included.
+                        let camera_profile = match &source.settings {
+                            SourceSettings::VideoDevice { device_id, .. } => app
+                                .state::<crate::settings::SettingsStore>()
+                                .camera_profile(device_id),
+                            _ => Vec::new(),
+                        };
+                        start_session(
+                            source.id,
+                            &source.settings,
+                            &mut starting,
+                            &reactions_queue,
+                            camera_profile,
+                        );
                         statuses.insert(source.id, SourceRuntime::waiting());
                         statuses_changed = true;
                     }
@@ -1629,6 +1815,40 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 statuses.remove(&id);
                 statuses_changed = true;
             }
+            // Timers: keep only the ones that took the Timer branch this pass.
+            // A kind flip (Timer → Color) hands the face to the static branch,
+            // which owns its health row from now on; one that left the scene
+            // entirely drops the row too (timers live in no session/spec map,
+            // so the `gone` union above can't see them).
+            timer_sources.retain(|id, _| {
+                if timer_seen.contains(id) {
+                    return true;
+                }
+                if !keep_ids.contains(id) && statuses.remove(id).is_some() {
+                    statuses_changed = true;
+                }
+                false
+            });
+            timer_specs.retain(|id, _| timer_sources.contains_key(id));
+            timer_faces.retain(|id, _| timer_sources.contains_key(id));
+            timer_done.retain(|id| timer_sources.contains_key(id));
+            timer_flash.retain(|id, _| timer_sources.contains_key(id));
+            timer_resets.retain(|id, _| timer_sources.contains_key(id));
+            // Bound texts: keep only the ones still bound this pass. One that
+            // merely lost its binding stays in the scene (the static branch
+            // now owns its face and health row); one that left the scene
+            // drops its row like the timers above.
+            bound_texts.retain(|id, _| {
+                if bound_seen.contains(id) {
+                    return true;
+                }
+                if !keep_ids.contains(id) && statuses.remove(id).is_some() {
+                    statuses_changed = true;
+                }
+                false
+            });
+            bound_specs.retain(|id, _| bound_texts.contains_key(id));
+            bound_states.retain(|id, _| bound_texts.contains_key(id));
             compositor.retain_sources(&keep_ids);
 
             // Filter files (LUT lattices, mask images) — the preview pane's,
@@ -1753,11 +1973,23 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 scan(&nested.items);
             }
         }
+        // CAP-M20: the workbench's armed video probe, checked once per tick —
+        // the drain below records a mean-luma sample per received frame on
+        // the armed source (CPU-side, before upload; ~2 k sampled pixels).
+        let calibration_state = app.state::<crate::calibration::CalibrationState>();
+        let calibration_armed = calibration_state.armed_source();
         let mut ended: Vec<(SourceId, CaptureError)> = Vec::new();
         for (id, slot) in sessions.iter_mut() {
             let delay_ms = delay_by_source.get(id).copied().unwrap_or(0);
             match slot.session.frames().recv_timeout(Duration::ZERO) {
                 Ok(Some(frame)) => {
+                    if calibration_armed == Some(*id) {
+                        calibration_state.push_frame(
+                            *id,
+                            frame.captured_at,
+                            crate::calibration::mean_luma(&frame),
+                        );
+                    }
                     if delay_ms == 0 && slot.delayed.is_empty() {
                         let size = (frame.width, frame.height);
                         match compositor.upload_frame(*id, &frame) {
@@ -1869,6 +2101,332 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             };
             if app.emit("studio", &dto).is_err() {
                 break;
+            }
+        }
+
+        // -- 5b. Timer & clock faces (CAP-M15) ----------------------------------
+        // Every tick, cheap: compute each live timer's display text and repaint
+        // (render_text + upload) only when the text or flash phase changed —
+        // ~1 Hz per timer in practice. End-of-countdown actions fire exactly
+        // once per zero crossing (the `timer_done` guard re-arms on reset).
+        if !timer_sources.is_empty() {
+            let now = Instant::now();
+            let mut switch_to: Option<SceneId> = None;
+            for (id, settings) in &timer_sources {
+                let SourceSettings::Timer {
+                    mode,
+                    format,
+                    utc_offset_min,
+                    countdown_ms,
+                    target,
+                    end_action,
+                    end_scene,
+                    font_family,
+                    font_file,
+                    size_px,
+                    color,
+                } = settings
+                else {
+                    continue;
+                };
+                let run = timers_snapshot.get(id).copied().unwrap_or_default();
+                // A Reset re-arms a latched wall countdown (and clears the
+                // flash) — it bumps no revision, so the run's reset counter
+                // is the only signal the loop gets.
+                let resets = run.resets();
+                if timer_resets.get(id).copied().unwrap_or(0) != resets {
+                    timer_resets.insert(*id, resets);
+                    timer_done.remove(id);
+                    timer_flash.remove(id);
+                    timer_faces.remove(id);
+                }
+                let (text, at_zero) = match mode {
+                    fcap_scene::TimerMode::WallClock => {
+                        let zone = crate::timers::clock_zone(*utc_offset_min);
+                        let at = chrono::Local::now().with_timezone(&zone);
+                        (crate::timers::render_time(&at, format), false)
+                    }
+                    fcap_scene::TimerMode::Countdown => {
+                        if let Some((hours, minutes)) = crate::timers::parse_wall_target(target) {
+                            // Once the target passes, HOLD at zero until the
+                            // user resets. Recomputing the remainder would roll
+                            // to tomorrow's occurrence and put "23:59:59" on
+                            // air one second after the countdown ended.
+                            if timer_done.contains(id) {
+                                ("0:00".to_string(), true)
+                            } else {
+                                let local = chrono::Local::now();
+                                let hit = crate::timers::wall_target_hit(&local, hours, minutes);
+                                let text = if hit {
+                                    "0:00".to_string()
+                                } else {
+                                    crate::timers::format_hms(crate::timers::remaining_to_wall(
+                                        &local, hours, minutes,
+                                    ))
+                                };
+                                (text, hit)
+                            }
+                        } else {
+                            let total = Duration::from_millis(*countdown_ms);
+                            let elapsed = run.elapsed(now);
+                            let remaining = total.saturating_sub(elapsed);
+                            let at_zero = remaining.is_zero()
+                                && (run.is_running() || elapsed > Duration::ZERO);
+                            (crate::timers::format_hms(remaining), at_zero)
+                        }
+                    }
+                    fcap_scene::TimerMode::Stopwatch => {
+                        (crate::timers::format_hms(run.elapsed(now)), false)
+                    }
+                    fcap_scene::TimerMode::SinceLive => {
+                        let since = app.state::<crate::stream::StreamBridgeState>().live_since();
+                        let elapsed = since
+                            .map(|at| now.saturating_duration_since(at))
+                            .unwrap_or_default();
+                        (crate::timers::format_hms(elapsed), false)
+                    }
+                    fcap_scene::TimerMode::SinceRecording => {
+                        let since = app
+                            .state::<crate::recording::RecordingState>()
+                            .recording_since();
+                        let elapsed = since
+                            .map(|at| now.saturating_duration_since(at))
+                            .unwrap_or_default();
+                        (crate::timers::format_hms(elapsed), false)
+                    }
+                };
+                if at_zero {
+                    if timer_done.insert(*id) {
+                        match end_action {
+                            fcap_scene::CountdownEnd::None => {}
+                            fcap_scene::CountdownEnd::Flash => {
+                                timer_flash.insert(*id, now);
+                            }
+                            fcap_scene::CountdownEnd::SwitchScene => {
+                                if let Some(scene_id) = end_scene {
+                                    switch_to = Some(*scene_id);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    timer_done.remove(id);
+                }
+                let highlight = match timer_flash.get(id) {
+                    Some(fired) if now.duration_since(*fired) < TIMER_FLASH_WINDOW => {
+                        (now.duration_since(*fired).as_millis() / 250) % 2 == 0
+                    }
+                    Some(_) => {
+                        timer_flash.remove(id);
+                        false
+                    }
+                    None => false,
+                };
+                let face = (text, highlight);
+                if timer_faces.get(id) == Some(&face) {
+                    continue;
+                }
+                let style = text::TextStyle {
+                    text: face.0.clone(),
+                    font_family: font_family.clone(),
+                    font_file: font_file.as_ref().map(PathBuf::from),
+                    size_px: *size_px,
+                    color: if highlight {
+                        TIMER_FLASH_COLOR
+                    } else {
+                        [color.r, color.g, color.b, color.a]
+                    },
+                    align: text::TextAlign::Left,
+                    line_spacing: 1.0,
+                    force_rtl: false,
+                    wrap_width: None,
+                };
+                match text::render_text(&style) {
+                    Ok(frame) => {
+                        let (w, h) = (frame.width, frame.height);
+                        match compositor.upload_frame(*id, &frame) {
+                            Ok(()) => {
+                                timer_faces.insert(*id, face);
+                                let stale = statuses.get(id).map_or(true, |prev| {
+                                    prev.state != "live"
+                                        || prev.width != Some(w)
+                                        || prev.height != Some(h)
+                                });
+                                if stale {
+                                    statuses.insert(*id, SourceRuntime::live(w, h));
+                                    statuses_changed = true;
+                                }
+                            }
+                            Err(err) => eprintln!("studio: timer face dropped: {err}"),
+                        }
+                    }
+                    Err(err) => {
+                        // Cache the failed face too — no 60 Hz retry storm; a
+                        // settings edit clears the cache and tries again.
+                        timer_faces.insert(*id, face);
+                        statuses.insert(*id, SourceRuntime::error("backend", err.to_string()));
+                        statuses_changed = true;
+                    }
+                }
+            }
+            if let Some(scene_id) = switch_to {
+                // A countdown's scene jump is live routing (no undo), done
+                // loop-side — the transition-ended emit pattern.
+                let dto = {
+                    let mut guard = lock_core(&core);
+                    match guard.collection.set_active_scene(scene_id) {
+                        Ok(()) => {
+                            guard.revision += 1;
+                            Some(dto_of(&guard))
+                        }
+                        Err(err) => {
+                            eprintln!("studio: countdown scene switch failed: {err}");
+                            None
+                        }
+                    }
+                };
+                if let Some(dto) = dto {
+                    let _ = app.emit("studio", &dto);
+                }
+            }
+        }
+
+        // -- 5c. Bound Text faces (CAP-M16) --------------------------------------
+        // Poll each bound file at BOUND_TEXT_POLL: one stat while unchanged;
+        // read + extract + repaint only when the fingerprint moved AND the
+        // extracted text differs. Transient read gaps (atomic temp+rename
+        // writers) keep the last good face; selector/parse misses surface as
+        // the source's honest error status without blanking the canvas.
+        if !bound_texts.is_empty() {
+            let now = Instant::now();
+            for (id, settings) in &bound_texts {
+                let state = bound_states.entry(*id).or_default();
+                if state.next_poll.is_some_and(|at| now < at) {
+                    continue;
+                }
+                state.next_poll = Some(now + BOUND_TEXT_POLL);
+                let SourceSettings::Text {
+                    source_file,
+                    binding,
+                    csv_row,
+                    csv_column,
+                    json_pointer,
+                    ..
+                } = settings
+                else {
+                    continue;
+                };
+                let trimmed = source_file.trim();
+                // NEVER stat a UNC/URL path: on Windows that forces an SMB
+                // connection (and an NTLM handshake) to the host, so an
+                // untrusted collection binding a text source to
+                // `\\attacker\share\x.txt` would leak the user's credential
+                // hash every poll. Same guard the missing-file doctor uses.
+                if crate::commands::studio::is_remote(trimmed) {
+                    if statuses.get(id).map_or(true, |s| s.state != "error") {
+                        statuses.insert(
+                            *id,
+                            SourceRuntime::error(
+                                "unsupported",
+                                "network paths (\\\\host\\share, url://) are not read".to_string(),
+                            ),
+                        );
+                        statuses_changed = true;
+                    }
+                    continue;
+                }
+                let path = std::path::Path::new(trimmed);
+                let Ok(meta) = std::fs::metadata(path) else {
+                    // Missing right now: a rename gap (hold the face) or a
+                    // genuinely absent file (say so once, honestly).
+                    if state.last_good.is_none()
+                        && statuses.get(id).map_or(true, |s| s.state != "error")
+                    {
+                        statuses.insert(
+                            *id,
+                            SourceRuntime::error(
+                                "notFound",
+                                format!("text file not found: {trimmed}"),
+                            ),
+                        );
+                        statuses_changed = true;
+                    }
+                    continue;
+                };
+                let fingerprint = (meta.modified().ok(), meta.len());
+                if state.fingerprint == Some(fingerprint) {
+                    continue; // unchanged — the cheap steady state
+                }
+                if meta.len() > fcap_sources::textfile::MAX_BOUND_FILE_BYTES {
+                    statuses.insert(
+                        *id,
+                        SourceRuntime::error(
+                            "backend",
+                            format!(
+                                "the bound file is {} bytes — the cap is {}",
+                                meta.len(),
+                                fcap_sources::textfile::MAX_BOUND_FILE_BYTES
+                            ),
+                        ),
+                    );
+                    statuses_changed = true;
+                    state.fingerprint = Some(fingerprint); // don't re-report every poll
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(path) else {
+                    continue; // mid-rename read gap — retry next poll
+                };
+                state.fingerprint = Some(fingerprint);
+                let content = String::from_utf8_lossy(&bytes);
+                let extracted = match binding {
+                    fcap_scene::FileBinding::Whole => Ok(content.trim_end().to_string()),
+                    fcap_scene::FileBinding::CsvCell => {
+                        fcap_sources::textfile::csv_cell(&content, *csv_row, csv_column)
+                    }
+                    fcap_scene::FileBinding::JsonPointer => {
+                        fcap_sources::textfile::json_value(&content, json_pointer)
+                    }
+                };
+                match extracted {
+                    Ok(value) => {
+                        if state.last_good.as_deref() == Some(value.as_str()) {
+                            continue; // the file changed but the shown text didn't
+                        }
+                        let style = text_style(settings, value.clone())
+                            .expect("a bound source is always a Text kind");
+                        match text::render_text(&style) {
+                            Ok(frame) => {
+                                let (w, h) = (frame.width, frame.height);
+                                match compositor.upload_frame(*id, &frame) {
+                                    Ok(()) => {
+                                        state.last_good = Some(value);
+                                        let stale = statuses.get(id).map_or(true, |prev| {
+                                            prev.state != "live"
+                                                || prev.width != Some(w)
+                                                || prev.height != Some(h)
+                                        });
+                                        if stale {
+                                            statuses.insert(*id, SourceRuntime::live(w, h));
+                                            statuses_changed = true;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        eprintln!("studio: bound text face dropped: {err}")
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                statuses
+                                    .insert(*id, SourceRuntime::error("backend", err.to_string()));
+                                statuses_changed = true;
+                            }
+                        }
+                    }
+                    Err(message) => {
+                        statuses.insert(*id, SourceRuntime::error("backend", message));
+                        statuses_changed = true;
+                    }
+                }
             }
         }
 
@@ -2444,6 +3002,32 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Map the model's deinterlace choice (CAP-M17) onto the capture pipeline's
+/// algorithm pair; `Off` runs no pass at all.
+fn deinterlace_config(
+    mode: fcap_scene::DeinterlaceMode,
+    order: fcap_scene::FieldOrder,
+) -> Option<(
+    fcap_sources::deinterlace::Mode,
+    fcap_sources::deinterlace::FieldOrder,
+)> {
+    use fcap_scene::DeinterlaceMode as M;
+    use fcap_sources::deinterlace::Mode;
+    let mode = match mode {
+        M::Off => return None,
+        M::Discard => Mode::Discard,
+        M::Bob => Mode::Bob,
+        M::Linear => Mode::Linear,
+        M::Blend => Mode::Blend,
+        M::MotionAdaptive => Mode::MotionAdaptive,
+    };
+    let order = match order {
+        fcap_scene::FieldOrder::TopFirst => fcap_sources::deinterlace::FieldOrder::TopFirst,
+        fcap_scene::FieldOrder::BottomFirst => fcap_sources::deinterlace::FieldOrder::BottomFirst,
+    };
+    Some((mode, order))
+}
+
 fn is_capture_backed(settings: &SourceSettings) -> bool {
     matches!(
         settings,
@@ -2455,6 +3039,8 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::Slideshow { .. }
             | SourceSettings::ChatOverlay { .. }
             | SourceSettings::RemoteGuest { .. }
+            | SourceSettings::TestSweep { .. }
+            | SourceSettings::TestFlashBeep { .. }
     )
 }
 
@@ -2652,12 +3238,14 @@ fn source_spec(settings: &SourceSettings) -> String {
 }
 
 /// Kick off a capture session on a helper thread (portal starts block on the
-/// system dialog; nothing may stall the render loop).
+/// system dialog; nothing may stall the render loop). `camera_profile` is
+/// the CAP-M18 saved control set (VideoDevice only; empty otherwise).
 fn start_session(
     id: SourceId,
     settings: &SourceSettings,
     starting: &mut HashMap<SourceId, mpsc::Receiver<Result<CaptureSession, CaptureError>>>,
     reactions_queue: &Arc<Mutex<Vec<String>>>,
+    camera_profile: Vec<(String, i64)>,
 ) {
     let (tx, rx) = mpsc::channel();
     let settings = settings.clone();
@@ -2671,14 +3259,24 @@ fn start_session(
                     fcap_capture::start_capture(capture_id)
                 }
                 SourceSettings::Portal {} => fcap_capture::start_capture("portal"),
-                SourceSettings::VideoDevice { device_id, format } => {
+                SourceSettings::VideoDevice {
+                    device_id,
+                    format,
+                    deinterlace,
+                    field_order,
+                } => {
                     let format = format.as_ref().map(|f| VideoFormatInfo {
                         width: f.width,
                         height: f.height,
                         fps: f.fps,
                         fourcc: f.fourcc.clone(),
                     });
-                    video_device::start_video_device(device_id, format.as_ref())
+                    video_device::start_video_device(
+                        device_id,
+                        format.as_ref(),
+                        deinterlace_config(*deinterlace, *field_order),
+                        camera_profile,
+                    )
                 }
                 SourceSettings::Media {
                     path,
@@ -2731,6 +3329,13 @@ fn start_session(
                 // Frames are pushed from the webview's WebRTC session over
                 // IPC — the session just opens the push channel.
                 SourceSettings::RemoteGuest { .. } => crate::remote::start_remote_guest(id),
+                SourceSettings::TestSweep { width, height } => {
+                    fcap_sources::testsignal::start_sweep(*width, *height)
+                }
+                SourceSettings::TestFlashBeep { width, height } => {
+                    // The source id keys the mixer-side audio ring (like Media).
+                    fcap_sources::testsignal::start_flash_beep(&id.0.to_string(), *width, *height)
+                }
                 other => Err(CaptureError::Unsupported(format!(
                     "{} is not capture-backed",
                     other.kind_name()
@@ -2741,6 +3346,47 @@ fn start_session(
     if spawned.is_ok() {
         starting.insert(id, rx);
     }
+}
+
+/// A Text source's style with `content` as the shown text — shared between
+/// the static render and the CAP-M16 bound-file refresh (which substitutes
+/// the file's extracted value for the `text` field).
+fn text_style(settings: &SourceSettings, content: String) -> Option<text::TextStyle> {
+    let SourceSettings::Text {
+        font_family,
+        font_file,
+        size_px,
+        color,
+        align,
+        line_spacing,
+        force_rtl,
+        wrap_width,
+        ..
+    } = settings
+    else {
+        return None;
+    };
+    Some(text::TextStyle {
+        text: content,
+        font_family: font_family.clone(),
+        font_file: font_file.as_ref().map(PathBuf::from),
+        size_px: *size_px,
+        color: [color.r, color.g, color.b, color.a],
+        align: match align {
+            fcap_scene::TextAlign::Left => text::TextAlign::Left,
+            fcap_scene::TextAlign::Center => text::TextAlign::Center,
+            fcap_scene::TextAlign::Right => text::TextAlign::Right,
+        },
+        line_spacing: *line_spacing,
+        force_rtl: *force_rtl,
+        wrap_width: *wrap_width,
+    })
+}
+
+/// Whether a Text source binds to a watched file (CAP-M16) — those render
+/// from the loop's poll step, not the static branch.
+fn is_bound_text(settings: &SourceSettings) -> bool {
+    matches!(settings, SourceSettings::Text { source_file, .. } if !source_file.trim().is_empty())
 }
 
 /// Render a static source (image / color / text) to its frame.
@@ -2755,33 +3401,17 @@ fn render_static(settings: &SourceSettings) -> Result<fcap_capture::Frame, Strin
             height,
         } => color::solid_color_frame([rgba.r, rgba.g, rgba.b, rgba.a], *width, *height)
             .map_err(|err| err.to_string()),
-        SourceSettings::Text {
-            text: content,
-            font_family,
-            font_file,
-            size_px,
-            color,
-            align,
-            line_spacing,
-            force_rtl,
-            wrap_width,
-        } => {
-            let style = text::TextStyle {
-                text: content.clone(),
-                font_family: font_family.clone(),
-                font_file: font_file.as_ref().map(PathBuf::from),
-                size_px: *size_px,
-                color: [color.r, color.g, color.b, color.a],
-                align: match align {
-                    fcap_scene::TextAlign::Left => text::TextAlign::Left,
-                    fcap_scene::TextAlign::Center => text::TextAlign::Center,
-                    fcap_scene::TextAlign::Right => text::TextAlign::Right,
-                },
-                line_spacing: *line_spacing,
-                force_rtl: *force_rtl,
-                wrap_width: *wrap_width,
-            };
+        SourceSettings::Text { text: content, .. } => {
+            let style =
+                text_style(settings, content.clone()).expect("a Text kind always yields a style");
             text::render_text(&style).map_err(|err| err.to_string())
+        }
+        SourceSettings::TestBars { width, height } => {
+            fcap_sources::testsignal::smpte_bars_frame(*width, *height)
+                .map_err(|err| err.to_string())
+        }
+        SourceSettings::TestGrid { width, height } => {
+            fcap_sources::testsignal::grid_frame(*width, *height).map_err(|err| err.to_string())
         }
         other => Err(format!("{} is not a static source", other.kind_name())),
     }
@@ -2876,6 +3506,49 @@ mod tests {
             width: 8,
             height: 8,
         }));
+        // Test signals (CAP-M21): the animated ones are sessions, the static
+        // patterns render once, the tone is the mixer's alone.
+        assert!(is_capture_backed(&SourceSettings::TestSweep {
+            width: 8,
+            height: 8,
+        }));
+        assert!(is_capture_backed(&SourceSettings::TestFlashBeep {
+            width: 8,
+            height: 8,
+        }));
+        assert!(!is_capture_backed(&SourceSettings::TestBars {
+            width: 8,
+            height: 8,
+        }));
+        assert!(!is_capture_backed(&SourceSettings::TestTone {}));
+        assert!(SourceSettings::TestTone {}.is_audio_only());
+        assert!(render_static(&SourceSettings::TestGrid {
+            width: 8,
+            height: 8,
+        })
+        .is_ok());
+    }
+
+    /// CAP-M16 + the security review: the bound-text poll must never stat a
+    /// UNC/URL path — on Windows that forces an SMB/NTLM handshake to the
+    /// host, so an untrusted collection could harvest the user's credential
+    /// hash on a 500 ms timer. The poll refuses these before any filesystem
+    /// call; this pins the predicate the loop gates on.
+    #[test]
+    fn bound_text_never_reaches_a_network_path() {
+        for hostile in [
+            "\\\\attacker\\share\\score.txt",
+            "//attacker/share/score.txt",
+            "http://attacker/score.txt",
+            "smb://attacker/score.txt",
+        ] {
+            assert!(
+                crate::commands::studio::is_remote(hostile),
+                "{hostile} must be refused before any stat/read"
+            );
+        }
+        assert!(!crate::commands::studio::is_remote("C:/data/score.txt"));
+        assert!(!crate::commands::studio::is_remote("/home/mike/score.txt"));
     }
 
     #[test]

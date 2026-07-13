@@ -35,6 +35,22 @@ fn fader_gain(volume_db: f32) -> f32 {
     }
 }
 
+/// The stereo balance law (CAP-M19): center = unity on both channels (an
+/// untouched pan changes nothing); panning attenuates the OPPOSITE side
+/// only, down to silence at the extremes.
+fn balance_gains(pan: f32) -> (f32, f32) {
+    let pan = if pan.is_finite() {
+        pan.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    if pan > 0.0 {
+        (1.0 - pan, 1.0)
+    } else {
+        (1.0, 1.0 + pan)
+    }
+}
+
 /// One source's per-block control state (model + hotkey runtime).
 #[derive(Debug, Clone)]
 pub struct StripControl {
@@ -178,6 +194,10 @@ impl MixerCore {
 
         let mut next_envelopes: HashMap<SourceId, f32> = HashMap::with_capacity(controls.len());
 
+        // CAP-M19 PFL: while ANY strip is soloed, the monitor bus carries
+        // ONLY soloed strips — the program/track mix never changes.
+        let any_solo = controls.values().any(|control| control.settings.solo);
+
         for (id, control) in controls {
             let strip = self.strips.get_mut(id).expect("reconciled above");
 
@@ -204,7 +224,29 @@ impl MixerCore {
                 filter.process(&mut strip.scratch, &ctx);
             }
 
-            // 3. Mute/PTT/fader, smoothed per sample against clicks.
+            // 3. Mono downmix + stereo balance (CAP-M19; center = unity, so
+            //    an untouched pan leaves the mix bit-identical).
+            let (left_bal, right_bal) = balance_gains(control.settings.pan);
+            let mono = control.settings.mono;
+            for frame in strip.scratch.chunks_exact_mut(2) {
+                if mono {
+                    let mixed = (frame[0] + frame[1]) * 0.5;
+                    frame[0] = mixed;
+                    frame[1] = mixed;
+                }
+                frame[0] *= left_bal;
+                frame[1] *= right_bal;
+            }
+
+            // 4. PFL (CAP-M19) taps HERE — pre-fader and pre-mute, which is
+            //    the whole point of pre-fade listen: cueing a muted or
+            //    pulled-down strip must still be audible on the monitor.
+            //    (Tapping after step 5 would monitor silence.)
+            if any_solo && control.settings.solo {
+                add_into(&mut self.monitor, &strip.scratch);
+            }
+
+            // 5. Mute/PTT/fader, smoothed per sample against clicks.
             let target = if control.effectively_muted() {
                 0.0
             } else {
@@ -218,14 +260,16 @@ impl MixerCore {
                 peak = peak.max(frame[0].abs()).max(frame[1].abs());
             }
 
-            // 4. What actually mixes is what meters + drives the sidechain.
+            // 6. What actually mixes is what meters + drives the sidechain.
             strip.meter.push_block(&strip.scratch);
             strip.envelope = peak.max(strip.envelope * ENVELOPE_FALL);
             next_envelopes.insert(*id, strip.envelope);
 
-            // 5. Routing.
+            // 7. Routing. While ANY strip solos, the monitor carries only the
+            //    soloed strips (tapped pre-fader above); everything else
+            //    leaves the monitor. The program/track mix never changes.
             let monitor = control.settings.monitor;
-            if monitor != MonitorMode::Off {
+            if !any_solo && monitor != MonitorMode::Off {
                 add_into(&mut self.monitor, &strip.scratch);
             }
             if monitor != MonitorMode::MonitorOnly {
@@ -362,6 +406,124 @@ mod tests {
             (peak(core.master()) - expected).abs() < 0.02,
             "expected ~{expected}, got {}",
             peak(core.master())
+        );
+    }
+
+    fn channel_peak(block: &[f32], channel: usize) -> f32 {
+        block
+            .iter()
+            .skip(channel)
+            .step_by(2)
+            .fold(0.0f32, |acc, s| acc.max(s.abs()))
+    }
+
+    #[test]
+    fn balance_attenuates_only_the_opposite_side() {
+        // Hard right: the left channel empties, the right keeps unity —
+        // and a centered pan is bit-identical to no pan at all.
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        let control = StripControl::new(AudioSettings {
+            pan: 1.0,
+            ..AudioSettings::default()
+        });
+        run_one(&mut core, id, &control, 0.5, 20);
+        assert!(channel_peak(core.master(), 0) < 0.01, "left emptied");
+        assert!(
+            (channel_peak(core.master(), 1) - 0.5).abs() < 0.02,
+            "right at unity"
+        );
+        assert_eq!(balance_gains(0.0), (1.0, 1.0), "center = unity");
+        assert_eq!(balance_gains(-1.0), (1.0, 0.0), "hard left");
+    }
+
+    #[test]
+    fn mono_downmix_equalizes_the_channels() {
+        // A hard-left-only signal (L=0.8, R=0) lands equally on both sides.
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        let control = StripControl::new(AudioSettings {
+            mono: true,
+            ..AudioSettings::default()
+        });
+        let mut controls = HashMap::new();
+        controls.insert(id, control);
+        let block: Vec<f32> = (0..BLOCK_FRAMES).flat_map(|_| [0.8f32, 0.0]).collect();
+        for _ in 0..20 {
+            let mut inputs = HashMap::new();
+            inputs.insert(id, block.clone());
+            core.process(&inputs, &controls);
+        }
+        assert!((channel_peak(core.master(), 0) - 0.4).abs() < 0.02);
+        assert!((channel_peak(core.master(), 1) - 0.4).abs() < 0.02);
+    }
+
+    #[test]
+    fn solo_is_pfl_monitor_only() {
+        // Strip A solos with monitor OFF; strip B monitors normally. While
+        // the solo holds: the monitor carries ONLY A (PFL reaches past A's
+        // Off mode, B leaves), and the program mix carries BOTH unchanged.
+        let mut core = MixerCore::new();
+        let id_a = SourceId::new();
+        let id_b = SourceId::new();
+        let mut controls = HashMap::new();
+        controls.insert(
+            id_a,
+            StripControl::new(AudioSettings {
+                solo: true,
+                monitor: MonitorMode::Off,
+                ..AudioSettings::default()
+            }),
+        );
+        controls.insert(
+            id_b,
+            StripControl::new(AudioSettings {
+                monitor: MonitorMode::MonitorAndOutput,
+                ..AudioSettings::default()
+            }),
+        );
+        for block in 0..20 {
+            let mut inputs = HashMap::new();
+            inputs.insert(id_a, tone_block(0.3, block * BLOCK_FRAMES));
+            inputs.insert(id_b, tone_block(0.5, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        assert!(
+            (peak(core.monitor()) - 0.3).abs() < 0.02,
+            "monitor = the soloed strip alone, got {}",
+            peak(core.monitor())
+        );
+        assert!(
+            (peak(core.master()) - 0.8).abs() < 0.03,
+            "program unchanged (both strips), got {}",
+            peak(core.master())
+        );
+    }
+
+    #[test]
+    fn solo_is_pre_fade_so_a_muted_strip_still_cues() {
+        // The classic reason to cue a strip is that it is NOT in the program
+        // mix. PFL must tap before the mute/fader — a post-fader tap would
+        // monitor silence and the operator would think the mic was dead.
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        let control = StripControl::new(AudioSettings {
+            solo: true,
+            muted: true,
+            volume_db: MIN_VOLUME_DB, // fader all the way down, too
+            monitor: MonitorMode::Off,
+            ..AudioSettings::default()
+        });
+        run_one(&mut core, id, &control, 0.5, 20);
+        assert!(
+            (peak(core.monitor()) - 0.5).abs() < 0.02,
+            "a soloed strip cues at full pre-fader level, got {}",
+            peak(core.monitor())
+        );
+        assert_eq!(
+            peak(core.master()),
+            0.0,
+            "and it stays out of the program mix (muted)"
         );
     }
 

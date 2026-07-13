@@ -298,6 +298,14 @@ pub struct AudioSettings {
     pub monitor: MonitorMode,
     /// Bitmask of the up-to-6 tracks this source mixes into (bit 0 = track 1).
     pub tracks: u8,
+    /// Stereo balance (CAP-M19), −1 (full left) ..= 1 (full right). 0 leaves
+    /// the signal untouched (unity — existing mixes are bit-identical).
+    pub pan: f32,
+    /// PFL solo (CAP-M19): while ANY strip is soloed, the monitor bus hears
+    /// only soloed strips. The program/track mix never changes.
+    pub solo: bool,
+    /// Downmix to mono before the balance (CAP-M19).
+    pub mono: bool,
     /// Delays this source's audio to line it up with video, ms
     /// (0..=[`MAX_SYNC_OFFSET_MS`]).
     pub sync_offset_ms: u32,
@@ -318,6 +326,9 @@ impl Default for AudioSettings {
             muted: false,
             monitor: MonitorMode::Off,
             tracks: default_tracks(),
+            pan: 0.0,
+            solo: false,
+            mono: false,
             sync_offset_ms: 0,
             push_to_talk: None,
             push_to_mute: None,
@@ -337,6 +348,11 @@ impl AudioSettings {
             0.0
         };
         self.tracks &= TRACK_MASK;
+        self.pan = if self.pan.is_finite() {
+            self.pan.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
         self.sync_offset_ms = self.sync_offset_ms.min(MAX_SYNC_OFFSET_MS);
     }
 

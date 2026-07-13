@@ -478,6 +478,8 @@ fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
             SourceSettings::VideoDevice {
                 device_id: String::new(),
                 format: None,
+                deinterlace: crate::DeinterlaceMode::Off,
+                field_order: crate::FieldOrder::TopFirst,
             },
             vec![ImportNote::NeedsReselect],
         ),
@@ -574,6 +576,11 @@ fn map_text(s: &Value) -> SourceSettings {
         Some("right") => TextAlign::Right,
         _ => TextAlign::Left,
     };
+    // OBS "read from file" maps onto the CAP-M16 whole-file binding.
+    let source_file = match s.get("read_from_file").and_then(Value::as_bool) {
+        Some(true) => get_str(s, "file").unwrap_or("").to_string(),
+        _ => String::new(),
+    };
     SourceSettings::Text {
         text: get_str(s, "text").unwrap_or("").to_string(),
         font_family,
@@ -584,6 +591,11 @@ fn map_text(s: &Value) -> SourceSettings {
         line_spacing: 1.0,
         force_rtl: false,
         wrap_width: None,
+        source_file,
+        binding: crate::FileBinding::Whole,
+        csv_row: 1,
+        csv_column: String::new(),
+        json_pointer: String::new(),
     }
 }
 

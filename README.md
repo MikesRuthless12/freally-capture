@@ -11,33 +11,39 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — Phase 4 (recording) complete; 0.56.0 adds the native GPU preview on
-> all three OSes.** Real capture is in: per-OS
-> screen/window capture (Windows DXGI + Windows.Graphics.Capture, macOS ScreenCaptureKit, Linux
-> ScreenCast portal + X11) and webcams/capture cards. The **owned wgpu GPU compositor** (per-item
-> move/scale/rotate/crop, seven blend modes, 60 fps @ 1080p verified on hardware), the **owned
-> scene/source model** (shared sources, autosaved scene collection), the **on-GPU filter chain**
-> (chroma key, color correction, LUT, blur, mask, sharpen, scroll, crop), **Image/Color/Text
-> sources** (real shaping incl. RTL), and the **Scenes/Sources rails with on-canvas transform
-> handles** are all in. The **owned audio engine** mixes mic + desktop audio across **up to 6 tracks**
-> with the owned classic-DSP filter set (**spectral denoise — no ML** — plus gate, compressor,
-> limiter, EQ, gain, ducking), monitoring, push-to-talk/mute, and a LUFS meter. **Phase 4 adds
-> recording**: the **owned `freally-video` (`.frec`) lossless codec**, per-OS **hardware encoders**
-> (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264/x265/AV1 fallback, **multi-track** mp4/mkv/mov/webm
-> + file splitting + **pause/resume**, HEVC/AV1 + **remux-to-mp4**, and a **Media source** (video/image
-> files, audio in the mixer) — with the patent-encumbered wire codecs driven through the
-> **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). **0.56.0 makes the
-> preview feel like OBS:** a **native GPU preview** paints the compositor's GPU output straight to the
-> screen with no read-back/encode round-trip — **Windows** (DirectComposition), **macOS** (CAMetalLayer),
-> and **Linux** (X11/Vulkan; Wayland keeps the JPEG preview) — with the interactive selection box +
-> transform handles drawn into the GPU frame; the JPEG preview stays as the universal fallback. The
-> **Window Capture picker shows live thumbnails** (in-memory only), lists **minimized** windows,
-> **re-binds to the same window across a restart**, and errored captures **auto-recover**. Streaming
-> lands next (0.70.0). The detailed planning + design set (product vision, PRD, roadmap, build-prompts guide, and
-> go-to-market plan) is **maintained privately** and is not published here.
+> **Status: in development — 0.99.0 closes the must-have set; 1.0.0 is next.** The engine is
+> complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
+> ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
+> compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
+> filter chain**, and the **owned audio engine** (up to 6 tracks; **spectral denoise — no ML** — plus
+> gate, compressor, limiter, EQ, gain, ducking; monitoring, push-to-talk, LUFS) are all in.
+> **Recording** (0.55.0) ships the **owned `freally-video` (`.frec`) lossless codec**, per-OS
+> **hardware encoders** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + x264/x265/AV1 fallback,
+> multi-track mp4/mkv/mov/webm with splitting and pause/resume — the patent-encumbered wire codecs
+> run through the **clearly-labeled, on-demand, hash-verified ffmpeg bridge** (never bundled). The
+> preview **feels like OBS** (0.56.0): a **native GPU preview** with no read-back round-trip
+> (DirectComposition / CAMetalLayer / X11-Vulkan; the JPEG path stays as the universal fallback, and
+> covers Wayland). **Streaming** is in — single-target (0.70.0) and **simultaneous multistream**
+> over RTMP/RTMPS/SRT/WHIP with a vertical 9:16 canvas, nested scenes, a replay buffer, and a
+> **no-key** chat overlay (0.85.0) — plus the **extensibility surface** (0.90.0: WebSocket remote
+> API, browser docks, sandboxed Lua, a plugin SDK) and **distribution** (0.95.0: a signed,
+> self-hosted auto-updater, per-app audio, an NDI seam, the EULA gate). The interface speaks **18
+> languages**, is keyboard-operable and screen-reader-audible, and themes light/dark/custom
+> (0.96.0). The **26 CAP-M must-haves** then landed as three batches: **scene authoring &
+> monitoring** (0.97.0 — undo/redo, an OBS importer, a missing-file doctor, multi-select +
+> guides, a keying workbench, multiview, projectors), **broadcast safety & reliability** (0.98.0 —
+> a go-live pre-flight, always-on alarms, a source-health dashboard, mid-session encoder failover,
+> crash-safe recording with next-launch repair, a quit guard, a panic button, filename templates, a
+> redacted diagnostics bundle), and **sources, devices & calibration** (0.99.0 — test signals, an
+> A/V sync calibration workbench, timer/clock sources, text bound to a watched file, a hotkey map
+> with conflict detection, mixer pan/solo/mono, deinterlacing, and camera controls with per-device
+> profiles). **1.0.0 is the next release.** A true browser source, the virtual camera, and
+> game-capture GPU hooking follow as their own milestones. The detailed planning + design set
+> (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
+> privately** and is not published here.
 > **Installers for every release are on the
-> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.85.0 (the
-> studio + streaming depth) is the latest.**
+> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.99.0 is the
+> latest.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
 > machine**. There is **no account** (a streaming tool should never become "connect your channel"), **no
@@ -54,12 +60,14 @@ leaves your machine is the stream you chose to send.
 
 ## What it does
 
-1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, text, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur, mask, sharpen) and scene **transitions** (cut/fade/slide/stinger/luma-wipe).
+1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, **text — including text bound to a watched `.txt`/CSV/JSON file**, **timers & clocks**, **test signals**, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur, mask, sharpen) and scene **transitions** (cut/fade/slide/stinger/luma-wipe).
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
 4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — including **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
-5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything, **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
-6. **Extend it** — a password-protected **WebSocket remote-control API** (Stream Deck / Companion-style; **off by default**, loopback unless you opt into LAN), **browser docks** (chat popouts / alerts / web buttons as their own window), **sandboxed Lua scripting** (react to go-live/scene/recording events, drive the studio — no file or OS access), and a **plugin SDK** (add a source or filter without touching core). A **virtual camera** and a true **browser source** follow as their own signed-driver / on-demand-component milestones.
+5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything (with a searchable **hotkey map** that flags conflicts), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
+6. **Keep the show safe** — a **go-live pre-flight checklist**, always-on **safety alarms** (silent audio, clipping, a black/frozen picture, a low-disk forecast), a **source-health dashboard**, **mid-session encoder failover**, **crash-safe recording** with a next-launch repair, a **quit guard**, and a **panic button** that cuts to a privacy slate and hard-mutes everything.
+7. **Calibrate the chain** — built-in **test signals** (SMPTE bars, a calibration grid, a motion sweep, a 1 kHz lineup tone, an A/V flash+beep) and a guided **A/V sync calibration workbench** that measures your camera/mic offset and applies it; plus **deinterlacing** and cross-platform **camera controls** (exposure, white balance, focus, zoom) with per-device profiles that survive hotplug.
+8. **Extend it** — a password-protected **WebSocket remote-control API** (Stream Deck / Companion-style; **off by default**, loopback unless you opt into LAN), **browser docks** (chat popouts / alerts / web buttons as their own window), **sandboxed Lua scripting** (react to go-live/scene/recording events, drive the studio — no file or OS access), and a **plugin SDK** (add a source or filter without touching core). A **virtual camera** and a true **browser source** follow as their own signed-driver / on-demand-component milestones.
 
 It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
 local and account-free, the same on all three desktop OSes, and integrated with the Freally suite.
@@ -96,11 +104,11 @@ legal review).
 
 ## Stack
 
-> The **Tauri v2 + React shell, the workspace, CI, and packaging are built** (Phase 0), **per-OS
-> capture (screens, windows, webcams) is live** (Phase 1), the **wgpu compositor, scene/source
-> model, GPU filters, and the scenes/sources UI compose in real time** (Phase 2), and the **owned
-> audio engine + mixer (capture, 6 tracks, classic-DSP filters, monitoring, PTT, LUFS)** is in
-> (Phase 3); the remaining engine pieces below land per the release ladder.
+> Every engine piece below is **built and shipping**: the Tauri v2 + React shell, the workspace, CI
+> and packaging; per-OS capture; the wgpu compositor + GPU filters; the owned audio engine and
+> mixer; multi-track recording (owned codec + hardware encoders); streaming and multistream; the
+> remote API, docks, scripting and plugin SDK; and the signed self-hosted auto-updater. What
+> remains before 1.0.0 is polish, not engine work.
 
 **Tauri v2** shell + **React + TypeScript (Vite)** control UI (Havoc dark) · a **Rust** Cargo workspace
 (the `src-tauri` app crate + owned crates `capture`, `compositor`, `encode`, `stream`, `audio`,
@@ -170,7 +178,8 @@ packages each, and opens a **draft GitHub Release** with the downloadable instal
 | macOS | `.app` / `.dmg` | **notarized**; ships the **CoreMediaIO virtual-camera plugin** |
 | Linux | AppImage / `.deb` / `.rpm` / Flatpak | virtual camera needs `v4l2loopback` |
 
-Signed/notarized installers and a self-hosted auto-updater arrive in **Phase 8 — Distribution**.
+Signed/notarized installers and the **signed, self-hosted auto-updater** shipped in **0.95.0** — the
+updater refuses any package it can't verify against a public key baked into the binary.
 
 A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Publish it via
 **Settings → Pages → Deploy from a branch → `main` / `docs`** to serve it at

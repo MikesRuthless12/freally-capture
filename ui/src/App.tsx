@@ -77,6 +77,8 @@ import { StatsDock } from "./panels/StatsDock";
 import { StudioPreviewPane } from "./panels/StudioPreviewPane";
 import { HistoryDialog } from "./panels/HistoryDialog";
 import { MissingFilesDialog } from "./panels/MissingFilesDialog";
+import { AvSyncDialog } from "./panels/AvSyncDialog";
+import { HotkeyAuditDialog } from "./panels/HotkeyAuditDialog";
 import { MultiviewDialog } from "./panels/MultiviewDialog";
 import { PanicBanner } from "./panels/PanicBanner";
 import { ProjectorDialog } from "./panels/ProjectorDialog";
@@ -95,6 +97,8 @@ type OpenDialog =
   | { kind: "multiview" }
   | { kind: "projector" }
   | { kind: "sourceHealth" }
+  | { kind: "avSync" }
+  | { kind: "hotkeyAudit" }
   | { kind: "missingFiles" }
   | null;
 
@@ -389,6 +393,20 @@ export default function App() {
         label: t("palette-source-health"),
         keywords: "source health dashboard fps dropped frames restart capture status",
         run: () => setDialog({ kind: "sourceHealth" }),
+      },
+      {
+        id: "action-av-sync",
+        group: t("palette-group-actions"),
+        label: t("palette-av-sync"),
+        keywords: "av sync calibration offset audio video align flash beep lip sync latency",
+        run: () => setDialog({ kind: "avSync" }),
+      },
+      {
+        id: "action-hotkey-audit",
+        group: t("palette-group-actions"),
+        label: t("palette-hotkey-audit"),
+        keywords: "hotkey map audit conflicts cheat sheet bindings keyboard shortcuts",
+        run: () => setDialog({ kind: "hotkeyAudit" }),
       },
       {
         id: "action-panic",
@@ -899,6 +917,15 @@ export default function App() {
       {dialog?.kind === "projector" && (
         <ProjectorDialog collection={collection} onClose={() => setDialog(null)} />
       )}
+      {dialog?.kind === "avSync" && (
+        <AvSyncDialog
+          studio={studio}
+          program={program}
+          audio={audio}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "hotkeyAudit" && <HotkeyAuditDialog onClose={() => setDialog(null)} />}
       {dialog?.kind === "sourceHealth" && (
         <SourceHealthDialog
           studio={studio}

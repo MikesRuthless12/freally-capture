@@ -123,6 +123,21 @@ pub fn studio_add_item(
     })
 }
 
+/// Drive one timer source's run state (CAP-M15): "start" | "pause" |
+/// "toggle" | "reset". Runtime-only — no model change, no undo; the render
+/// loop repaints the face next tick.
+#[tauri::command]
+pub fn studio_timer_control(
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+    action: String,
+) -> Result<(), String> {
+    let cmd = crate::studio::TimerCmd::parse(&action)
+        .ok_or_else(|| format!("unknown timer action: {action}"))?;
+    state.timer_control(source_id, cmd);
+    Ok(())
+}
+
 /// Place an existing pool source on top of a scene (source sharing).
 #[tauri::command]
 pub fn studio_add_existing_source(
@@ -625,7 +640,10 @@ pub struct MissingFile {
 /// a UNC path on Windows forces an SMB connection (and an NTLM handshake) to the
 /// host, so an imported collection referencing `\\attacker\share\x.png` must
 /// never be probed. Such paths are treated as "not missing" (never reported).
-fn is_remote(path: &str) -> bool {
+///
+/// Also the gate for CAP-M16's bound-text poll (`studio.rs` §5c) — an untrusted
+/// collection must never make the render loop reach out to an attacker's host.
+pub(crate) fn is_remote(path: &str) -> bool {
     path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
 }
 

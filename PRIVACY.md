@@ -84,6 +84,18 @@ recording or stream, that data is used **only** to produce your recording and/or
 the broadcast you chose to send. It is **never** transmitted to the Licensor, and
 you control whether each source is captured.
 
+The **A/V sync calibration workbench** (which you start explicitly) is the one
+place your camera and microphone are analysed rather than composed: for about
+twelve seconds it watches for the built-in flash-and-beep pattern. It keeps only
+per-frame **brightness** and per-block **audio levels** — never a picture, never a
+sound recording — and discards even those when the measurement ends. Everything
+happens on your machine; nothing is transmitted anywhere.
+
+**Camera controls** (exposure, white balance, focus, zoom…) adjust your device
+directly and are remembered in your local settings so they can be reapplied when
+that camera is reconnected. A **text source bound to a file** reads only the local
+file you point it at, and only to display its contents on your canvas.
+
 ## The remote-control API
 The optional WebSocket remote-control API is **off by default**. When you enable
 it, it binds to your own machine (loopback by default; LAN only if you explicitly

@@ -138,12 +138,19 @@ fn frame_format_from_fourcc(fourcc: &str) -> Option<FrameFormat> {
 
 /// Start streaming a device. `format: None` = the highest resolution the
 /// device offers; `Some` = the user's pick from [`list_video_formats`].
+/// `deinterlace: Some` runs the chosen classic algorithm (CAP-M17) over
+/// every frame on this capture thread — identical on every OS.
+/// `camera_profile` (CAP-M18) is the saved per-device control profile,
+/// reapplied on every (re)open — hotplug and auto-recover included.
 pub fn start_video_device(
     device_id: &str,
     format: Option<&VideoFormatInfo>,
+    deinterlace: Option<(crate::deinterlace::Mode, crate::deinterlace::FieldOrder)>,
+    camera_profile: Vec<(String, i64)>,
 ) -> Result<CaptureSession, CaptureError> {
     ensure_camera_permission()?;
     let index = parse_index(device_id);
+    let controls_hub = crate::camera_controls::device(device_id);
     let requested_type = match format {
         Some(sel) => {
             let resolution = Resolution::new(sel.width, sel.height);
@@ -159,23 +166,53 @@ pub fn start_video_device(
         None => RequestedFormatType::AbsoluteHighestResolution,
     };
 
+    let deinterlacer =
+        deinterlace.map(|(mode, order)| crate::deinterlace::Deinterlacer::new(mode, order));
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
     let join = std::thread::Builder::new()
         .name("fcap-webcam".into())
-        .spawn(move || run(index, requested_type, sender, stop_thread))
+        .spawn(move || {
+            run(
+                index,
+                requested_type,
+                sender,
+                stop_thread,
+                deinterlacer,
+                controls_hub,
+                camera_profile,
+            )
+        })
         .map_err(|err| CaptureError::Backend(format!("could not spawn capture: {err}")))?;
     Ok(CaptureSession::from_parts(receiver, stop, join))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     index: CameraIndex,
     requested_type: RequestedFormatType,
     sender: FrameSender,
     stop: Arc<AtomicBool>,
+    deinterlacer: Option<crate::deinterlace::Deinterlacer>,
+    controls_hub: Arc<crate::camera_controls::DeviceControls>,
+    camera_profile: Vec<(String, i64)>,
 ) {
-    match run_inner(index, requested_type, &sender, &stop) {
+    // This session's token: only the session that published a device's
+    // controls may retire them (two sources can share one camera).
+    let token = crate::camera_controls::session_token();
+    let result = run_inner(
+        index,
+        requested_type,
+        &sender,
+        &stop,
+        deinterlacer,
+        &controls_hub,
+        &camera_profile,
+        token,
+    );
+    crate::camera_controls::retire(&controls_hub, token);
+    match result {
         Ok(()) => sender.close(None),
         Err(err) => sender.close(Some(err)),
     }
@@ -238,19 +275,30 @@ fn open_streaming_camera(
     Err(last.unwrap_or_else(|| CaptureError::Backend("no camera format streamed".into())))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_inner(
     index: CameraIndex,
     requested_type: RequestedFormatType,
     sender: &FrameSender,
     stop: &AtomicBool,
+    mut deinterlacer: Option<crate::deinterlace::Deinterlacer>,
+    controls_hub: &crate::camera_controls::DeviceControls,
+    camera_profile: &[(String, i64)],
+    token: u64,
 ) -> Result<(), CaptureError> {
     // The camera lives entirely on this thread (nokhwa handles aren't Send).
     let mut camera = open_streaming_camera(index, requested_type)?;
+
+    // CAP-M18: surface whatever controls this backend reports, then queue
+    // the saved profile so it reapplies on every (re)open. Claims the hub for
+    // this session (a failed open never publishes, so it never claims).
+    crate::camera_controls::publish_controls(controls_hub, &camera, camera_profile, token);
 
     // Cameras occasionally emit a corrupt MJPEG frame — skip those, but give
     // up honestly if nothing decodes for a while.
     let mut consecutive_failures = 0u32;
     while !stop.load(Ordering::Relaxed) && sender.is_open() {
+        crate::camera_controls::apply_pending(controls_hub, &mut camera);
         let buffer = match camera.frame() {
             Ok(buffer) => buffer,
             Err(err) => return Err(backend_error(err)),
@@ -260,14 +308,18 @@ fn run_inner(
                 consecutive_failures = 0;
                 let width = image.width();
                 let height = image.height();
-                sender.send(Frame {
+                let mut frame = Frame {
                     width,
                     height,
                     stride: width * 4,
                     format: PixelFormat::Rgba8,
                     data: image.into_raw(),
                     captured_at: Instant::now(),
-                });
+                };
+                if let Some(deint) = deinterlacer.as_mut() {
+                    deint.process(&mut frame);
+                }
+                sender.send(frame);
             }
             Err(err) => {
                 consecutive_failures += 1;

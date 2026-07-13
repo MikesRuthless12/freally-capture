@@ -1,7 +1,7 @@
 {
   "name": "@freally-capture/ui",
   "private": true,
-  "version": "0.98.0",
+  "version": "0.99.0",
   "type": "module",
   "description": "Freally Capture — the React + TypeScript control UI (Vite, Havoc dark).",
   "license": "SEE LICENSE IN LICENSE",
