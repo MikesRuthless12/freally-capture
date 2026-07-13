@@ -16,6 +16,8 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["addMarker", "hotkeys-add-marker", "hotkeys-add-marker-placeholder"],
   ["still", "hotkeys-still", "hotkeys-still-placeholder"],
   ["panic", "hotkeys-panic", "hotkeys-panic-placeholder"],
+  ["timerToggle", "hotkeys-timer-toggle", "hotkeys-timer-toggle-placeholder"],
+  ["timerReset", "hotkeys-timer-reset", "hotkeys-timer-reset-placeholder"],
 ];
 
 /**
@@ -50,6 +52,8 @@ export function SettingsHotkeys({
       addMarker: draft.addMarker?.trim() || null,
       still: draft.still?.trim() || null,
       panic: draft.panic?.trim() || null,
+      timerToggle: draft.timerToggle?.trim() || null,
+      timerReset: draft.timerReset?.trim() || null,
     };
     const next = {
       ...settings,

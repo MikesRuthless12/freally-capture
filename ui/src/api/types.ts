@@ -89,6 +89,9 @@ export type Settings = {
   alignment: AlignmentSettings;
   /** Whether the first-run wizard has been seen (Phase 9). */
   completedOnboarding: boolean;
+  /** CAP-M18: device id → control tag → value. Server-owned — written by
+   * cameraControlSet and PRESERVED across settingsSet (never edit here). */
+  cameraProfiles?: Record<string, Record<string, number>>;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */
@@ -176,6 +179,10 @@ export type HotkeySettings = {
   still: string | null;
   /** Cut to the privacy slate + hard-mute (CAP-M22). Engage only. */
   panic: string | null;
+  /** Start/pause every timer source (CAP-M15). */
+  timerToggle: string | null;
+  /** Reset every timer source (CAP-M15). */
+  timerReset: string | null;
 };
 
 /** The panic button's privacy slate (CAP-M22). */
@@ -534,6 +541,50 @@ export type CornerSlot = { itemId: ItemId; corner: Corner };
 
 export type TextAlign = "left" | "center" | "right";
 
+/** Which face a Timer source shows (CAP-M15). */
+export type TimerMode = "wallClock" | "countdown" | "stopwatch" | "sinceLive" | "sinceRecording";
+
+/** What a countdown does at zero (CAP-M15). */
+export type CountdownEnd = "none" | "flash" | "switchScene";
+
+/** How a Text source's bound file parses (CAP-M16). */
+export type FileBinding = "whole" | "csvCell" | "jsonPointer";
+
+/** One camera control a running device reports (CAP-M18). */
+export type CameraControl = {
+  /** Stable tag: "exposure" | "whiteBalance" | "focus" | "zoom" | "gain" | … */
+  id: string;
+  /** The backend's own display name (fallback label). */
+  name: string;
+  /** Absent when the backend reports no range (Windows: exposure/focus/zoom):
+   * the UI shows a stepper rather than a meaningless slider. */
+  min?: number;
+  max?: number;
+  step: number;
+  default: number;
+  value: number;
+  writable: boolean;
+};
+
+/** A device source's deinterlace mode (CAP-M17). */
+export type DeinterlaceMode = "off" | "discard" | "bob" | "linear" | "blend" | "motionAdaptive";
+
+/** Which field an interlaced feed shot first (CAP-M17). */
+export type FieldOrder = "topFirst" | "bottomFirst";
+
+/** CAP-M14: one audited hotkey binding. */
+export type HotkeyAuditEntry = {
+  accelerator: string;
+  action: string;
+  feature: string;
+  /** The audio source's name (PTT/PTM rows only). */
+  source?: string;
+  registered: boolean;
+  /** How many OTHER bindings share this key. */
+  sharedWith: number;
+  valid: boolean;
+};
+
 export type VideoDeviceFormat = {
   width: number;
   height: number;
@@ -546,7 +597,14 @@ export type SourceSettings =
   | { kind: "display"; captureId: string; label: string }
   | { kind: "window"; captureId: string; label: string }
   | { kind: "portal" }
-  | { kind: "videoDevice"; deviceId: string; format?: VideoDeviceFormat | null }
+  | {
+      kind: "videoDevice";
+      deviceId: string;
+      format?: VideoDeviceFormat | null;
+      /** CAP-M17: deinterlacing for interlaced feeds (changing restarts the device). */
+      deinterlace: DeinterlaceMode;
+      fieldOrder: FieldOrder;
+    }
   | { kind: "image"; path: string }
   | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
   | { kind: "remoteGuest"; label: string }
@@ -583,6 +641,34 @@ export type SourceSettings =
       lineSpacing: number;
       forceRtl: boolean;
       wrapWidth?: number | null;
+      /** CAP-M16: a watched local file the content binds to; "" = the text field. */
+      sourceFile: string;
+      binding: FileBinding;
+      /** CSV: 1-based data row. */
+      csvRow: number;
+      /** CSV: column by header name or 1-based index. */
+      csvColumn: string;
+      /** JSON: an RFC 6901 pointer, e.g. /teams/0/score. */
+      jsonPointer: string;
+    }
+  | { kind: "testBars"; width: number; height: number }
+  | { kind: "testGrid"; width: number; height: number }
+  | { kind: "testSweep"; width: number; height: number }
+  | { kind: "testTone" }
+  | { kind: "testFlashBeep"; width: number; height: number }
+  | {
+      kind: "timer";
+      mode: TimerMode;
+      format: string;
+      utcOffsetMin?: number | null;
+      countdownMs: number;
+      target: string;
+      endAction: CountdownEnd;
+      endScene?: SceneId | null;
+      fontFamily?: string | null;
+      fontFile?: string | null;
+      sizePx: number;
+      color: Rgba;
     };
 
 export type SourceKindName = SourceSettings["kind"];
@@ -594,7 +680,9 @@ export function kindHasAudio(kind: SourceKindName): boolean {
     kind === "audioOutput" ||
     kind === "appAudio" ||
     kind === "media" ||
-    kind === "remoteGuest"
+    kind === "remoteGuest" ||
+    kind === "testTone" ||
+    kind === "testFlashBeep"
   );
 }
 
@@ -613,6 +701,35 @@ export type AudioFilterId = string;
 
 /** Where a source's monitored audio goes. */
 export type MonitorMode = "off" | "monitorOnly" | "monitorAndOutput";
+
+/** CAP-M20: live probe status while the sync workbench measures. */
+export type CalibrationStatus = {
+  videoSamples: number;
+  audioSamples: number;
+  flashSeen: boolean;
+  beepHeard: boolean;
+};
+
+/** CAP-M20: a completed measurement. Positive = video later than audio. */
+export type CalibrationMeasurement = {
+  offsetMs: number;
+  cycles: number;
+  jitterMs: number;
+};
+
+/** CAP-M20: why a measurement failed (serde tag = `kind`). */
+export type CalibrationFailure =
+  | { kind: "noFlash" }
+  | { kind: "noBeep" }
+  | { kind: "tooFewCycles"; paired: number }
+  | { kind: "notThePattern" }
+  | { kind: "unstable"; jitterMs: number };
+
+/** CAP-M20: the finish verdict — exactly one side is present. */
+export type CalibrationResult = {
+  measurement?: CalibrationMeasurement;
+  error?: CalibrationFailure;
+};
 
 /** One audio filter's parameters (serde tag = `type`; owned classic DSP). */
 export type AudioFilterKind =
@@ -663,6 +780,12 @@ export type AudioSettings = {
   monitor: MonitorMode;
   /** Bitmask of the up-to-6 tracks (bit 0 = track 1). */
   tracks: number;
+  /** Stereo balance (CAP-M19), −1 (left) ..= 1 (right); 0 = untouched. */
+  pan: number;
+  /** PFL solo (CAP-M19): monitor hears only soloed strips; program unchanged. */
+  solo: boolean;
+  /** Mono downmix before the balance (CAP-M19). */
+  mono: boolean;
   syncOffsetMs: number;
   /** Hotkey accelerator: silent unless held. */
   pushToTalk?: string | null;

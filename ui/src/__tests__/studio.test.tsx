@@ -14,7 +14,15 @@ function fixtureCollection(): Collection {
     canvasWidth: 1920,
     canvasHeight: 1080,
     sources: [
-      { id: "src-cam", name: "Face cam", kind: "videoDevice", deviceId: "cam-0", format: null },
+      {
+        id: "src-cam",
+        name: "Face cam",
+        kind: "videoDevice",
+        deviceId: "cam-0",
+        format: null,
+        deinterlace: "off",
+        fieldOrder: "topFirst",
+      },
       {
         id: "src-img",
         name: "Overlay",

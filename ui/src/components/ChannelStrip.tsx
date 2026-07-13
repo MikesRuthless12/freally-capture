@@ -1,8 +1,11 @@
 import { useState } from "react";
 
 import {
+  studioSetAudioMono,
   studioSetAudioMonitor,
   studioSetAudioMuted,
+  studioSetAudioPan,
+  studioSetAudioSolo,
   studioSetAudioSyncOffset,
   studioSetAudioTracks,
   studioSetAudioVolume,
@@ -201,6 +204,27 @@ function SceneMixButton({
       }`}
     >
       S
+    </button>
+  );
+}
+
+/** PFL solo (CAP-M19): monitor hears only soloed strips; program unchanged. */
+function SoloButton({ source, audio }: { source: Source; audio: AudioSettings }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={() => studioSetAudioSolo(source.id, !audio.solo).catch(fail("solo"))}
+      title={t("channelstrip-solo-title")}
+      aria-label={t("channelstrip-solo-source", { name: source.name })}
+      aria-pressed={audio.solo}
+      className={`shrink-0 rounded border px-1.5 text-[10px] font-bold ${
+        audio.solo
+          ? "border-amber-400/60 bg-amber-500/20 text-amber-300"
+          : "border-white/10 text-havoc-muted hover:text-havoc-text"
+      }`}
+    >
+      PFL
     </button>
   );
 }
@@ -455,6 +479,7 @@ export function ChannelStrip({
           {sceneId && (
             <SceneMixButton source={source} active={overriding} onToggle={toggleSceneMix} />
           )}
+          <SoloButton source={source} audio={audio} />
           <MonitorButton source={source} audio={audio} />
           <FiltersButton source={source} audio={audio} onOpenFilters={onOpenFilters} />
           <AdvancedButton source={source} onOpenAdvanced={onOpenAdvanced} />
@@ -488,6 +513,7 @@ export function ChannelStrip({
         {sceneId && (
           <SceneMixButton source={source} active={overriding} onToggle={toggleSceneMix} />
         )}
+        <SoloButton source={source} audio={audio} />
         <MonitorButton source={source} audio={audio} />
         <FiltersButton source={source} audio={audio} onOpenFilters={onOpenFilters} />
         <AdvancedButton source={source} onOpenAdvanced={onOpenAdvanced} />
@@ -538,6 +564,32 @@ export function AdvancedAudioFields({
 
   return (
     <div className="flex flex-col gap-2">
+      <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+        {t("channelstrip-pan-label")}
+        <input
+          type="range"
+          min={-100}
+          max={100}
+          step={1}
+          value={Math.round(audio.pan * 100)}
+          onChange={(event) =>
+            studioSetAudioPan(source.id, Number(event.target.value) / 100).catch(fail("pan"))
+          }
+          onDoubleClick={() => studioSetAudioPan(source.id, 0).catch(fail("pan"))}
+          aria-label={t("channelstrip-pan-aria", { name: source.name })}
+          className="min-w-0 flex-1 accent-havoc-accent"
+        />
+      </label>
+      <label className="flex items-center gap-1.5 text-[11px] text-havoc-muted">
+        <input
+          type="checkbox"
+          checked={audio.mono}
+          onChange={(event) =>
+            studioSetAudioMono(source.id, event.target.checked).catch(fail("mono"))
+          }
+        />
+        {t("channelstrip-mono-label")}
+      </label>
       <NumberField
         label={t("channelstrip-sync-offset", { max: MAX_SYNC_OFFSET_MS })}
         value={audio.syncOffsetMs}

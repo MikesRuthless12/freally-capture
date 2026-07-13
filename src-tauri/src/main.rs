@@ -15,12 +15,14 @@ mod audio;
 mod autoconfig;
 mod bugreport;
 mod buildinfo;
+mod calibration;
 mod commands;
 mod diagnostics;
 mod docks;
 mod eula;
 mod events;
 mod filename;
+mod hotkey_audit;
 mod hotkeys;
 mod native_preview;
 mod openfile;
@@ -38,6 +40,7 @@ mod settings;
 mod shutdown;
 mod stream;
 mod studio;
+mod timers;
 
 use audio::{AudioRuntime, HotkeyRegistry};
 use preview::PreviewState;
@@ -133,6 +136,7 @@ fn main() {
         .manage(PreviewState::default())
         .manage(StudioState::load_default())
         .manage(AudioRuntime::new())
+        .manage(calibration::CalibrationState::default())
         .manage(HotkeyRegistry::default())
         .manage(commands::recording::EncodeState::new())
         .manage(commands::cef::CefState::new())
@@ -242,6 +246,7 @@ fn main() {
             commands::studio::studio_select_scene,
             commands::studio::studio_reorder_scene,
             commands::studio::studio_add_item,
+            commands::studio::studio_timer_control,
             commands::studio::studio_add_existing_source,
             commands::studio::studio_remove_item,
             commands::studio::studio_reorder_item,
@@ -308,6 +313,9 @@ fn main() {
             commands::audio::studio_set_audio_muted,
             commands::audio::studio_set_audio_monitor,
             commands::audio::studio_set_audio_tracks,
+            commands::audio::studio_set_audio_pan,
+            commands::audio::studio_set_audio_solo,
+            commands::audio::studio_set_audio_mono,
             commands::audio::studio_set_audio_sync_offset,
             commands::audio::studio_set_audio_hotkeys,
             commands::audio::studio_add_audio_filter,
@@ -315,6 +323,15 @@ fn main() {
             commands::audio::studio_reorder_audio_filter,
             commands::audio::studio_update_audio_filter,
             commands::audio::studio_set_audio_filter_enabled,
+            hotkey_audit::hotkey_audit,
+            hotkey_audit::hotkey_cheatsheet_save,
+            commands::camera_controls_list,
+            commands::camera_control_set,
+            commands::camera_profile_reset,
+            commands::calibration::calibration_start,
+            commands::calibration::calibration_stop,
+            commands::calibration::calibration_status,
+            commands::calibration::calibration_finish,
             commands::recording::encoders_list,
             commands::recording::ffmpeg_status,
             commands::recording::ffmpeg_install,

@@ -153,6 +153,11 @@ pub struct Settings {
     /// `false` on a fresh install; set once the user finishes *or skips* it, so
     /// a skipped wizard never comes back uninvited.
     pub completed_onboarding: bool,
+    /// Camera control profiles (CAP-M18): device id → control tag → value,
+    /// reapplied whenever that device (re)opens. Written server-side by
+    /// `set_camera_control` and PRESERVED across `set()` (the counter/EULA
+    /// pattern) so an open settings dialog can't clobber a live tweak.
+    pub camera_profiles: std::collections::HashMap<String, std::collections::HashMap<String, i64>>,
 }
 
 impl Default for Settings {
@@ -176,6 +181,7 @@ impl Default for Settings {
             scripts: Vec::new(),
             accepted_eula_version: None,
             completed_onboarding: false,
+            camera_profiles: std::collections::HashMap::new(),
         }
     }
 }
@@ -292,6 +298,10 @@ pub struct HotkeySettings {
     /// Cut program to the privacy slate + hard-mute everything (CAP-M22).
     /// Engage only — restoring is the deliberate two-step in the UI.
     pub panic: Option<String>,
+    /// Start/pause every timer source (CAP-M15).
+    pub timer_toggle: Option<String>,
+    /// Reset every timer source (CAP-M15).
+    pub timer_reset: Option<String>,
 }
 
 impl HotkeySettings {
@@ -304,6 +314,8 @@ impl HotkeySettings {
             &self.add_marker,
             &self.still,
             &self.panic,
+            &self.timer_toggle,
+            &self.timer_reset,
         ]
         .into_iter()
         .flatten()
@@ -959,6 +971,24 @@ impl Settings {
         for script in &self.scripts {
             script.validate()?;
         }
+        // Camera profiles (CAP-M18): bounded maps of short ASCII-ish keys —
+        // a hand-edited file can't grow them without limit.
+        if self.camera_profiles.len() > 64 {
+            return Err("too many camera profiles (64 devices max)".to_owned());
+        }
+        for (device, profile) in &self.camera_profiles {
+            if device.len() > 256 || device.chars().any(char::is_control) {
+                return Err("invalid camera profile device id".to_owned());
+            }
+            if profile.len() > 32 {
+                return Err("too many camera controls in a profile (32 max)".to_owned());
+            }
+            for control in profile.keys() {
+                if control.len() > 32 || !control.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    return Err("invalid camera control tag".to_owned());
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1036,10 +1066,15 @@ impl SettingsStore {
             let accepted = guard.accepted_eula_version.clone();
             let onboarded = guard.completed_onboarding;
             let counter = guard.recording.counter;
+            // Camera profiles (CAP-M18) are written server-side while the
+            // user drags a slider — a stale dialog snapshot must not clobber
+            // them (the counter/EULA pattern).
+            let camera_profiles = std::mem::take(&mut guard.camera_profiles);
             *guard = next;
             guard.accepted_eula_version = accepted;
             guard.completed_onboarding = onboarded;
             guard.recording.counter = counter;
+            guard.camera_profiles = camera_profiles;
         }
         self.persist()
     }
@@ -1047,6 +1082,42 @@ impl SettingsStore {
     /// Advance the `{counter}` filename token and return the new value — the
     /// only path allowed to write it (CAP-M25). A persist failure keeps the
     /// in-memory bump (the recording must not be blocked on a settings write).
+    /// Write one camera control into a device's profile (CAP-M18) and
+    /// persist. The only writer besides `reset_camera_profile`.
+    pub fn set_camera_control(&self, device_id: &str, control: &str, value: i64) {
+        {
+            let mut guard = self.lock();
+            guard
+                .camera_profiles
+                .entry(device_id.to_string())
+                .or_default()
+                .insert(control.to_string(), value);
+        }
+        if let Err(err) = self.persist() {
+            eprintln!("settings: could not persist a camera profile: {err}");
+        }
+    }
+
+    /// Drop a device's whole camera profile (CAP-M18) and persist.
+    pub fn reset_camera_profile(&self, device_id: &str) {
+        {
+            let mut guard = self.lock();
+            guard.camera_profiles.remove(device_id);
+        }
+        if let Err(err) = self.persist() {
+            eprintln!("settings: could not persist a camera profile reset: {err}");
+        }
+    }
+
+    /// One device's saved camera profile as (tag, value) pairs (CAP-M18).
+    pub fn camera_profile(&self, device_id: &str) -> Vec<(String, i64)> {
+        self.lock()
+            .camera_profiles
+            .get(device_id)
+            .map(|profile| profile.iter().map(|(k, v)| (k.clone(), *v)).collect())
+            .unwrap_or_default()
+    }
+
     pub fn bump_recording_counter(&self) -> u32 {
         let value = {
             let mut guard = self.lock();
@@ -1284,6 +1355,8 @@ mod tests {
                 add_marker: None,
                 still: Some("Ctrl+Shift+P".to_owned()),
                 panic: Some("Ctrl+Shift+F12".to_owned()),
+                timer_toggle: Some("Ctrl+Shift+T".to_owned()),
+                timer_reset: None,
             },
             panic_slate: PanicSlateSettings {
                 color: "#221100".to_owned(),
@@ -1305,16 +1378,45 @@ mod tests {
             }],
             accepted_eula_version: Some("2026-07-08".to_owned()),
             completed_onboarding: true,
+            camera_profiles: std::collections::HashMap::from([(
+                "cam-0".to_owned(),
+                std::collections::HashMap::from([("exposure".to_owned(), -6_i64)]),
+            )]),
         };
         // `set` never writes the EULA field or the onboarding flag (see its
         // docs) — go through their real writers first, so the round-trip below
         // compares the whole struct.
         store.accept_eula("2026-07-08").expect("accept eula");
         store.complete_onboarding().expect("complete onboarding");
+        // Camera profiles (CAP-M18) are preserved by `set` too — write the
+        // fixture's profile through the real writer.
+        store.set_camera_control("cam-0", "exposure", -6);
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
         assert_eq!(reloaded.get(), next);
+        let _ = fs::remove_file(&path);
+    }
+
+    /// A settings dialog saved mid-tweak must not clobber a camera profile
+    /// written server-side after the dialog snapshotted (CAP-M18).
+    #[test]
+    fn set_preserves_camera_profiles() {
+        let path = temp_path("camera-profiles");
+        let store = SettingsStore::load_from(path.clone());
+        store.set_camera_control("cam-1", "zoom", 150);
+
+        let stale: Settings = serde_json::from_str(r#"{"language":"fr"}"#).expect("parses");
+        assert!(stale.camera_profiles.is_empty());
+        store.set(stale).expect("save settings");
+
+        assert_eq!(
+            store.camera_profile("cam-1"),
+            vec![("zoom".to_owned(), 150)],
+            "the live tweak survives the stale dialog save"
+        );
+        store.reset_camera_profile("cam-1");
+        assert!(store.camera_profile("cam-1").is_empty());
         let _ = fs::remove_file(&path);
     }
 

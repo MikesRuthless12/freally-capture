@@ -29,6 +29,11 @@ pub enum HotkeyAction {
     /// Cut to the privacy slate + hard-mute (CAP-M22). Engage only — the
     /// restore is the deliberate two-step in the UI.
     Panic,
+    /// Start/pause EVERY timer source at once (CAP-M15) — a global key
+    /// can't name a source; the settings row says so.
+    TimerToggle,
+    /// Reset every timer source (CAP-M15).
+    TimerReset,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -44,6 +49,14 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl ActionHotkeys {
+    /// A snapshot of the action shortcuts the OS actually accepted — the
+    /// CAP-M14 audit's "registered" signal.
+    pub fn registered(&self) -> HashSet<Shortcut> {
+        lock(&self.registered).clone()
+    }
 }
 
 /// Route a global-shortcut event to its action (fires on press). Returns
@@ -126,6 +139,14 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
             app.state::<crate::studio::StudioState>()
                 .set_panic(app, true);
         }
+        HotkeyAction::TimerToggle => {
+            app.state::<crate::studio::StudioState>()
+                .timer_control_all(crate::studio::TimerCmd::Toggle);
+        }
+        HotkeyAction::TimerReset => {
+            app.state::<crate::studio::StudioState>()
+                .timer_control_all(crate::studio::TimerCmd::Reset);
+        }
     }
 }
 
@@ -147,6 +168,8 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
         (&settings.add_marker, HotkeyAction::AddMarker),
         (&settings.still, HotkeyAction::CaptureStill),
         (&settings.panic, HotkeyAction::Panic),
+        (&settings.timer_toggle, HotkeyAction::TimerToggle),
+        (&settings.timer_reset, HotkeyAction::TimerReset),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

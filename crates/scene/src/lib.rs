@@ -41,7 +41,10 @@ pub use scene::{
     ItemId, NormRect, Scene, SceneAudioOverride, SceneId, SceneItem, SourceGroup, Transform,
     TransitionKind,
 };
-pub use source::{Rgba, Source, SourceId, SourceSettings, TextAlign, VideoDeviceFormat};
+pub use source::{
+    CountdownEnd, DeinterlaceMode, FieldOrder, FileBinding, Rgba, Source, SourceId, SourceSettings,
+    TextAlign, TimerMode, VideoDeviceFormat,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1491,6 +1494,28 @@ impl Collection {
         Ok(())
     }
 
+    /// Set the stereo balance (CAP-M19), clamped to −1..=1.
+    pub fn set_audio_pan(&mut self, id: SourceId, pan: f32) -> Result<(), SceneError> {
+        self.audio_mut(id)?.pan = if pan.is_finite() {
+            pan.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        Ok(())
+    }
+
+    /// Set PFL solo (CAP-M19) — monitor-bus routing only.
+    pub fn set_audio_solo(&mut self, id: SourceId, solo: bool) -> Result<(), SceneError> {
+        self.audio_mut(id)?.solo = solo;
+        Ok(())
+    }
+
+    /// Set the mono downmix (CAP-M19).
+    pub fn set_audio_mono(&mut self, id: SourceId, mono: bool) -> Result<(), SceneError> {
+        self.audio_mut(id)?.mono = mono;
+        Ok(())
+    }
+
     /// Set the A/V sync offset, clamped to 0..=[`MAX_SYNC_OFFSET_MS`].
     pub fn set_audio_sync_offset(&mut self, id: SourceId, ms: u32) -> Result<(), SceneError> {
         self.audio_mut(id)?.sync_offset_ms = ms.min(MAX_SYNC_OFFSET_MS);
@@ -1624,6 +1649,8 @@ mod tests {
                             fps: 30,
                             fourcc: "MJPG".into(),
                         }),
+                        deinterlace: DeinterlaceMode::MotionAdaptive,
+                        field_order: FieldOrder::BottomFirst,
                     },
                 ),
             )
@@ -1661,6 +1688,11 @@ mod tests {
                 line_spacing: 1.2,
                 force_rtl: false,
                 wrap_width: Some(800),
+                source_file: "C:/data/score.csv".into(),
+                binding: FileBinding::CsvCell,
+                csv_row: 2,
+                csv_column: "score".into(),
+                json_pointer: String::new(),
             },
         ] {
             let source = Source::new("", settings);
@@ -1909,6 +1941,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: "c".into(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -1991,6 +2025,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: "cam-1".into(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -2078,6 +2114,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: "cam".into(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -2121,6 +2159,8 @@ mod tests {
             SourceSettings::VideoDevice {
                 device_id: "cam-7".into(),
                 format: None,
+                deinterlace: DeinterlaceMode::Off,
+                field_order: FieldOrder::TopFirst,
             },
         );
         let json = serde_json::to_string(&source).expect("serialize");
@@ -2133,6 +2173,8 @@ mod tests {
             SourceSettings::VideoDevice {
                 device_id: "cam-7".into(),
                 format: None,
+                deinterlace: DeinterlaceMode::Off,
+                field_order: FieldOrder::TopFirst,
             }
         );
 
@@ -2157,6 +2199,11 @@ mod tests {
             line_spacing: 1.0,
             force_rtl: false,
             wrap_width: None,
+            source_file: String::new(),
+            binding: FileBinding::Whole,
+            csv_row: 1,
+            csv_column: String::new(),
+            json_pointer: String::new(),
         })
         .expect("serialize");
         for key in [
@@ -2165,9 +2212,25 @@ mod tests {
             "\"lineSpacing\"",
             "\"forceRtl\"",
             "\"wrapWidth\"",
+            "\"sourceFile\"",
+            "\"jsonPointer\"",
         ] {
             assert!(text_json.contains(key), "missing {key} in {text_json}");
         }
+
+        // CAP-M16: a pre-binding Text JSON (no sourceFile/binding fields)
+        // still loads — the binding defaults to "off".
+        let legacy: SourceSettings = serde_json::from_str(
+            r#"{"kind":"text","text":"old","sizePx":48.0,
+                "color":{"r":255,"g":255,"b":255,"a":255},"align":"left",
+                "lineSpacing":1.0,"forceRtl":false}"#,
+        )
+        .expect("legacy text loads");
+        assert!(matches!(
+            legacy,
+            SourceSettings::Text { ref source_file, binding: FileBinding::Whole, .. }
+                if source_file.is_empty()
+        ));
 
         let scroll: FilterKind =
             serde_json::from_str(r#"{"type":"scroll","speedX":120.0,"speedY":-3.0}"#)
@@ -2679,6 +2742,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: String::new(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -2691,6 +2756,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: String::new(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -3004,6 +3071,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: String::new(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -3259,6 +3328,8 @@ mod tests {
                 SourceSettings::VideoDevice {
                     device_id: String::new(),
                     format: None,
+                    deinterlace: DeinterlaceMode::Off,
+                    field_order: FieldOrder::TopFirst,
                 },
             )
         };
@@ -3322,6 +3393,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: String::new(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )
@@ -3467,6 +3540,8 @@ mod tests {
                     SourceSettings::VideoDevice {
                         device_id: "cam".into(),
                         format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
                     },
                 ),
             )

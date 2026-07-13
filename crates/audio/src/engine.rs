@@ -21,6 +21,9 @@ const TICK: Duration = Duration::from_millis(10);
 /// Backoff between monitor-device (re)open attempts after a failure/break.
 const MONITOR_RETRY: Duration = Duration::from_secs(2);
 const BLOCK_SAMPLES: usize = BLOCK_FRAMES * 2;
+/// The calibration tap's sample cap (~40 s of 10 ms blocks) — a workbench
+/// run is ~15 s; the cap only guards a dialog left armed.
+const CALIBRATION_MAX_SAMPLES: usize = 4_096;
 /// Wait for this much buffered audio before a source starts mixing —
 /// absorbs callback jitter without audible underruns.
 const PREBUFFER_SAMPLES: usize = BLOCK_SAMPLES * 3; // 30 ms
@@ -109,6 +112,10 @@ enum Cmd {
     /// The replay buffer's tap (Phase 6) — the third independent twin, so
     /// the rolling buffer never contends with recording or streaming.
     ReplayTap(Option<RecordTap>),
+    /// Arm (or clear) the A/V sync calibration tap (CAP-M20): record one
+    /// source's raw pre-gain block peaks, timestamped against the shared
+    /// arm instant so the video probe's clock matches.
+    Calibrate(Option<(SourceId, Instant)>),
 }
 
 /// Cloneable handle to the engine thread.
@@ -116,6 +123,8 @@ enum Cmd {
 pub struct AudioEngine {
     tx: mpsc::Sender<Cmd>,
     snapshot: Arc<Mutex<EngineSnapshot>>,
+    /// (ms since arm, block peak 0..1) — written only by the engine thread.
+    calibration: Arc<Mutex<Vec<(f64, f32)>>>,
 }
 
 impl AudioEngine {
@@ -124,11 +133,17 @@ impl AudioEngine {
         let (tx, rx) = mpsc::channel();
         let snapshot = Arc::new(Mutex::new(EngineSnapshot::default()));
         let shared = Arc::clone(&snapshot);
+        let calibration = Arc::new(Mutex::new(Vec::new()));
+        let calibration_shared = Arc::clone(&calibration);
         std::thread::Builder::new()
             .name("fcap-audio".into())
-            .spawn(move || run(rx, shared))
+            .spawn(move || run(rx, shared, calibration_shared))
             .expect("audio engine thread spawns");
-        Self { tx, snapshot }
+        Self {
+            tx,
+            snapshot,
+            calibration,
+        }
     }
 
     /// Replace the desired source set (the app's reconcile).
@@ -172,6 +187,19 @@ impl AudioEngine {
     pub fn snapshot(&self) -> EngineSnapshot {
         self.snapshot.lock().clone()
     }
+
+    /// Arm (or clear) the calibration tap on one source (CAP-M20). Pass the
+    /// same `Instant` the video probe was armed with — both series share it
+    /// as their zero. The buffer is cleared by the engine thread when the
+    /// command lands, so stale samples can never leak into a fresh run.
+    pub fn calibrate(&self, target: Option<(SourceId, Instant)>) {
+        let _ = self.tx.send(Cmd::Calibrate(target));
+    }
+
+    /// The calibration series recorded so far: (ms since arm, block peak).
+    pub fn calibration_series(&self) -> Vec<(f64, f32)> {
+        self.calibration.lock().clone()
+    }
 }
 
 /// Everything the engine tracks per source.
@@ -210,12 +238,17 @@ impl SourceRuntime {
     }
 }
 
-fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
+fn run(
+    rx: mpsc::Receiver<Cmd>,
+    shared: Arc<Mutex<EngineSnapshot>>,
+    calibration: Arc<Mutex<Vec<(f64, f32)>>>,
+) {
     let mut core = MixerCore::new();
     let mut sources: HashMap<SourceId, SourceRuntime> = HashMap::new();
     let mut record_tap: Option<RecordTap> = None;
     let mut stream_tap: Option<RecordTap> = None;
     let mut replay_tap: Option<RecordTap> = None;
+    let mut calibration_target: Option<(SourceId, Instant)> = None;
     let mut monitor: Option<MonitorStream> = None;
     let mut monitor_device = String::new();
     let mut monitor_error: Option<String> = None;
@@ -290,6 +323,12 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
                 Ok(Cmd::RecordTap(tap)) => record_tap = tap,
                 Ok(Cmd::StreamTap(tap)) => stream_tap = tap,
                 Ok(Cmd::ReplayTap(tap)) => replay_tap = tap,
+                Ok(Cmd::Calibrate(target)) => {
+                    calibration_target = target;
+                    // Cleared here (engine thread), never handle-side, so a
+                    // late block from the previous target can't leak in.
+                    calibration.lock().clear();
+                }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return, // app gone
             }
@@ -340,6 +379,19 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
             }
         }
 
+        // -- the calibration tap (CAP-M20): the armed source's RAW block
+        //    peak — pre-gain, pre-sync-delay — so the measurement doesn't
+        //    depend on the fader or the offset being tuned -------------------
+        if let Some((id, armed_at)) = &calibration_target {
+            if let Some(block) = inputs.get(id) {
+                let peak = block.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+                let mut series = calibration.lock();
+                if series.len() < CALIBRATION_MAX_SAMPLES {
+                    series.push((armed_at.elapsed().as_secs_f64() * 1_000.0, peak));
+                }
+            }
+        }
+
         // -- mix one block -----------------------------------------------------
         core.process(&inputs, &controls);
 
@@ -368,9 +420,11 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Mutex<EngineSnapshot>>) {
         }
 
         // -- monitor output ----------------------------------------------------
+        // A soloed strip monitors even with its monitor mode Off (PFL,
+        // CAP-M19) — the device must open for it too.
         let monitoring = controls
             .values()
-            .any(|control| control.settings.monitor != MonitorMode::Off);
+            .any(|control| control.settings.monitor != MonitorMode::Off || control.settings.solo);
         if monitoring {
             // Open (or reopen after a break) on a backoff — a device that
             // failed or died is retried, not abandoned until the user toggles

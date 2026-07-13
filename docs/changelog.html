@@ -20,8 +20,35 @@
     </header>
 
     <main>
-      <!-- 0.98.0 — broadcast safety & reliability (CAP-M Batch 2) -->
+      <!-- 0.99.0 — sources, devices & calibration (CAP-M Batch 3) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.99.0</span>
+            <span class="date">Jul 12, 2026 · Sources, devices &amp; calibration — CAP-M Batch 3</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.99.0">Download</a>
+        </div>
+
+        <h2>0.99.0 — Sources, devices &amp; calibration (CAP-M Batch 3)</h2>
+        <p class="summary">
+          The third and final must-have batch — everything between the glass and the canvas. This
+          closes the 26 CAP-M must-haves; 1.0.0 is next.
+        </p>
+        <ul class="features">
+          <li><strong>Test signal sources</strong> — SMPTE-style color bars, a calibration grid, a motion sweep, the 1&nbsp;kHz lineup tone (−20&nbsp;dBFS), and a combined A/V sync flash+beep pattern generated from one clock. Verify scenes, encoders, projectors, and stream targets with no camera plugged in.</li>
+          <li><strong>An A/V sync calibration workbench</strong> — plays the flash+beep through your display and speakers, watches your camera and mic capture it back, measures the offset by pure signal processing (with honest failure guidance), and applies it to the mic's sync offset. The manual slider stays as the fallback.</li>
+          <li><strong>Timer &amp; clock sources</strong> — wall clock (strftime formats, fixed UTC offset), countdown to a duration or a wall time with an at-zero action (flash or switch scene), stopwatch, and time since live / since recording — with start/pause/reset hotkeys.</li>
+          <li><strong>Text from file + data binding</strong> — a Text source can follow a watched .txt file, one CSV cell, or one JSON pointer, re-read within half a second of a change and tolerant of atomic-write editors. Scoreboards and lower thirds with no service.</li>
+          <li><strong>A hotkey map</strong> — every binding (global actions + per-source push-to-talk/mute) in one searchable table with honest conflict detection (same chord written two ways; keys the OS refused), plus an exportable Markdown cheat sheet.</li>
+          <li><strong>Mixer pan / solo / mono</strong> — per-strip stereo balance (center is bit-identical to no pan), PFL solo that changes only what you monitor — never the program mix — and per-source mono downmix.</li>
+          <li><strong>Deinterlacing for device sources</strong> — per-device discard/bob/linear/blend/motion-adaptive with field-order selection, pure CPU and identical on every OS.</li>
+          <li><strong>Camera controls with per-device profiles</strong> — exposure, white balance, focus, zoom, gain (and more) cross-platform; macOS honestly reports what AVFoundation exposes (often nothing). Every adjustment saves into a per-device profile that reapplies on hotplug and restart.</li>
+        </ul>
+      </article>
+
+      <!-- 0.98.0 — broadcast safety & reliability (CAP-M Batch 2) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.98.0</span>

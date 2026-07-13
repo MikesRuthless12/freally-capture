@@ -12,9 +12,53 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> The next rungs toward **1.0.0** are the 26 CAP-M must-haves, run as three themed batches
-> (0.97.0 / 0.98.0 / 0.99.0). **0.98.0 is the second batch** — broadcast safety & reliability;
-> Batch 3 (0.99.0) closes the set.
+> **0.99.0 closes the 26 CAP-M must-haves** — the last themed batch before **1.0.0**.
+
+## [0.99.0] — 2026-07-12 (Sources, devices & calibration — CAP-M Batch 3)
+
+> The third and final must-have batch: everything between the glass and the canvas. Built-in
+> test signals and a guided A/V sync workbench to calibrate the whole chain; timer/clock and
+> file-bound text sources for shows that run on data; a hotkey map that audits every binding;
+> the missing mixer console features; and real device depth — deinterlacing and cross-platform
+> camera controls with per-device profiles.
+
+### Added
+- **Test signal sources** (CAP-M21). SMPTE-style color bars, a calibration grid/crosshatch, a
+  motion sweep, the 1 kHz lineup tone (−20 dBFS), and a combined **A/V sync flash+beep**
+  pattern generated from one clock — verify scenes, encoders, projectors, and stream targets
+  with no camera plugged in.
+- **An A/V sync calibration workbench** (CAP-M20). A guided tool that plays the flash+beep
+  pattern through your display and speakers, watches your camera and microphone capture it
+  back, measures the offset by pure signal processing (onset detection over several cycles,
+  with honest failure guidance — dark room, silent mic, room noise that isn't the pattern),
+  and offers to apply the result to the microphone's sync offset. The manual slider stays as
+  the fallback. Loopback honesty: your display/speaker latency is part of what's measured.
+- **Timer & clock sources** (CAP-M15). A text-source family: wall clock (strftime formats +
+  fixed UTC offset), countdown (to a duration or the next wall time, with an at-zero action —
+  flash the face or switch scene), count-up stopwatch, and time since live / since recording.
+  Start/pause/reset from the source's properties or two new global hotkeys (all timers at
+  once). Faces repaint only when their text changes.
+- **Text from file + data binding** (CAP-M16). A Text source can bind to a watched local
+  file: the whole `.txt`, one CSV cell (header name or index), or one JSON value (RFC 6901
+  pointer) — re-read within half a second of a change, tolerating atomic-write (temp+rename)
+  editors by keeping the last good value on screen. The scoreboard/lower-third foundation,
+  no service required. The OBS importer now maps "read from file" too.
+- **A hotkey map** (CAP-M14). One searchable, filterable table of **every** binding — global
+  actions and per-source push-to-talk/push-to-mute — with honest conflict signals: the same
+  chord written two ways is flagged as shared, and a key the OS refused to register (owned by
+  another app, or unavailable on this compositor) says so. Exports a Markdown cheat sheet to
+  Downloads. Settings → Hotkeys binds; this audits and documents.
+- **Mixer completeness: pan, solo, mono** (CAP-M19). Per-strip stereo **balance** (center is
+  bit-identical to no pan), **PFL solo** (the monitor hears only soloed strips — the program
+  mix never changes), and per-source **mono downmix**.
+- **Deinterlacing for device sources** (CAP-M17). Per-device discard / bob / linear / blend /
+  motion-adaptive (yadif-class) with field-order selection — pure CPU on the capture thread,
+  identical on every OS. Changing the mode restarts the device, like a format change.
+- **Camera controls with per-device profiles** (CAP-M18). Exposure, white balance, focus,
+  zoom, gain (and more) for webcams and capture cards through one cross-platform path — UVC
+  via the native APIs on Windows/Linux; macOS surfaces whatever AVFoundation reports, which
+  is often nothing, and the panel says so honestly. Every adjustment saves into a per-device
+  profile that reapplies on hotplug and restart.
 
 ## [0.98.0] — 2026-07-12 (Broadcast safety & reliability — CAP-M Batch 2)
 

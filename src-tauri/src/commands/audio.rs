@@ -185,6 +185,48 @@ pub fn studio_set_audio_tracks(
     })
 }
 
+/// Stereo balance (CAP-M19) — drag-coalesced like the fader.
+#[tauri::command]
+pub fn studio_set_audio_pan(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+    pan: f32,
+) -> Result<(), String> {
+    state.mutate_tracked(
+        &app,
+        "setPan",
+        Some(coalesce_key("pan", source_id)),
+        |collection| collection.set_audio_pan(source_id, pan),
+    )
+}
+
+/// PFL solo (CAP-M19) — monitor routing only; the program mix never changes.
+#[tauri::command]
+pub fn studio_set_audio_solo(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+    solo: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "toggleSolo", None, |collection| {
+        collection.set_audio_solo(source_id, solo)
+    })
+}
+
+/// Mono downmix (CAP-M19).
+#[tauri::command]
+pub fn studio_set_audio_mono(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+    mono: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "toggleMono", None, |collection| {
+        collection.set_audio_mono(source_id, mono)
+    })
+}
+
 #[tauri::command]
 pub fn studio_set_audio_sync_offset(
     app: AppHandle,

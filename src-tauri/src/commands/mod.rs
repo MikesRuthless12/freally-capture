@@ -11,6 +11,7 @@ use fcap_capture::SourceKind;
 use fcap_sources::video_device;
 
 pub mod audio;
+pub mod calibration;
 pub mod cef;
 pub mod recording;
 pub mod studio;
@@ -307,6 +308,95 @@ pub async fn video_devices_list() -> Result<Vec<VideoDeviceDto>, String> {
     })
     .await
     .map_err(|err| format!("device listing task failed: {err}"))?
+}
+
+/// One camera control, as the properties dialog shows it (CAP-M18).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraControlDto {
+    pub id: String,
+    /// The backend's own display name (fallback label for unknown tags).
+    pub name: String,
+    /// `None` when the backend reports no range (Windows does this for
+    /// exposure/focus/zoom): the UI shows a stepper, not a fake slider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<i64>,
+    pub step: i64,
+    pub default: i64,
+    pub value: i64,
+    pub writable: bool,
+}
+
+/// The controls a RUNNING device reports (CAP-M18). Empty while the device
+/// isn't streaming (add it to a scene first) or on a backend without control
+/// support — the honest per-OS answer, which the UI spells out.
+#[tauri::command]
+pub fn camera_controls_list(device_id: String) -> Vec<CameraControlDto> {
+    fcap_sources::camera_controls::device(&device_id)
+        .snapshot()
+        .into_iter()
+        .map(|control| CameraControlDto {
+            id: control.id.to_string(),
+            name: control.name,
+            min: control.range.map(|(min, _)| min),
+            max: control.range.map(|(_, max)| max),
+            step: control.step,
+            default: control.default,
+            value: control.value,
+            writable: control.writable,
+        })
+        .collect()
+}
+
+fn validate_camera_ids(device_id: &str, control: Option<&str>) -> Result<(), String> {
+    if device_id.is_empty() || device_id.len() > 256 || device_id.chars().any(char::is_control) {
+        return Err("invalid device id".to_owned());
+    }
+    if let Some(control) = control {
+        if control.is_empty()
+            || control.len() > 32
+            || !control.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            return Err("invalid control tag".to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// Set one control on the running device AND save it into the per-device
+/// profile, so it reapplies on hotplug/restart (CAP-M18). The capture thread
+/// clamps the value to the device's reported range.
+#[tauri::command]
+pub fn camera_control_set(
+    store: State<'_, SettingsStore>,
+    device_id: String,
+    control: String,
+    value: i64,
+) -> Result<(), String> {
+    validate_camera_ids(&device_id, Some(&control))?;
+    fcap_sources::camera_controls::device(&device_id).queue(&control, value);
+    store.set_camera_control(&device_id, &control, value);
+    Ok(())
+}
+
+/// Drop a device's saved profile and push the backend defaults back onto the
+/// running device (CAP-M18).
+#[tauri::command]
+pub fn camera_profile_reset(
+    store: State<'_, SettingsStore>,
+    device_id: String,
+) -> Result<(), String> {
+    validate_camera_ids(&device_id, None)?;
+    let hub = fcap_sources::camera_controls::device(&device_id);
+    for control in hub.snapshot() {
+        if control.writable {
+            hub.queue(control.id, control.default);
+        }
+    }
+    store.reset_camera_profile(&device_id);
+    Ok(())
 }
 
 /// A webcam format offer (mirrors `ui/src/api/types.ts` `VideoFormat`).

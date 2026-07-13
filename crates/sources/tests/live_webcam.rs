@@ -14,7 +14,7 @@ fn webcam_delivers_frames() {
         eprintln!("no camera attached — nothing to smoke-test");
         return;
     };
-    let session = start_video_device(&device.id, None).expect("start webcam");
+    let session = start_video_device(&device.id, None, None, Vec::new()).expect("start webcam");
     let deadline = Instant::now() + Duration::from_secs(8); // cams warm up slowly
     let mut frames = 0;
     while Instant::now() < deadline && frames < 5 {

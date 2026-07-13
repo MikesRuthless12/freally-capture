@@ -297,6 +297,14 @@ fn specs_to_configs(
                 SourceSettings::AppAudio { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
+                // Test signals (CAP-M21): the tone generator runs on this
+                // thread (see `reconcile_test_tones`); the flash+beep session
+                // thread feeds the ring itself (like Media's decode thread).
+                SourceSettings::TestTone {} | SourceSettings::TestFlashBeep { .. } => {
+                    InputSpec::Media {
+                        id: spec.id.0.to_string(),
+                    }
+                }
                 _ => return None,
             };
             let mut settings = spec.audio.clone();
@@ -352,6 +360,28 @@ fn reconcile_app_audio(
     }
 }
 
+/// Start/stop the 1 kHz lineup-tone generators (CAP-M21) to match the current
+/// `TestTone` sources. Each generator pushes stereo f32 @ 48 kHz into the
+/// media hub ring keyed by its source id — the ring the engine drains for the
+/// source's `InputSpec::Media`. Same lifecycle shape as `reconcile_app_audio`;
+/// dropping a task stops + joins its thread.
+fn reconcile_test_tones(
+    specs: &[AudioSourceSpec],
+    running: &mut HashMap<String, fcap_sources::testsignal::ToneTask>,
+) {
+    let wanted: HashSet<String> = specs
+        .iter()
+        .filter(|spec| matches!(spec.settings, SourceSettings::TestTone {}))
+        .map(|spec| spec.id.0.to_string())
+        .collect();
+    running.retain(|id, _| wanted.contains(id));
+    for id in wanted {
+        running
+            .entry(id)
+            .or_insert_with_key(|id| fcap_sources::testsignal::start_tone(id));
+    }
+}
+
 /// Spawn the reconcile + levels thread. It winds down once the app is gone
 /// (emit failures), like the other emitter threads.
 pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
@@ -364,6 +394,9 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             let mut had_sources = false;
             // Running per-app captures, keyed by source id (owned by this thread).
             let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> =
+                HashMap::new();
+            // Running 1 kHz tone generators (CAP-M21), keyed by source id.
+            let mut tone_tasks: HashMap<String, fcap_sources::testsignal::ToneTask> =
                 HashMap::new();
             // Silence/clipping watch over the master mix (CAP-M10).
             let mut audio_watch = crate::alarms::AudioWatch::default();
@@ -381,6 +414,7 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                     let registered = app.state::<HotkeyRegistry>().registered();
                     engine.set_sources(specs_to_configs(&specs, &registered));
                     reconcile_app_audio(&specs, &mut app_captures);
+                    reconcile_test_tones(&specs, &mut tone_tasks);
                 }
 
                 // 2. Settings → monitor device, only on change (read just the
@@ -472,5 +506,56 @@ mod tests {
         let spec = mic_with_ptt("not a real accelerator!!");
         let configs = specs_to_configs(std::slice::from_ref(&spec), &HashSet::new());
         assert_eq!(configs[0].settings.push_to_talk, None);
+    }
+
+    #[test]
+    fn test_signals_map_to_their_media_rings() {
+        // CAP-M21: tone + flash+beep drain the hub ring keyed by the source
+        // id — exactly like Media — so their generators reach the mixer.
+        for settings in [
+            SourceSettings::TestTone {},
+            SourceSettings::TestFlashBeep {
+                width: 8,
+                height: 8,
+            },
+        ] {
+            let spec = AudioSourceSpec {
+                id: SourceId::new(),
+                settings,
+                audio: AudioSettings::default(),
+                nonce: 0,
+            };
+            let configs = specs_to_configs(std::slice::from_ref(&spec), &HashSet::new());
+            assert_eq!(
+                configs[0].input,
+                InputSpec::Media {
+                    id: spec.id.0.to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn tone_generators_track_the_spec_set() {
+        let spec = AudioSourceSpec {
+            id: SourceId::new(),
+            settings: SourceSettings::TestTone {},
+            audio: AudioSettings::default(),
+            nonce: 0,
+        };
+        let mut running = HashMap::new();
+        reconcile_test_tones(std::slice::from_ref(&spec), &mut running);
+        assert_eq!(running.len(), 1, "a TestTone source starts its generator");
+        let ring = fcap_audio::media_hub::ring(&spec.id.0.to_string());
+        let filled = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            !ring.is_empty()
+        });
+        assert!(filled, "the generator feeds the source's ring");
+        reconcile_test_tones(&[], &mut running);
+        assert!(
+            running.is_empty(),
+            "removing the source stops the generator"
+        );
     }
 }

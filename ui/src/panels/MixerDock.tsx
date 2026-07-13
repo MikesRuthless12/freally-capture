@@ -68,6 +68,9 @@ export function MixerDock({
     muted: false,
     monitor: "off" as const,
     tracks: 1,
+    pan: 0,
+    solo: false,
+    mono: false,
     syncOffsetMs: 0,
     filters: [],
   };

@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -55,6 +55,9 @@ pub struct StreamBridgeState {
     /// The last **failed** DTO, kept after teardown so the UI's failure banner
     /// persists (a clean End Stream clears it; the next Go Live clears it).
     terminal: Mutex<Option<StreamDto>>,
+    /// When the current session went live — the CAP-M15 "time since live"
+    /// clock. Read gated on `active`, so a stale instant is harmless.
+    since: Mutex<Option<Instant>>,
 }
 
 impl StreamBridgeState {
@@ -67,7 +70,19 @@ impl StreamBridgeState {
             wants_vertical: AtomicBool::new(false),
             feed: Mutex::new(None),
             terminal: Mutex::new(None),
+            since: Mutex::new(None),
         }
+    }
+
+    /// When the running session went live; `None` while not live.
+    pub fn live_since(&self) -> Option<Instant> {
+        if !self.is_live() {
+            return None;
+        }
+        *self
+            .since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn lock_terminal(&self) -> std::sync::MutexGuard<'_, Option<StreamDto>> {
@@ -647,6 +662,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     state
         .wants_vertical
         .store(plans.iter().any(|plan| plan.canvas == 1), Ordering::Relaxed);
+    *state
+        .since
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     state.active.store(true, Ordering::Relaxed);
     emit_status(app);
     println!("stream: live → {services}");
