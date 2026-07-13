@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useDismiss } from "../lib/useDismiss";
 
@@ -9,6 +9,10 @@ import {
   studioReorderFilter,
   studioSetFilterEnabled,
   studioSetItemBlend,
+  studioAutocrop,
+  studioAutocropFollow,
+  studioAutocropGet,
+  studioSetItemScaling,
   studioUpdateFilter,
 } from "../api/commands";
 import { copyFilters, useClipboard } from "../lib/clipboard";
@@ -19,10 +23,20 @@ import type {
   FilterKind,
   FilterTypeName,
   Rgba,
+  ScaleMode,
   SceneId,
   SceneItem,
 } from "../api/types";
 import { BLEND_MODES } from "../api/types";
+
+/** Pixel-perfect scaling (CAP-N70), in UI order, with render-time i18n keys. */
+const SCALE_MODES: ScaleMode[] = ["auto", "nearest", "integer", "sharpBilinear"];
+const SCALE_MODE_KEYS: Record<ScaleMode, string> = {
+  auto: "filters-scaling-auto",
+  nearest: "filters-scaling-nearest",
+  integer: "filters-scaling-integer",
+  sharpBilinear: "filters-scaling-sharp",
+};
 import { hexToRgba, rgbaToHex } from "../lib/color";
 import { useT } from "../i18n/t";
 import { PickerShell } from "./PickerShell";
@@ -44,6 +58,7 @@ const FILTER_NAME_KEYS: Record<FilterTypeName, string> = {
   sharpen: "filters-name-sharpen",
   scroll: "filters-name-scroll",
   crop: "filters-name-crop",
+  flip: "filters-name-flip",
 };
 
 const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
@@ -77,6 +92,7 @@ const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
   sharpen: { type: "sharpen", amount: 0.25 },
   scroll: { type: "scroll", speedX: 50, speedY: 0 },
   crop: { type: "crop", left: 0, top: 0, right: 0, bottom: 0 },
+  flip: { type: "flip", horizontal: true, vertical: false },
 };
 
 type FiltersDialogProps = {
@@ -104,28 +120,86 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
     studioUpdateFilter(sceneId, item.id, filter.id, kind).catch(fail("filter update"));
   };
 
+  // Auto black-bar crop (CAP-N72): follow-mode state, hydrated from the
+  // engine so a reopened dialog shows the truth.
+  const [autocropFollow, setAutocropFollow] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    studioAutocropGet(item.id)
+      .then((follow) => alive && typeof follow === "boolean" && setAutocropFollow(follow))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [item.id]);
+
   return (
     <>
       <PickerShell title={t("filters-title", { name: sourceName })} onClose={onClose} wide>
         <div className="flex flex-col gap-3">
-          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            {t("filters-blend-mode")}
-            <select
-              value={item.blend}
-              onChange={(event) =>
-                studioSetItemBlend(sceneId, item.id, event.target.value as BlendMode).catch(
-                  fail("blend change"),
-                )
-              }
-              className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
-            >
-              {BLEND_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {mode}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-blend-mode")}
+              <select
+                value={item.blend}
+                onChange={(event) =>
+                  studioSetItemBlend(sceneId, item.id, event.target.value as BlendMode).catch(
+                    fail("blend change"),
+                  )
+                }
+                className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+              >
+                {BLEND_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-scaling")}
+              <select
+                value={item.scaling ?? "auto"}
+                onChange={(event) =>
+                  studioSetItemScaling(sceneId, item.id, event.target.value as ScaleMode).catch(
+                    fail("scaling change"),
+                  )
+                }
+                title={t("filters-scaling-hint")}
+                className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+              >
+                {SCALE_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {t(SCALE_MODE_KEYS[mode])}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!item.backdrop && (
+              <span className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                <button
+                  type="button"
+                  onClick={() => studioAutocrop(sceneId, item.id).catch(fail("auto-crop"))}
+                  title={t("filters-autocrop-title")}
+                  className="rounded-md border border-white/10 px-2 py-1 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+                >
+                  {t("filters-autocrop")}
+                </button>
+                <label className="flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={autocropFollow}
+                    onChange={(event) => {
+                      const next = event.target.checked;
+                      setAutocropFollow(next);
+                      studioAutocropFollow(sceneId, item.id, next).catch(fail("auto-crop follow"));
+                    }}
+                  />
+                  {t("filters-autocrop-follow")}
+                </label>
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
@@ -678,6 +752,27 @@ function FilterParams({
       return (
         <div className="mt-2">
           <CropRow values={filter} onChange={(values) => onChange({ ...filter, ...values })} />
+        </div>
+      );
+    case "flip":
+      return (
+        <div className="mt-2 flex items-center gap-4 text-xs text-havoc-muted">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={filter.horizontal}
+              onChange={(event) => onChange({ ...filter, horizontal: event.target.checked })}
+            />
+            {t("filters-flip-horizontal")}
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={filter.vertical}
+              onChange={(event) => onChange({ ...filter, vertical: event.target.checked })}
+            />
+            {t("filters-flip-vertical")}
+          </label>
         </div>
       );
   }

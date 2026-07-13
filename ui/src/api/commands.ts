@@ -14,6 +14,7 @@ import type {
   AudioDevice,
   AudioFilterId,
   AudioFilterKind,
+  BackdropSplit,
   BlendMode,
   BugReportContext,
   CalibrationResult,
@@ -38,7 +39,10 @@ import type {
   LoopbackDevices,
   MonitorMode,
   NormRect,
+  PtzMoveDirection,
+  ScaleMode,
   RecordingFile,
+  RundownStatus,
   RecordingStatus,
   ReplayStatus,
   SceneId,
@@ -404,6 +408,15 @@ export function studioSetItemLocked(
   locked: boolean,
 ): Promise<void> {
   return invoke("studio_set_item_locked", { sceneId, itemId, locked });
+}
+
+/** Pixel-perfect scaling (CAP-N70): smooth / nearest / integer / sharp-bilinear. */
+export function studioSetItemScaling(
+  sceneId: SceneId,
+  itemId: ItemId,
+  scaling: ScaleMode,
+): Promise<void> {
+  return invoke("studio_set_item_scaling", { sceneId, itemId, scaling });
 }
 
 export function studioSetItemBlend(
@@ -994,6 +1007,209 @@ export function studioMediaSetPaused(sourceId: SourceId, paused: boolean): Promi
 /** Whether an embedded Media source is currently paused. */
 export function studioMediaPaused(sourceId: SourceId): Promise<boolean> {
   return invoke<boolean>("studio_media_paused", { sourceId });
+}
+
+/** A Media source's transport state; duration 0 = not known yet. */
+export type MediaTransport = { position: number; duration: number };
+
+/** Jump a Media source's playback to `seconds` (the transport scrubber). */
+export function studioMediaSeek(sourceId: SourceId, seconds: number): Promise<void> {
+  return invoke("studio_media_seek", { sourceId, seconds });
+}
+
+/** Poll a Media source's playhead + duration for the scrubber. */
+export function studioMediaTransport(sourceId: SourceId): Promise<MediaTransport> {
+  return invoke<MediaTransport>("studio_media_transport", { sourceId });
+}
+
+/** The MIDI ports on this machine (CAP-N03): `[inputs, outputs]`. */
+export function midiPorts(): Promise<[string[], string[]]> {
+  return invoke<[string[], string[]]>("midi_ports");
+}
+
+/** Arm MIDI-learn: the next pad/knob touched is reported, not fired. */
+export function midiLearn(on: boolean): Promise<void> {
+  return invoke("midi_learn", { on });
+}
+
+/** Drive a PTZ head (CAP-N08); "stop" halts it (VISCA heads keep moving). */
+export function ptzMove(
+  camera: string,
+  direction: PtzMoveDirection,
+  panSpeed: number,
+  tiltSpeed: number,
+): Promise<void> {
+  return invoke("ptz_move", { camera, direction, panSpeed, tiltSpeed });
+}
+
+/** Zoom a PTZ camera (positive = in, negative = out, 0 = stop). */
+export function ptzZoom(camera: string, speed: number): Promise<void> {
+  return invoke("ptz_zoom", { camera, speed });
+}
+
+/** Recall a PTZ preset slot. */
+export function ptzPresetRecall(camera: string, slot: number): Promise<void> {
+  return invoke("ptz_preset_recall", { camera, slot });
+}
+
+/** Store the camera's current position into a preset slot. */
+export function ptzPresetStore(camera: string, slot: number): Promise<void> {
+  return invoke("ptz_preset_store", { camera, slot });
+}
+
+/** The LAN panel's URL (CAP-N06), or null while it is off. */
+export function panelUrl(): Promise<string | null> {
+  return invoke<string | null>("panel_url");
+}
+
+/** Switch the active hotkey layer (CAP-N05; sticky — see the docs). */
+export function hotkeySetLayer(layer: number): Promise<void> {
+  return invoke("hotkey_set_layer", { layer });
+}
+
+/** The active hotkey layer (0 = base). */
+export function hotkeyLayer(): Promise<number> {
+  return invoke<number>("hotkey_layer");
+}
+
+/** Start the show rundown at a step (CAP-N09). */
+export function rundownStart(index: number): Promise<void> {
+  return invoke("rundown_start", { index });
+}
+
+/** Advance the rundown to the next step; stops at the end. */
+export function rundownAdvance(): Promise<void> {
+  return invoke("rundown_advance");
+}
+
+/** Stop the rundown (the scene stays put). */
+export function rundownStop(): Promise<void> {
+  return invoke("rundown_stop");
+}
+
+/** The rundown's live state — next up + remaining time. */
+export function rundownStatus(): Promise<RundownStatus> {
+  return invoke<RundownStatus>("rundown_status");
+}
+
+/** Run a macro by name (CAP-N02) — the same path hotkeys and rules use. */
+export function automationRunMacro(name: string): Promise<void> {
+  return invoke("automation_run_macro", { name });
+}
+
+/** Every studio variable (CAP-N02). */
+export function automationVariables(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("automation_variables");
+}
+
+/** Set one studio variable by hand (CAP-N02). */
+export function automationSetVariable(name: string, value: string): Promise<void> {
+  return invoke("automation_set_variable", { name, value });
+}
+
+/** The passthrough monitor's measured capture→publish latency in ms
+ * (CAP-N69); null until a monitor has been open long enough to measure. */
+export function studioPassthroughLatency(sourceId: SourceId): Promise<number | null> {
+  return invoke<number | null>("studio_passthrough_latency", { sourceId });
+}
+
+/** Set one display's HDR→SDR tone-map (CAP-N74) — persisted and applied to
+ * the very next captured frame (no restart). */
+export function hdrToneMapSet(
+  captureId: string,
+  operator: string,
+  paperWhiteNits: number,
+): Promise<void> {
+  return invoke("hdr_tone_map_set", { captureId, operator, paperWhiteNits });
+}
+
+/** Add a Window Capture together with its app's audio as one linked pair
+ * (CAP-N73, Windows). Hidden mutes the audio; removal removes it; the pid
+ * re-resolves across app restarts. */
+export function studioAddLinkedWindow(
+  sceneId: SceneId,
+  captureId: string,
+  label: string,
+): Promise<AddedItem> {
+  return invoke<AddedItem>("studio_add_linked_window", { sceneId, captureId, label });
+}
+
+/** One-shot auto black-bar crop (CAP-N72): scan the item's next frame and
+ * apply the detected crop as an undoable edit. */
+export function studioAutocrop(sceneId: SceneId, itemId: ItemId): Promise<void> {
+  return invoke("studio_autocrop", { sceneId, itemId });
+}
+
+/** Arm/disarm re-detection on resolution change (follow; off by default). */
+export function studioAutocropFollow(
+  sceneId: SceneId,
+  itemId: ItemId,
+  follow: boolean,
+): Promise<void> {
+  return invoke("studio_autocrop_follow", { sceneId, itemId, follow });
+}
+
+/** Whether follow-mode auto-crop is armed for an item. */
+export function studioAutocropGet(itemId: ItemId): Promise<boolean> {
+  return invoke<boolean>("studio_autocrop_get", { itemId });
+}
+
+/** A punch-in lens's target state (CAP-N71). */
+export type ZoomLensState = { zoom: number; follow: boolean };
+
+/** Punch-in zoom (CAP-N71): set a lens's absolute target zoom (1..8) about
+ * an optional normalized content anchor. Runtime-only — never persisted. */
+export function studioZoomSet(
+  itemId: ItemId,
+  zoom: number,
+  anchor?: { x: number; y: number },
+): Promise<void> {
+  return invoke("studio_zoom_set", {
+    itemId,
+    zoom,
+    anchorX: anchor?.x ?? null,
+    anchorY: anchor?.y ?? null,
+  });
+}
+
+/** Multiply a lens's target zoom (the canvas wheel) about an anchor. */
+export function studioZoomScroll(
+  itemId: ItemId,
+  factor: number,
+  anchorX: number,
+  anchorY: number,
+): Promise<void> {
+  return invoke("studio_zoom_scroll", { itemId, factor, anchorX, anchorY });
+}
+
+/** Toggle follow-the-cursor panning while zoomed (Windows-first). */
+export function studioZoomFollow(itemId: ItemId, follow: boolean): Promise<void> {
+  return invoke("studio_zoom_follow", { itemId, follow });
+}
+
+/** A lens's current target (for UI state after a reload). */
+export function studioZoomGet(itemId: ItemId): Promise<ZoomLensState> {
+  return invoke<ZoomLensState>("studio_zoom_get", { itemId });
+}
+
+/** Set (or clear, with `null`) a scene's backdrop wallpaper — an image, an
+ * animated GIF, or a looping video, pinned under everything else. */
+export function studioSetSceneBackdrop(sceneId: SceneId, path: string | null): Promise<void> {
+  return invoke("studio_set_scene_backdrop", { sceneId, path });
+}
+
+/** Move the backdrop between the whole canvas and a half split (the capture
+ * is seated into the other half). */
+export function studioSetBackdropSplit(sceneId: SceneId, split: BackdropSplit): Promise<void> {
+  return invoke("studio_set_backdrop_split", { sceneId, split });
+}
+
+/** Toggle a video backdrop's "start playback with recording" hold. */
+export function studioSetBackdropSync(
+  sceneId: SceneId,
+  startWithRecording: boolean,
+): Promise<void> {
+  return invoke("studio_set_backdrop_sync", { sceneId, startWithRecording });
 }
 
 /** Export a `.frec` the user opened via the OS to a sibling wire file. */

@@ -37,6 +37,30 @@ impl AudioRuntime {
             engine: AudioEngine::spawn(),
         }
     }
+
+    /// Peak dBFS per mixer strip, keyed by the SOURCE NAME (CAP-N01's
+    /// audio-level trigger — a rule names the strip the user sees).
+    /// Silent/absent strips report a floor, never `-inf`.
+    pub fn peaks_by_name(
+        &self,
+        names: &std::collections::HashMap<fcap_scene::SourceId, String>,
+    ) -> std::collections::HashMap<String, f32> {
+        let snapshot = self.engine.snapshot();
+        snapshot
+            .sources
+            .into_iter()
+            .filter_map(|(id, source)| {
+                let name = names.get(&id)?.clone();
+                let peak = source.levels.peak[0].max(source.levels.peak[1]);
+                let db = if peak > 1e-6 {
+                    20.0 * peak.log10()
+                } else {
+                    -120.0
+                };
+                Some((name, db))
+            })
+            .collect()
+    }
 }
 
 /// What a hotkey does to its source.

@@ -14,6 +14,7 @@ import {
   studioGet,
   studioRemoveItem,
   studioReorderItem,
+  studioZoomSet,
   studioSetFocus,
   studioSetItemLocked,
   studioSetStudioMode,
@@ -40,6 +41,7 @@ import {
   onRemoteInvite,
   onStillError,
   onStillSaved,
+  onZoomPreset,
   onStudio,
 } from "./api/events";
 import type {
@@ -56,6 +58,9 @@ import type {
   SourceSettings,
   StudioDto,
   Transform,
+  Scene,
+  SceneItem,
+  Collection,
 } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
@@ -306,6 +311,52 @@ export default function App() {
   // Selection follows reality (derived, not synced): it only counts while it
   // names an item of the active scene.
   const selectedItem = selection.length ? selection[selection.length - 1] : null;
+
+  // Punch-in zoom presets (CAP-N71): a hotkey broadcasts the factor; the UI
+  // picks the lens target — the selected visible item if it can zoom, else
+  // the top-most visible screen capture. Refs keep the resolver current
+  // while the event subscription registers once.
+  const zoomTargetRef = useRef<{ scene: Scene | null; selected: ItemId | null }>({
+    scene: null,
+    selected: null,
+  });
+  const zoomSourcesRef = useRef<Collection["sources"]>([]);
+  useEffect(() => {
+    zoomTargetRef.current = { scene: activeScene, selected: selectedItem };
+    zoomSourcesRef.current = collection?.sources ?? [];
+  });
+  useEffect(() => {
+    let cancelled = false;
+    const unlisten = onZoomPreset((factor) => {
+      if (cancelled) return;
+      const { scene, selected } = zoomTargetRef.current;
+      if (!scene) return;
+      const kindOf = (item: SceneItem) =>
+        zoomSourcesRef.current.find((source) => source.id === item.source)?.kind ?? "";
+      const audioKinds = new Set(["audioInput", "audioOutput", "appAudio", "testTone"]);
+      const screenKinds = new Set(["display", "window", "portal"]);
+      let target = scene.items.find(
+        (item) =>
+          item.id === selected && !item.backdrop && item.visible && !audioKinds.has(kindOf(item)),
+      );
+      if (!target) {
+        for (let index = scene.items.length - 1; index >= 0; index -= 1) {
+          const item = scene.items[index];
+          if (!item.backdrop && item.visible && screenKinds.has(kindOf(item))) {
+            target = item;
+            break;
+          }
+        }
+      }
+      if (target) {
+        studioZoomSet(target.id, factor).catch((err) => console.error("zoom preset failed:", err));
+      }
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn?.());
+    };
+  }, []);
   const effectiveSelection =
     selectedItem && activeScene?.items.some((item) => item.id === selectedItem)
       ? selectedItem
@@ -898,6 +949,7 @@ export default function App() {
           />
           <ControlsDock
             settings={settings}
+            sceneNames={(collection?.scenes ?? []).map((scene) => scene.name)}
             onSettingsSaved={setSettings}
             onOpenSourceHealth={() => setDialog({ kind: "sourceHealth" })}
           />

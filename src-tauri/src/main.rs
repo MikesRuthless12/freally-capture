@@ -13,9 +13,11 @@
 mod alarms;
 mod audio;
 mod autoconfig;
+mod automation;
 mod bugreport;
 mod buildinfo;
 mod calibration;
+mod chords;
 mod commands;
 mod diagnostics;
 mod docks;
@@ -24,16 +26,20 @@ mod events;
 mod filename;
 mod hotkey_audit;
 mod hotkeys;
+mod midi;
 mod native_preview;
 mod openfile;
+mod osc;
 mod preview;
 mod profiles;
 mod projector;
+mod ptz;
 mod reactions;
 mod recording;
 mod remote;
 mod remote_api;
 mod replay;
+mod rundown;
 mod salvage;
 mod scripting;
 mod settings;
@@ -41,6 +47,7 @@ mod shutdown;
 mod stream;
 mod studio;
 mod timers;
+mod webpanel;
 
 use audio::{AudioRuntime, HotkeyRegistry};
 use preview::PreviewState;
@@ -154,6 +161,12 @@ fn main() {
         .manage(profiles::WorkspaceState::load_default())
         .manage(native_preview::NativePreviewState::new())
         .manage(remote_api::RemoteApiState::default())
+        .manage(automation::AutomationState::default())
+        .manage(rundown::RundownState::default())
+        .manage(webpanel::WebPanelState::default())
+        .manage(osc::OscState::default())
+        .manage(midi::MidiState::default())
+        .manage(std::sync::Mutex::new(chords::ChordState::default()))
         // The program-frame pipe: the UI polls `preview://` for the newest
         // composed JPEG. In-process only — frames never touch a socket or
         // disk — and CORS-pinned to the app's own origins.
@@ -254,6 +267,7 @@ fn main() {
             commands::studio::studio_set_item_visible,
             commands::studio::studio_set_item_locked,
             commands::studio::studio_set_item_blend,
+            commands::studio::studio_set_item_scaling,
             commands::studio::studio_apply_layout,
             commands::studio::studio_set_item_slot,
             commands::studio::studio_set_center_view,
@@ -272,6 +286,20 @@ fn main() {
             commands::studio::studio_panic_set,
             commands::studio::studio_media_set_paused,
             commands::studio::studio_media_paused,
+            commands::studio::studio_media_seek,
+            commands::studio::studio_media_transport,
+            commands::studio::studio_passthrough_latency,
+            commands::studio::studio_add_linked_window,
+            commands::studio::studio_autocrop,
+            commands::studio::studio_autocrop_follow,
+            commands::studio::studio_autocrop_get,
+            commands::studio::studio_zoom_set,
+            commands::studio::studio_zoom_scroll,
+            commands::studio::studio_zoom_follow,
+            commands::studio::studio_zoom_get,
+            commands::studio::studio_set_scene_backdrop,
+            commands::studio::studio_set_backdrop_split,
+            commands::studio::studio_set_backdrop_sync,
             commands::studio::studio_add_filter,
             commands::studio::studio_remove_filter,
             commands::studio::studio_reorder_filter,
@@ -327,6 +355,23 @@ fn main() {
             hotkey_audit::hotkey_cheatsheet_save,
             commands::camera_controls_list,
             commands::camera_control_set,
+            commands::hdr_tone_map_set,
+            commands::midi_ports,
+            commands::midi_learn,
+            commands::ptz_move,
+            commands::ptz_zoom,
+            commands::ptz_preset_recall,
+            commands::ptz_preset_store,
+            webpanel::panel_url,
+            commands::hotkey_set_layer,
+            commands::hotkey_layer,
+            commands::rundown_start,
+            commands::rundown_advance,
+            commands::rundown_stop,
+            commands::rundown_status,
+            commands::automation_run_macro,
+            commands::automation_variables,
+            commands::automation_set_variable,
             commands::camera_profile_reset,
             commands::calibration::calibration_start,
             commands::calibration::calibration_stop,
@@ -423,6 +468,13 @@ fn main() {
             // Sandboxed Lua scripts (Phase 7) — loaded from settings, same
             // command allowlist as the remote API.
             scripting::spawn_manager(app.handle().clone());
+            // The LAN touch panel + tally service (CAP-N06/N07) — off by
+            // default; same allowlist, password required, loopback unless LAN.
+            webpanel::spawn_manager(app.handle().clone());
+            // OSC (CAP-N04) — off by default, LAN-only, same allowlist.
+            osc::spawn_manager(app.handle().clone());
+            // MIDI control surfaces (CAP-N03) — no port opens until picked.
+            midi::spawn_manager(app.handle().clone());
             println!("init: bridges spawned — calling native_preview::try_create");
             // The native preview child window (Windows). Created here on the
             // main thread; the studio thread presents the GPU surface onto it.

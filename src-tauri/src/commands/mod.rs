@@ -365,6 +365,220 @@ fn validate_camera_ids(device_id: &str, control: Option<&str>) -> Result<(), Str
     Ok(())
 }
 
+// -- MIDI control surfaces (CAP-N03) --------------------------------------------
+
+/// The MIDI ports on this machine: `(inputs, outputs)`. Listing opens nothing.
+#[tauri::command]
+pub fn midi_ports() -> (Vec<String>, Vec<String>) {
+    crate::midi::list_ports()
+}
+
+/// Arm MIDI-learn: the next pad/knob touched is reported on the
+/// `midi-learned` event instead of firing its binding.
+#[tauri::command]
+pub fn midi_learn(state: tauri::State<'_, crate::midi::MidiState>, on: bool) {
+    state.set_learning(on);
+}
+
+// -- PTZ camera control (CAP-N08) -----------------------------------------------
+
+/// Find a configured camera by name (the only way a camera is addressed —
+/// the app never talks to an address the operator didn't enter).
+fn ptz_camera(
+    settings: &tauri::State<'_, crate::settings::SettingsStore>,
+    name: &str,
+) -> Result<crate::ptz::PtzCamera, String> {
+    settings
+        .get()
+        .ptz
+        .cameras
+        .into_iter()
+        .find(|camera| camera.name == name)
+        .ok_or_else(|| format!("no PTZ camera named {name}"))
+}
+
+/// A rolling VISCA-over-IP sequence number (per process; cameras only need
+/// it to be monotonic).
+fn ptz_sequence() -> u32 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SEQ: AtomicU32 = AtomicU32::new(1);
+    SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Drive the head (or stop it).
+#[tauri::command]
+pub fn ptz_move(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    camera: String,
+    direction: crate::ptz::PtzMove,
+    pan_speed: u8,
+    tilt_speed: u8,
+) -> Result<(), String> {
+    let target = ptz_camera(&settings, &camera)?;
+    let payload = crate::ptz::visca_move(direction, pan_speed, tilt_speed);
+    crate::ptz::send(&target.host, target.port, &payload, ptz_sequence())
+}
+
+/// Zoom (positive = tele, negative = wide, 0 = stop).
+#[tauri::command]
+pub fn ptz_zoom(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    camera: String,
+    speed: i8,
+) -> Result<(), String> {
+    let target = ptz_camera(&settings, &camera)?;
+    let payload = crate::ptz::visca_zoom(speed);
+    crate::ptz::send(&target.host, target.port, &payload, ptz_sequence())
+}
+
+/// Recall a preset slot.
+#[tauri::command]
+pub fn ptz_preset_recall(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    camera: String,
+    slot: u8,
+) -> Result<(), String> {
+    let target = ptz_camera(&settings, &camera)?;
+    let payload = crate::ptz::visca_preset_recall(slot);
+    crate::ptz::send(&target.host, target.port, &payload, ptz_sequence())
+}
+
+/// Store the camera's current position into a preset slot.
+#[tauri::command]
+pub fn ptz_preset_store(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    camera: String,
+    slot: u8,
+) -> Result<(), String> {
+    let target = ptz_camera(&settings, &camera)?;
+    let payload = crate::ptz::visca_preset_store(slot);
+    crate::ptz::send(&target.host, target.port, &payload, ptz_sequence())
+}
+
+// -- hotkey layers (CAP-N05) ----------------------------------------------------
+
+/// Switch the active hotkey layer (CAP-N05). Layers are **sticky**: a layer
+/// stays active until switched back (a true hold-to-shift layer is not
+/// reachable through the OS global-shortcut API — the UI says so).
+#[tauri::command]
+pub fn hotkey_set_layer(
+    state: tauri::State<'_, std::sync::Mutex<crate::chords::ChordState>>,
+    layer: u8,
+) {
+    state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .set_layer(layer);
+}
+
+/// The active hotkey layer (0 = base).
+#[tauri::command]
+pub fn hotkey_layer(state: tauri::State<'_, std::sync::Mutex<crate::chords::ChordState>>) -> u8 {
+    state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .layer()
+}
+
+// -- show rundown (CAP-N09) -----------------------------------------------------
+
+/// Start the rundown at a step (the operator's Start / jump-to).
+#[tauri::command]
+pub fn rundown_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::rundown::RundownState>,
+    index: usize,
+) -> Result<(), String> {
+    state.start(&app, index)
+}
+
+/// Advance to the next step (Next). Stops at the end.
+#[tauri::command]
+pub fn rundown_advance(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::rundown::RundownState>,
+) -> Result<(), String> {
+    state.advance(&app)
+}
+
+/// Stop the rundown (the scene stays put — no surprise cuts).
+#[tauri::command]
+pub fn rundown_stop(app: tauri::AppHandle, state: tauri::State<'_, crate::rundown::RundownState>) {
+    state.stop(&app);
+}
+
+/// The dock's view: where we are, what's next, and the countdown.
+#[tauri::command]
+pub fn rundown_status(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    state: tauri::State<'_, crate::rundown::RundownState>,
+) -> crate::rundown::RundownStatus {
+    state.status(&settings.get().rundown)
+}
+
+// -- automation (CAP-N01 / CAP-N02) --------------------------------------------
+
+/// Run a macro by name (the UI's Run button; hotkeys and the rules engine
+/// call the same path). Unknown names are a no-op, logged.
+#[tauri::command]
+pub fn automation_run_macro(app: tauri::AppHandle, name: String) {
+    crate::automation::run_macro_by_name(&app, &name);
+}
+
+/// Every studio variable (CAP-N02) — the UI's variables panel reads this.
+#[tauri::command]
+pub fn automation_variables(
+    state: tauri::State<'_, crate::automation::AutomationState>,
+) -> std::collections::HashMap<String, String> {
+    state.variables()
+}
+
+/// Set one studio variable by hand (the UI). Bounded like every other write.
+#[tauri::command]
+pub fn automation_set_variable(
+    state: tauri::State<'_, crate::automation::AutomationState>,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    if name.trim().is_empty() || name.len() > 64 || value.len() > 512 {
+        return Err("bad variable name or value".to_owned());
+    }
+    state.set_variable(&name, &value);
+    Ok(())
+}
+
+/// Set one display's HDR→SDR tone-map (CAP-N74): persisted like a camera
+/// profile AND pushed into the live registry, so the very next captured
+/// frame retunes — no session restart.
+#[tauri::command]
+pub fn hdr_tone_map_set(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    capture_id: String,
+    operator: String,
+    paper_white_nits: u32,
+) -> Result<(), String> {
+    let parsed = fcap_capture::tonemap::ToneMapOperator::from_name(&operator)
+        .ok_or_else(|| format!("unknown tone-map operator: {operator}"))?;
+    if !(80..=1000).contains(&paper_white_nits) {
+        return Err("paper white must be 80–1000 nits".to_owned());
+    }
+    settings.set_hdr_tone_map(
+        &capture_id,
+        crate::settings::HdrToneMapSetting {
+            operator,
+            paper_white_nits,
+        },
+    );
+    fcap_capture::tonemap::set_tone_map(
+        &capture_id,
+        fcap_capture::tonemap::ToneMapConfig {
+            operator: parsed,
+            paper_white_nits: paper_white_nits as f32,
+        },
+    );
+    Ok(())
+}
+
 /// Set one control on the running device AND save it into the per-device
 /// profile, so it reapplies on hotplug/restart (CAP-M18). The capture thread
 /// clamps the value to the device's reported range.

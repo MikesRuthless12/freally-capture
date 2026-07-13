@@ -37,6 +37,8 @@ mod win;
 mod window_match;
 
 pub mod game;
+pub mod signals;
+pub mod tonemap;
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -339,6 +341,64 @@ pub fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
             "no capture backend for {}",
             std::env::consts::OS
         )))
+    }
+}
+
+/// The desktop rectangle `(x, y, w, h)` a display/window capture id
+/// currently covers, in virtual-screen pixels — re-resolved per call so a
+/// moved window stays mapped. Windows-only today (CAP-N71 follow-pan; other
+/// platforms return `None` and the UI is honest about it).
+pub fn source_screen_rect(id: &str) -> Option<(i32, i32, u32, u32)> {
+    #[cfg(target_os = "windows")]
+    {
+        win::source_screen_rect(id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        None
+    }
+}
+
+/// Whether a display capture targets an HDR-enabled output (CAP-N74's
+/// tone-map auto-suggest). Windows-only; `None` elsewhere or for windows.
+pub fn display_is_hdr(id: &str) -> Option<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        win::display_is_hdr(id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        None
+    }
+}
+
+/// The process behind a window-capture id — `(pid, exe name)`, re-resolved
+/// by window identity per call (CAP-N73's window↔app-audio auto-link).
+/// Windows-only today; other platforms return `None` and the UI says so.
+pub fn window_process(id: &str) -> Option<(u32, String)> {
+    #[cfg(target_os = "windows")]
+    {
+        win::window_process(id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        None
+    }
+}
+
+/// The cursor's position on the virtual desktop (pairs with
+/// [`source_screen_rect`] for CAP-N71's follow-pan). Windows-only today.
+pub fn cursor_screen_position() -> Option<(i32, i32)> {
+    #[cfg(target_os = "windows")]
+    {
+        win::cursor_position()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
     }
 }
 

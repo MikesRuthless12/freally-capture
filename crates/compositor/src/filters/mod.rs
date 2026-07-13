@@ -52,6 +52,7 @@ pub(crate) enum PassKind {
     Sharpen,
     Scroll,
     Crop,
+    Flip,
     /// Preview-only alpha→grayscale, appended by the keying workbench (CAP-M26).
     Matte,
 }
@@ -366,6 +367,22 @@ pub(crate) fn plan_filter(
                 out: in_size,
             }])
         }
+        FilterKind::Flip {
+            horizontal,
+            vertical,
+        } => {
+            if !horizontal && !vertical {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [f32::from(*horizontal), f32::from(*vertical), 0.0, 0.0];
+            Some(vec![PassPlan {
+                kind: PassKind::Flip,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
         FilterKind::Crop {
             left,
             top,
@@ -541,7 +558,7 @@ impl FilterEngine {
             push_constant_ranges: &[],
         });
 
-        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 11] = [
+        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 12] = [
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
             (PassKind::ColorKey, "fs_color_key", &basic_layout),
             (PassKind::LumaKey, "fs_luma_key", &basic_layout),
@@ -556,6 +573,7 @@ impl FilterEngine {
             (PassKind::Sharpen, "fs_sharpen", &basic_layout),
             (PassKind::Scroll, "fs_scroll", &basic_layout),
             (PassKind::Crop, "fs_crop", &basic_layout),
+            (PassKind::Flip, "fs_flip", &basic_layout),
             (PassKind::Matte, "fs_matte", &basic_layout),
         ];
         let pipelines = entries

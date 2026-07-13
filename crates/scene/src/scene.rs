@@ -73,6 +73,36 @@ impl BlendMode {
     ];
 }
 
+/// How an item's pixels scale onto the canvas (CAP-N70) — the pixel-perfect
+/// modes for retro/pixel content. `Auto` is the smooth bilinear every item
+/// used before the setting existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScaleMode {
+    /// Smooth bilinear (the default).
+    #[default]
+    Auto,
+    /// Nearest-neighbor: hard texel edges at any size.
+    Nearest,
+    /// Nearest **and** the drawn scale snapped to whole multiples ("3×") —
+    /// every source pixel maps to an exact square of canvas pixels. The
+    /// selection handles show the logical size; the pixels draw snapped.
+    Integer,
+    /// Scale up nearest-crisp, then a soft half-texel edge — crisp pixels
+    /// without the shimmer of raw nearest under motion.
+    SharpBilinear,
+}
+
+impl ScaleMode {
+    /// Every mode, in UI order.
+    pub const ALL: [ScaleMode; 4] = [
+        ScaleMode::Auto,
+        ScaleMode::Nearest,
+        ScaleMode::Integer,
+        ScaleMode::SharpBilinear,
+    ];
+}
+
 /// Pixels cut from each edge of the *source* (pre-scale, source px).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -208,6 +238,47 @@ pub fn preset_seats() -> [NormRect; 6] {
         Corner::BottomLeft.slot(),
         Corner::BottomRight.slot(),
     ]
+}
+
+/// Where a scene's backdrop wallpaper sits: the whole canvas (cover-fit,
+/// overflow cropped — seamless edge-to-edge) or one half (the media
+/// fit-contained in that half so the whole picture stays visible — the
+/// critique layouts), leaving the other half to the capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BackdropSplit {
+    #[default]
+    Full,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl BackdropSplit {
+    /// The normalized canvas region this mode fills.
+    pub fn region(self) -> NormRect {
+        let (x, y, w, h) = match self {
+            BackdropSplit::Full => (0.0, 0.0, 1.0, 1.0),
+            BackdropSplit::Left => (0.0, 0.0, 0.5, 1.0),
+            BackdropSplit::Right => (0.5, 0.0, 0.5, 1.0),
+            BackdropSplit::Top => (0.0, 0.0, 1.0, 0.5),
+            BackdropSplit::Bottom => (0.0, 0.5, 1.0, 0.5),
+        };
+        NormRect { x, y, w, h }
+    }
+
+    /// The other half — where a split seats the capture. `None` for Full
+    /// (the capture re-fits to the whole canvas instead).
+    pub fn opposite(self) -> Option<NormRect> {
+        match self {
+            BackdropSplit::Full => None,
+            BackdropSplit::Left => Some(BackdropSplit::Right.region()),
+            BackdropSplit::Right => Some(BackdropSplit::Left.region()),
+            BackdropSplit::Top => Some(BackdropSplit::Bottom.region()),
+            BackdropSplit::Bottom => Some(BackdropSplit::Top.region()),
+        }
+    }
 }
 
 /// The centered shared view (a Desktop/Window capture or a promoted cam).
@@ -388,6 +459,19 @@ pub struct SceneItem {
     pub pending_slot: Option<NormRect>,
     #[serde(default)]
     pub filters: Vec<Filter>,
+    /// Pixel-perfect scaling (CAP-N70): how this item's pixels reach the
+    /// canvas. `Auto` = the ordinary smooth bilinear.
+    #[serde(default)]
+    pub scaling: ScaleMode,
+    /// Present on a scene's backdrop wallpaper (at most one per scene, always
+    /// `items[0]`): which canvas region it fills. The compositor lays it out
+    /// itself every frame — cover-fit for [`BackdropSplit::Full`], fit-contain
+    /// for a half — reading this item's `transform` only as zoom (`scale_x`)
+    /// and pan (`x`/`y`) *within* that region, clamped so blank canvas never
+    /// shows. Pinned: reorder is a no-op and nothing moves below it, so it can
+    /// never sit above (or otherwise interfere with) a capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backdrop: Option<BackdropSplit>,
 }
 
 impl SceneItem {
@@ -403,6 +487,8 @@ impl SceneItem {
             pending_fit: true,
             pending_slot: None,
             filters: Vec::new(),
+            scaling: ScaleMode::default(),
+            backdrop: None,
         }
     }
 }

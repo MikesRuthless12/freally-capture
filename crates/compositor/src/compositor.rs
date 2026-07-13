@@ -199,6 +199,10 @@ pub struct Compositor {
     /// transforms/filters/blends apply to it like any capture.
     scene_pool: Vec<Scene>,
     scene_refs: HashMap<SourceId, SceneId>,
+    /// The punch-in zoom lenses (CAP-N71): per-item `(zoom, anchor)` the
+    /// studio animates each tick — applied to the *drawn* transform only,
+    /// so the model (and undo) never see them.
+    lenses: HashMap<ItemId, (f32, (f32, f32))>,
 
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
@@ -471,6 +475,7 @@ impl Compositor {
             uniform_stride,
             sources: HashMap::new(),
             scene_pool: Vec::new(),
+            lenses: HashMap::new(),
             scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
@@ -1634,6 +1639,12 @@ impl Compositor {
 
     /// The scenes a nested-scene source can reference + the source→scene
     /// mapping (refreshed by the studio each tick; empty = no nesting).
+    /// Replace the punch-in zoom lenses (CAP-N71) for this tick — a tiny
+    /// map; the studio hands over only items actively zoomed or animating.
+    pub fn set_lenses(&mut self, lenses: HashMap<ItemId, (f32, (f32, f32))>) {
+        self.lenses = lenses;
+    }
+
     pub fn set_scene_pool(&mut self, scenes: Vec<Scene>, refs: HashMap<SourceId, SceneId>) {
         self.scene_pool = scenes;
         self.scene_refs = refs;
@@ -1789,18 +1800,67 @@ impl Compositor {
                 plans.push(matte_plan);
             }
 
+            // The backdrop wallpaper lays itself out every frame: cover-fit
+            // (Full) or fit-contain (a half) into its region, reading the
+            // item's transform only as clamped zoom/pan — it can never leave
+            // blank canvas, and being `items[0]` by model invariant it can
+            // never paint above the capture.
+            let transform = match item.backdrop {
+                Some(split) => {
+                    let region = split.region();
+                    transform::backdrop_layout(
+                        chain_size.0,
+                        chain_size.1,
+                        (
+                            region.x * canvas.0,
+                            region.y * canvas.1,
+                            region.w * canvas.0,
+                            region.h * canvas.1,
+                        ),
+                        split != fcap_scene::BackdropSplit::Full,
+                        item.transform.scale_x,
+                        (item.transform.x, item.transform.y),
+                    )
+                }
+                None => item.transform,
+            };
+            // The punch-in zoom lens (CAP-N71): a runtime zoom/pan the studio
+            // animates — drawn only, never written to the model. The backdrop
+            // has its own zoom semantics and is excluded.
+            let transform = match self.lenses.get(&item.id) {
+                Some((zoom, anchor)) if item.backdrop.is_none() => {
+                    match transform::content_size(chain_size.0, chain_size.1, &transform.crop) {
+                        Some(content) => transform::apply_lens(transform, content, *zoom, *anchor),
+                        None => transform,
+                    }
+                }
+                _ => transform,
+            };
+            // Pixel-perfect scaling (CAP-N70): Integer snaps the drawn scale
+            // to whole multiples; Nearest/Integer/SharpBilinear pick their
+            // sampling in the item shader (misc.y), with the drawn scale as
+            // sharp-bilinear's sharpness (misc.z).
+            let transform = match item.scaling {
+                fcap_scene::ScaleMode::Integer => transform::integer_snap(transform),
+                _ => transform,
+            };
+            let sampling = match item.scaling {
+                fcap_scene::ScaleMode::Auto => 0.0,
+                fcap_scene::ScaleMode::Nearest | fcap_scene::ScaleMode::Integer => 1.0,
+                fcap_scene::ScaleMode::SharpBilinear => 2.0,
+            };
             // The composite sees the chain's output (or the raw source).
             let Some(content) =
-                transform::content_size(chain_size.0, chain_size.1, &item.transform.crop)
+                transform::content_size(chain_size.0, chain_size.1, &transform.crop)
             else {
                 continue; // fully cropped away
             };
             let (_, prep) = blend_config(item.blend);
             let uniform = ItemUniform {
-                mvp: transform::clip_matrix(&item.transform, content, canvas),
-                uv_rect: transform::uv_rect(chain_size.0, chain_size.1, &item.transform.crop),
+                mvp: transform::clip_matrix(&transform, content, canvas),
+                uv_rect: transform::uv_rect(chain_size.0, chain_size.1, &transform.crop),
                 size: [content.0, content.1, 0.0, 0.0],
-                misc: [prep, 0.0, 0.0, 0.0],
+                misc: [prep, sampling, transform.scale_x.abs(), 0.0],
             };
             let offset = draws.len() as u64 * self.uniform_stride;
             item_staging.resize(offset as usize, 0);

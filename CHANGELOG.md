@@ -15,6 +15,85 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.200.0] — 2026-07-13 (Automation + Capture & Device Depth — CAP-N Phases 1 & 9)
+
+> Two themed phases in one release, so the version crosses two rungs (0.99.0 → 0.200.0). **Phase 1
+> — Automation** makes the studio drive itself: a rules engine, macros with variables, MIDI and OSC
+> control surfaces, hotkey chords and layers, a LAN touch panel, a tally-light service, PTZ camera
+> control, and a timed show rundown. **Phase 9 — Capture & Device Depth** finishes the glass-to-canvas
+> path: a low-latency passthrough monitor, pixel-perfect scaling, punch-in zoom, auto black-bar crop,
+> window↔app-audio auto-linking, and HDR→SDR tone-mapping. Ships alongside the **scene backdrop** and
+> **true reverse media playback** built earlier in the cycle.
+>
+> **The whole automation surface shares one design invariant:** every rule, macro, MIDI pad, OSC
+> address, panel button, and rundown step dispatches through a single fixed command allowlist — the
+> same one the WebSocket remote API exposes. No control surface can name a file, spawn a process, or
+> reach the internet **by construction**, and every network surface is off by default and binds
+> loopback unless LAN is explicitly enabled.
+
+### Added
+
+- **Scene backdrop / wallpaper.** Pin any image, looping GIF, or looping video behind the capture as
+  a full-canvas or half-screen (left / right / top / bottom) backdrop, with the capture auto-seated
+  in the other half. Mouse-wheel zoom on the capture or the backdrop, a real-time Flip filter, a
+  "hold until recording starts" mode with a pre-record preview, and a hide/show toggle so a tutorial
+  video can play full-frame before the capture returns.
+- **True reverse media playback + full transport.** A real reverse render (bounded-memory, segmented,
+  cached) plus scrub, seek-from-anywhere, play/pause, and a loop toggle — a backdrop video behaves
+  like a regular player, on the operator's cue.
+- **Automation rules engine** (CAP-N01). Nine edge-triggered triggers — scene switch, stream state,
+  recording state, source error, audio level crossing, system idle, window focus, time of day, and a
+  watched file changing — gated by conditions (a variable equals, streaming, recording) that run
+  studio actions. Every rule ships **disabled**; the engine is a no-op until one is turned on.
+- **Macros, variables & sequences** (CAP-N02). Named step sequences (run an action, wait, set a
+  variable) with a repeat count and an optional global hotkey, runnable from the UI, a hotkey, a rule,
+  or the remote API. Studio **variables** interpolate `{{name}}` into any Text source and update it
+  live the moment a macro sets the value.
+- **MIDI control surfaces** (CAP-N03). MIDI-learn a pad, knob, or fader onto a studio action, macro,
+  scene switch, mixer fader, or mute, with **LED and motor-fader feedback** that mirrors the studio's
+  real state (the REC pad lights because you are recording). No MIDI port opens until one is chosen.
+- **OSC control** (CAP-N04). TouchOSC-class controllers and lighting desks drive the studio over Open
+  Sound Control — `/scene/switch`, `/record/start`, `/macro/run`, `/mixer/vol`, and more. Off by
+  default, loopback unless LAN. *OSC has no authentication of its own — the LAN toggle says so.*
+- **Hotkey chords & layers** (CAP-N05). Two-stroke chords (`Ctrl+K, 3`) where the bare second key is
+  only claimed while the chord is pending, plus sticky layers so a small keyboard drives many actions.
+- **LAN touch panel** (CAP-N06). The app serves a control page — scene buttons with live tally, mixer
+  faders, and action keys — to any phone on the network, reached by a QR code. Off by default, a
+  password on every request, loopback unless LAN, and the page is embedded (nothing is fetched from
+  the internet).
+- **Tally light service** (CAP-N07). A full-screen red/green tally page any spare phone can display;
+  `?scene=NAME` watches one scene, otherwise it tracks the program's live state.
+- **PTZ camera control** (CAP-N08). Pan / tilt / zoom cameras over VISCA-over-IP with named presets
+  and per-scene auto-recall (a scene going on program recalls its bound shot). LAN-only; a camera
+  exists only because its address was entered — nothing is discovered.
+- **Show rundown** (CAP-N09). An ordered playlist of steps — a scene and how long it holds, plus
+  optional actions — with manual or automatic advance and a live "next up + remaining time". Running
+  a rundown switches scenes the ordinary, undoable way; it never edits the scene collection.
+- **Low-latency passthrough monitor** (CAP-N69). A projector that shows a capture device's **raw**
+  frames — no scenes, no filters, no compositor — with a measured capture→display latency readout, so
+  a capture-card game feed can be watched with minimal delay.
+- **Pixel-perfect scaling modes** (CAP-N70). Per-item smooth, nearest-neighbor, integer-snapped, or
+  sharp-bilinear scaling — retro/pixel-art content reaches the canvas without blur.
+- **Punch-in zoom & follow pan** (CAP-N71). Wheel-zoom into any capture with a critically-damped
+  animation, three hotkey presets, and an optional follow mode that tracks the cursor.
+- **Auto black-bar crop** (CAP-N72). Detect and crop letterbox/pillarbox bars from a source, one-shot
+  or continuously as the content's aspect changes.
+- **Window↔app-audio auto-link** (CAP-N73). Capture a window's application audio alongside it; hiding
+  the window mutes the linked strip and showing it unmutes — without ever clobbering a manual mute.
+- **HDR→SDR tone-map for capture** (CAP-N74). Map an HDR display's output to the SDR canvas
+  (clip / hue-preserving maxRGB / Reinhard / BT.2408 knee) with an adjustable paper-white level, tuned
+  live per display without restarting the capture.
+
+### Security & reliability
+
+- Every automation surface routes through the shared remote-API allowlist (`ALLOWED_COMMANDS`), so no
+  rule, macro, MIDI/OSC binding, panel button, or rundown step can reach a command the app's own
+  buttons don't — verified by a test that the allowlist and its dispatch arms cannot drift apart.
+- The `FileChanged` trigger honors the existing remote-path guard, so watching a file never probes a
+  UNC path (no NTLM credential leak).
+- Both LAN control surfaces (panel, OSC) warn in Settings that LAN traffic is unencrypted before the
+  port opens to the network.
+
 ## [0.99.0] — 2026-07-12 (Sources, devices & calibration — CAP-M Batch 3)
 
 > The third and final must-have batch: everything between the glass and the canvas. Built-in

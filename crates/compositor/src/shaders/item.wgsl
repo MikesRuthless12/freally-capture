@@ -15,7 +15,9 @@ struct ItemUniform {
     uv_rect: vec4<f32>,
     // xy = content size in local px; zw reserved.
     size: vec4<f32>,
-    // x = blend prep mode (0/1/2); yzw reserved.
+    // x = blend prep mode (0/1/2);
+    // y = sampling mode (0 smooth, 1 nearest, 2 sharp-bilinear — CAP-N70);
+    // z = the drawn scale (sharp-bilinear's sharpness); w reserved.
     misc: vec4<f32>,
 };
 
@@ -40,7 +42,24 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    var color = textureSample(t_source, s_source, in.uv);
+    // Pixel-perfect sampling (CAP-N70), all on the one linear sampler:
+    // nearest = snap the UV to the texel center; sharp-bilinear = snap with
+    // a half-texel-wide linear edge (fract sharpened by the drawn scale) —
+    // crisp pixels without raw nearest's shimmer under motion.
+    var uv = in.uv;
+    let sampling = u32(item.misc.y + 0.5);
+    if sampling != 0u {
+        let dims = vec2<f32>(textureDimensions(t_source));
+        let texel = uv * dims;
+        if sampling == 1u {
+            uv = (floor(texel) + 0.5) / dims;
+        } else {
+            let sharp = max(item.misc.z, 1.0);
+            let edge = clamp((fract(texel) - 0.5) * sharp, vec2<f32>(-0.5), vec2<f32>(0.5));
+            uv = (floor(texel) + 0.5 + edge) / dims;
+        }
+    }
+    var color = textureSample(t_source, s_source, uv);
     let prep = u32(item.misc.x + 0.5);
     if prep == 1u {
         color = vec4<f32>(color.rgb * color.a, color.a);

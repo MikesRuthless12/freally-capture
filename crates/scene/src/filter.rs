@@ -190,6 +190,13 @@ pub enum FilterKind {
         #[serde(default)]
         bottom: u32,
     },
+    /// Mirror the item horizontally and/or vertically, live.
+    Flip {
+        #[serde(default)]
+        horizontal: bool,
+        #[serde(default)]
+        vertical: bool,
+    },
 }
 
 impl Rgba {
@@ -214,6 +221,7 @@ impl FilterKind {
             FilterKind::Sharpen { .. } => "sharpen",
             FilterKind::Scroll { .. } => "scroll",
             FilterKind::Crop { .. } => "crop",
+            FilterKind::Flip { .. } => "flip",
         }
     }
 
@@ -231,6 +239,7 @@ impl FilterKind {
             FilterKind::Sharpen { .. } => "Sharpen",
             FilterKind::Scroll { .. } => "Scroll",
             FilterKind::Crop { .. } => "Crop",
+            FilterKind::Flip { .. } => "Flip",
         }
     }
 }

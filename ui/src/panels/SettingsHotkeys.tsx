@@ -18,6 +18,9 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["panic", "hotkeys-panic", "hotkeys-panic-placeholder"],
   ["timerToggle", "hotkeys-timer-toggle", "hotkeys-timer-toggle-placeholder"],
   ["timerReset", "hotkeys-timer-reset", "hotkeys-timer-reset-placeholder"],
+  ["zoom100", "hotkeys-zoom-100", "hotkeys-zoom-placeholder"],
+  ["zoom150", "hotkeys-zoom-150", "hotkeys-zoom-placeholder"],
+  ["zoom200", "hotkeys-zoom-200", "hotkeys-zoom-placeholder"],
 ];
 
 /**
@@ -54,6 +57,9 @@ export function SettingsHotkeys({
       panic: draft.panic?.trim() || null,
       timerToggle: draft.timerToggle?.trim() || null,
       timerReset: draft.timerReset?.trim() || null,
+      zoom100: draft.zoom100?.trim() || null,
+      zoom150: draft.zoom150?.trim() || null,
+      zoom200: draft.zoom200?.trim() || null,
     };
     const next = {
       ...settings,

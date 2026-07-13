@@ -28,8 +28,13 @@ import { SettingsDialog } from "./Settings";
 import { ModelsDialog } from "./Models";
 import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
+import { AutomationDialog } from "./AutomationDialog";
+import { MidiDialog } from "./MidiDialog";
+import { PtzDialog } from "./PtzDialog";
+import { RundownDialog } from "./RundownDialog";
 import { ScriptsDialog } from "./ScriptsDialog";
 import { SettingsHotkeys } from "./SettingsHotkeys";
+import { SettingsPanel } from "./SettingsPanel";
 import { SettingsRemote } from "./SettingsRemote";
 import { SettingsOutput } from "./SettingsOutput";
 import { SettingsReplay } from "./SettingsReplay";
@@ -42,10 +47,13 @@ const buttonBase =
 /** The Controls dock: recording (P4); Go Live / Virtual Camera land in 0.70. */
 export function ControlsDock({
   settings,
+  sceneNames,
   onSettingsSaved,
   onOpenSourceHealth,
 }: {
   settings: Settings | null;
+  /** The collection's scene names — the rundown's step targets (CAP-N09). */
+  sceneNames: string[];
   onSettingsSaved: (next: Settings) => void;
   /** The pre-flight's "sources" fix (CAP-M09) → the CAP-M13 dashboard. */
   onOpenSourceHealth: () => void;
@@ -65,6 +73,11 @@ export function ControlsDock({
     | "remote"
     | "docks"
     | "scripts"
+    | "automation"
+    | "rundown"
+    | "panel"
+    | "ptz"
+    | "midi"
     | "bug"
     | "updates"
     | "settings"
@@ -347,6 +360,46 @@ export function ControlsDock({
           </button>
           <button
             type="button"
+            onClick={() => setDialog("automation")}
+            title={t("controls-automation-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-automation")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("rundown")}
+            title={t("controls-rundown-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-rundown")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("panel")}
+            title={t("controls-panel-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-panel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("ptz")}
+            title={t("controls-ptz-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-ptz")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialog("midi")}
+            title={t("controls-midi-title")}
+            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
+          >
+            {t("controls-midi")}
+          </button>
+          <button
+            type="button"
             onClick={() => setDialog("docks")}
             title={t("controls-docks-title")}
             className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
@@ -454,6 +507,44 @@ export function ControlsDock({
       {dialog === "scripts" && (
         <ScriptsDialog
           settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "automation" && (
+        <AutomationDialog
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "rundown" && (
+        <RundownDialog
+          settings={settings}
+          sceneNames={sceneNames}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "panel" && (
+        <SettingsPanel
+          settings={settings}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "ptz" && (
+        <PtzDialog
+          settings={settings}
+          sceneNames={sceneNames}
+          onSaved={onSettingsSaved}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "midi" && (
+        <MidiDialog
+          settings={settings}
+          sceneNames={sceneNames}
           onSaved={onSettingsSaved}
           onClose={() => setDialog(null)}
         />

@@ -134,6 +134,115 @@ pub fn fit_into_slot(
     }
 }
 
+/// The backdrop wallpaper's placement: lay `source` into `region` (canvas
+/// pixels, `(x, y, w, h)`) — cover-fit for the whole-canvas mode (fills
+/// edge-to-edge, overflow cropped by the canvas bounds), fit-contain for a
+/// half split (the whole picture stays visible) — then apply the item's
+/// transform as zoom (`scale_x`, clamped to `1..=8` of the baseline) and pan
+/// (`x`/`y` pixel offsets, clamped to the overflow), so zooming and panning
+/// can only choose *which part* of the picture shows: blank canvas never
+/// enters the region, no matter what the webview sends.
+pub fn backdrop_layout(
+    source_w: u32,
+    source_h: u32,
+    region: (f32, f32, f32, f32),
+    contain: bool,
+    zoom: f32,
+    pan: (f32, f32),
+) -> Transform {
+    let (rx, ry, rw, rh) = region;
+    let sw = source_w.max(1) as f32;
+    let sh = source_h.max(1) as f32;
+    let base = if contain {
+        (rw / sw).min(rh / sh)
+    } else {
+        (rw / sw).max(rh / sh)
+    };
+    let zoom = if zoom.is_finite() {
+        zoom.clamp(1.0, 8.0)
+    } else {
+        1.0
+    };
+    let scale = base * zoom;
+    let max_dx = ((sw * scale - rw) * 0.5).max(0.0);
+    let max_dy = ((sh * scale - rh) * 0.5).max(0.0);
+    let pan_x = if pan.0.is_finite() {
+        pan.0.clamp(-max_dx, max_dx)
+    } else {
+        0.0
+    };
+    let pan_y = if pan.1.is_finite() {
+        pan.1.clamp(-max_dy, max_dy)
+    } else {
+        0.0
+    };
+    Transform {
+        x: rx + rw * 0.5 + pan_x,
+        y: ry + rh * 0.5 + pan_y,
+        scale_x: scale,
+        scale_y: scale,
+        rotation: 0.0,
+        crop: Crop::default(),
+    }
+}
+
+/// The punch-in zoom lens (CAP-N71): scale an item's drawn transform by
+/// `zoom` about `anchor` (a point in normalized content coordinates,
+/// `(0,0)` top-left → `(1,1)` bottom-right), so the anchored spot stays
+/// fixed on the canvas while everything grows around it. Runtime-only —
+/// callers apply this to the *drawn* transform; the model's transform (and
+/// the undo history) never see it. Zoom clamps to `1..=8`; hostile values
+/// fall back to no zoom.
+pub fn apply_lens(
+    mut transform: Transform,
+    content: (f32, f32),
+    zoom: f32,
+    anchor: (f32, f32),
+) -> Transform {
+    let zoom = if zoom.is_finite() {
+        zoom.clamp(1.0, 8.0)
+    } else {
+        1.0
+    };
+    if (zoom - 1.0).abs() < 1e-4 {
+        return transform;
+    }
+    let m = affine(&transform, content);
+    let ax = anchor.0.clamp(0.0, 1.0) * content.0;
+    let ay = anchor.1.clamp(0.0, 1.0) * content.1;
+    let px = m[0] * ax + m[1] * ay + m[2];
+    let py = m[3] * ax + m[4] * ay + m[5];
+    transform.scale_x *= zoom;
+    transform.scale_y *= zoom;
+    transform.x = px + (transform.x - px) * zoom;
+    transform.y = py + (transform.y - py) * zoom;
+    transform
+}
+
+/// Integer-lock (CAP-N70): snap each axis's scale to a whole multiple —
+/// upscales to the nearest integer (min 1×), downscales to the nearest
+/// exact reciprocal (1/2, 1/3, …) — so every source pixel maps to an exact
+/// block of canvas pixels. Sign (flip filters never come through here, but
+/// hostile files might) and center are preserved; zero/non-finite scales
+/// pass through untouched for the ordinary draw path to handle.
+pub fn integer_snap(mut transform: Transform) -> Transform {
+    let snap = |scale: f32| -> f32 {
+        if !scale.is_finite() || scale == 0.0 {
+            return scale;
+        }
+        let magnitude = scale.abs();
+        let snapped = if magnitude >= 1.0 {
+            magnitude.round().max(1.0)
+        } else {
+            1.0 / (1.0 / magnitude).round().max(1.0)
+        };
+        snapped.copysign(scale)
+    };
+    transform.scale_x = snap(transform.scale_x);
+    transform.scale_y = snap(transform.scale_y);
+    transform
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +392,177 @@ mod tests {
             (t.scale_x - t.scale_y).abs() < EPS,
             "uniform scale keeps aspect"
         );
+    }
+
+    #[test]
+    fn backdrop_cover_fills_the_canvas_edge_to_edge() {
+        // A 16:9 source on a 16:9 canvas covers exactly (scale 1 at 1:1 px).
+        let t = backdrop_layout(
+            1920,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            1.0,
+            (0.0, 0.0),
+        );
+        assert!((t.scale_x - 1.0).abs() < EPS);
+        assert!((t.x - 960.0).abs() < EPS);
+        // A 4:3 source covers by width: 1920/1440 h = 1440 > 1080, cropped.
+        let t = backdrop_layout(
+            1440,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            1.0,
+            (0.0, 0.0),
+        );
+        assert!(
+            (t.scale_x - (1920.0 / 1440.0)).abs() < EPS,
+            "the larger ratio wins"
+        );
+    }
+
+    #[test]
+    fn backdrop_contain_keeps_the_whole_picture_in_its_half() {
+        // A 16:9 video fit-contained into the left half of a 1920×1080 canvas
+        // (960×1080): width binds, scale = 960/1920 = 0.5.
+        let t = backdrop_layout(1920, 1080, (0.0, 0.0, 960.0, 1080.0), true, 1.0, (0.0, 0.0));
+        assert!((t.scale_x - 0.5).abs() < EPS);
+        assert!((t.x - 480.0).abs() < EPS, "centered in its half");
+        assert!((t.y - 540.0).abs() < EPS);
+    }
+
+    #[test]
+    fn backdrop_zoom_and_pan_never_reveal_blank_canvas() {
+        // Zoom below baseline clamps to 1 (never smaller than the fit)...
+        let t = backdrop_layout(
+            1920,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            0.25,
+            (0.0, 0.0),
+        );
+        assert!((t.scale_x - 1.0).abs() < EPS);
+        // ...and above 8× clamps too.
+        let t = backdrop_layout(
+            1920,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            99.0,
+            (0.0, 0.0),
+        );
+        assert!((t.scale_x - 8.0).abs() < EPS);
+        // At 2× zoom the overflow is half a canvas each way — a huge pan
+        // clamps exactly there, so the edge never crosses into the region.
+        let t = backdrop_layout(
+            1920,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            2.0,
+            (99999.0, -99999.0),
+        );
+        assert!((t.x - (960.0 + 960.0)).abs() < EPS);
+        assert!((t.y - (540.0 - 540.0)).abs() < EPS);
+        // At zoom 1 with a cover fit, only the overflow axis can pan: a 4:3
+        // source covers a 16:9 canvas by width (1440×1080 → 1920×1440), so
+        // the vertical crop can be repositioned by ±180 px, the horizontal
+        // not at all.
+        let t = backdrop_layout(
+            1440,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            1.0,
+            (500.0, 500.0),
+        );
+        assert!((t.x - 960.0).abs() < EPS, "no horizontal overflow to pan");
+        assert!(
+            (t.y - (540.0 + 180.0)).abs() < EPS,
+            "vertical pan clamps to the overflow"
+        );
+        // Hostile NaN zoom/pan land on the safe defaults.
+        let t = backdrop_layout(
+            1920,
+            1080,
+            (0.0, 0.0, 1920.0, 1080.0),
+            false,
+            f32::NAN,
+            (f32::NAN, f32::NAN),
+        );
+        assert!((t.scale_x - 1.0).abs() < EPS);
+        assert!((t.x - 960.0).abs() < EPS);
+    }
+
+    #[test]
+    fn lens_zoom_keeps_the_anchor_fixed_on_canvas() {
+        // A 200×100 item centered at (400, 300), zoomed 2× about its own
+        // center: the center must not move, the corners spread out.
+        let t = plain(400.0, 300.0);
+        let content = (200.0, 100.0);
+        let zoomed = apply_lens(t, content, 2.0, (0.5, 0.5));
+        assert!((zoomed.x - 400.0).abs() < EPS);
+        assert!((zoomed.y - 300.0).abs() < EPS);
+        assert!((zoomed.scale_x - 2.0).abs() < EPS);
+
+        // Zoomed about the top-left corner: that canvas point stays put.
+        let before = corners(&t, content)[0];
+        let zoomed = apply_lens(t, content, 2.0, (0.0, 0.0));
+        let after = corners(&zoomed, content)[0];
+        assert_close(after, before);
+
+        // Zoom 1 is the identity; hostile zoom is too.
+        let same = apply_lens(t, content, 1.0, (0.3, 0.7));
+        assert!((same.x - t.x).abs() < EPS && (same.scale_x - 1.0).abs() < EPS);
+        let hostile = apply_lens(t, content, f32::NAN, (0.5, 0.5));
+        assert!((hostile.scale_x - 1.0).abs() < EPS);
+        // And it clamps at 8×.
+        let capped = apply_lens(t, content, 99.0, (0.5, 0.5));
+        assert!((capped.scale_x - 8.0).abs() < EPS);
+    }
+
+    #[test]
+    fn integer_snap_locks_scales_to_whole_multiples() {
+        let snapped = integer_snap(Transform {
+            scale_x: 2.7,
+            scale_y: 3.2,
+            ..plain(10.0, 10.0)
+        });
+        assert!((snapped.scale_x - 3.0).abs() < EPS);
+        assert!((snapped.scale_y - 3.0).abs() < EPS);
+        // Never snaps an upscale below 1×.
+        let one = integer_snap(Transform {
+            scale_x: 1.2,
+            scale_y: 1.0,
+            ..plain(0.0, 0.0)
+        });
+        assert!((one.scale_x - 1.0).abs() < EPS);
+        // Downscales land on exact reciprocals (1/2, 1/3, …) by rounding
+        // the divisor: 0.45 → 1/2, 0.4 (divisor 2.5) → 1/3, 0.3 → 1/3.
+        let down = integer_snap(Transform {
+            scale_x: 0.45,
+            scale_y: 0.3,
+            ..plain(0.0, 0.0)
+        });
+        assert!((down.scale_x - 0.5).abs() < EPS, "0.45 → 1/2");
+        assert!((down.scale_y - (1.0 / 3.0)).abs() < EPS, "0.3 → 1/3");
+        // Hostile values pass through instead of poisoning the matrix.
+        let hostile = integer_snap(Transform {
+            scale_x: f32::NAN,
+            scale_y: 0.0,
+            ..plain(0.0, 0.0)
+        });
+        assert!(hostile.scale_x.is_nan());
+        assert_eq!(hostile.scale_y, 0.0);
+        // A flip's negative scale keeps its sign.
+        let flipped = integer_snap(Transform {
+            scale_x: -1.8,
+            scale_y: 1.0,
+            ..plain(0.0, 0.0)
+        });
+        assert!((flipped.scale_x + 2.0).abs() < EPS);
     }
 
     #[test]

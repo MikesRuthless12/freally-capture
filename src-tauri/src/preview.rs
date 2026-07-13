@@ -187,6 +187,15 @@ impl PreviewState {
                         path[pos + "projector-source/".len()..].trim_end_matches('/')
                     )
                 })
+            })
+            .or_else(|| {
+                // CAP-N69: the passthrough monitor's raw-frame slot.
+                path.rfind("projector-passthrough/").map(|pos| {
+                    format!(
+                        "passthrough:{}",
+                        path[pos + "projector-passthrough/".len()..].trim_end_matches('/')
+                    )
+                })
             });
         let frame: Option<(u64, Vec<u8>)> = if let Some(key) = projector_key {
             self.projectors

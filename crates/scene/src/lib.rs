@@ -37,9 +37,9 @@ pub use obs_import::{
     SkippedSource,
 };
 pub use scene::{
-    BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, GuideLine, GuideOrientation,
-    ItemId, NormRect, Scene, SceneAudioOverride, SceneId, SceneItem, SourceGroup, Transform,
-    TransitionKind,
+    BackdropSplit, BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, GuideLine,
+    GuideOrientation, ItemId, NormRect, ScaleMode, Scene, SceneAudioOverride, SceneId, SceneItem,
+    SourceGroup, Transform, TransitionKind,
 };
 pub use source::{
     CountdownEnd, DeinterlaceMode, FieldOrder, FileBinding, Rgba, Source, SourceId, SourceSettings,
@@ -135,6 +135,11 @@ pub struct Collection {
     pub scenes: Vec<Scene>,
     /// Always a valid scene id after any constructor or mutation.
     pub active_scene: SceneId,
+    /// CAP-N73 (runtime-only): linked app-audio strips this collection
+    /// auto-muted because their window was hidden. Showing the window unmutes
+    /// only these — never a strip the operator muted by hand. Never persisted.
+    #[serde(default, skip)]
+    pub hidden_muted: std::collections::HashSet<SourceId>,
     /// The optional second output canvas (Phase 6, TASK-604): e.g. a
     /// vertical 9:16 feed composed from any scene in the collection,
     /// recordable/streamable independently of the program canvas.
@@ -196,6 +201,7 @@ impl Collection {
             sources: Vec::new(),
             scenes: vec![scene],
             active_scene: active,
+            hidden_muted: std::collections::HashSet::new(),
             vertical: None,
         }
     }
@@ -729,9 +735,13 @@ impl Collection {
     /// seat is taken (fall back to a centered fit).
     fn free_corner_for_new_item(&self, scene_id: SceneId) -> Option<NormRect> {
         let scene = self.scene(scene_id)?;
+        // The backdrop wallpaper doesn't count as "another video item": the
+        // first capture added over a wallpaper still fills the whole canvas.
         let is_video = |item: &SceneItem| {
-            self.source(item.source)
-                .is_some_and(|source| !source.settings.is_audio_only())
+            item.backdrop.is_none()
+                && self
+                    .source(item.source)
+                    .is_some_and(|source| !source.settings.is_audio_only())
         };
         let existing: Vec<&SceneItem> = scene.items.iter().filter(|item| is_video(item)).collect();
         if existing.is_empty() {
@@ -765,13 +775,35 @@ impl Collection {
             .iter()
             .position(|item| item.id == item_id)
             .ok_or(SceneError::ItemNotFound)?;
+        let removed_source = scene.items[index].source;
         scene.items.remove(index);
+        // CAP-N73: audio linked to the removed window leaves with it —
+        // "removed together" is the pairing's whole point.
+        let linked: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|source| {
+                matches!(
+                    &source.settings,
+                    SourceSettings::AppAudio { linked_window: Some(target), .. }
+                        if *target == removed_source
+                )
+            })
+            .map(|source| source.id)
+            .collect();
+        if !linked.is_empty() {
+            let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
+            scene.items.retain(|item| !linked.contains(&item.source));
+        }
+        let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
         scene.prune_groups();
         self.gc_sources();
         Ok(())
     }
 
     /// Move an item to `to_index` in the z-order (clamped; 0 = bottom).
+    /// The backdrop wallpaper is pinned: moving it is a no-op, and no other
+    /// item can move below it — the capture always renders above it.
     pub fn reorder_item(
         &mut self,
         scene_id: SceneId,
@@ -784,10 +816,144 @@ impl Collection {
             .iter()
             .position(|item| item.id == item_id)
             .ok_or(SceneError::ItemNotFound)?;
-        let to = to_index.min(scene.items.len() - 1);
+        if scene.items[from].backdrop.is_some() {
+            return Ok(());
+        }
+        let floor = usize::from(
+            scene
+                .items
+                .first()
+                .is_some_and(|item| item.backdrop.is_some()),
+        );
+        let to = to_index.clamp(floor, scene.items.len() - 1);
         let item = scene.items.remove(from);
         scene.items.insert(to, item);
         Ok(())
+    }
+
+    /// Set (or clear, with `None`) a scene's backdrop wallpaper: a pinned
+    /// item at the very bottom of the z-order. At most one per scene —
+    /// setting replaces the previous backdrop (whose source leaves the pool
+    /// when nothing else shows it). The new item lands locked, in
+    /// [`BackdropSplit::Full`] (whole-canvas) mode, with the compositor
+    /// owning its placement (no first-frame fit).
+    pub fn set_scene_backdrop(
+        &mut self,
+        scene_id: SceneId,
+        source: Option<Source>,
+    ) -> Result<Option<(SourceId, ItemId)>, SceneError> {
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let old: Vec<ItemId> = scene
+            .items
+            .iter()
+            .filter(|item| item.backdrop.is_some())
+            .map(|item| item.id)
+            .collect();
+        for id in old {
+            self.remove_item(scene_id, id)?;
+        }
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        let (source_id, item_id) = self.add_item_with_new_source(scene_id, source)?;
+        let scene = self.scene_mut(scene_id).expect("checked above");
+        let from = scene
+            .items
+            .iter()
+            .position(|item| item.id == item_id)
+            .expect("just added");
+        let mut item = scene.items.remove(from);
+        item.backdrop = Some(BackdropSplit::Full);
+        item.locked = true;
+        // The compositor lays the backdrop out every frame; the transform is
+        // only its zoom/pan, so no first-frame fit may overwrite it.
+        item.pending_fit = false;
+        item.pending_slot = None;
+        scene.items.insert(0, item);
+        Ok(Some((source_id, item_id)))
+    }
+
+    /// Change where a scene's backdrop sits — the whole canvas or one half —
+    /// and seat the top-most visible non-backdrop video item into the other
+    /// half (back to a whole-canvas fit when returning to Full), so "video
+    /// left, capture right" is one call. Errors when the scene has no
+    /// backdrop.
+    pub fn set_backdrop_split(
+        &mut self,
+        scene_id: SceneId,
+        split: BackdropSplit,
+    ) -> Result<(), SceneError> {
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        if !scene.items.iter().any(|item| item.backdrop.is_some()) {
+            return Err(SceneError::ItemNotFound);
+        }
+        // The item that takes the other half: the top-most visible screen
+        // capture if there is one (the usual pairing), else the top-most
+        // visible video item — never a text overlay when a capture exists.
+        let candidates: Vec<(ItemId, bool)> = scene
+            .items
+            .iter()
+            .rev()
+            .filter(|item| item.backdrop.is_none() && item.visible)
+            .filter_map(|item| {
+                self.source(item.source).and_then(|source| {
+                    (!source.settings.is_audio_only())
+                        .then(|| (item.id, source.settings.is_screen_view()))
+                })
+            })
+            .collect();
+        let partner = candidates
+            .iter()
+            .find(|(_, is_screen)| *is_screen)
+            .or_else(|| candidates.first())
+            .map(|(id, _)| *id);
+        let scene = self.scene_mut(scene_id).expect("checked above");
+        for item in &mut scene.items {
+            if item.backdrop.is_some() {
+                item.backdrop = Some(split);
+                // Region changed: yesterday's zoom/pan is meaningless there.
+                item.transform = Transform::default();
+            }
+        }
+        if let Some(partner) = partner {
+            let slot = split.opposite();
+            let item = scene.item_mut(partner).expect("listed above");
+            item.pending_fit = true;
+            item.pending_slot = slot; // None = whole-canvas fit (Full)
+        }
+        Ok(())
+    }
+
+    /// Toggle a backdrop video's "start playback with recording" hold (its
+    /// media restarts and holds on the first frame until recording begins).
+    /// Errors when the scene has no backdrop or it is a still image.
+    pub fn set_backdrop_sync(
+        &mut self,
+        scene_id: SceneId,
+        start_with_recording: bool,
+    ) -> Result<(), SceneError> {
+        let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
+        let source_id = scene
+            .items
+            .iter()
+            .find(|item| item.backdrop.is_some())
+            .map(|item| item.source)
+            .ok_or(SceneError::ItemNotFound)?;
+        let source = self
+            .sources
+            .iter_mut()
+            .find(|source| source.id == source_id)
+            .ok_or(SceneError::SourceNotFound)?;
+        match &mut source.settings {
+            SourceSettings::Media {
+                start_with_recording: flag,
+                ..
+            } => {
+                *flag = start_with_recording;
+                Ok(())
+            }
+            _ => Err(SceneError::SourceNotFound),
+        }
     }
 
     fn item_mut(
@@ -951,9 +1117,16 @@ impl Collection {
         center: Option<ItemId>,
         corners: &[(ItemId, Corner)],
     ) -> Result<(), SceneError> {
-        // Validate every id first so a bad reference changes nothing.
+        // Validate every id first so a bad reference changes nothing. The
+        // backdrop wallpaper is not layoutable (a first-frame fit would
+        // overwrite the zoom/pan its transform actually holds).
         let scene = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
-        let present = |id: ItemId| scene.items.iter().any(|item| item.id == id);
+        let present = |id: ItemId| {
+            scene
+                .items
+                .iter()
+                .any(|item| item.id == id && item.backdrop.is_none())
+        };
         let unknown =
             center.is_some_and(|c| !present(c)) || corners.iter().any(|(id, _)| !present(*id));
         if unknown {
@@ -973,8 +1146,15 @@ impl Collection {
         }
 
         // Z-order: screen at the bottom, corners above it in order; any other
-        // items (overlays) stay on top.
-        let mut index = 0;
+        // items (overlays) stay on top. A backdrop wallpaper keeps index 0 —
+        // the layout stacks above it, never around it.
+        let mut index = usize::from(
+            self.scene(scene_id)
+                .expect("validated above")
+                .items
+                .first()
+                .is_some_and(|item| item.backdrop.is_some()),
+        );
         if let Some(center) = center {
             self.reorder_item(scene_id, center, index)?;
             index += 1;
@@ -1018,6 +1198,10 @@ impl Collection {
 
         let scene_ref = self.scene(scene_id).ok_or(SceneError::SceneNotFound)?;
         let mover = scene_ref.item(item_id).ok_or(SceneError::ItemNotFound)?;
+        // The backdrop is not seatable — the compositor owns its placement.
+        if mover.backdrop.is_some() {
+            return Ok(());
+        }
         let old_seat = mover.pending_slot;
 
         // "Nothing overlaps the shared view": while another item holds the
@@ -1150,10 +1334,13 @@ impl Collection {
             return Ok(());
         };
 
-        let mover_old = scene_ref
-            .item(target)
-            .ok_or(SceneError::ItemNotFound)?
-            .pending_slot;
+        let mover = scene_ref.item(target).ok_or(SceneError::ItemNotFound)?;
+        // The backdrop wallpaper can't take the center seat (the compositor
+        // owns its placement; its transform is only zoom/pan).
+        if mover.backdrop.is_some() {
+            return Err(SceneError::ItemNotFound);
+        }
+        let mover_old = mover.pending_slot;
 
         // The displaced center takes the mover's old seat, else a rail seat.
         if let Some(occ) = occupant.filter(|occ| *occ != target) {
@@ -1250,7 +1437,14 @@ impl Collection {
             .collect();
 
         let scene = self.scene_mut(scene_id).ok_or(SceneError::SceneNotFound)?;
-        if !scene.items.iter().any(|item| item.id == item_id) {
+        // The backdrop wallpaper can't be promoted (a first-frame fit would
+        // overwrite the zoom/pan its transform actually holds); it does get
+        // hidden-and-restored like any other video item.
+        if !scene
+            .items
+            .iter()
+            .any(|item| item.id == item_id && item.backdrop.is_none())
+        {
             return Err(SceneError::ItemNotFound);
         }
         let prior = scene
@@ -1318,7 +1512,50 @@ impl Collection {
         item_id: ItemId,
         visible: bool,
     ) -> Result<(), SceneError> {
-        self.item_mut(scene_id, item_id)?.visible = visible;
+        let source = {
+            let item = self.item_mut(scene_id, item_id)?;
+            item.visible = visible;
+            item.source
+        };
+        // CAP-N73: hiding a window mutes its linked app audio ("muted
+        // together"); showing it unmutes — but only a strip WE auto-muted,
+        // never one the operator muted by hand (else a deliberately-silenced
+        // copyrighted track would go back on air the next time the window is
+        // shown). `hidden_muted` records exactly which strips this link muted.
+        let linked: Vec<SourceId> = self
+            .sources
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    &entry.settings,
+                    SourceSettings::AppAudio { linked_window: Some(target), .. }
+                        if *target == source
+                )
+            })
+            .map(|entry| entry.id)
+            .collect();
+        for id in linked {
+            if visible {
+                // Restore only what the hide muted; a manual mute stays put.
+                if self.hidden_muted.remove(&id) {
+                    let _ = self.set_audio_muted(id, false);
+                }
+            } else {
+                // Auto-mute only a strip that is currently audible; a strip the
+                // operator already muted is left alone (and not tracked, so it
+                // will not be auto-unmuted on show).
+                let audible = self
+                    .sources
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .and_then(|entry| entry.audio.as_ref())
+                    .is_some_and(|audio| !audio.muted);
+                if audible {
+                    self.hidden_muted.insert(id);
+                    let _ = self.set_audio_muted(id, true);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1329,6 +1566,18 @@ impl Collection {
         locked: bool,
     ) -> Result<(), SceneError> {
         self.item_mut(scene_id, item_id)?.locked = locked;
+        Ok(())
+    }
+
+    /// Pixel-perfect scaling (CAP-N70): how the item's pixels reach the
+    /// canvas (smooth / nearest / integer-snapped nearest / sharp-bilinear).
+    pub fn set_item_scaling(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        scaling: ScaleMode,
+    ) -> Result<(), SceneError> {
+        self.item_mut(scene_id, item_id)?.scaling = scaling;
         Ok(())
     }
 
@@ -1850,7 +2099,20 @@ mod tests {
 
     #[test]
     fn round_trips_through_json() {
-        let original = full_collection();
+        let mut original = full_collection();
+        // A split media backdrop rides along so the new fields round-trip.
+        let scene = original.active_scene;
+        original
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.mp4")))
+            .expect("backdrop");
+        original
+            .set_backdrop_split(scene, BackdropSplit::Left)
+            .expect("split");
+        // Pixel-perfect scaling (CAP-N70) rides along too.
+        let item = original.scenes[0].items[0].id;
+        original
+            .set_item_scaling(scene, item, ScaleMode::Integer)
+            .expect("scaling");
         let json = serde_json::to_string_pretty(&original).expect("serialize");
         let restored: Collection = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, restored, "the model must round-trip losslessly");
@@ -1927,6 +2189,448 @@ mod tests {
 
         // An unknown scene is rejected.
         assert!(collection.set_guides(SceneId::new(), Vec::new()).is_err());
+    }
+
+    fn backdrop_media(path: &str) -> Source {
+        Source::new(
+            "Backdrop",
+            SourceSettings::Media {
+                path: path.into(),
+                looping: true,
+                hw_decode: true,
+                start_with_recording: false,
+                reverse: false,
+            },
+        )
+    }
+
+    #[test]
+    fn backdrop_sets_replaces_clears_and_stays_pinned() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // A capture already in the scene.
+        let (_cap, cap_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: "dxgi:0".into(),
+                        label: "Display 1".into(),
+                    },
+                ),
+            )
+            .expect("add capture");
+
+        let (wall_src, wall_item) = collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.mp4")))
+            .expect("set")
+            .expect("created");
+        {
+            let scene_ref = collection.scene(scene).expect("scene");
+            assert_eq!(
+                scene_ref.items[0].id, wall_item,
+                "backdrop lands at the bottom"
+            );
+            assert_eq!(scene_ref.items[0].backdrop, Some(BackdropSplit::Full));
+            assert!(scene_ref.items[0].locked);
+            assert!(
+                !scene_ref.items[0].pending_fit,
+                "the compositor owns placement"
+            );
+        }
+
+        // Pinned: the backdrop won't move, and nothing moves below it.
+        collection
+            .reorder_item(scene, wall_item, 5)
+            .expect("no-op reorder");
+        collection
+            .reorder_item(scene, cap_item, 0)
+            .expect("clamped");
+        let scene_ref = collection.scene(scene).expect("scene");
+        assert_eq!(scene_ref.items[0].id, wall_item, "still at the bottom");
+
+        // Not seatable, layoutable, focusable, or centerable.
+        assert!(collection
+            .set_item_slot(scene, wall_item, scene::Corner::TopLeft.slot())
+            .is_ok());
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(wall_item)
+                .expect("item")
+                .pending_slot,
+            None,
+            "seating the backdrop is a no-op"
+        );
+        assert!(collection
+            .apply_layout(scene, Some(wall_item), &[])
+            .is_err());
+        assert!(collection.set_focus(scene, wall_item).is_err());
+
+        // Replacing swaps the pool source; clearing drops item + source.
+        let (wall2_src, _wall2_item) = collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall2.mp4")))
+            .expect("replace")
+            .expect("created");
+        assert!(collection.source(wall_src).is_none(), "old source gc'd");
+        assert!(collection.source(wall2_src).is_some());
+        assert!(
+            collection
+                .set_scene_backdrop(scene, None)
+                .expect("clear")
+                .is_none(),
+            "clear creates nothing"
+        );
+        assert!(
+            collection.source(wall2_src).is_none(),
+            "cleared source gc'd"
+        );
+        assert!(collection
+            .scene(scene)
+            .expect("scene")
+            .items
+            .iter()
+            .all(|item| item.backdrop.is_none()));
+
+        // An unknown scene is rejected.
+        assert!(collection.set_scene_backdrop(SceneId::new(), None).is_err());
+    }
+
+    #[test]
+    fn first_capture_over_a_wallpaper_still_fills_the_canvas() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.png")))
+            .expect("set");
+        let (_cap, cap_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: "dxgi:0".into(),
+                        label: "Display 1".into(),
+                    },
+                ),
+            )
+            .expect("add capture");
+        let item = collection
+            .scene(scene)
+            .expect("scene")
+            .item(cap_item)
+            .expect("item");
+        assert_eq!(
+            item.pending_slot, None,
+            "the wallpaper is not 'another video item' — the capture fills the canvas"
+        );
+    }
+
+    #[test]
+    fn backdrop_split_reseats_the_capture_into_the_other_half() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // No backdrop yet: split errors.
+        assert!(collection
+            .set_backdrop_split(scene, BackdropSplit::Left)
+            .is_err());
+
+        collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.mp4")))
+            .expect("set");
+        let (_cap, cap_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: "dxgi:0".into(),
+                        label: "Display 1".into(),
+                    },
+                ),
+            )
+            .expect("add capture");
+
+        collection
+            .set_backdrop_split(scene, BackdropSplit::Left)
+            .expect("split");
+        let scene_ref = collection.scene(scene).expect("scene");
+        assert_eq!(
+            scene_ref.items[0].backdrop,
+            Some(BackdropSplit::Left),
+            "backdrop takes the left half"
+        );
+        let cap = scene_ref.item(cap_item).expect("item");
+        assert!(cap.pending_fit);
+        assert_eq!(
+            cap.pending_slot,
+            Some(BackdropSplit::Right.region()),
+            "the capture is seated into the right half"
+        );
+
+        // Back to Full: the capture re-fits to the whole canvas.
+        collection
+            .set_backdrop_split(scene, BackdropSplit::Full)
+            .expect("full");
+        let scene_ref = collection.scene(scene).expect("scene");
+        let cap = scene_ref.item(cap_item).expect("item");
+        assert!(cap.pending_fit);
+        assert_eq!(cap.pending_slot, None, "whole-canvas fit");
+    }
+
+    #[test]
+    fn apply_layout_stacks_above_the_backdrop() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.png")))
+            .expect("backdrop");
+        let (_screen, screen_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Screen",
+                    SourceSettings::Display {
+                        capture_id: "dxgi:0".into(),
+                        label: "Display 1".into(),
+                    },
+                ),
+            )
+            .expect("add screen");
+        let (_cam, cam_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::VideoDevice {
+                        device_id: "cam-0".into(),
+                        format: None,
+                        deinterlace: DeinterlaceMode::Off,
+                        field_order: FieldOrder::TopFirst,
+                    },
+                ),
+            )
+            .expect("add cam");
+
+        collection
+            .apply_layout(scene, Some(screen_item), &[(cam_item, Corner::TopRight)])
+            .expect("layout");
+        let order: Vec<ItemId> = collection
+            .scene(scene)
+            .expect("scene")
+            .items
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        assert!(
+            collection.scene(scene).expect("scene").items[0]
+                .backdrop
+                .is_some(),
+            "the backdrop keeps the bottom"
+        );
+        assert_eq!(
+            order[1], screen_item,
+            "the centered screen sits directly above the backdrop"
+        );
+        assert_eq!(order[2], cam_item, "the corner cam sits above the screen");
+    }
+
+    #[test]
+    fn item_scaling_sets_and_rejects_unknown_targets() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_source, item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Cam",
+                    SourceSettings::Display {
+                        capture_id: "dxgi:0".into(),
+                        label: "Display 1".into(),
+                    },
+                ),
+            )
+            .expect("add");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(item)
+                .expect("item")
+                .scaling,
+            ScaleMode::Auto,
+            "smooth by default"
+        );
+        collection
+            .set_item_scaling(scene, item, ScaleMode::SharpBilinear)
+            .expect("set");
+        assert_eq!(
+            collection
+                .scene(scene)
+                .expect("scene")
+                .item(item)
+                .expect("item")
+                .scaling,
+            ScaleMode::SharpBilinear
+        );
+        assert!(collection
+            .set_item_scaling(scene, ItemId::new(), ScaleMode::Nearest)
+            .is_err());
+    }
+
+    #[test]
+    fn linked_app_audio_follows_its_window() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (window_id, window_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Game",
+                    SourceSettings::Window {
+                        capture_id: "window:1234".into(),
+                        label: "Game".into(),
+                    },
+                ),
+            )
+            .expect("add window");
+        let (audio_id, _audio_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "game.exe audio",
+                    SourceSettings::AppAudio {
+                        pid: 4242,
+                        exe: "game.exe".into(),
+                        linked_window: Some(window_id),
+                    },
+                ),
+            )
+            .expect("add audio");
+
+        // Hiding the window mutes the linked strip; showing unmutes.
+        collection
+            .set_item_visible(scene, window_item, false)
+            .expect("hide");
+        assert!(
+            collection
+                .source(audio_id)
+                .and_then(|source| source.audio.as_ref())
+                .is_some_and(|audio| audio.muted),
+            "hidden window = muted app audio"
+        );
+        collection
+            .set_item_visible(scene, window_item, true)
+            .expect("show");
+        assert!(
+            collection
+                .source(audio_id)
+                .and_then(|source| source.audio.as_ref())
+                .is_some_and(|audio| !audio.muted),
+            "shown window = unmuted app audio"
+        );
+
+        // Removing the window removes the linked audio (and its pool entry).
+        collection
+            .remove_item(scene, window_item)
+            .expect("remove window");
+        assert!(collection.source(audio_id).is_none(), "audio leaves too");
+        assert!(
+            collection.scene(scene).expect("scene").items.is_empty(),
+            "no orphaned items"
+        );
+    }
+
+    #[test]
+    fn hiding_a_window_never_clobbers_a_manual_mute() {
+        // CAP-N73 regression: a strip the operator muted by hand must NOT be
+        // force-unmuted when the linked window is shown again — else a
+        // deliberately-silenced (e.g. copyrighted) track goes back on air.
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (window_id, window_item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Game",
+                    SourceSettings::Window {
+                        capture_id: "window:1234".into(),
+                        label: "Game".into(),
+                    },
+                ),
+            )
+            .expect("add window");
+        let (audio_id, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "game.exe audio",
+                    SourceSettings::AppAudio {
+                        pid: 4242,
+                        exe: "game.exe".into(),
+                        linked_window: Some(window_id),
+                    },
+                ),
+            )
+            .expect("add audio");
+        let is_muted = |c: &Collection| {
+            c.source(audio_id)
+                .and_then(|source| source.audio.as_ref())
+                .is_some_and(|audio| audio.muted)
+        };
+
+        // The operator manually mutes the strip while the window is visible.
+        collection.set_audio_muted(audio_id, true).expect("mute");
+        // Toggle the window hidden then visible again.
+        collection
+            .set_item_visible(scene, window_item, false)
+            .expect("hide");
+        collection
+            .set_item_visible(scene, window_item, true)
+            .expect("show");
+        assert!(
+            is_muted(&collection),
+            "a manual mute survives a hide/show cycle"
+        );
+    }
+
+    #[test]
+    fn backdrop_sync_toggles_only_media_backdrops() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        // No backdrop: error.
+        assert!(collection.set_backdrop_sync(scene, true).is_err());
+
+        collection
+            .set_scene_backdrop(scene, Some(backdrop_media("wall.mp4")))
+            .expect("set");
+        collection.set_backdrop_sync(scene, true).expect("toggle");
+        let flagged = collection.sources.iter().any(|source| {
+            matches!(
+                source.settings,
+                SourceSettings::Media {
+                    start_with_recording: true,
+                    ..
+                }
+            )
+        });
+        assert!(flagged, "the media backdrop carries the flag");
+
+        // A still-image backdrop has no playback to sync.
+        collection
+            .set_scene_backdrop(
+                scene,
+                Some(Source::new(
+                    "Backdrop",
+                    SourceSettings::Image {
+                        path: "wall.png".into(),
+                    },
+                )),
+            )
+            .expect("image backdrop");
+        assert!(collection.set_backdrop_sync(scene, true).is_err());
     }
 
     #[test]

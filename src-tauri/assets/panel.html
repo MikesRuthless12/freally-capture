@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Freally Capture — panel</title>
+    <!--
+      The LAN touch panel (CAP-N06) and the tally page (CAP-N07).
+
+      Everything is inline on purpose: no CDN, no web font, no analytics, no
+      remote anything. This page works with the machine offline, and a test
+      (webpanel.rs) fails the build if a remote origin ever creeps in.
+
+      Commands go to POST /api/command and are checked against the same fixed
+      allowlist the desktop UI and the WebSocket API use — this page cannot ask
+      the studio to do anything the studio doesn't already do.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0e13;
+        --panel: #151a22;
+        --line: #262d38;
+        --text: #e8edf5;
+        --muted: #8b97a8;
+        --accent: #4a9eff;
+        --live: #ef4444;
+        --preview: #22c55e;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0.75rem;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.4 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        -webkit-tap-highlight-color: transparent;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 0.85rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .bar {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .pill {
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .pill.on {
+        border-color: transparent;
+        color: #fff;
+      }
+      .pill.live.on {
+        background: var(--live);
+      }
+      .pill.rec.on {
+        background: var(--live);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.5rem;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 0.6rem;
+        padding: 0.9rem 0.6rem;
+        min-height: 3.25rem;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button.program {
+        border-color: var(--live);
+        box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.35);
+      }
+      button.preview {
+        border-color: var(--preview);
+      }
+      section {
+        margin-top: 1rem;
+      }
+      .strip {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.5rem;
+        border: 1px solid var(--line);
+        border-radius: 0.6rem;
+        background: var(--panel);
+        margin-bottom: 0.4rem;
+      }
+      .strip .name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .strip input[type="range"] {
+        flex: 2;
+        accent-color: var(--accent);
+      }
+      .mute {
+        min-height: 2.2rem;
+        padding: 0.35rem 0.6rem;
+      }
+      .mute.on {
+        background: var(--live);
+        border-color: var(--live);
+        color: #fff;
+      }
+      .err {
+        color: var(--live);
+        font-size: 0.8rem;
+        min-height: 1.2em;
+      }
+      /* The tally page: nothing but colour, readable across a room. */
+      body.tally {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 0;
+        transition: background-color 120ms linear;
+      }
+      body.tally .label {
+        font-size: 12vw;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+      }
+      body.tally.program {
+        background: var(--live);
+        color: #fff;
+      }
+      body.tally.preview {
+        background: var(--preview);
+        color: #06210f;
+      }
+      body.tally.idle {
+        background: #0b0e13;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      // The key rides the query string (a scanned QR carries it); every
+      // request repeats it. The page never stores it anywhere else.
+      const params = new URLSearchParams(location.search);
+      const KEY = params.get("k") || "";
+      const IS_TALLY = location.pathname.startsWith("/tally");
+      // Which scene this tally box watches (?scene=Name). Absent = the
+      // program as a whole (live/not).
+      const WATCH = params.get("scene") || "";
+
+      const api = (path) => `${path}?k=${encodeURIComponent(KEY)}`;
+
+      async function send(command, cmdParams) {
+        const response = await fetch(api("/api/command"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command, params: cmdParams || {} }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${response.status}`);
+        }
+        return response.json();
+      }
+
+      const app = document.getElementById("app");
+      let error = "";
+
+      function renderTally(state) {
+        document.body.className = "tally";
+        let mode = "idle";
+        let label = "IDLE";
+        if (WATCH) {
+          const scene = (state.scenes || []).find((s) => s.name === WATCH);
+          if (scene && scene.program) {
+            mode = "program";
+            label = "ON AIR";
+          } else if (scene && scene.preview) {
+            mode = "preview";
+            label = "PREVIEW";
+          } else {
+            label = WATCH;
+          }
+        } else if (state.live || state.recording) {
+          mode = "program";
+          label = state.live ? "LIVE" : "REC";
+        } else {
+          label = "STANDBY";
+        }
+        document.body.classList.add(mode);
+        app.innerHTML = `<div class="label"></div>`;
+        app.querySelector(".label").textContent = label;
+      }
+
+      function renderPanel(state) {
+        const scenes = state.scenes || [];
+        const sources = state.sources || [];
+        app.innerHTML = `
+          <div class="bar">
+            <span class="pill live ${state.live ? "on" : ""}">LIVE</span>
+            <span class="pill rec ${state.recording ? "on" : ""}">REC</span>
+            <span class="err" id="err"></span>
+          </div>
+          <h1>Scenes</h1>
+          <div class="grid" id="scenes"></div>
+          <section>
+            <h1>Actions</h1>
+            <div class="grid" id="actions"></div>
+          </section>
+          <section>
+            <h1>Mixer</h1>
+            <div id="mixer"></div>
+          </section>
+        `;
+        document.getElementById("err").textContent = error;
+
+        const sceneGrid = document.getElementById("scenes");
+        for (const scene of scenes) {
+          const button = document.createElement("button");
+          button.textContent = scene.name;
+          if (scene.program) button.classList.add("program");
+          else if (scene.preview) button.classList.add("preview");
+          button.onclick = () => act("setProgramScene", { scene: scene.id });
+          sceneGrid.appendChild(button);
+        }
+
+        const actions = [
+          ["Transition", "transition", {}],
+          [state.recording ? "Stop REC" : "Start REC", state.recording ? "stopRecording" : "startRecording", {}],
+          [state.live ? "End stream" : "Go live", state.live ? "stopStream" : "startStream", {}],
+          ["Save replay", "saveReplay", {}],
+          ["Marker", "addMarker", {}],
+        ];
+        const actionGrid = document.getElementById("actions");
+        for (const [label, command, args] of actions) {
+          const button = document.createElement("button");
+          button.textContent = label;
+          button.onclick = () => act(command, args);
+          actionGrid.appendChild(button);
+        }
+
+        const mixer = document.getElementById("mixer");
+        for (const source of sources) {
+          const strip = document.createElement("div");
+          strip.className = "strip";
+
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = source.name;
+
+          const fader = document.createElement("input");
+          fader.type = "range";
+          fader.min = "-60";
+          fader.max = "6";
+          fader.step = "0.5";
+          fader.value = String(Math.max(-60, Math.min(6, source.volumeDb)));
+          fader.oninput = () =>
+            act("setAudioVolume", { sourceId: source.id, volumeDb: Number(fader.value) }, true);
+
+          const mute = document.createElement("button");
+          mute.className = `mute ${source.muted ? "on" : ""}`;
+          mute.textContent = source.muted ? "Muted" : "Mute";
+          mute.onclick = () => act("setAudioMuted", { sourceId: source.id, muted: !source.muted });
+
+          strip.append(name, fader, mute);
+          mixer.appendChild(strip);
+        }
+      }
+
+      async function act(command, args, quiet) {
+        try {
+          error = "";
+          await send(command, args);
+          if (!quiet) await refresh();
+        } catch (err) {
+          error = String(err.message || err);
+          const slot = document.getElementById("err");
+          if (slot) slot.textContent = error;
+        }
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch(api("/api/state"), { cache: "no-store" });
+          if (response.status === 401) {
+            app.textContent = "Wrong or missing key — open the panel from the QR code in Settings.";
+            return;
+          }
+          const state = await response.json();
+          if (IS_TALLY) renderTally(state);
+          else renderPanel(state);
+        } catch {
+          // The studio is restarting: keep the last render and retry.
+        }
+      }
+
+      refresh();
+      // Tally needs to be snappy; the control panel can be gentler.
+      setInterval(refresh, IS_TALLY ? 300 : 1000);
+    </script>
+  </body>
+</html>

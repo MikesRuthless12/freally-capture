@@ -11,8 +11,8 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — 0.99.0 closes all 26 must-haves; the remaining feature phases land
-> before 1.0.0.** The engine is
+> **Status: in development — 0.99.0 closed all 26 must-haves; 0.200.0 adds the Automation and
+> Capture-Depth phases; the remaining feature phases land before 1.0.0.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
@@ -38,13 +38,19 @@ leaves your machine is the stream you chose to send.
 > redacted diagnostics bundle), and **sources, devices & calibration** (0.99.0 — test signals, an
 > A/V sync calibration workbench, timer/clock sources, text bound to a watched file, a hotkey map
 > with conflict detection, mixer pan/solo/mono, deinterlacing, and camera controls with per-device
-> profiles). **1.0.0 ships once the remaining feature set lands** — it is deliberately gated on the
+> profiles). **0.200.0** then adds two themed phases at once — **Automation** (a rules engine, macros
+> with studio variables, MIDI and OSC control surfaces, hotkey chords/layers, a LAN touch panel, a
+> tally-light service, PTZ camera control, and a timed show rundown — every surface sharing one fixed,
+> off-by-default command allowlist) and **Capture & Device Depth** (a low-latency passthrough monitor,
+> pixel-perfect scaling, punch-in zoom, auto black-bar crop, window↔app-audio auto-linking, and
+> HDR→SDR tone-mapping), alongside a scene backdrop/wallpaper and true reverse media playback.
+> **1.0.0 ships once the remaining feature set lands** — it is deliberately gated on the
 > *complete* product, not just the must-haves. A true browser source, the virtual camera, and
 > game-capture GPU hooking follow as their own milestones. The detailed planning + design set
 > (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
 > privately** and is not published here.
 > **Installers for every release are on the
-> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.99.0 is the
+> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.200.0 is the
 > latest.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your

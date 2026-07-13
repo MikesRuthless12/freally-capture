@@ -92,6 +92,9 @@ export type Settings = {
   /** CAP-M18: device id → control tag → value. Server-owned — written by
    * cameraControlSet and PRESERVED across settingsSet (never edit here). */
   cameraProfiles?: Record<string, Record<string, number>>;
+  /** CAP-N74: capture id → HDR tone-map. Server-owned — written by
+   * hdrToneMapSet and PRESERVED across settingsSet (never edit here). */
+  hdrToneMap?: Record<string, HdrToneMapSetting>;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */
@@ -112,6 +115,191 @@ export type Settings = {
   browserDocks: BrowserDockSettings[];
   /** Sandboxed Lua scripts (Phase 7). */
   scripts: ScriptSettings[];
+  /** Automation: rules + macros (CAP-N01/N02). Rules ship disabled. */
+  automation?: AutomationSettings;
+  /** The show rundown (CAP-N09). Auto-advance ships off. */
+  rundown?: RundownSettings;
+  /** The LAN touch panel + tally service (CAP-N06/N07). Off by default. */
+  webPanel?: WebPanelSettings;
+  /** The OSC control surface (CAP-N04). Off by default. */
+  osc?: OscSettings;
+  /** PTZ cameras (CAP-N08). Empty by default. */
+  ptz?: PtzSettings;
+  /** MIDI control surfaces (CAP-N03). No port opens until one is picked. */
+  midi?: MidiSettings;
+};
+
+/** The fixed studio-command allowlist automation actions draw from
+ * (CAP-N01/N02) — mirrors `ALLOWED_COMMANDS` in remote_api.rs. An action can
+ * be nothing else: no file paths, no processes, no network. */
+export const ALLOWED_COMMANDS = [
+  "getStatus",
+  "listScenes",
+  "setProgramScene",
+  "setPreviewScene",
+  "setStudioMode",
+  "transition",
+  "startStream",
+  "stopStream",
+  "startRecording",
+  "stopRecording",
+  "pauseRecording",
+  "addMarker",
+  "armReplay",
+  "saveReplay",
+  "setAudioMuted",
+  "setAudioVolume",
+  "setFilterEnabled",
+  "runMacro",
+] as const;
+
+/** One step of a macro (CAP-N02). */
+export type MacroStep =
+  | { kind: "action"; command: string; params?: unknown }
+  | { kind: "wait"; ms: number }
+  | { kind: "setVariable"; name: string; value: string };
+
+/** One named macro (CAP-N02); `hotkey` is an OS-global accelerator. */
+export type AutomationMacro = {
+  name: string;
+  steps: MacroStep[];
+  repeat: number;
+  /** Plain ("Ctrl+Shift+M") or a chord ("Ctrl+K, 3" — CAP-N05). */
+  hotkey?: string;
+  /** The hotkey layer this accelerator belongs to (CAP-N05); absent = all. */
+  layer?: number;
+};
+
+/** What makes a rule fire (CAP-N01). Idle/focus are Windows-only signals —
+ * elsewhere those triggers simply never fire, and the UI says so. */
+export type AutomationTrigger =
+  | { kind: "sceneSwitched"; scene: string }
+  | { kind: "streamState"; live: boolean }
+  | { kind: "recordingState"; recording: boolean }
+  | { kind: "sourceError"; source: string }
+  | { kind: "audioLevel"; source: string; thresholdDb: number; above: boolean }
+  | { kind: "systemIdle"; seconds: number }
+  | { kind: "windowFocus"; exe: string }
+  | { kind: "timeOfDay"; at: string }
+  | { kind: "fileChanged"; path: string };
+
+/** A condition gate — all must hold for a rule's actions to run. */
+export type AutomationCondition =
+  | { kind: "variableEquals"; name: string; value: string }
+  | { kind: "streaming"; live: boolean }
+  | { kind: "recording"; recording: boolean };
+
+/** One automation rule (CAP-N01). Ships disabled. */
+export type AutomationRule = {
+  name: string;
+  enabled: boolean;
+  trigger: AutomationTrigger;
+  conditions: AutomationCondition[];
+  actions: MacroStep[];
+  macroName: string;
+};
+
+/** Rules + macros (CAP-N01/N02). */
+export type AutomationSettings = {
+  rules: AutomationRule[];
+  macros: AutomationMacro[];
+};
+
+/** One rundown step (CAP-N09): a scene, a hold, and optional actions. */
+export type RundownStep = {
+  name: string;
+  /** The scene to cut to; "" = stay on the current one. */
+  scene: string;
+  /** Seconds to hold before auto-advance; 0 = manual only. */
+  holdSecs: number;
+  actions: MacroStep[];
+};
+
+/** The show rundown (CAP-N09). Auto-advance ships off. */
+export type RundownSettings = {
+  steps: RundownStep[];
+  autoAdvance: boolean;
+};
+
+/** The rundown's live state — "next up + remaining time". */
+export type RundownStatus = {
+  at?: number;
+  remainingSecs?: number;
+  nextUp?: string;
+  running: boolean;
+};
+
+/** The LAN touch panel + tally service (CAP-N06/N07). Off by default;
+ * password required; loopback unless `lan`. */
+export type WebPanelSettings = {
+  enabled: boolean;
+  port: number;
+  lan: boolean;
+  password: string;
+};
+
+/** The OSC control surface (CAP-N04). Off by default; LAN-only. */
+export type OscSettings = {
+  enabled: boolean;
+  port: number;
+  lan: boolean;
+};
+
+/** A learned MIDI control (CAP-N03). */
+export type MidiControl =
+  { kind: "note"; channel: number; note: number } | { kind: "cc"; channel: number; cc: number };
+
+/** What a MIDI control drives (CAP-N03). Actions ride the fixed allowlist. */
+export type MidiTarget =
+  | { kind: "action"; command: string; params?: unknown }
+  | { kind: "macro"; name: string }
+  | { kind: "volume"; source: string }
+  | { kind: "mute"; source: string }
+  | { kind: "scene"; scene: string };
+
+/** One learned MIDI binding. */
+export type MidiBinding = {
+  control: MidiControl;
+  target: MidiTarget;
+  /** Light the pad's LED / drive the motor fader from the studio's state. */
+  feedback: boolean;
+};
+
+/** MIDI control surfaces (CAP-N03). No port opens until one is picked. */
+export type MidiSettings = {
+  input: string;
+  output: string;
+  bindings: MidiBinding[];
+};
+
+/** Which way a PTZ head is driven (CAP-N08). */
+export type PtzMoveDirection =
+  "up" | "down" | "left" | "right" | "upLeft" | "upRight" | "downLeft" | "downRight" | "stop";
+
+/** One named PTZ preset (a VISCA memory slot). */
+export type PtzPreset = { name: string; slot: number };
+
+/** "When this scene goes on program, recall this preset." */
+export type PtzSceneRecall = { scene: string; slot: number };
+
+/** One PTZ camera the operator entered (CAP-N08). Never auto-discovered. */
+export type PtzCamera = {
+  name: string;
+  host: string;
+  port: number;
+  presets: PtzPreset[];
+  sceneRecalls: PtzSceneRecall[];
+};
+
+/** PTZ cameras (CAP-N08). Empty by default. */
+export type PtzSettings = { cameras: PtzCamera[] };
+
+/** One display's HDR→SDR tone-map (CAP-N74). */
+export type HdrToneMapSetting = {
+  /** "clip" | "maxRgb" | "reinhard" | "bt2408". */
+  operator: string;
+  /** 80–1000. */
+  paperWhiteNits: number;
 };
 
 /** One browser dock: a named URL opened as its own dock window. */
@@ -183,6 +371,10 @@ export type HotkeySettings = {
   timerToggle: string | null;
   /** Reset every timer source (CAP-M15). */
   timerReset: string | null;
+  /** Punch-in zoom presets (CAP-N71). */
+  zoom100: string | null;
+  zoom150: string | null;
+  zoom200: string | null;
 };
 
 /** The panic button's privacy slate (CAP-M22). */
@@ -606,7 +798,18 @@ export type SourceSettings =
       fieldOrder: FieldOrder;
     }
   | { kind: "image"; path: string }
-  | { kind: "media"; path: string; loop: boolean; hwDecode: boolean }
+  | {
+      kind: "media";
+      path: string;
+      loop: boolean;
+      hwDecode: boolean;
+      /** Hold on the first frame until recording starts, then play from the
+       * top (the backdrop's "start playback with recording" option). */
+      startWithRecording?: boolean;
+      /** True reverse playback (GIFs reverse natively; video renders a
+       * reversed copy once, via the labeled ffmpeg component). */
+      reverse?: boolean;
+    }
   | { kind: "remoteGuest"; label: string }
   | { kind: "color"; color: Rgba; width: number; height: number }
   | { kind: "nestedScene"; scene: SceneId }
@@ -889,7 +1092,8 @@ export type FilterKind =
   | { type: "renderDelay"; delayMs: number }
   | { type: "sharpen"; amount: number }
   | { type: "scroll"; speedX: number; speedY: number }
-  | { type: "crop"; left: number; top: number; right: number; bottom: number };
+  | { type: "crop"; left: number; top: number; right: number; bottom: number }
+  | { type: "flip"; horizontal: boolean; vertical: boolean };
 
 export type FilterTypeName = FilterKind["type"];
 
@@ -912,6 +1116,16 @@ export type DisplayInfo = {
   primary: boolean;
 };
 
+/** Where a scene's backdrop wallpaper sits: the whole canvas (cover-fit) or
+ * one half (fit-contained there, the capture free to take the other half).
+ * Mirrors `BackdropSplit` in Rust. */
+export type BackdropSplit = "full" | "left" | "right" | "top" | "bottom";
+
+/** Pixel-perfect scaling (CAP-N70). Mirrors `ScaleMode` in Rust: `auto` is
+ * the ordinary smooth bilinear; `integer` also snaps the drawn scale to
+ * whole multiples. */
+export type ScaleMode = "auto" | "nearest" | "integer" | "sharpBilinear";
+
 /** One placement of a source in a scene. */
 export type SceneItem = {
   id: ItemId;
@@ -925,6 +1139,13 @@ export type SceneItem = {
   /** When set, the first-frame fit targets this normalized slot (a layout corner). */
   pendingSlot?: NormRect;
   filters: Filter[];
+  /** Pixel-perfect scaling (CAP-N70); absent = "auto" (smooth bilinear). */
+  scaling?: ScaleMode;
+  /** Present on the scene's backdrop wallpaper (pinned bottom layer): which
+   * canvas region it fills. The compositor owns its placement; the item's
+   * transform is only clamped zoom/pan within that region, and the canvas
+   * skips it for clicks and drags. */
+  backdrop?: BackdropSplit | null;
 };
 
 /** One scene: ordered items, index = z-order, `items[0]` bottom-most. */
@@ -1052,6 +1273,8 @@ export type SourceRuntime = {
   width?: number;
   height?: number;
   fps?: number;
+  /** An HDR display feeds this source (CAP-N74) — offer the tone-map. */
+  hdr?: boolean;
   errorCode?: SourceRuntimeErrorCode;
   errorMessage?: string;
   /** Ms since the last delivered frame (capture sources only) (CAP-M13). */

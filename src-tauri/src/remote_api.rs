@@ -46,6 +46,66 @@ impl RemoteHandler for AppHandler {
     }
 }
 
+/// The fixed command allowlist, by name — the single vocabulary the remote
+/// API **and** the automation engine (CAP-N01/N02) share. Anything not on
+/// this list is rejected by both, so automation can never reach a surface
+/// the remote API doesn't already expose (no file paths, no processes).
+pub const ALLOWED_COMMANDS: [&str; 18] = [
+    "getStatus",
+    "listScenes",
+    "setProgramScene",
+    "setPreviewScene",
+    "setStudioMode",
+    "transition",
+    "startStream",
+    "stopStream",
+    "startRecording",
+    "stopRecording",
+    "pauseRecording",
+    "addMarker",
+    "armReplay",
+    "saveReplay",
+    "setAudioMuted",
+    "setAudioVolume",
+    "setFilterEnabled",
+    "runMacro",
+];
+
+/// Whether `command` is on the allowlist (the automation validator's gate).
+pub fn is_allowed_command(command: &str) -> bool {
+    ALLOWED_COMMANDS.contains(&command)
+}
+
+/// The automation executor's entry point: reject anything off the allowlist
+/// **before** dispatching, so a hand-edited settings file can never reach a
+/// command the remote API doesn't already expose.
+pub fn dispatch_any<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    command: &str,
+    params: &Value,
+) -> Result<Value, String> {
+    if !is_allowed_command(command) {
+        return Err(format!("not an allowed studio command: {command}"));
+    }
+    // The dispatcher is written against the concrete runtime the app uses;
+    // automation always runs inside that same app.
+    let app: &AppHandle = as_default_runtime(app);
+    dispatch(app, command, params)
+}
+
+/// Automation and the remote API share one process and one runtime. The
+/// dispatcher is written against the app's concrete runtime; this recovers
+/// it from a generic handle by downcast — **no unsafe, no transmute** (the
+/// crate is `#![forbid(unsafe_code)]`).
+fn as_default_runtime<R: tauri::Runtime>(app: &AppHandle<R>) -> &AppHandle {
+    // `AppHandle<R>` is only ever `AppHandle<Wry>` in this binary; asserting
+    // it here keeps the automation module runtime-generic (its tests use a
+    // mock runtime) without any unsafe code.
+    (app as &dyn std::any::Any)
+        .downcast_ref::<AppHandle>()
+        .expect("the app runs on the default Tauri runtime")
+}
+
 /// The fixed command allowlist. Everything routes through the same
 /// functions the UI/hotkeys use, so validation and side effects stay
 /// identical no matter who asks.
@@ -102,7 +162,7 @@ pub(crate) fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result
             Ok(json!({ "path": path.display().to_string() }))
         }
         "setAudioMuted" => {
-            let source: SourceId = p_id(params, "sourceId")?;
+            let source: SourceId = resolve_source(app, params)?;
             let muted = p_bool(params, "muted")?;
             crate::commands::audio::studio_set_audio_muted(
                 app.clone(),
@@ -113,7 +173,7 @@ pub(crate) fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result
             Ok(Value::Null)
         }
         "setAudioVolume" => {
-            let source: SourceId = p_id(params, "sourceId")?;
+            let source: SourceId = resolve_source(app, params)?;
             let volume = params
                 .get("volumeDb")
                 .and_then(Value::as_f64)
@@ -141,6 +201,17 @@ pub(crate) fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result
             )?;
             Ok(Value::Null)
         }
+        "runMacro" => {
+            // CAP-N02: macros are callable from the remote API too. The macro
+            // itself can only contain allowlisted actions (validated at save),
+            // so this opens no new surface.
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("missing string param: name")?;
+            crate::automation::run_macro_by_name(app, name);
+            Ok(Value::Null)
+        }
         other => Err(format!("unknown command: {other}")),
     }
 }
@@ -160,6 +231,26 @@ fn p_id<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Result<T, 
         .cloned()
         .ok_or_else(|| format!("missing param: {key}"))?;
     serde_json::from_value(value).map_err(|err| format!("bad {key}: {err}"))
+}
+
+/// `params.sourceId` (an id) **or** `params.sourceName` (the strip's name) —
+/// OSC and touch panels key by the name the operator sees; the UI by id.
+fn resolve_source(app: &AppHandle, params: &Value) -> Result<SourceId, String> {
+    if let Some(raw) = params.get("sourceId").cloned() {
+        return serde_json::from_value(raw).map_err(|err| format!("bad sourceId: {err}"));
+    }
+    let name = params
+        .get("sourceName")
+        .and_then(Value::as_str)
+        .ok_or("missing param: sourceId or sourceName")?;
+    let snapshot = app.state::<StudioState>().snapshot();
+    snapshot
+        .collection
+        .sources
+        .iter()
+        .find(|source| source.name == name)
+        .map(|source| source.id)
+        .ok_or_else(|| format!("no source named {name}"))
 }
 
 /// `params.scene` is a scene **id or exact name** — controllers usually key
@@ -315,4 +406,22 @@ pub fn spawn_manager(app: AppHandle) {
             std::thread::sleep(Duration::from_millis(250));
         })
         .expect("remote-api manager thread spawns");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_allowlist_const_matches_the_dispatch_arms() {
+        let source = include_str!("remote_api.rs");
+        for command in super::ALLOWED_COMMANDS {
+            let arm = format!("\"{command}\" =>");
+            assert!(
+                source.contains(&arm),
+                "{command} is on the allowlist but has no dispatch arm"
+            );
+        }
+        assert!(!super::is_allowed_command("readFile"));
+        assert!(!super::is_allowed_command("exec"));
+        assert!(super::is_allowed_command("startRecording"));
+    }
 }
