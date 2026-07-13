@@ -76,6 +76,11 @@ impl ReplayState {
         self.active.load(Ordering::Relaxed)
     }
 
+    /// Whether the buffer is armed — the quit guard's check (CAP-M23).
+    pub fn is_armed(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
+    }
+
     /// Push the newest program frame (never blocks; the buffer drops
     /// honestly when its encoder can't keep up).
     pub fn push_video(&self, pixels: Arc<Vec<u8>>) {
@@ -230,7 +235,8 @@ pub fn arm<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         let ready = ready.clone();
         let dir = dir.clone();
         let settings = settings.clone();
-        Box::new(move || {
+        // The replay ring keeps its encoder — no failover ladder here.
+        Box::new(move |_death: Option<&fcap_stream::SinkDeath>| {
             let plan = ReplayPlan {
                 encoder_id: encoder_id.clone(),
                 rate_control: RateControl {
@@ -379,11 +385,18 @@ pub fn save<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     }
 
     let recording = app.state::<SettingsStore>().get().recording;
-    let folder = crate::recording::recordings_folder(&recording);
+    let folder = crate::recording::output_folder(&recording, &recording.replay_folder);
     std::fs::create_dir_all(&folder)
-        .map_err(|err| format!("could not create the recordings folder: {err}"))?;
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
-    let out = crate::recording::unique_recording_path(&folder, "Replay", &timestamp, "mkv", false);
+        .map_err(|err| format!("could not create the replay folder: {err}"))?;
+    // CAP-M25: replays resolve their own token template; `{marker-count}`
+    // is the live session's count ("saved after marker 3").
+    let counter = crate::recording::counter_for(app, &recording.replay_template, recording.counter);
+    let canvas = app
+        .state::<crate::studio::StudioState>()
+        .with_collection(|collection| (collection.canvas_width, collection.canvas_height));
+    let naming = crate::recording::naming_context(app, "Replay".to_owned(), canvas, counter);
+    let stem = crate::filename::resolve_template(&recording.replay_template, &naming);
+    let out = crate::recording::unique_recording_path(&folder, &stem, "mkv", false);
 
     concat_copy(&ready, &picked, &out)?;
     *state

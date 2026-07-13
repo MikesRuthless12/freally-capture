@@ -908,6 +908,13 @@ output-install = Installeren…
 output-recordings-folder = Opnamemap
 output-folder-placeholder = OS-videomap
 output-filename-prefix = Bestandsnaamvoorvoegsel
+output-recording-template = Bestandsnaam voor opnamen
+output-replay-template = Bestandsnaam voor replays
+output-still-template = Bestandsnaam voor stilstaande beelden
+output-template-tokens = Tokens: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Map voor replays
+output-still-folder = Map voor stilstaande beelden
+output-same-folder-placeholder = Opnamemap
 output-frame-rate = Framerate
 output-fps-option = { $fps } fps
 output-split-every = Splitsen elke (minuten, 0 = uit)
@@ -1382,3 +1389,102 @@ still-saved-toast = Beeld opgeslagen: { $name }
 still-failed-toast = Beeld vastleggen mislukt: { $error }
 hotkeys-still = Beeld vastleggen
 hotkeys-still-placeholder = bijv. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Brongezondheid…
+health-title = Brongezondheid
+health-col-source = Bron
+health-col-state = Status
+health-col-resolution = Resolutie
+health-col-fps = FPS
+health-col-last-frame = Laatste frame
+health-col-dropped = Verworpen
+health-col-retries = Herstarts
+health-col-actions = Acties
+health-state-live = Live
+health-state-waiting = Wachtend
+health-state-error = Fout
+health-state-inactive = Inactief
+health-restart = Herstarten
+health-properties = Eigenschappen
+health-empty = Deze collectie heeft nog geen bronnen.
+health-seconds = { $value } s
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Freally Capture afsluiten?
+quit-body = Nu afsluiten voert het volgende veilig en in volgorde uit:
+quit-consequence-stream = De livestream beëindigen en de verbinding met de dienst verbreken.
+quit-consequence-recording = De opname stoppen en de bestanden afronden.
+quit-consequence-replay = De replaybuffer afsluiten — niet-opgeslagen replaybeelden gaan verloren.
+quit-confirm = Veilig afsluiten
+quit-quitting = Bezig met afsluiten…
+quit-cancel = Annuleren
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Onderbroken opnamen herstellen?
+salvage-body = De vorige sessie eindigde onverwacht terwijl deze opnamen nog werden geschreven. Herstellen maakt een afspeelbare kopie naast het origineel — het originele bestand wordt nooit gewijzigd.
+salvage-repair = Herstellen
+salvage-repairing = Bezig met herstellen…
+salvage-done = Hersteld
+salvage-repaired = Hersteld → { $name }
+salvage-failed = Herstellen mislukt: { $error }
+salvage-dismiss = Niet nu
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Encoderfout — overgeschakeld van { $from } naar { $to }. De stream is opnieuw verbonden en blijft actief.
+fallback-toast-recording = Encoderfout — overgeschakeld van { $from } naar { $to }. De opname gaat verder in een nieuw bestand.
+fallback-note = Encoder-terugval: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Programmageluid is stil geworden
+alarm-clipping = Programmageluid clipt
+alarm-black = Programmabeeld is zwart
+alarm-frozen = Programmabeeld is al even niet veranderd
+alarm-lowDisk = Schijfruimte: nog ongeveer { $minutes } min bij de huidige bitrate
+alarm-dismiss = Alarm sluiten
+alarm-cleared = Opgelost: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Paniek — naar privacyscherm snijden
+panic-banner-title = Paniek
+panic-banner-body = Het programma toont het privacyscherm; alle audio is gedempt en captures zijn gestopt. Stream en opname blijven actief.
+panic-restore = Herstellen…
+panic-restore-confirm = Programma herstellen?
+panic-restore-yes = Herstellen
+panic-restore-cancel = Annuleren
+hotkeys-panic = Paniek (privacyscherm)
+hotkeys-panic-placeholder = bijv. Ctrl+Shift+F12
+panic-slate-color = Kleur privacyscherm
+panic-slate-image = Afbeelding privacyscherm
+panic-slate-image-placeholder = Optioneel afbeeldingspad
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Diagnosebundel
+diag-intro = Exporteert een geredigeerde .zip (configuratiesnapshot, encoderprobe, recente statistieken — geheimen, paden en namen zitten er nooit in) om handmatig aan een GitHub-issue te hangen. Er wordt niets verzonden.
+diag-preview = Inhoud bekijken
+diag-hide-preview = Voorbeeld verbergen
+diag-export = .zip exporteren
+diag-exported = Geëxporteerd: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Pre-flight vóór live
+preflight-intro = Elk blokkerend punt moet groen zijn; de rest zijn eerlijke hints.
+preflight-item-targets = Streamdoelen ingesteld (sleutel/URL)
+preflight-item-encoder = Bruikbare encoder beschikbaar
+preflight-item-sources = Alle bronnen gezond
+preflight-item-disk = Schijfruimte voor de opname
+preflight-item-mic = Microfoonmeting
+preflight-item-desktopAudio = Desktopaudio-meting
+preflight-item-replay = Replaybuffer actief
+preflight-targets-detail = { $count } ingeschakeld
+preflight-sources-detail = { $count } bron(nen) met fout
+preflight-disk-detail = ~{ $minutes } min bij huidige bitrate
+preflight-fix-stream = Streaminstellingen…
+preflight-fix-components = Componenten…
+preflight-fix-sources = Brongezondheid…
+preflight-fix-replay = Activeren
+preflight-optional = optioneel
+preflight-hold = Go Live blokkeren tot alles groen is
+preflight-cancel = Annuleren
+preflight-go-anyway = Toch live gaan
+preflight-go-live = Ga live

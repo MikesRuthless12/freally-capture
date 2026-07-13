@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { streamStart, streamStatus, streamStop } from "../api/commands";
 import { onStream } from "../api/events";
-import type { StreamStatus } from "../api/types";
+import type { Settings, StreamStatus } from "../api/types";
+import { PreflightDialog } from "../panels/PreflightDialog";
 import { useT } from "../i18n/t";
 import { formatHms } from "../lib/time";
 
@@ -18,17 +19,25 @@ export function LiveButton({
   disabled,
   onNeedsComponents,
   onNeedsSettings,
+  onOpenSourceHealth,
+  onSettingsSaved,
 }: {
   disabled: boolean;
   /** The honest ffmpeg gate: route the user to the labeled component panel. */
   onNeedsComponents: () => void;
   /** A missing key/ingest routes to the Stream settings. */
   onNeedsSettings: () => void;
+  /** The pre-flight's "sources" fix opens the health dashboard (CAP-M13). */
+  onOpenSourceHealth: () => void;
+  /** The pre-flight's hold toggle saves settings — keep App's copy fresh. */
+  onSettingsSaved: (next: Settings) => void;
 }) {
   const t = useT();
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The go-live pre-flight checklist (CAP-M09).
+  const [preflight, setPreflight] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -50,15 +59,11 @@ export function LiveButton({
 
   const live = status?.state === "live" || status?.state === "reconnecting";
 
-  const toggle = async () => {
+  const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      if (live) {
-        await streamStop();
-      } else {
-        await streamStart();
-      }
+      await streamStart();
     } catch (raw) {
       const message = String(raw);
       setError(message);
@@ -67,6 +72,24 @@ export function LiveButton({
       } else if (message.includes("stream key") || message.includes("ingest")) {
         onNeedsSettings();
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async () => {
+    if (!live) {
+      // CAP-M09: Go Live runs through the pre-flight checklist first.
+      setError(null);
+      setPreflight(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await streamStop();
+    } catch (raw) {
+      setError(String(raw));
     } finally {
       setBusy(false);
     }
@@ -122,6 +145,28 @@ export function LiveButton({
         <p role="alert" className="m-0 text-[11px] leading-snug break-words text-red-300">
           {shownError}
         </p>
+      )}
+      {preflight && (
+        <PreflightDialog
+          onSettingsSaved={onSettingsSaved}
+          onClose={() => setPreflight(false)}
+          onProceed={() => {
+            setPreflight(false);
+            void start();
+          }}
+          onOpenStreamSettings={() => {
+            setPreflight(false);
+            onNeedsSettings();
+          }}
+          onOpenComponents={() => {
+            setPreflight(false);
+            onNeedsComponents();
+          }}
+          onOpenSourceHealth={() => {
+            setPreflight(false);
+            onOpenSourceHealth();
+          }}
+        />
       )}
     </>
   );

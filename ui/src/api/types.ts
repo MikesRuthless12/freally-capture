@@ -101,6 +101,8 @@ export type Settings = {
   transition: TransitionSettings;
   /** Global action hotkeys (Phase 5). */
   hotkeys: HotkeySettings;
+  /** The panic button's privacy slate (CAP-M22). */
+  panicSlate: PanicSlateSettings;
   /** The WebSocket remote-control API (Phase 7). */
   remoteControl: RemoteControlSettings;
   /** Browser docks — named URLs opened as dock windows (Phase 7). */
@@ -172,6 +174,16 @@ export type HotkeySettings = {
   addMarker: string | null;
   /** Grab a still frame of the program (CAP-M08). */
   still: string | null;
+  /** Cut to the privacy slate + hard-mute (CAP-M22). Engage only. */
+  panic: string | null;
+};
+
+/** The panic button's privacy slate (CAP-M22). */
+export type PanicSlateSettings = {
+  /** `#rrggbb`. */
+  color: string;
+  /** Optional image path ("" = colour only), drawn native-size centered. */
+  image: string;
 };
 
 /** What a still-frame grab captures (CAP-M08). Mirrors `StillTarget` in studio.rs. */
@@ -289,6 +301,8 @@ export type StreamSettings = {
   targets: StreamTargetSettings[];
   /** Start a local recording automatically on Go Live. */
   autoRecord: boolean;
+  /** CAP-M09: refuse "Go Live anyway" until every blocking item is green. */
+  preflightHold: boolean;
 };
 
 /** One target's slice of the `stream` event payload. */
@@ -357,7 +371,17 @@ export type RecordingSettings = {
   tracksMask: number;
   /** Output folder ("" = the OS Videos folder). */
   folder: string;
+  /** The `{prefix}` token's value (CAP-M25). */
   filenamePrefix: string;
+  /** Token filename templates (CAP-M25) for recordings, replays, stills. */
+  template: string;
+  replayTemplate: string;
+  stillTemplate: string;
+  /** Per-output folders ("" = the recordings folder) (CAP-M25). */
+  replayFolder: string;
+  stillFolder: string;
+  /** The persisted `{counter}` token value — server-owned, read-only here. */
+  counter: number;
   /** Split into playable segments every N minutes (0 = off). */
   splitMinutes: number;
   /** Also record the vertical canvas (a parallel "… (vertical)" file). */
@@ -856,6 +880,8 @@ export type StudioDto = {
   studioMode?: StudioModeDto;
   /** Undo/redo availability + the viewable history list (CAP-M01). */
   history: HistoryState;
+  /** Panic slate engaged (CAP-M22) — absent when false. */
+  panic?: boolean;
 };
 
 /**
@@ -905,6 +931,38 @@ export type SourceRuntime = {
   fps?: number;
   errorCode?: SourceRuntimeErrorCode;
   errorMessage?: string;
+  /** Ms since the last delivered frame (capture sources only) (CAP-M13). */
+  lastFrameMs?: number;
+  /** Capture frames overwritten before the compositor took them (CAP-M13). */
+  dropped?: number;
+  /** Pipeline restarts (manual retry + auto-recover) (CAP-M13). */
+  retries?: number;
+};
+
+/** The `alarm` push event (CAP-M10): a broadcast-safety watchdog raised or
+ * cleared. Non-modal — a dismissible banner + the a11y announcer. */
+export type AlarmKind = "silentAudio" | "clipping" | "black" | "frozen" | "lowDisk";
+export type Alarm = {
+  kind: AlarmKind;
+  active: boolean;
+  /** lowDisk only: the forecast in whole minutes. */
+  minutesLeft?: number;
+};
+
+/** The `encoder-fallback` push event (CAP-M12): a mid-session encoder swap
+ * kept the stream/recording alive — surfaced as a toast + stats note. */
+export type EncoderFallback = {
+  scope: "stream" | "recording";
+  /** Human labels (catalog-resolved), not raw encoder ids. */
+  from: string;
+  to: string;
+};
+
+/** The `quit-guard` push event (CAP-M23): what quitting now interrupts. */
+export type QuitConsequences = {
+  streaming: boolean;
+  recording: boolean;
+  replay: boolean;
 };
 
 /** The `program` push event: compose fps + per-source states (≥1 Hz). */

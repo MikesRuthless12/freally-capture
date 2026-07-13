@@ -21,6 +21,8 @@ vi.mock("../api/events", () => ({
     emitRecording = handler;
     return Promise.resolve(() => undefined);
   },
+  // CAP-M10: the announcer also listens for safety alarms.
+  onAlarm: () => Promise.resolve(() => undefined),
 }));
 
 /** English is the fallback catalog, so the real keys resolve to real sentences. */

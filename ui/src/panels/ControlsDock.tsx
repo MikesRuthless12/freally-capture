@@ -43,9 +43,12 @@ const buttonBase =
 export function ControlsDock({
   settings,
   onSettingsSaved,
+  onOpenSourceHealth,
 }: {
   settings: Settings | null;
   onSettingsSaved: (next: Settings) => void;
+  /** The pre-flight's "sources" fix (CAP-M09) → the CAP-M13 dashboard. */
+  onOpenSourceHealth: () => void;
 }) {
   const t = useT();
   const [rec, setRec] = useState<RecordingStatus | null>(null);
@@ -253,6 +256,8 @@ export function ControlsDock({
           disabled={!settings}
           onNeedsComponents={() => setDialog("components")}
           onNeedsSettings={() => setDialog("stream")}
+          onOpenSourceHealth={onOpenSourceHealth}
+          onSettingsSaved={onSettingsSaved}
         />
         <ReplayControls disabled={!settings} onNeedsComponents={() => setDialog("components")} />
         <div

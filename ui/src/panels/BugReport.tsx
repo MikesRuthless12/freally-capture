@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { bugReportClearCrash, bugReportContext, bugReportSubmit } from "../api/commands";
+import {
+  bugReportClearCrash,
+  bugReportContext,
+  bugReportSubmit,
+  diagnosticsExport,
+  diagnosticsPreview,
+} from "../api/commands";
 import type { BugReportContext } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
@@ -20,6 +26,9 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
   const [includeCrash, setIncludeCrash] = useState(true);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The diagnostics bundle (CAP-M24): show the EXACT content before export.
+  const [bundlePreview, setBundlePreview] = useState<string | null>(null);
+  const [exportedPath, setExportedPath] = useState<string | null>(null);
 
   const load = () => {
     bugReportContext()
@@ -152,6 +161,51 @@ export function BugReportDialog({ onClose }: { onClose: () => void }) {
             >
               {t("bugreport-dismiss-crash")}
             </button>
+          )}
+        </div>
+
+        {/* CAP-M24 — the redacted diagnostics bundle. Strictly manual: the
+            zip lands in Downloads for the user to attach by hand. */}
+        <div className="flex flex-col gap-2 border-t border-white/10 pt-2">
+          <span className="text-[10px] tracking-wide text-havoc-muted uppercase">
+            {t("diag-title")}
+          </span>
+          <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("diag-intro")}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                bundlePreview !== null
+                  ? setBundlePreview(null)
+                  : diagnosticsPreview()
+                      .then(setBundlePreview)
+                      .catch((err) => setError(String(err)))
+              }
+              className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+            >
+              {bundlePreview !== null ? t("diag-hide-preview") : t("diag-preview")}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                diagnosticsExport()
+                  .then(setExportedPath)
+                  .catch((err) => setError(String(err)))
+              }
+              className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+            >
+              {t("diag-export")}
+            </button>
+          </div>
+          {bundlePreview !== null && (
+            <pre className="m-0 max-h-48 overflow-auto rounded-md border border-white/10 bg-black/30 px-2 py-1.5 font-mono text-[10px] leading-snug break-words whitespace-pre-wrap text-havoc-muted">
+              {bundlePreview}
+            </pre>
+          )}
+          {exportedPath && (
+            <p className="m-0 text-[11px] text-emerald-300">
+              {t("diag-exported", { path: exportedPath })}
+            </p>
           )}
         </div>
 

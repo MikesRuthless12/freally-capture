@@ -872,6 +872,13 @@ output-install = इंस्टॉल करें…
 output-recordings-folder = रिकॉर्डिंग फ़ोल्डर
 output-folder-placeholder = OS Videos फ़ोल्डर
 output-filename-prefix = फ़ाइलनाम उपसर्ग
+output-recording-template = रिकॉर्डिंग फ़ाइलनाम
+output-replay-template = रीप्ले फ़ाइलनाम
+output-still-template = स्थिर फ़्रेम फ़ाइलनाम
+output-template-tokens = टोकन: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = रीप्ले फ़ोल्डर
+output-still-folder = स्थिर फ़्रेम फ़ोल्डर
+output-same-folder-placeholder = रिकॉर्डिंग फ़ोल्डर
 output-frame-rate = फ़्रेम दर
 output-fps-option = { $fps } fps
 output-split-every = हर इतने पर स्प्लिट करें (मिनट, 0 = बंद)
@@ -1346,3 +1353,102 @@ still-saved-toast = फ़्रेम सहेजा गया: { $name }
 still-failed-toast = फ़्रेम कैप्चर विफल: { $error }
 hotkeys-still = स्थिर फ़्रेम कैप्चर करें
 hotkeys-still-placeholder = उदा. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = स्रोत स्वास्थ्य…
+health-title = स्रोत स्वास्थ्य
+health-col-source = स्रोत
+health-col-state = स्थिति
+health-col-resolution = रिज़ॉल्यूशन
+health-col-fps = FPS
+health-col-last-frame = अंतिम फ़्रेम
+health-col-dropped = छोड़े गए
+health-col-retries = पुनरारंभ
+health-col-actions = क्रियाएँ
+health-state-live = लाइव
+health-state-waiting = प्रतीक्षारत
+health-state-error = त्रुटि
+health-state-inactive = निष्क्रिय
+health-restart = पुनरारंभ करें
+health-properties = गुण
+health-empty = इस संग्रह में अभी कोई स्रोत नहीं है।
+health-seconds = { $value } s
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Freally Capture छोड़ें?
+quit-body = अभी छोड़ने पर क्रम से निम्नलिखित सुरक्षित रूप से होगा:
+quit-consequence-stream = लाइव स्ट्रीम समाप्त करें और सेवा से डिस्कनेक्ट करें।
+quit-consequence-recording = रिकॉर्डिंग रोकें और उसकी फ़ाइलें अंतिम रूप दें।
+quit-consequence-replay = रीप्ले बफ़र बंद करें — बिना सहेजा रीप्ले फ़ुटेज हट जाएगा।
+quit-confirm = सुरक्षित रूप से बाहर निकलें
+quit-quitting = बंद हो रहा है…
+quit-cancel = रद्द करें
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = बाधित रिकॉर्डिंग पुनर्प्राप्त करें?
+salvage-body = पिछला सत्र अप्रत्याशित रूप से समाप्त हो गया, जबकि ये रिकॉर्डिंग अभी लिखी जा रही थीं। मरम्मत मूल के बगल में चलने योग्य प्रति बनाती है — मूल फ़ाइल कभी नहीं बदली जाती।
+salvage-repair = मरम्मत करें
+salvage-repairing = मरम्मत हो रही है…
+salvage-done = मरम्मत हो गई
+salvage-repaired = मरम्मत हो गई → { $name }
+salvage-failed = मरम्मत विफल: { $error }
+salvage-dismiss = अभी नहीं
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = एन्कोडर विफलता — { $from } से { $to } पर स्विच किया गया। स्ट्रीम पुनः कनेक्ट होकर चालू है।
+fallback-toast-recording = एन्कोडर विफलता — { $from } से { $to } पर स्विच किया गया। रिकॉर्डिंग नई फ़ाइल में जारी है।
+fallback-note = एन्कोडर फ़ॉलबैक: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = प्रोग्राम ऑडियो मौन हो गया है
+alarm-clipping = प्रोग्राम ऑडियो क्लिप हो रहा है
+alarm-black = प्रोग्राम चित्र काला है
+alarm-frozen = प्रोग्राम चित्र कुछ समय से नहीं बदला है
+alarm-lowDisk = डिस्क स्थान: वर्तमान बिटरेट पर लगभग { $minutes } मिनट शेष
+alarm-dismiss = अलार्म हटाएँ
+alarm-cleared = हल हुआ: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = पैनिक — गोपनीयता स्लेट पर कट करें
+panic-banner-title = पैनिक
+panic-banner-body = प्रोग्राम गोपनीयता स्लेट दिखा रहा है; सारा ऑडियो म्यूट है और कैप्चर रुके हैं। स्ट्रीम और रिकॉर्डिंग चालू रहती हैं।
+panic-restore = पुनर्स्थापित करें…
+panic-restore-confirm = प्रोग्राम पुनर्स्थापित करें?
+panic-restore-yes = पुनर्स्थापित करें
+panic-restore-cancel = रद्द करें
+hotkeys-panic = पैनिक (गोपनीयता स्लेट)
+hotkeys-panic-placeholder = जैसे Ctrl+Shift+F12
+panic-slate-color = पैनिक स्लेट रंग
+panic-slate-image = पैनिक स्लेट छवि
+panic-slate-image-placeholder = वैकल्पिक छवि पथ
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = निदान बंडल
+diag-intro = GitHub इश्यू में हाथ से जोड़ने के लिए एक संपादित .zip निर्यात करें (कॉन्फ़िग स्नैपशॉट, एन्कोडर जांच, हाल के आँकड़े — रहस्य, पथ और नाम कभी शामिल नहीं)। कुछ भी कहीं नहीं भेजा जाता।
+diag-preview = सामग्री देखें
+diag-hide-preview = पूर्वावलोकन छिपाएँ
+diag-export = .zip निर्यात करें
+diag-exported = निर्यात किया गया: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = गो-लाइव पूर्व-जांच
+preflight-intro = हर अवरोधक मद हरी होनी चाहिए; बाकी ईमानदार संकेत हैं।
+preflight-item-targets = स्ट्रीम लक्ष्य कॉन्फ़िगर (कुंजी/URL सेट)
+preflight-item-encoder = उपयोगी एन्कोडर उपलब्ध
+preflight-item-sources = सभी स्रोत स्वस्थ
+preflight-item-disk = रिकॉर्डिंग के लिए डिस्क स्थान
+preflight-item-mic = माइक्रोफ़ोन मीटरिंग
+preflight-item-desktopAudio = डेस्कटॉप ऑडियो मीटरिंग
+preflight-item-replay = रीप्ले बफ़र सक्रिय
+preflight-targets-detail = { $count } सक्षम
+preflight-sources-detail = { $count } स्रोत त्रुटि में
+preflight-disk-detail = वर्तमान बिटरेट पर ~{ $minutes } मिनट
+preflight-fix-stream = स्ट्रीम सेटिंग्स…
+preflight-fix-components = घटक…
+preflight-fix-sources = स्रोत स्वास्थ्य…
+preflight-fix-replay = सक्रिय करें
+preflight-optional = वैकल्पिक
+preflight-hold = सब हरा होने तक गो लाइव रोकें
+preflight-cancel = रद्द करें
+preflight-go-anyway = फिर भी लाइव जाएँ
+preflight-go-live = लाइव जाएँ

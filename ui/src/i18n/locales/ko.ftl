@@ -885,6 +885,13 @@ output-install = 설치…
 output-recordings-folder = 녹화 폴더
 output-folder-placeholder = OS 비디오 폴더
 output-filename-prefix = 파일 이름 접두사
+output-recording-template = 녹화 파일 이름
+output-replay-template = 리플레이 파일 이름
+output-still-template = 스틸 파일 이름
+output-template-tokens = 토큰: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = 리플레이 폴더
+output-still-folder = 스틸 폴더
+output-same-folder-placeholder = 녹화 폴더
 output-frame-rate = 프레임 레이트
 output-fps-option = { $fps } fps
 output-split-every = 분할 간격 (분, 0 = 끔)
@@ -1359,3 +1366,102 @@ still-saved-toast = 스틸 저장됨: { $name }
 still-failed-toast = 스틸 캡처 실패: { $error }
 hotkeys-still = 스틸 캡처
 hotkeys-still-placeholder = 예: Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = 소스 상태…
+health-title = 소스 상태
+health-col-source = 소스
+health-col-state = 상태
+health-col-resolution = 해상도
+health-col-fps = FPS
+health-col-last-frame = 마지막 프레임
+health-col-dropped = 드롭됨
+health-col-retries = 재시작 횟수
+health-col-actions = 동작
+health-state-live = 라이브
+health-state-waiting = 대기 중
+health-state-error = 오류
+health-state-inactive = 비활성
+health-restart = 재시작
+health-properties = 속성
+health-empty = 이 컬렉션에는 아직 소스가 없습니다.
+health-seconds = { $value }초
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Freally Capture를 종료할까요?
+quit-body = 지금 종료하면 다음 작업이 순서대로 안전하게 수행됩니다:
+quit-consequence-stream = 라이브 스트림을 종료하고 서비스 연결을 해제합니다.
+quit-consequence-recording = 녹화를 중지하고 파일을 마무리합니다.
+quit-consequence-replay = 리플레이 버퍼를 종료합니다 — 저장하지 않은 리플레이 영상은 삭제됩니다.
+quit-confirm = 안전하게 종료
+quit-quitting = 종료 중…
+quit-cancel = 취소
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = 중단된 녹화를 복구할까요?
+salvage-body = 마지막 세션이 이 녹화 파일을 쓰는 도중 예기치 않게 종료되었습니다. 복구는 원본 옆에 재생 가능한 사본을 만듭니다 — 원본 파일은 절대 변경되지 않습니다.
+salvage-repair = 복구
+salvage-repairing = 복구 중…
+salvage-done = 복구됨
+salvage-repaired = 복구됨 → { $name }
+salvage-failed = 복구 실패: { $error }
+salvage-dismiss = 나중에
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = 인코더 오류 — { $from }에서 { $to }(으)로 전환했습니다. 스트림은 다시 연결되어 계속됩니다.
+fallback-toast-recording = 인코더 오류 — { $from }에서 { $to }(으)로 전환했습니다. 녹화는 새 파일로 계속됩니다.
+fallback-note = 인코더 대체: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = 프로그램 오디오가 무음이 되었습니다
+alarm-clipping = 프로그램 오디오가 클리핑되고 있습니다
+alarm-black = 프로그램 화면이 검게 나옵니다
+alarm-frozen = 프로그램 화면이 한동안 변하지 않았습니다
+alarm-lowDisk = 디스크 공간: 현재 비트레이트로 약 { $minutes }분 남음
+alarm-dismiss = 알람 닫기
+alarm-cleared = 해결됨: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = 패닉 — 프라이버시 슬레이트로 전환
+panic-banner-title = 패닉
+panic-banner-body = 프로그램이 프라이버시 슬레이트를 표시 중입니다. 모든 오디오는 음소거되고 캡처는 중지되었습니다. 스트림과 녹화는 계속됩니다.
+panic-restore = 복원…
+panic-restore-confirm = 프로그램을 복원할까요?
+panic-restore-yes = 복원
+panic-restore-cancel = 취소
+hotkeys-panic = 패닉 (프라이버시 슬레이트)
+hotkeys-panic-placeholder = 예: Ctrl+Shift+F12
+panic-slate-color = 패닉 슬레이트 색상
+panic-slate-image = 패닉 슬레이트 이미지
+panic-slate-image-placeholder = 선택적 이미지 경로
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = 진단 번들
+diag-intro = GitHub 이슈에 직접 첨부할 수정된 .zip(설정 스냅샷, 인코더 프로브, 최근 통계 — 비밀, 경로, 이름은 절대 포함되지 않음)을 내보냅니다. 아무것도 전송되지 않습니다.
+diag-preview = 내용 보기
+diag-hide-preview = 미리보기 숨기기
+diag-export = .zip 내보내기
+diag-exported = 내보냄: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = 방송 전 점검
+preflight-intro = 차단 항목은 모두 녹색이어야 합니다. 나머지는 정직한 알림입니다.
+preflight-item-targets = 스트림 대상 구성됨 (키/URL)
+preflight-item-encoder = 사용 가능한 인코더 있음
+preflight-item-sources = 모든 소스 정상
+preflight-item-disk = 녹화용 디스크 공간
+preflight-item-mic = 마이크 미터링
+preflight-item-desktopAudio = 데스크톱 오디오 미터링
+preflight-item-replay = 리플레이 버퍼 대기
+preflight-targets-detail = { $count }개 활성
+preflight-sources-detail = { $count }개 소스 오류
+preflight-disk-detail = 현재 비트레이트로 약 { $minutes }분
+preflight-fix-stream = 스트림 설정…
+preflight-fix-components = 구성 요소…
+preflight-fix-sources = 소스 상태…
+preflight-fix-replay = 대기
+preflight-optional = 선택
+preflight-hold = 모두 녹색이 될 때까지 방송 시작 보류
+preflight-cancel = 취소
+preflight-go-anyway = 그래도 방송 시작
+preflight-go-live = 방송 시작

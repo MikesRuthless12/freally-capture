@@ -86,6 +86,9 @@ pub struct StudioDto {
     pub studio_mode: Option<StudioModeDto>,
     /// Undo/redo availability + the viewable history list (CAP-M01).
     pub history: HistoryState,
+    /// Panic engaged (CAP-M22) — absent when false, so old fixtures hold.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub panic: bool,
 }
 
 /// The Studio-Mode slice of the model (session state, never persisted).
@@ -220,6 +223,87 @@ struct StudioCore {
     /// Open scene/source projectors (CAP-M07 extension): while non-empty the
     /// render loop keeps their sources live and publishes their full-res slots.
     projectors: HashSet<ProjectorTarget>,
+    /// Panic (CAP-M22): while `Some`, the render loop composes this frozen
+    /// slate instead of the program, every capture stops, and the audio
+    /// engine runs no sources. Session state, never persisted.
+    panic: Option<PanicPack>,
+}
+
+/// The frozen slate composition an engaged panic renders (CAP-M22): built
+/// once at engage time so its synthetic source ids stay stable per tick.
+#[derive(Debug, Clone)]
+pub struct PanicPack {
+    scene: Scene,
+    sources: Vec<fcap_scene::Source>,
+    vertical_scene: Option<Scene>,
+}
+
+/// Build the slate: a full-canvas colour fill, with the optional image
+/// drawn at its native size, centered (a canvas-sized image fills exactly).
+fn build_panic_pack(
+    slate: &crate::settings::PanicSlateSettings,
+    canvas: (u32, u32),
+    vertical: Option<(u32, u32)>,
+) -> PanicPack {
+    use fcap_scene::{Rgba, Source, SourceSettings};
+
+    let hex = slate.color.strip_prefix('#').unwrap_or("10141a");
+    let channel =
+        |at: usize| u8::from_str_radix(hex.get(at..at + 2).unwrap_or("10"), 16).unwrap_or(0x10);
+    let color = Rgba::new(channel(0), channel(2), channel(4), 255);
+
+    let mut sources = Vec::new();
+    let image_source = (!slate.image.trim().is_empty()).then(|| {
+        Source::new(
+            "Panic Slate Image",
+            SourceSettings::Image {
+                path: slate.image.trim().to_string(),
+            },
+        )
+    });
+
+    let build_scene = |dims: (u32, u32), sources: &mut Vec<Source>| -> Scene {
+        let fill = Source::new(
+            "Panic Slate",
+            SourceSettings::Color {
+                color,
+                width: dims.0,
+                height: dims.1,
+            },
+        );
+        let mut fill_item = SceneItem::new(fill.id);
+        fill_item.transform = Transform {
+            x: dims.0 as f32 / 2.0,
+            y: dims.1 as f32 / 2.0,
+            ..Default::default()
+        };
+        fill_item.pending_fit = false;
+        let mut scene = Scene::new("panic");
+        scene.items = vec![fill_item];
+        if let Some(image) = &image_source {
+            let mut image_item = SceneItem::new(image.id);
+            image_item.transform = Transform {
+                x: dims.0 as f32 / 2.0,
+                y: dims.1 as f32 / 2.0,
+                ..Default::default()
+            };
+            image_item.pending_fit = false;
+            scene.items.push(image_item);
+        }
+        sources.push(fill);
+        scene
+    };
+
+    let scene = build_scene(canvas, &mut sources);
+    let vertical_scene = vertical.map(|dims| build_scene(dims, &mut sources));
+    if let Some(image) = image_source {
+        sources.push(image);
+    }
+    PanicPack {
+        scene,
+        sources,
+        vertical_scene,
+    }
 }
 
 /// The DTO for the current core state (one shape for every emit site).
@@ -232,6 +316,7 @@ fn dto_of(core: &StudioCore) -> StudioDto {
             transitioning: core.transition.is_some(),
         }),
         history: core.undo.state(),
+        panic: core.panic.is_some(),
     }
 }
 
@@ -283,6 +368,7 @@ impl StudioState {
                 multiview: false,
                 still_request: None,
                 projectors: HashSet::new(),
+                panic: None,
             })),
         }
     }
@@ -304,6 +390,41 @@ impl StudioState {
         *core.retry_nonces.entry(source).or_insert(0) += 1;
         core.revision += 1;
         Ok(())
+    }
+
+    /// Engage/restore the panic slate (CAP-M22). Engaging freezes the slate
+    /// config; the next render tick swaps the composed world for it, stops
+    /// every capture, and empties the audio engine. Restoring reconciles
+    /// everything back. Idempotent; emits `studio` on every real change.
+    pub fn set_panic<R: Runtime>(&self, app: &AppHandle<R>, on: bool) {
+        let dto = {
+            let mut core = self.lock();
+            if on == core.panic.is_some() {
+                return;
+            }
+            core.panic = on.then(|| {
+                let slate = app
+                    .state::<crate::settings::SettingsStore>()
+                    .get()
+                    .panic_slate;
+                build_panic_pack(
+                    &slate,
+                    (core.collection.canvas_width, core.collection.canvas_height),
+                    core.collection
+                        .vertical
+                        .map(|config| (config.width, config.height)),
+                )
+            });
+            core.revision += 1;
+            dto_of(&core)
+        };
+        println!("studio: panic {}", if on { "ENGAGED" } else { "restored" });
+        let _ = app.emit("studio", &dto);
+    }
+
+    /// Whether the panic slate is engaged (CAP-M22).
+    pub fn is_panicked(&self) -> bool {
+        self.lock().panic.is_some()
     }
 
     /// A snapshot for `studio_get` / event payloads.
@@ -493,6 +614,11 @@ impl StudioState {
     /// per-scene mixer overrides applied (TASK-605).
     pub fn audio_specs(&self) -> (u64, Vec<AudioSourceSpec>) {
         let core = self.lock();
+        // Panic (CAP-M22): the engine runs NO sources — a hard mute that
+        // stops capturing the microphone at all, and moots push-to-talk.
+        if core.panic.is_some() {
+            return (core.revision, Vec::new());
+        }
         let collection = &core.collection;
         // The program scene + its transitively nested scenes.
         let mut scene_ids = vec![collection.active_scene];
@@ -855,6 +981,17 @@ pub struct SourceRuntime {
     pub error_code: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Ms since this source last delivered a frame (capture-backed sources
+    /// only) — the health dashboard's staleness signal (CAP-M13).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_frame_ms: Option<u64>,
+    /// Capture frames overwritten before the compositor took them (CAP-M13).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<u64>,
+    /// Pipeline restarts so far (manual retry + auto-recover), absent until
+    /// the first one — the auto-recover history (CAP-M13).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retries: Option<u64>,
 }
 
 impl SourceRuntime {
@@ -866,6 +1003,9 @@ impl SourceRuntime {
             fps: None,
             error_code: None,
             error_message: None,
+            last_frame_ms: None,
+            dropped: None,
+            retries: None,
         }
     }
 
@@ -937,6 +1077,9 @@ struct SessionSlot {
     session: CaptureSession,
     frames_this_second: u32,
     live_size: Option<(u32, u32)>,
+    /// When the last frame was uploaded — the dashboard's last-frame age
+    /// (CAP-M13).
+    last_frame: Option<Instant>,
     /// Render Delay (TASK-608): frames held back by the filter, bounded —
     /// raw frames are memory, so both the delay (500 ms) and the queue
     /// length are capped.
@@ -1043,6 +1186,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // Per-source auto-recover backoff: source id → (next attempt time, last wait).
     let mut retry_schedule: HashMap<SourceId, (Instant, Duration)> = HashMap::new();
     let mut statuses_changed = true;
+    // Black/frozen program watch (CAP-M10), fed by the readback below.
+    let mut video_watch = crate::alarms::VideoWatch::default();
 
     // The native preview surface (the "OBS feel" path): created lazily once
     // the UI reports a non-zero preview region, then presented every frame
@@ -1089,6 +1234,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             multiview_scenes,
             still_job,
             projector_pack,
+            panic_active,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -1280,16 +1426,66 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         guard.collection.scenes.clone()
                     }
                 });
-            (
-                guard.revision,
-                guard.collection.active_scene().clone(),
-                guard
+            // Panic (CAP-M22): the slate replaces the composed world.
+            // Program + vertical show it, the live set collapses to the
+            // slate's static sources (every capture stops), monitoring
+            // renders stop, and projectors — possibly on a PUBLIC display —
+            // show the slate too. Multiview thumbnails simply freeze
+            // (operator-side monitoring only).
+            let panic_pack = guard.panic.clone();
+            let scene = match &panic_pack {
+                Some(pack) => pack.scene.clone(),
+                None => guard.collection.active_scene().clone(),
+            };
+            let scene_sources = match &panic_pack {
+                Some(pack) => pack.sources.clone(),
+                None => guard
                     .collection
                     .sources
                     .iter()
                     .filter(|source| live_sources.contains(&source.id))
                     .cloned()
                     .collect::<Vec<_>>(),
+            };
+            let (preview_scene, transition_pack, workbench_pack, multiview_scenes) =
+                if panic_pack.is_some() {
+                    (None, None, None, None)
+                } else {
+                    (
+                        preview_scene,
+                        transition_pack,
+                        workbench_pack,
+                        multiview_scenes,
+                    )
+                };
+            let vertical_pack = match (&panic_pack, vertical_pack) {
+                (Some(pack), Some((_, w, h))) => {
+                    pack.vertical_scene.clone().map(|slate| (slate, w, h))
+                }
+                (_, vertical) => vertical,
+            };
+            let projector_pack = match &panic_pack {
+                Some(pack) => (
+                    projector_pack.0,
+                    projector_pack.1.map(|jobs| {
+                        jobs.into_iter()
+                            .map(|job| match job {
+                                ProjectorJob::Scene(key, _) => {
+                                    ProjectorJob::Scene(key, pack.scene.clone())
+                                }
+                                ProjectorJob::Source(key, _) => {
+                                    ProjectorJob::Scene(key, pack.scene.clone())
+                                }
+                            })
+                            .collect()
+                    }),
+                ),
+                None => projector_pack,
+            };
+            (
+                guard.revision,
+                scene,
+                scene_sources,
                 (
                     guard.collection.canvas_width,
                     guard.collection.canvas_height,
@@ -1305,6 +1501,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 multiview_scenes,
                 still_job,
                 projector_pack,
+                panic_pack.is_some(),
             )
         };
         if let Some(dto) = transition_ended {
@@ -1512,6 +1709,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             session,
                             frames_this_second: 0,
                             live_size: None,
+                            last_frame: None,
                             delayed: std::collections::VecDeque::new(),
                         },
                     );
@@ -1565,6 +1763,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         match compositor.upload_frame(*id, &frame) {
                             Ok(()) => {
                                 slot.frames_this_second += 1;
+                                slot.last_frame = Some(Instant::now());
                                 if slot.live_size != Some(size) {
                                     slot.live_size = Some(size);
                                     statuses.insert(*id, SourceRuntime::live(size.0, size.1));
@@ -1602,6 +1801,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     match compositor.upload_frame(*id, &frame) {
                         Ok(()) => {
                             slot.frames_this_second += 1;
+                            slot.last_frame = Some(Instant::now());
                             if slot.live_size != Some(size) {
                                 slot.live_size = Some(size);
                                 statuses.insert(*id, SourceRuntime::live(size.0, size.1));
@@ -1847,6 +2047,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                     if replay_due {
                         replaying.push_video(Arc::clone(&data));
+                    }
+                    // CAP-M10: black/frozen watch over THIS readback (never
+                    // an extra one); it only alarms while the picture goes
+                    // somewhere. ~2k sampled pixels — no budget impact.
+                    // A deliberate panic slate (CAP-M22) is neither black
+                    // nor frozen worth alarming about.
+                    if preview_due {
+                        let engaged = (record_due || stream_due) && !panic_active;
+                        for (kind, active) in video_watch.evaluate(&data, engaged, Instant::now()) {
+                            crate::alarms::emit_alarm(&app, kind, active, None);
+                        }
                     }
                     if preview_due {
                         if let Some(jpeg) = encode_program_jpeg(
@@ -2103,7 +2314,18 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         status.fps =
                             Some((slot.frames_this_second as f32 / elapsed).round() as u32);
                     }
+                    // Health dashboard extras (CAP-M13): staleness + drops.
+                    status.last_frame_ms = slot
+                        .last_frame
+                        .map(|at| at.elapsed().as_millis().min(u64::MAX as u128) as u64);
+                    status.dropped = Some(slot.session.frames().dropped());
                     slot.frames_this_second = 0;
+                }
+                // Restart history (manual retry + auto-recover), from the
+                // tick snapshot's nonce clone.
+                let retries = nonces.get(id).copied().unwrap_or(0);
+                if retries > 0 {
+                    status.retries = Some(retries);
                 }
                 sources.insert(id.0.to_string(), status);
             }
@@ -2121,13 +2343,22 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 dropped,
                 sources,
             };
-            // Hand the render numbers to the stats dock's emitter.
+            // Hand the render numbers to the stats dock's emitter, and the
+            // errored-source count to the CAP-M09 pre-flight hold.
             app.state::<crate::events::RuntimeStats>().publish(
                 status.fps,
                 (composed_vertical_this_second as f32 / elapsed).round() as u32,
                 status.dropped,
                 status.render_micros,
             );
+            app.state::<crate::events::RuntimeStats>()
+                .set_errored_sources(
+                    status
+                        .sources
+                        .values()
+                        .filter(|source| source.state == "error")
+                        .count() as u32,
+                );
             if app.emit("program", &status).is_err() {
                 break; // the app is gone — wind down
             }
@@ -2298,9 +2529,19 @@ pub fn capture_still<R: Runtime>(app: &AppHandle<R>, target: StillTarget) {
         .state::<crate::settings::SettingsStore>()
         .get()
         .recording;
-    let folder = crate::recording::recordings_folder(&recording);
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
-    let path = crate::recording::unique_recording_path(&folder, "Still", &timestamp, "png", false);
+    let folder = crate::recording::output_folder(&recording, &recording.still_folder);
+    // A custom still folder may not exist yet — create it here so the render
+    // thread's save can't fail on a missing directory.
+    if let Err(err) = std::fs::create_dir_all(&folder) {
+        eprintln!("still: could not create {}: {err}", folder.display());
+    }
+    let counter = crate::recording::counter_for(app, &recording.still_template, recording.counter);
+    let canvas = app
+        .state::<StudioState>()
+        .with_collection(|collection| (collection.canvas_width, collection.canvas_height));
+    let naming = crate::recording::naming_context(app, "Still".to_owned(), canvas, counter);
+    let stem = crate::filename::resolve_template(&recording.still_template, &naming);
+    let path = crate::recording::unique_recording_path(&folder, &stem, "png", false);
     app.state::<StudioState>().request_still(target, path);
 }
 

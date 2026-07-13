@@ -209,6 +209,81 @@ export function SettingsOutput({
           </label>
         </div>
 
+        {/* Templates commit on blur/Enter, NOT per keystroke: the backend
+            validator rejects every intermediate state of typing a token
+            ("{" is an unclosed brace), and a controlled per-keystroke save
+            would snap the input back — making tokens untypeable. */}
+        <div className="grid grid-cols-3 gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("output-recording-template")}
+            <input
+              type="text"
+              defaultValue={rec.template}
+              onBlur={(event) => {
+                if (event.target.value !== rec.template) save({ template: event.target.value });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("output-replay-template")}
+            <input
+              type="text"
+              defaultValue={rec.replayTemplate}
+              onBlur={(event) => {
+                if (event.target.value !== rec.replayTemplate)
+                  save({ replayTemplate: event.target.value });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("output-still-template")}
+            <input
+              type="text"
+              defaultValue={rec.stillTemplate}
+              onBlur={(event) => {
+                if (event.target.value !== rec.stillTemplate)
+                  save({ stillTemplate: event.target.value });
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              className={inputClass}
+            />
+          </label>
+        </div>
+        <p className="m-0 text-[11px] text-havoc-muted">{t("output-template-tokens")}</p>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("output-replay-folder")}
+            <input
+              type="text"
+              value={rec.replayFolder}
+              placeholder={t("output-same-folder-placeholder")}
+              onChange={(event) => save({ replayFolder: event.target.value })}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("output-still-folder")}
+            <input
+              type="text"
+              value={rec.stillFolder}
+              placeholder={t("output-same-folder-placeholder")}
+              onChange={(event) => save({ stillFolder: event.target.value })}
+              className={inputClass}
+            />
+          </label>
+        </div>
+
         <div className="grid grid-cols-3 items-end gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
             {t("output-frame-rate")}

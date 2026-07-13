@@ -458,7 +458,7 @@ mod tests {
             let members = Arc::clone(&cells.members);
             let spawn_order = Arc::clone(&cells.spawn_order);
             LaneIo {
-                factory: Box::new(move || {
+                factory: Box::new(move |_death| {
                     *lock(&spawn_order) = lock(&members).clone();
                     Ok(Box::new(FakeSink {
                         fail: Arc::new(AtomicBool::new(false)),
@@ -523,7 +523,7 @@ mod tests {
                 Arc::new(AtomicBool::new(false))
             };
             LaneIo {
-                factory: Box::new(move || {
+                factory: Box::new(move |_death| {
                     *lock(&spawn_order) = lock(&members).clone();
                     Ok(Box::new(FakeSink {
                         fail: Arc::clone(&fail),

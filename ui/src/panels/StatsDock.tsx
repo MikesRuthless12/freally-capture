@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { onStats, onStream } from "../api/events";
-import type { StatsPayload, StreamStatus } from "../api/types";
+import { onEncoderFallback, onStats, onStream } from "../api/events";
+import type { EncoderFallback, StatsPayload, StreamStatus } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { useT } from "../i18n/t";
 
@@ -28,6 +28,9 @@ export function StatsDock() {
   const t = useT();
   const [stats, setStats] = useState<StatsPayload | null>(null);
   const [stream, setStream] = useState<StreamStatus | null>(null);
+  // Encoder failover note (CAP-M12): sticky for the session — the operator
+  // must be able to see AFTER the show why quality/CPU changed mid-way.
+  const [fallback, setFallback] = useState<EncoderFallback | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -42,6 +45,12 @@ export function StatsDock() {
         // Not running inside Tauri (plain browser / tests): no events arrive.
       });
     onStream((payload) => setStream(payload))
+      .then((fn) => {
+        if (disposed) fn();
+        else cleanups.push(fn);
+      })
+      .catch(() => undefined);
+    onEncoderFallback((payload) => setFallback(payload))
       .then((fn) => {
         if (disposed) fn();
         else cleanups.push(fn);
@@ -106,6 +115,11 @@ export function StatsDock() {
             </li>
           ))}
         </ul>
+      )}
+      {fallback && (
+        <p className="m-0 mt-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-1.5 text-[11px] text-amber-200">
+          {t("fallback-note", { from: fallback.from, to: fallback.to })}
+        </p>
       )}
       {stats?.placeholder && (
         <div className="mt-2">

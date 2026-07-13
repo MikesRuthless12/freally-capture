@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { onRecording, onStream } from "../api/events";
+import { onAlarm, onRecording, onStream } from "../api/events";
 import { useT } from "../i18n/t";
 
 /**
@@ -74,10 +74,23 @@ export function StatusAnnouncer() {
       }
     }).catch(() => undefined);
 
+    // Broadcast-safety alarms (CAP-M10): each event IS a transition, so it
+    // can announce directly. Raises matter to a blind streamer exactly as
+    // much as the banner does; clears are spoken too ("resolved" beats
+    // wondering).
+    const unlistenAlarm = onAlarm((alarm) => {
+      const text =
+        alarm.kind === "lowDisk"
+          ? t("alarm-lowDisk", { minutes: alarm.minutesLeft ?? 0 })
+          : t(`alarm-${alarm.kind}`);
+      say(alarm.active ? text : t("alarm-cleared", { alarm: text }));
+    }).catch(() => undefined);
+
     return () => {
       alive = false;
       void unlistenRecording.then((fn) => fn?.());
       void unlistenStream.then((fn) => fn?.());
+      void unlistenAlarm.then((fn) => fn?.());
     };
   }, [t]);
 

@@ -7,11 +7,14 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  Alarm,
   AudioLevelsPayload,
   CefStatus,
+  EncoderFallback,
   ExportStatus,
   FfmpegStatus,
   ProgramStatus,
+  QuitConsequences,
   RecordingStatus,
   ReplayStatus,
   StatsPayload,
@@ -63,6 +66,24 @@ export function onStillError(handler: (message: string) => void): Promise<Unlist
 /** Subscribe to compose-loop health + per-source states (≥1 Hz). */
 export function onProgram(handler: (status: ProgramStatus) => void): Promise<UnlistenFn> {
   return listen<ProgramStatus>("program", (event) => handler(event.payload));
+}
+
+/** Subscribe to the quit guard (CAP-M23): the user tried to close while
+ * live/recording/replay-armed — show the confirm with these consequences. */
+export function onQuitGuard(handler: (pending: QuitConsequences) => void): Promise<UnlistenFn> {
+  return listen<QuitConsequences>("quit-guard", (event) => handler(event.payload));
+}
+
+/** Subscribe to mid-session encoder failovers (CAP-M12). */
+export function onEncoderFallback(
+  handler: (fallback: EncoderFallback) => void,
+): Promise<UnlistenFn> {
+  return listen<EncoderFallback>("encoder-fallback", (event) => handler(event.payload));
+}
+
+/** Subscribe to broadcast-safety alarm transitions (CAP-M10). */
+export function onAlarm(handler: (alarm: Alarm) => void): Promise<UnlistenFn> {
+  return listen<Alarm>("alarm", (event) => handler(event.payload));
 }
 
 /** Subscribe to mixer levels + audio source states (~20 Hz). */

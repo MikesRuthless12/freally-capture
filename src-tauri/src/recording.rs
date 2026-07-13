@@ -98,6 +98,9 @@ pub struct RecordingState {
     /// Stream markers (TASK-610): timestamps (ms) dropped by the hotkey,
     /// written as mkv chapters / a sidecar file at stop.
     markers: Mutex<Vec<u64>>,
+    /// Encoder failover (CAP-M12): the session's ladder, consulted by the
+    /// watchdog when the sink dies. `None` for .frec (no wire encoder).
+    failover: Mutex<Option<fcap_encode::FailoverLadder>>,
 }
 
 impl RecordingState {
@@ -111,6 +114,7 @@ impl RecordingState {
             vertical_feed: Mutex::new(None),
             last: Mutex::new((Vec::new(), None)),
             markers: Mutex::new(Vec::new()),
+            failover: Mutex::new(None),
         }
     }
 
@@ -150,6 +154,21 @@ impl RecordingState {
         if let Some(handle) = feed.as_ref() {
             handle.push_frame(pixels);
         }
+    }
+
+    /// Whether a session is up (running, paused or finalizing) — the quit
+    /// guard's check (CAP-M23).
+    pub fn is_active(&self) -> bool {
+        self.lock_inner().is_some()
+    }
+
+    /// Markers dropped so far this session — the `{marker-count}` filename
+    /// token (CAP-M25); 0 outside a session.
+    pub fn marker_count(&self) -> u32 {
+        self.markers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len() as u32
     }
 
     /// The current status snapshot.
@@ -213,6 +232,33 @@ fn emit_status<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.emit("recording", &status).is_ok()
 }
 
+/// Emit the `encoder-fallback` event (CAP-M12): the honest toast + stats
+/// note, with encoder ids resolved to catalog labels when known. Shared by
+/// the recording watchdog and the stream lanes.
+pub(crate) fn announce_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    scope: &str,
+    from: &str,
+    to: &str,
+    catalog: Option<&fcap_encode::Catalog>,
+) {
+    let label = |id: &str| {
+        catalog
+            .and_then(|catalog| catalog.get(id))
+            .map(|desc| desc.label.clone())
+            .unwrap_or_else(|| id.to_string())
+    };
+    println!("{scope}: encoder failover {from} → {to}");
+    let _ = app.emit(
+        "encoder-fallback",
+        serde_json::json!({
+            "scope": scope,
+            "from": label(from),
+            "to": label(to),
+        }),
+    );
+}
+
 /// The default recording folder: the OS Videos directory (falling back to
 /// the home directory) — never a temp dir the OS may sweep.
 fn default_folder() -> PathBuf {
@@ -232,14 +278,60 @@ pub fn recordings_folder(settings: &RecordingSettings) -> PathBuf {
     }
 }
 
-/// A non-colliding output path: `{prefix} {timestamp}.{ext}`, appending
-/// ` (2)`, ` (3)`… if that base (or, when splitting, its first `part…`
-/// segment) already exists — so two sessions in the same local-time second
-/// never overwrite each other.
+/// A per-output folder override (CAP-M25): blank → the recordings folder.
+pub fn output_folder(settings: &RecordingSettings, override_folder: &str) -> PathBuf {
+    let trimmed = override_folder.trim();
+    if trimmed.is_empty() {
+        recordings_folder(settings)
+    } else {
+        PathBuf::from(trimmed)
+    }
+}
+
+/// The `{counter}` value for one naming event (CAP-M25): advance the
+/// persisted counter only when the template actually uses it — no settings
+/// write otherwise.
+pub(crate) fn counter_for<R: Runtime>(app: &AppHandle<R>, template: &str, current: u32) -> u32 {
+    if template.contains("{counter}") {
+        app.state::<SettingsStore>().bump_recording_counter()
+    } else {
+        current
+    }
+}
+
+/// Gather the filename-token context for one naming event (CAP-M25): the
+/// moment's local date/time, the active scene + profile, the recorded
+/// geometry and the live marker count.
+pub(crate) fn naming_context<R: Runtime>(
+    app: &AppHandle<R>,
+    prefix: String,
+    canvas: (u32, u32),
+    counter: u32,
+) -> crate::filename::TokenContext {
+    let now = chrono::Local::now();
+    crate::filename::TokenContext {
+        prefix,
+        date: now.format("%Y-%m-%d").to_string(),
+        time: now.format("%H-%M-%S").to_string(),
+        scene: app
+            .state::<StudioState>()
+            .with_collection(|collection| collection.active_scene().name.clone()),
+        profile: app
+            .state::<crate::profiles::WorkspaceState>()
+            .profile_name(),
+        canvas,
+        marker_count: app.state::<RecordingState>().marker_count(),
+        counter,
+    }
+}
+
+/// A non-colliding output path: `{stem}.{ext}`, appending ` (2)`, ` (3)`…
+/// if that base (or, when splitting, its first `part…` segment) already
+/// exists — so two naming events resolving to the same stem (same
+/// local-time second, or a static template) never overwrite each other.
 pub(crate) fn unique_recording_path(
     folder: &std::path::Path,
-    prefix: &str,
-    timestamp: &str,
+    stem: &str,
     ext: &str,
     split: bool,
 ) -> PathBuf {
@@ -261,16 +353,16 @@ pub(crate) fn unique_recording_path(
     };
     for n in 0..10_000u32 {
         let name = if n == 0 {
-            format!("{prefix} {timestamp}.{ext}")
+            format!("{stem}.{ext}")
         } else {
-            format!("{prefix} {timestamp} ({}).{ext}", n + 1)
+            format!("{stem} ({}).{ext}", n + 1)
         };
         let base = folder.join(name);
         if !taken(&base) {
             return base;
         }
     }
-    folder.join(format!("{prefix} {timestamp}.{ext}"))
+    folder.join(format!("{stem}.{ext}"))
 }
 
 /// Resets an [`AtomicBool`] on scope exit — arms the `starting` guard so it
@@ -284,6 +376,16 @@ impl Drop for ResetOnDrop<'_> {
 
 /// Start a recording session from the persisted settings.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    start_with(app, None)
+}
+
+/// Start with an optional encoder override — the failover restart path
+/// (CAP-M12). `None` (every user-initiated start) resolves the settings
+/// encoder and arms a fresh ladder; `Some(id)` keeps the advanced ladder.
+pub(crate) fn start_with<R: Runtime>(
+    app: &AppHandle<R>,
+    encoder_override: Option<String>,
+) -> Result<(), String> {
     let state = app.state::<RecordingState>();
     // Serialize the whole start (it does slow file/child I/O before the
     // session is registered): a second concurrent start bails here instead of
@@ -320,14 +422,21 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     std::fs::create_dir_all(&folder)
         .map_err(|err| format!("could not create {}: {err}", folder.display()))?;
     let split = (settings.split_minutes > 0).then_some(settings.split_minutes);
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
-    // Second-granularity local timestamps collide (a fast restart, or a DST
-    // fall-back hour), and both sink paths truncate — so guard uniqueness
-    // rather than silently overwrite a finished recording.
+    // CAP-M25: resolve the token template once per session (main + vertical
+    // share the moment and the counter). Resolved names still collide (a
+    // fast restart, a DST fall-back hour, a static template), and both sink
+    // paths truncate — so guard uniqueness rather than silently overwrite.
+    let counter = counter_for(app, &settings.template, settings.counter);
+    let naming = naming_context(
+        app,
+        settings.filename_prefix.clone(),
+        (width, height),
+        counter,
+    );
+    let stem = crate::filename::resolve_template(&settings.template, &naming);
     let path = unique_recording_path(
         &folder,
-        &settings.filename_prefix,
-        &timestamp,
+        &stem,
         settings.container.extension(),
         split.is_some(),
     );
@@ -348,7 +457,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                      Components (the owned lossless .frec format needs nothing)"
                             .to_string()
                     })?;
-                    let encoder_id = resolve_encoder(app, &settings, wire)?;
+                    let encoder_id = match &encoder_override {
+                        Some(id) => id.clone(),
+                        None => resolve_encoder(app, &settings, wire)?,
+                    };
                     let plan = WirePlan {
                         container: wire,
                         encoder_id,
@@ -380,10 +492,22 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                     fps: settings.fps,
                     tracks: spec.tracks.clone(),
                 };
+                let vertical_naming = crate::filename::TokenContext {
+                    prefix: format!("{} (vertical)", settings.filename_prefix),
+                    canvas: (config.width, config.height),
+                    ..naming.clone()
+                };
+                let mut vertical_stem =
+                    crate::filename::resolve_template(&settings.template, &vertical_naming);
+                if vertical_stem == stem {
+                    // A template using neither {prefix} nor {canvas} resolves
+                    // both files identically — label the vertical file rather
+                    // than let it pass as a collision suffix.
+                    vertical_stem.push_str(" (vertical)");
+                }
                 let vertical_path = unique_recording_path(
                     &folder,
-                    &format!("{} (vertical)", settings.filename_prefix),
-                    &timestamp,
+                    &vertical_stem,
                     settings.container.extension(),
                     split.is_some(),
                 );
@@ -395,6 +519,23 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     } else {
         None
     };
+
+    // CAP-M11: track the in-flight outputs so an unclean exit can offer to
+    // repair them next launch. The owned .frec is crash-safe by design and
+    // is never listed.
+    if settings.container != Container::Frec {
+        let mut in_progress = vec![crate::salvage::InProgressFile {
+            path: path.clone(),
+            split: split.is_some(),
+        }];
+        if let Some((_, _, vertical_path)) = &vertical {
+            in_progress.push(crate::salvage::InProgressFile {
+                path: vertical_path.clone(),
+                split: split.is_some(),
+            });
+        }
+        crate::salvage::write_in_progress(&in_progress);
+    }
 
     let recorder = Recorder::start(spec, sink);
     let handle = recorder.handle();
@@ -451,6 +592,25 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clear();
+    // CAP-M12: arm the failover ladder for wire sessions. A user start
+    // builds a fresh one; a failover restart keeps its advanced ladder.
+    if encoder_override.is_none() {
+        let ladder = if settings.container == Container::Frec {
+            None // the owned lossless writer has no wire encoder to swap
+        } else {
+            crate::commands::recording::ensure_catalog(app)
+                .ok()
+                .and_then(|catalog| {
+                    resolve_encoder(app, &settings, settings.container)
+                        .ok()
+                        .map(|id| fcap_encode::FailoverLadder::new(&id, &catalog))
+                })
+        };
+        *state
+            .failover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ladder;
+    }
     emit_status(app);
     println!("recording: started → {}", path.display());
     Ok(())
@@ -632,6 +792,12 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
         }
         None => {}
     }
+    // CAP-M11: every output finalized cleanly — nothing to salvage next
+    // launch. Any finalize failure keeps the sidecar, so a later crash still
+    // surfaces the repair offer for the damaged file.
+    if result.is_ok() && error.is_none() {
+        crate::salvage::clear_in_progress();
+    }
     // TASK-610: attach the dropped markers — embedded chapters for a single
     // mkv, a readable sidecar otherwise. Best-effort: a chapter failure
     // never invalidates the finished recording.
@@ -692,28 +858,104 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     }
 }
 
-/// The status emitter: ~2 Hz while a session runs, and the watchdog that
-/// stops a session whose sink died (ffmpeg crash, disk full) so the failure
-/// is surfaced instead of silently eating frames forever.
+/// CAP-M12: after a dead sink was stopped, consult the session's ladder and
+/// — when the encoder is to blame — restart the recording on the next rung.
+/// The muxer lives inside the encoder child, so the recording necessarily
+/// continues as a NEW file; the toast says so honestly.
+fn failover_restart<R: Runtime>(app: &AppHandle<R>, why: &str, lived: Duration) {
+    // A sink death can race a confirmed quit: the ordered shutdown already
+    // finalized recordings — starting a fresh session now would leave a
+    // truncated stray file when the process exits moments later.
+    if app.state::<crate::shutdown::QuitState>().is_quitting() {
+        return;
+    }
+    let decision = {
+        let state = app.state::<RecordingState>();
+        let mut guard = state
+            .failover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match guard.as_mut() {
+            Some(ladder) => ladder.on_fault(fcap_encode::classify_fault(why), lived),
+            None => return,
+        }
+    };
+    if let fcap_encode::FailoverDecision::Switch { from, to } = decision {
+        match start_with(app, Some(to.clone())) {
+            Ok(()) => {
+                let catalog = crate::commands::recording::ensure_catalog(app).ok();
+                announce_fallback(app, "recording", &from, &to, catalog.as_ref());
+            }
+            Err(err) => eprintln!("recording: failover restart failed: {err}"),
+        }
+    }
+}
+
+/// The status emitter: ~2 Hz while a session runs, the watchdog that stops
+/// a session whose sink died (ffmpeg crash, disk full) so the failure is
+/// surfaced instead of silently eating frames forever, and the low-disk
+/// forecast (CAP-M10) — a filesystem stat every ~5 s, never at 2 Hz.
 pub fn spawn_status_thread<R: Runtime>(app: AppHandle<R>) {
     std::thread::Builder::new()
         .name("fcap-rec-status".into())
-        .spawn(move || loop {
-            let state = app.state::<RecordingState>();
-            let (running, broken) = {
-                let inner = state.lock_inner();
-                match inner.as_ref() {
-                    Some(active) => (true, !active.finalizing && active.handle.error().is_some()),
-                    None => (false, false),
+        .spawn(move || {
+            let mut disk_watch = crate::alarms::DiskWatch::default();
+            let mut disk_ticks = 0u32;
+            loop {
+                let state = app.state::<RecordingState>();
+                let (running, broken) = {
+                    let inner = state.lock_inner();
+                    match inner.as_ref() {
+                        Some(active) if !active.finalizing => (
+                            true,
+                            active
+                                .handle
+                                .error()
+                                .map(|why| (why, active.handle.duration())),
+                        ),
+                        Some(_) => (true, None),
+                        None => (false, None),
+                    }
+                };
+                if let Some((why, lived)) = broken {
+                    // Finalize whatever the dead sink managed to write.
+                    let err = stop(&app).err().unwrap_or_else(|| why.clone());
+                    eprintln!("recording: session died: {err}");
+                    // CAP-M12: if the ladder blames the encoder, keep the
+                    // show — restart on the next rung (necessarily a new
+                    // file).
+                    failover_restart(&app, &why, lived);
+                } else if running && !emit_status(&app) {
+                    return; // the app is gone — wind down
                 }
-            };
-            if broken {
-                let err = stop(&app).err().unwrap_or_else(|| "unknown".into());
-                eprintln!("recording: session died: {err}");
-            } else if running && !emit_status(&app) {
-                return; // the app is gone — wind down
+                // CAP-M10: the low-disk forecast, every 10th tick (~5 s).
+                disk_ticks += 1;
+                if disk_ticks >= 10 {
+                    disk_ticks = 0;
+                    let forecast = if running {
+                        let settings = app.state::<SettingsStore>().get().recording;
+                        let canvas = app.state::<StudioState>().with_collection(|collection| {
+                            (collection.canvas_width, collection.canvas_height)
+                        });
+                        let rate = crate::alarms::recording_write_rate(
+                            settings.container,
+                            canvas,
+                            settings.fps,
+                            settings.rate_control.bitrate_kbps,
+                            settings.audio_bitrate_kbps,
+                            settings.tracks_mask.count_ones(),
+                        );
+                        crate::alarms::free_space_for(&recordings_folder(&settings))
+                            .and_then(|free| crate::alarms::forecast_secs(free, rate))
+                    } else {
+                        None // not recording — the alarm clears
+                    };
+                    if let Some(dto) = disk_watch.evaluate(forecast) {
+                        crate::alarms::emit_alarm(&app, dto.kind, dto.active, dto.minutes_left);
+                    }
+                }
+                std::thread::sleep(STATUS_TICK);
             }
-            std::thread::sleep(STATUS_TICK);
         })
         .expect("recording status thread spawns");
 }
@@ -734,19 +976,19 @@ mod tests {
     }
 
     #[test]
-    fn same_second_never_overwrites_a_finished_recording() {
+    fn same_stem_never_overwrites_a_finished_recording() {
         let dir = temp_dir("collide");
-        let ts = "2026-07-03 14-30-00";
+        let stem = "Freally Capture 2026-07-03 14-30-00";
 
-        let first = unique_recording_path(&dir, "Freally Capture", ts, "frec", false);
+        let first = unique_recording_path(&dir, stem, "frec", false);
         assert_eq!(
             first.file_name().unwrap(),
             "Freally Capture 2026-07-03 14-30-00.frec"
         );
         std::fs::write(&first, b"x").expect("write");
 
-        // A second session in the same local-time second gets a fresh name.
-        let second = unique_recording_path(&dir, "Freally Capture", ts, "frec", false);
+        // A second session resolving the same stem gets a fresh name.
+        let second = unique_recording_path(&dir, stem, "frec", false);
         assert_eq!(
             second.file_name().unwrap(),
             "Freally Capture 2026-07-03 14-30-00 (2).frec"
@@ -758,11 +1000,10 @@ mod tests {
     #[test]
     fn splitting_collision_checks_the_first_segment() {
         let dir = temp_dir("split");
-        let ts = "2026-07-03 14-30-00";
         // A split session writes `… part001.frec`, not the bare base — the
         // guard must still see the clash.
         std::fs::write(dir.join("Rec 2026-07-03 14-30-00 part001.frec"), b"x").expect("write");
-        let next = unique_recording_path(&dir, "Rec", ts, "frec", true);
+        let next = unique_recording_path(&dir, "Rec 2026-07-03 14-30-00", "frec", true);
         assert_eq!(
             next.file_name().unwrap(),
             "Rec 2026-07-03 14-30-00 (2).frec"
