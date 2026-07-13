@@ -12,7 +12,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
-> **0.99.0 closes the 26 CAP-M must-haves** — the last themed batch before **1.0.0**.
+> **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
+> remaining themed phases land first.
 
 ## [0.99.0] — 2026-07-12 (Sources, devices & calibration — CAP-M Batch 3)
 

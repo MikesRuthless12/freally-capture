@@ -11,7 +11,8 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — 0.99.0 closes the must-have set; 1.0.0 is next.** The engine is
+> **Status: in development — 0.99.0 closes all 26 must-haves; the remaining feature phases land
+> before 1.0.0.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
@@ -37,7 +38,8 @@ leaves your machine is the stream you chose to send.
 > redacted diagnostics bundle), and **sources, devices & calibration** (0.99.0 — test signals, an
 > A/V sync calibration workbench, timer/clock sources, text bound to a watched file, a hotkey map
 > with conflict detection, mixer pan/solo/mono, deinterlacing, and camera controls with per-device
-> profiles). **1.0.0 is the next release.** A true browser source, the virtual camera, and
+> profiles). **1.0.0 ships once the remaining feature set lands** — it is deliberately gated on the
+> *complete* product, not just the must-haves. A true browser source, the virtual camera, and
 > game-capture GPU hooking follow as their own milestones. The detailed planning + design set
 > (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
 > privately** and is not published here.
