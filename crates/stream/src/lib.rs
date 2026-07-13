@@ -28,8 +28,8 @@ pub use multistream::{
 };
 pub use rtmp::{StreamProtocol, StreamService, StreamTarget, TargetError};
 pub use session::{
-    backoff, SinkFactory, StreamHandle, StreamSession, StreamSpec, StreamState, StreamStatus,
-    MAX_RECONNECT_ATTEMPTS,
+    backoff, SinkDeath, SinkFactory, StreamHandle, StreamSession, StreamSpec, StreamState,
+    StreamStatus, MAX_RECONNECT_ATTEMPTS,
 };
 
 /// This crate's version (inherited from the workspace).

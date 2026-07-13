@@ -908,6 +908,13 @@ output-install = Pasang…
 output-recordings-folder = Folder rekaman
 output-folder-placeholder = Folder Video OS
 output-filename-prefix = Awalan nama berkas
+output-recording-template = Nama berkas rekaman
+output-replay-template = Nama berkas replay
+output-still-template = Nama berkas bingkai
+output-template-tokens = Token: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Folder replay
+output-still-folder = Folder bingkai
+output-same-folder-placeholder = Folder rekaman
 output-frame-rate = Laju frame
 output-fps-option = { $fps } fps
 output-split-every = Pisah tiap (menit, 0 = nonaktif)
@@ -1381,3 +1388,102 @@ still-saved-toast = Bingkai disimpan: { $name }
 still-failed-toast = Gagal mengambil bingkai: { $error }
 hotkeys-still = Ambil bingkai
 hotkeys-still-placeholder = mis. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Kesehatan sumber…
+health-title = Kesehatan Sumber
+health-col-source = Sumber
+health-col-state = Status
+health-col-resolution = Resolusi
+health-col-fps = FPS
+health-col-last-frame = Bingkai terakhir
+health-col-dropped = Terbuang
+health-col-retries = Mulai ulang
+health-col-actions = Tindakan
+health-state-live = Langsung
+health-state-waiting = Menunggu
+health-state-error = Kesalahan
+health-state-inactive = Tidak aktif
+health-restart = Mulai ulang
+health-properties = Properti
+health-empty = Koleksi ini belum memiliki sumber.
+health-seconds = { $value } dtk
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Keluar dari Freally Capture?
+quit-body = Keluar sekarang akan melakukan hal berikut dengan aman, secara berurutan:
+quit-consequence-stream = Mengakhiri siaran langsung dan memutus sambungan dari layanan.
+quit-consequence-recording = Menghentikan rekaman dan memfinalkan berkasnya.
+quit-consequence-replay = Mematikan replay buffer — rekaman replay yang belum disimpan akan dibuang.
+quit-confirm = Keluar dengan aman
+quit-quitting = Menutup…
+quit-cancel = Batal
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Pulihkan rekaman yang terputus?
+salvage-body = Sesi terakhir berakhir tiba-tiba saat rekaman ini masih ditulis. Perbaikan membuat salinan yang dapat diputar di samping aslinya — berkas asli tidak pernah diubah.
+salvage-repair = Perbaiki
+salvage-repairing = Memperbaiki…
+salvage-done = Diperbaiki
+salvage-repaired = Diperbaiki → { $name }
+salvage-failed = Perbaikan gagal: { $error }
+salvage-dismiss = Nanti saja
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Kesalahan encoder — beralih dari { $from } ke { $to }. Siaran tersambung kembali dan tetap berjalan.
+fallback-toast-recording = Kesalahan encoder — beralih dari { $from } ke { $to }. Rekaman berlanjut di berkas baru.
+fallback-note = Encoder cadangan: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Audio program menjadi sunyi
+alarm-clipping = Audio program mengalami clipping
+alarm-black = Gambar program hitam
+alarm-frozen = Gambar program tidak berubah beberapa saat
+alarm-lowDisk = Ruang disk: tersisa sekitar { $minutes } mnt pada bitrate saat ini
+alarm-dismiss = Tutup alarm
+alarm-cleared = Teratasi: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Panik — potong ke slate privasi
+panic-banner-title = Panik
+panic-banner-body = Program menampilkan slate privasi; semua audio dibisukan dan penangkapan dihentikan. Siaran dan rekaman tetap berjalan.
+panic-restore = Pulihkan…
+panic-restore-confirm = Pulihkan program?
+panic-restore-yes = Pulihkan
+panic-restore-cancel = Batal
+hotkeys-panic = Panik (slate privasi)
+hotkeys-panic-placeholder = mis. Ctrl+Shift+F12
+panic-slate-color = Warna slate panik
+panic-slate-image = Gambar slate panik
+panic-slate-image-placeholder = Jalur gambar opsional
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Bundel diagnostik
+diag-intro = Ekspor .zip tersunting (snapshot konfigurasi, probe encoder, statistik terbaru — rahasia, jalur, dan nama tidak pernah disertakan) untuk dilampirkan manual ke issue GitHub. Tidak ada yang dikirim.
+diag-preview = Lihat isi
+diag-hide-preview = Sembunyikan pratinjau
+diag-export = Ekspor .zip
+diag-exported = Diekspor: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Pra-siaran
+preflight-intro = Setiap butir pemblokir harus hijau; sisanya pengingat jujur.
+preflight-item-targets = Target siaran dikonfigurasi (kunci/URL)
+preflight-item-encoder = Encoder yang dapat dipakai tersedia
+preflight-item-sources = Semua sumber sehat
+preflight-item-disk = Ruang disk untuk rekaman
+preflight-item-mic = Meter mikrofon
+preflight-item-desktopAudio = Meter audio desktop
+preflight-item-replay = Replay buffer siaga
+preflight-targets-detail = { $count } aktif
+preflight-sources-detail = { $count } sumber bermasalah
+preflight-disk-detail = ~{ $minutes } mnt pada bitrate saat ini
+preflight-fix-stream = Pengaturan siaran…
+preflight-fix-components = Komponen…
+preflight-fix-sources = Kesehatan sumber…
+preflight-fix-replay = Siagakan
+preflight-optional = opsional
+preflight-hold = Tahan Go Live sampai semua hijau
+preflight-cancel = Batal
+preflight-go-anyway = Tetap siaran
+preflight-go-live = Siaran

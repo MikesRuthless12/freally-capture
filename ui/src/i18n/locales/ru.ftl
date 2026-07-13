@@ -872,6 +872,13 @@ output-install = Установить…
 output-recordings-folder = Папка записей
 output-folder-placeholder = Папка «Видео» ОС
 output-filename-prefix = Префикс имени файла
+output-recording-template = Имя файла записи
+output-replay-template = Имя файла повтора
+output-still-template = Имя файла стоп-кадра
+output-template-tokens = Токены: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Папка повторов
+output-still-folder = Папка стоп-кадров
+output-same-folder-placeholder = Папка записей
 output-frame-rate = Частота кадров
 output-fps-option = { $fps } fps
 output-split-every = Разбивать каждые (минуты, 0 = выкл.)
@@ -1346,3 +1353,102 @@ still-saved-toast = Стоп-кадр сохранён: { $name }
 still-failed-toast = Не удалось сделать стоп-кадр: { $error }
 hotkeys-still = Сделать стоп-кадр
 hotkeys-still-placeholder = напр. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Состояние источников…
+health-title = Состояние источников
+health-col-source = Источник
+health-col-state = Состояние
+health-col-resolution = Разрешение
+health-col-fps = FPS
+health-col-last-frame = Последний кадр
+health-col-dropped = Пропущено
+health-col-retries = Перезапуски
+health-col-actions = Действия
+health-state-live = В эфире
+health-state-waiting = Ожидание
+health-state-error = Ошибка
+health-state-inactive = Неактивен
+health-restart = Перезапустить
+health-properties = Свойства
+health-empty = В этой коллекции пока нет источников.
+health-seconds = { $value } с
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Выйти из Freally Capture?
+quit-body = При выходе сейчас будет безопасно выполнено по порядку:
+quit-consequence-stream = Завершение эфира и отключение от сервиса.
+quit-consequence-recording = Остановка записи и финализация её файлов.
+quit-consequence-replay = Отключение буфера повтора — несохранённые кадры будут удалены.
+quit-confirm = Выйти безопасно
+quit-quitting = Завершение…
+quit-cancel = Отмена
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Восстановить прерванные записи?
+salvage-body = Последний сеанс завершился неожиданно, пока эти записи ещё писались. Восстановление создаёт воспроизводимую копию рядом с оригиналом — исходный файл никогда не изменяется.
+salvage-repair = Восстановить
+salvage-repairing = Восстановление…
+salvage-done = Восстановлено
+salvage-repaired = Восстановлено → { $name }
+salvage-failed = Сбой восстановления: { $error }
+salvage-dismiss = Не сейчас
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Сбой кодировщика — переключено с { $from } на { $to }. Эфир переподключился и продолжается.
+fallback-toast-recording = Сбой кодировщика — переключено с { $from } на { $to }. Запись продолжается в новом файле.
+fallback-note = Резервный кодировщик: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Звук программы пропал
+alarm-clipping = Звук программы клиппирует
+alarm-black = Картинка программы чёрная
+alarm-frozen = Картинка программы давно не меняется
+alarm-lowDisk = Место на диске: осталось около { $minutes } мин при текущем битрейте
+alarm-dismiss = Скрыть тревогу
+alarm-cleared = Устранено: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Паника — переключить на экран приватности
+panic-banner-title = Паника
+panic-banner-body = Программа показывает экран приватности; весь звук выключен, захваты остановлены. Эфир и запись продолжаются.
+panic-restore = Восстановить…
+panic-restore-confirm = Восстановить программу?
+panic-restore-yes = Восстановить
+panic-restore-cancel = Отмена
+hotkeys-panic = Паника (экран приватности)
+hotkeys-panic-placeholder = напр. Ctrl+Shift+F12
+panic-slate-color = Цвет экрана паники
+panic-slate-image = Изображение экрана паники
+panic-slate-image-placeholder = Необязательный путь к изображению
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Диагностический пакет
+diag-intro = Экспортирует очищенный .zip (снимок настроек, проба кодировщиков, свежая статистика — секреты, пути и имена никогда не включаются) для ручного прикрепления к issue на GitHub. Ничего никуда не отправляется.
+diag-preview = Показать содержимое
+diag-hide-preview = Скрыть просмотр
+diag-export = Экспортировать .zip
+diag-exported = Экспортировано: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Предэфирная проверка
+preflight-intro = Каждый блокирующий пункт должен быть зелёным; остальное — честные подсказки.
+preflight-item-targets = Цели настроены (ключ/URL)
+preflight-item-encoder = Доступен рабочий кодировщик
+preflight-item-sources = Все источники в порядке
+preflight-item-disk = Место на диске для записи
+preflight-item-mic = Уровень микрофона
+preflight-item-desktopAudio = Уровень звука рабочего стола
+preflight-item-replay = Буфер повтора включён
+preflight-targets-detail = { $count } включено
+preflight-sources-detail = { $count } источник(ов) с ошибкой
+preflight-disk-detail = ~{ $minutes } мин при текущем битрейте
+preflight-fix-stream = Настройки эфира…
+preflight-fix-components = Компоненты…
+preflight-fix-sources = Состояние источников…
+preflight-fix-replay = Включить
+preflight-optional = необязательно
+preflight-hold = Не выходить в эфир, пока всё не зелёное
+preflight-cancel = Отмена
+preflight-go-anyway = Всё равно в эфир
+preflight-go-live = В эфир

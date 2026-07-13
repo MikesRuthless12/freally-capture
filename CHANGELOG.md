@@ -13,7 +13,60 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 ## [Unreleased]
 
 > The next rungs toward **1.0.0** are the 26 CAP-M must-haves, run as three themed batches
-> (0.97.0 / 0.98.0 / 0.99.0). **0.97.0 is the first batch** — scene authoring & monitoring.
+> (0.97.0 / 0.98.0 / 0.99.0). **0.98.0 is the second batch** — broadcast safety & reliability;
+> Batch 3 (0.99.0) closes the set.
+
+## [0.98.0] — 2026-07-12 (Broadcast safety & reliability — CAP-M Batch 2)
+
+> The second must-have batch: *don't lose the show*. The studio now catches failures before you go
+> live (a pre-flight checklist), while you're live (always-on safety alarms, a mid-session encoder
+> failover, a source health dashboard), and after the worst happens (crash-safe recordings with a
+> next-launch repair, a quit guard that finalizes everything in order). And when you need to hide
+> everything *right now*, there's a panic button.
+
+### Added
+- **Recording filename templates** (CAP-M25). Token-based naming — `{prefix}`, `{date}`, `{time}`,
+  `{scene}`, `{profile}`, `{canvas}`, `{marker-count}`, and a persisted `{counter}` — for recordings,
+  replay saves and stills, with collision-safe auto-suffixing and **per-output folders** for replays
+  and stills. Names are sanitized against every platform's reserved characters; a template typo is
+  caught at save time.
+- **A source health dashboard** (CAP-M13). One palette-opened panel with every source's live state,
+  fps, **last-frame age**, dropped-frame count and restart history — plus per-source Restart and
+  Properties. Sources the engine isn't running honestly read "inactive".
+- **A quit guard + orderly shutdown** (CAP-M23). Closing the studio while live, recording, or
+  replay-armed asks first — listing exactly what will happen — then ends the stream, finalizes the
+  recording, and flushes the replay buffer **in order** before exiting. A crash-marker file now
+  distinguishes clean exits from crashes.
+- **Crash-safe recordings + a salvage prompt** (CAP-M11). mp4/mov recordings are written
+  **fragmented** (an index flush per keyframe), so a crash or power cut leaves a playable file
+  instead of an unreadable one. If a session dies uncleanly mid-recording, the next launch offers a
+  one-click **repair** into a `(repaired)` copy — the original is never touched.
+- **Mid-session encoder failover** (CAP-M12). If the hardware encoder faults mid-stream or
+  mid-recording (driver reset, GPU contention), the session hot-swaps down a ladder — the other
+  hardware family, then x264 — instead of dying. The stream rides its existing reconnect; the
+  recording continues in a new file; an honest toast + a sticky stats-dock note say exactly what
+  happened. Network faults never trigger a swap.
+- **Broadcast safety alarms** (CAP-M10). Always-on watchdogs while output runs: **silent program
+  audio**, **sustained clipping**, a **black or frozen program picture** (classic CV — sampled luma
+  + frame delta over the existing readback, no ML), and a **low-disk forecast** ("~22 min left at
+  the current bitrate"). Non-modal: a dismissible banner + the screen-reader announcer.
+- **A panic button** (CAP-M22). One global hotkey cuts program (and the vertical canvas, and any
+  projectors) to a configurable privacy slate, stops every capture, and hard-mutes all audio — the
+  microphone isn't even being captured — while the stream and recording stay up. Restoring is a
+  deliberate two-step confirm.
+- **A redacted diagnostics bundle** (CAP-M24). "Export diagnostics" writes a zip (config snapshot,
+  encoder/device probe, recent stats, the last crash report) built by a strict **allowlist** —
+  stream keys, passwords, tokens, file paths and user text are never read, let alone included. You
+  can read the exact content before exporting; nothing is ever sent anywhere.
+- **A go-live pre-flight checklist** (CAP-M09). Go Live now runs the checks first: targets keyed,
+  encoder usable, sources healthy, disk space sufficient — each green/red with a one-click fix —
+  plus honest nudges for mic/desktop-audio metering and the replay buffer. An optional setting
+  holds Go Live until every blocking check is green.
+
+### Changed
+- mp4/mov recordings switched from write-index-at-the-end (`+faststart`) to fragmented writing;
+  the salvage repair (or Remux) produces a classic faststart file when an editor insists on one.
+- The `HotkeySettings` validator now bounds the still-grab and panic accelerators too.
 
 ## [0.97.0] — 2026-07-11 (Scene authoring & monitoring — CAP-M Batch 1)
 

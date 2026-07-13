@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { settingsSet } from "../api/commands";
-import type { HotkeySettings, Settings } from "../api/types";
+import type { HotkeySettings, PanicSlateSettings, Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
 
@@ -15,6 +15,7 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["saveReplay", "hotkeys-save-replay", "hotkeys-save-replay-placeholder"],
   ["addMarker", "hotkeys-add-marker", "hotkeys-add-marker-placeholder"],
   ["still", "hotkeys-still", "hotkeys-still-placeholder"],
+  ["panic", "hotkeys-panic", "hotkeys-panic-placeholder"],
 ];
 
 /**
@@ -33,9 +34,11 @@ export function SettingsHotkeys({
 }) {
   const t = useT();
   const [draft, setDraft] = useState<HotkeySettings | null>(settings?.hotkeys ?? null);
+  // The panic slate (CAP-M22) is configured beside its hotkey.
+  const [slate, setSlate] = useState<PanicSlateSettings | null>(settings?.panicSlate ?? null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!settings || !draft) return null;
+  if (!settings || !draft || !slate) return null;
 
   const save = () => {
     setError(null);
@@ -46,8 +49,13 @@ export function SettingsHotkeys({
       saveReplay: draft.saveReplay?.trim() || null,
       addMarker: draft.addMarker?.trim() || null,
       still: draft.still?.trim() || null,
+      panic: draft.panic?.trim() || null,
     };
-    const next = { ...settings, hotkeys: normalized };
+    const next = {
+      ...settings,
+      hotkeys: normalized,
+      panicSlate: { color: slate.color.trim(), image: slate.image.trim() },
+    };
     settingsSet(next)
       .then(() => {
         onSaved(next);
@@ -70,6 +78,26 @@ export function SettingsHotkeys({
             />
           </label>
         ))}
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("panic-slate-color")}
+            <input
+              value={slate.color}
+              onChange={(event) => setSlate({ ...slate, color: event.target.value })}
+              placeholder="#10141a"
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("panic-slate-image")}
+            <input
+              value={slate.image}
+              onChange={(event) => setSlate({ ...slate, image: event.target.value })}
+              placeholder={t("panic-slate-image-placeholder")}
+              className={inputClass}
+            />
+          </label>
+        </div>
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("hotkeys-note")}</p>
         {error && (
           <p role="alert" className="m-0 text-[11px] text-red-300">

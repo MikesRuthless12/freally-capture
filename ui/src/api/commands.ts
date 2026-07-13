@@ -76,6 +76,12 @@ export function streamStart(): Promise<void> {
   return invoke("stream_start");
 }
 
+/** The pre-flight disk item (CAP-M09): whole minutes of recording left at
+ * the configured bitrate, or null when free space can't be read. */
+export function preflightDisk(): Promise<number | null> {
+  return invoke("preflight_disk");
+}
+
 /** End the stream (the local recording, if any, is untouched). */
 export function streamStop(): Promise<StreamStatus> {
   return invoke<StreamStatus>("stream_stop");
@@ -480,6 +486,12 @@ export function studioRetrySource(sourceId: SourceId): Promise<void> {
   return invoke("studio_retry_source", { sourceId });
 }
 
+/** Engage (true) or restore (false) the panic slate (CAP-M22). Restoring is
+ * only ever called from the deliberate two-step confirm. */
+export function studioPanicSet(on: boolean): Promise<void> {
+  return invoke("studio_panic_set", { on });
+}
+
 export function studioAddFilter(
   sceneId: SceneId,
   itemId: ItemId,
@@ -562,6 +574,50 @@ export function studioMultiviewSet(on: boolean): Promise<void> {
  * path arrives on the `still-saved` event (or `still-error`). */
 export function captureStill(target: StillTarget): Promise<void> {
   return invoke("studio_capture_still", { target });
+}
+
+/** Confirm the quit guard (CAP-M23): ordered shutdown — end stream →
+ * finalize recordings → flush replay → save — then the app exits. */
+export function quitConfirmed(): Promise<void> {
+  return invoke("quit_confirmed");
+}
+
+/** Cancel the quit guard: the next close asks again (instead of reading as
+ * the hung-webview double-close escape). */
+export function quitGuardCancel(): Promise<void> {
+  return invoke("quit_guard_cancel");
+}
+
+// -- Redacted diagnostics bundle (CAP-M24) -------------------------------------
+
+/** The EXACT text the diagnostics zip will contain (allowlist-built,
+ * scrubbed) — shown before export, in the crash-report tradition. */
+export function diagnosticsPreview(): Promise<string> {
+  return invoke("diagnostics_preview");
+}
+
+/** Zip the bundle into Downloads and resolve to its path. Strictly local —
+ * nothing is sent anywhere; the user attaches it by hand. */
+export function diagnosticsExport(): Promise<string> {
+  return invoke("diagnostics_export");
+}
+
+// -- Recording salvage (CAP-M11) ----------------------------------------------
+
+/** Interrupted recordings found at startup (unclean exit) awaiting repair. */
+export function salvagePending(): Promise<string[]> {
+  return invoke("salvage_pending");
+}
+
+/** Repair one pending file into a `(repaired)` sibling; resolves to the new
+ * path. Long recordings copy for minutes — keep the UI responsive. */
+export function salvageRepair(path: string): Promise<string> {
+  return invoke("salvage_repair", { path });
+}
+
+/** Decline the salvage offer (the files themselves stay on disk). */
+export function salvageDismiss(): Promise<void> {
+  return invoke("salvage_dismiss");
 }
 
 // -- Projectors + aux windows (CAP-M07) ---------------------------------------

@@ -599,12 +599,21 @@ impl FfmpegSink {
                 plan.container.muxer(),
             ]);
             if matches!(plan.container, Container::Mp4 | Container::Mov) {
-                cmd.args(["-segment_format_options", "movflags=+faststart"]);
+                cmd.args([
+                    "-segment_format_options",
+                    "movflags=+frag_keyframe+empty_moov",
+                ]);
             }
         } else {
             cmd.args(["-f", plan.container.muxer()]);
             if matches!(plan.container, Container::Mp4 | Container::Mov) {
-                cmd.args(["-movflags", "+faststart"]);
+                // CAP-M11: fragmented writing — the moov up front and an
+                // index flush per fragment (each keyframe), so a crash or
+                // power cut leaves a playable file instead of a moov-less
+                // brick (`+faststart` wrote the index only at finalize).
+                // `repair_recording` (or Remux) yields a classic faststart
+                // file when an editor insists on one.
+                cmd.args(["-movflags", "+frag_keyframe+empty_moov"]);
             }
         }
         cmd.arg(&out_path);

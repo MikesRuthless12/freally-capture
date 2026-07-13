@@ -45,7 +45,11 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+# `disk` feeds the CAP-M10 low-disk forecast (free space at the recordings folder).
+sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
+# The CAP-M24 diagnostics bundle (already in the tree transitively). Deflate
+# only — the bundle is a handful of small text files.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # The post-crash "stopped unexpectedly" message box, shown by the `--crash-notice`
 # helper process *after* the studio has died — so it cannot use Tauri's dialog
 # plugin (there is no app left to host it). Already in the tree via

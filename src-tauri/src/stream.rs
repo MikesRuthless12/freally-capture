@@ -21,8 +21,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use fcap_audio::RecordTap;
 use fcap_encode::{
-    tee_safe, EncPreset, FfmpegSink, RateControl, RcMode, RecordSink, RecordSpec, RtmpMonitor,
-    RtmpPlan, VideoCodec,
+    tee_safe, EncPreset, FailoverDecision, FailoverLadder, FfmpegSink, RateControl, RcMode,
+    RecordSink, RecordSpec, RtmpMonitor, RtmpPlan, VideoCodec,
 };
 use fcap_stream::{
     LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle, MultiSession,
@@ -80,6 +80,12 @@ impl StreamBridgeState {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Whether a stream session is up at all (either canvas) — the quit
+    /// guard's check (CAP-M23).
+    pub fn is_live(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
     }
 
     /// Whether the render loop should hand this state program frames.
@@ -331,6 +337,26 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 
     let settings = app.state::<SettingsStore>().get().stream;
     settings.validate()?;
+    // CAP-M09: the user asked Go Live to HOLD until the blocking checks are
+    // green — enforce it HERE, where every path (button, hotkey, remote
+    // API) converges. Missing keys and unusable encoders already hard-fail
+    // below; errored sources and low disk are the two blockers nothing
+    // else would catch.
+    if settings.preflight_hold {
+        let errored = app.state::<crate::events::RuntimeStats>().errored_sources();
+        if errored > 0 {
+            return Err(format!(
+                "pre-flight hold: {errored} source(s) are errored — fix them in Source health, or turn the hold off"
+            ));
+        }
+        if let Some(minutes) = crate::alarms::preflight_disk_minutes(app) {
+            if u64::from(minutes) * 60 < crate::alarms::LOW_DISK_CLEAR_SECS {
+                return Err(format!(
+                    "pre-flight hold: only ~{minutes} min of disk space left for the recording — free space, or turn the hold off"
+                ));
+            }
+        }
+    }
     let enabled: Vec<(usize, &crate::settings::StreamTargetSettings)> = settings
         .targets
         .iter()
@@ -462,6 +488,12 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         })
         .collect();
 
+    // CAP-M12: per-lane encoder failover. The catalog builds each lane's
+    // ladder (configured → other hardware family → software) and maps ids
+    // to honest labels for the toast.
+    let failover_catalog = crate::commands::recording::ensure_catalog(app).ok();
+    let app_for_lanes = app.clone();
+
     let maker: LaneMaker = {
         let plans = plans.clone();
         Box::new(move |ids: &[usize]| {
@@ -472,8 +504,17 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             let bytes_out = Arc::clone(&cells.bytes_out);
             let plans = plans.clone();
             let ready = ready.clone();
+            // The lane's failover ladder, consulted by every (re)spawn.
+            let ladder: Arc<Mutex<Option<FailoverLadder>>> =
+                Arc::new(Mutex::new(failover_catalog.as_ref().and_then(|catalog| {
+                    ids.iter()
+                        .find_map(|id| plans.iter().find(|plan| plan.id == *id))
+                        .map(|plan| FailoverLadder::new(&plan.encoder_id, catalog))
+                })));
+            let catalog_for_labels = failover_catalog.clone();
+            let app_events = app_for_lanes.clone();
             LaneIo {
-                factory: Box::new(move || {
+                factory: Box::new(move |death: Option<&fcap_stream::SinkDeath>| {
                     // Publish to the lane's *current* members — a target the
                     // engine split out must not ride this lane's respawn.
                     let ids: Vec<usize> = members_cell
@@ -487,8 +528,40 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
                     let Some(first) = lane_plans.first() else {
                         return Err("this lane has no targets left".to_string());
                     };
+                    // CAP-M12: the supervisor hands this factory WHY the
+                    // last sink died — the real stderr tail and how long it
+                    // actually lived (never inflated by backoff). The
+                    // ladder classifies it exactly like the recording
+                    // watchdog: an encoder fault switches, a network flap
+                    // keeps its encoder, and an unclassifiable error needs
+                    // two consecutive fast deaths before it moves.
+                    let encoder_id = {
+                        let mut guard = ladder
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        match guard.as_mut() {
+                            Some(ladder) => {
+                                if let Some(death) = death {
+                                    let blame = fcap_encode::classify_fault(&death.error);
+                                    if let FailoverDecision::Switch { from, to } =
+                                        ladder.on_fault(blame, death.lived)
+                                    {
+                                        crate::recording::announce_fallback(
+                                            &app_events,
+                                            "stream",
+                                            &from,
+                                            &to,
+                                            catalog_for_labels.as_ref(),
+                                        );
+                                    }
+                                }
+                                ladder.current().to_string()
+                            }
+                            None => first.encoder_id.clone(),
+                        }
+                    };
                     let plan = RtmpPlan {
-                        encoder_id: first.encoder_id.clone(),
+                        encoder_id,
                         rate_control: RateControl {
                             mode: RcMode::Cbr,
                             bitrate_kbps: first.bitrate_kbps,

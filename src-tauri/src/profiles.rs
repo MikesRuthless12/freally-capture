@@ -108,6 +108,11 @@ impl WorkspaceState {
             .ok_or_else(|| "no config directory".to_string())
     }
 
+    /// The active profile's name — the `{profile}` filename token (CAP-M25).
+    pub fn profile_name(&self) -> String {
+        self.lock().profile.clone()
+    }
+
     /// Replace the remembered open-projector list and persist it (CAP-M07
     /// extension). Called at exit with the windows still open, so they reopen.
     pub fn set_projectors(&self, projectors: Vec<ProjectorState>) {

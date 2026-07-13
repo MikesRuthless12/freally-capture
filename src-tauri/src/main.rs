@@ -10,14 +10,17 @@
 //! store, and (Phase 2) the studio runtime — the scene collection + the
 //! 60 fps compose loop; the engine lives in the owned `fcap-*` crates.
 
+mod alarms;
 mod audio;
 mod autoconfig;
 mod bugreport;
 mod buildinfo;
 mod commands;
+mod diagnostics;
 mod docks;
 mod eula;
 mod events;
+mod filename;
 mod hotkeys;
 mod native_preview;
 mod openfile;
@@ -29,8 +32,10 @@ mod recording;
 mod remote;
 mod remote_api;
 mod replay;
+mod salvage;
 mod scripting;
 mod settings;
+mod shutdown;
 mod stream;
 mod studio;
 
@@ -38,7 +43,7 @@ use audio::{AudioRuntime, HotkeyRegistry};
 use preview::PreviewState;
 use settings::SettingsStore;
 use studio::StudioState;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     // `--crash-notice <pid>`: we are the tiny helper a dying studio spawned, not
@@ -133,6 +138,10 @@ fn main() {
         .manage(commands::cef::CefState::new())
         .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
+        // CAP-M23: drop this session's crash marker, remembering whether the
+        // previous one exited uncleanly (CAP-M11's salvage signal).
+        .manage(shutdown::QuitState::new(shutdown::mark_session_start()))
+        .manage(salvage::SalvageState::default())
         .manage(stream::StreamBridgeState::new())
         .manage(replay::ReplayState::new())
         .manage(reactions::ReactionState::new())
@@ -159,9 +168,27 @@ fn main() {
             // projector windows are still alive, so `ExitRequested` can remember
             // them (on the default last-window-closes path they would be destroyed
             // first, and the session snapshot would be empty). CAP-M07 extension.
+            // CAP-M23: quitting while live/recording/replay-armed asks first
+            // (`quit-guard` → the webview confirm), and every exit goes through
+            // the ordered shutdown (a fast no-op when nothing is running).
             tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
                 api.prevent_close();
-                window.app_handle().exit(0);
+                let app = window.app_handle();
+                let quit = app.state::<shutdown::QuitState>();
+                let pending = shutdown::consequences(app);
+                // Proceed straight to the ordered shutdown when nothing
+                // needs guarding, when one is already underway, or when a
+                // prompt is already up unanswered — a hung/dead webview
+                // must never make the app unclosable: the SECOND close
+                // click is the confirmation.
+                if !pending.any() || quit.is_quitting() || quit.prompt_armed() {
+                    shutdown::shutdown_and_exit(app.clone());
+                } else {
+                    quit.arm_prompt();
+                    if app.emit("quit-guard", &pending).is_err() {
+                        shutdown::shutdown_and_exit(app.clone());
+                    }
+                }
             }
             // When a scene/source projector window closes (its own Esc, or the OS),
             // tell the render loop to stop rendering its slot (CAP-M07 extension).
@@ -177,6 +204,11 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
+            shutdown::quit_confirmed,
+            shutdown::quit_guard_cancel,
+            salvage::salvage_pending,
+            salvage::salvage_repair,
+            salvage::salvage_dismiss,
             commands::integrations_status,
             commands::game_capture_status,
             eula::eula_status,
@@ -198,6 +230,9 @@ fn main() {
             bugreport::bug_report_context,
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,
+            diagnostics::diagnostics_preview,
+            diagnostics::diagnostics_export,
+            alarms::preflight_disk,
             commands::studio::studio_get,
             commands::studio::studio_undo,
             commands::studio::studio_redo,
@@ -229,6 +264,7 @@ fn main() {
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,
+            commands::studio::studio_panic_set,
             commands::studio::studio_media_set_paused,
             commands::studio::studio_media_paused,
             commands::studio::studio_add_filter,
@@ -386,6 +422,26 @@ fn main() {
             // Reopen the projectors that were open last session (CAP-M07
             // extension) — stale scene/source targets are skipped.
             projector::reopen_saved(app.handle());
+            // CAP-M11: the in-progress sidecar is consumed every launch (so
+            // stale ones never linger). Its presence IS the signal — stop()
+            // clears it only when every output finalized — so the salvage
+            // prompt fires regardless of the CAP-M23 marker: a session whose
+            // finalize failed followed by a clean app exit still deserves
+            // its repair offer. The marker just annotates the log.
+            let interrupted = salvage::take_interrupted();
+            let found = salvage::candidates(&interrupted);
+            if !found.is_empty() {
+                println!(
+                    "salvage: {} interrupted recording(s) found (previous exit unclean: {})",
+                    found.len(),
+                    app.handle()
+                        .state::<shutdown::QuitState>()
+                        .previous_exit_was_unclean()
+                );
+                app.handle()
+                    .state::<salvage::SalvageState>()
+                    .set_pending(found);
+            }
             println!("init: setup complete");
             Ok(())
         })
@@ -401,6 +457,9 @@ fn main() {
             // Never lose the last edit: the autosave debounce may still be
             // pending when the user quits.
             app_handle.state::<StudioState>().save_now();
+            // CAP-M23: the exit was orderly only if nothing was left running —
+            // then (and only then) the crash marker comes off.
+            shutdown::mark_clean_if_quiescent(app_handle);
         }
         _ => {}
     });

@@ -26,6 +26,9 @@ pub enum HotkeyAction {
     SaveReplay,
     AddMarker,
     CaptureStill,
+    /// Cut to the privacy slate + hard-mute (CAP-M22). Engage only — the
+    /// restore is the deliberate two-step in the UI.
+    Panic,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -119,6 +122,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
         HotkeyAction::CaptureStill => {
             crate::studio::capture_still(app, crate::studio::StillTarget::Program);
         }
+        HotkeyAction::Panic => {
+            app.state::<crate::studio::StudioState>()
+                .set_panic(app, true);
+        }
     }
 }
 
@@ -139,6 +146,7 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
         (&settings.save_replay, HotkeyAction::SaveReplay),
         (&settings.add_marker, HotkeyAction::AddMarker),
         (&settings.still, HotkeyAction::CaptureStill),
+        (&settings.panic, HotkeyAction::Panic),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

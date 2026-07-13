@@ -908,6 +908,13 @@ output-install = インストール…
 output-recordings-folder = 録画フォルダ
 output-folder-placeholder = OSのビデオフォルダ
 output-filename-prefix = ファイル名のプレフィックス
+output-recording-template = 録画のファイル名
+output-replay-template = リプレイのファイル名
+output-still-template = 静止画のファイル名
+output-template-tokens = トークン: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = リプレイフォルダ
+output-still-folder = 静止画フォルダ
+output-same-folder-placeholder = 録画フォルダ
 output-frame-rate = フレームレート
 output-fps-option = { $fps } fps
 output-split-every = 分割間隔（分、0 = オフ）
@@ -1382,3 +1389,102 @@ still-saved-toast = 静止画を保存しました: { $name }
 still-failed-toast = 静止画のキャプチャに失敗しました: { $error }
 hotkeys-still = 静止画をキャプチャ
 hotkeys-still-placeholder = 例: Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = ソースの状態…
+health-title = ソースの状態
+health-col-source = ソース
+health-col-state = 状態
+health-col-resolution = 解像度
+health-col-fps = FPS
+health-col-last-frame = 最終フレーム
+health-col-dropped = ドロップ
+health-col-retries = 再起動回数
+health-col-actions = 操作
+health-state-live = ライブ
+health-state-waiting = 待機中
+health-state-error = エラー
+health-state-inactive = 非アクティブ
+health-restart = 再起動
+health-properties = プロパティ
+health-empty = このコレクションにはまだソースがありません。
+health-seconds = { $value } 秒
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Freally Capture を終了しますか？
+quit-body = 今終了すると、次の処理が順に安全に実行されます：
+quit-consequence-stream = ライブ配信を終了し、サービスから切断します。
+quit-consequence-recording = 録画を停止し、ファイルをファイナライズします。
+quit-consequence-replay = リプレイバッファを停止します — 未保存のリプレイ映像は破棄されます。
+quit-confirm = 安全に終了
+quit-quitting = シャットダウン中…
+quit-cancel = キャンセル
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = 中断された録画を復旧しますか？
+salvage-body = 前回のセッションは、これらの録画の書き込み中に予期せず終了しました。修復すると元のファイルの隣に再生可能なコピーが作成されます — 元のファイルは変更されません。
+salvage-repair = 修復
+salvage-repairing = 修復中…
+salvage-done = 修復済み
+salvage-repaired = 修復済み → { $name }
+salvage-failed = 修復に失敗しました: { $error }
+salvage-dismiss = 後で
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = エンコーダー障害 — { $from } から { $to } に切り替えました。配信は再接続され継続中です。
+fallback-toast-recording = エンコーダー障害 — { $from } から { $to } に切り替えました。録画は新しいファイルで継続します。
+fallback-note = エンコーダーのフォールバック: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = プログラム音声が無音になりました
+alarm-clipping = プログラム音声がクリッピングしています
+alarm-black = プログラム映像が真っ黒です
+alarm-frozen = プログラム映像がしばらく変化していません
+alarm-lowDisk = ディスク容量: 現在のビットレートで残り約 { $minutes } 分
+alarm-dismiss = アラームを閉じる
+alarm-cleared = 解消: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = パニック — プライバシースレートに切り替え
+panic-banner-title = パニック
+panic-banner-body = プログラムはプライバシースレートを表示中。音声はすべてミュート、キャプチャは停止。配信と録画は継続します。
+panic-restore = 復帰…
+panic-restore-confirm = プログラムを復帰しますか？
+panic-restore-yes = 復帰
+panic-restore-cancel = キャンセル
+hotkeys-panic = パニック（プライバシースレート）
+hotkeys-panic-placeholder = 例: Ctrl+Shift+F12
+panic-slate-color = パニックスレートの色
+panic-slate-image = パニックスレートの画像
+panic-slate-image-placeholder = 任意の画像パス
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = 診断バンドル
+diag-intro = GitHub Issue に手動で添付するための赤入れ済み .zip（設定スナップショット、エンコーダープローブ、最近の統計 — 機密・パス・名前は決して含まれません）をエクスポートします。どこにも送信されません。
+diag-preview = 内容を確認
+diag-hide-preview = プレビューを隠す
+diag-export = .zip をエクスポート
+diag-exported = エクスポート済み: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = 配信前チェック
+preflight-intro = ブロック項目はすべて緑である必要があります。残りは正直な注意です。
+preflight-item-targets = 配信先の設定（キー/URL）
+preflight-item-encoder = 使用可能なエンコーダーあり
+preflight-item-sources = すべてのソースが正常
+preflight-item-disk = 録画用のディスク容量
+preflight-item-mic = マイクの音量メーター
+preflight-item-desktopAudio = デスクトップ音声のメーター
+preflight-item-replay = リプレイバッファ待機中
+preflight-targets-detail = { $count } 件有効
+preflight-sources-detail = { $count } 件のソースがエラー
+preflight-disk-detail = 現在のビットレートで約 { $minutes } 分
+preflight-fix-stream = 配信設定…
+preflight-fix-components = コンポーネント…
+preflight-fix-sources = ソースの状態…
+preflight-fix-replay = 待機
+preflight-optional = 任意
+preflight-hold = すべて緑になるまで配信開始を保留
+preflight-cancel = キャンセル
+preflight-go-anyway = それでも配信開始
+preflight-go-live = 配信開始

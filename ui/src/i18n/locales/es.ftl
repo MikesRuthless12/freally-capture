@@ -885,6 +885,13 @@ output-install = Instalar…
 output-recordings-folder = Carpeta de grabaciones
 output-folder-placeholder = Carpeta de Vídeos del SO
 output-filename-prefix = Prefijo del nombre de archivo
+output-recording-template = Nombre de archivo de grabación
+output-replay-template = Nombre de archivo de repetición
+output-still-template = Nombre de archivo de fotograma
+output-template-tokens = Variables: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Carpeta de repeticiones
+output-still-folder = Carpeta de fotogramas
+output-same-folder-placeholder = Carpeta de grabaciones
 output-frame-rate = Frecuencia de fotogramas
 output-fps-option = { $fps } fps
 output-split-every = Dividir cada (minutos, 0 = desactivado)
@@ -1359,3 +1366,102 @@ still-saved-toast = Fotograma guardado: { $name }
 still-failed-toast = Error al capturar el fotograma: { $error }
 hotkeys-still = Capturar fotograma
 hotkeys-still-placeholder = p. ej. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Salud de las fuentes…
+health-title = Salud de las fuentes
+health-col-source = Fuente
+health-col-state = Estado
+health-col-resolution = Resolución
+health-col-fps = FPS
+health-col-last-frame = Último fotograma
+health-col-dropped = Descartados
+health-col-retries = Reinicios
+health-col-actions = Acciones
+health-state-live = En vivo
+health-state-waiting = Esperando
+health-state-error = Error
+health-state-inactive = Inactiva
+health-restart = Reiniciar
+health-properties = Propiedades
+health-empty = Esta colección aún no tiene fuentes.
+health-seconds = { $value } s
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = ¿Salir de Freally Capture?
+quit-body = Al salir ahora se hará lo siguiente de forma segura y en orden:
+quit-consequence-stream = Finalizar la transmisión en vivo y desconectarse del servicio.
+quit-consequence-recording = Detener la grabación y finalizar sus archivos.
+quit-consequence-replay = Apagar el búfer de repetición: el material no guardado se descarta.
+quit-confirm = Salir de forma segura
+quit-quitting = Cerrando…
+quit-cancel = Cancelar
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = ¿Recuperar grabaciones interrumpidas?
+salvage-body = La última sesión terminó de forma inesperada mientras estas grabaciones aún se escribían. La reparación crea una copia reproducible junto al original — el archivo original nunca se modifica.
+salvage-repair = Reparar
+salvage-repairing = Reparando…
+salvage-done = Reparado
+salvage-repaired = Reparado → { $name }
+salvage-failed = La reparación falló: { $error }
+salvage-dismiss = Ahora no
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Fallo del codificador: se cambió de { $from } a { $to }. La transmisión se reconectó y sigue activa.
+fallback-toast-recording = Fallo del codificador: se cambió de { $from } a { $to }. La grabación continúa en un archivo nuevo.
+fallback-note = Codificador de respaldo: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = El audio del programa está en silencio
+alarm-clipping = El audio del programa está saturando
+alarm-black = La imagen del programa está en negro
+alarm-frozen = La imagen del programa lleva un rato sin cambiar
+alarm-lowDisk = Espacio en disco: quedan unos { $minutes } min a la tasa de bits actual
+alarm-dismiss = Descartar alarma
+alarm-cleared = Resuelto: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Pánico — cortar a la placa de privacidad
+panic-banner-title = Pánico
+panic-banner-body = El programa muestra la placa de privacidad; todo el audio está silenciado y las capturas detenidas. La transmisión y la grabación siguen activas.
+panic-restore = Restaurar…
+panic-restore-confirm = ¿Restaurar el programa?
+panic-restore-yes = Restaurar
+panic-restore-cancel = Cancelar
+hotkeys-panic = Pánico (placa de privacidad)
+hotkeys-panic-placeholder = p. ej. Ctrl+Shift+F12
+panic-slate-color = Color de la placa de pánico
+panic-slate-image = Imagen de la placa de pánico
+panic-slate-image-placeholder = Ruta de imagen opcional
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Paquete de diagnóstico
+diag-intro = Exporta un .zip depurado (instantánea de configuración, sondeo de codificadores, estadísticas recientes — nunca incluye secretos, rutas ni nombres) para adjuntarlo a mano a un issue de GitHub. No se envía nada.
+diag-preview = Ver contenido
+diag-hide-preview = Ocultar vista previa
+diag-export = Exportar .zip
+diag-exported = Exportado: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Verificación previa
+preflight-intro = Cada punto bloqueante debe estar en verde; el resto son avisos honestos.
+preflight-item-targets = Destinos configurados (clave/URL)
+preflight-item-encoder = Hay un codificador utilizable
+preflight-item-sources = Todas las fuentes sanas
+preflight-item-disk = Espacio en disco para la grabación
+preflight-item-mic = Medición del micrófono
+preflight-item-desktopAudio = Medición del audio del escritorio
+preflight-item-replay = Búfer de repetición armado
+preflight-targets-detail = { $count } habilitados
+preflight-sources-detail = { $count } fuente(s) con error
+preflight-disk-detail = ~{ $minutes } min a la tasa actual
+preflight-fix-stream = Ajustes de stream…
+preflight-fix-components = Componentes…
+preflight-fix-sources = Salud de las fuentes…
+preflight-fix-replay = Armar
+preflight-optional = opcional
+preflight-hold = Bloquear Go Live hasta que todo esté en verde
+preflight-cancel = Cancelar
+preflight-go-anyway = Salir en vivo igualmente
+preflight-go-live = Salir en vivo

@@ -34,6 +34,9 @@ ignore = [
   "RUSTSEC-2026-0192", # ttf-parser — unmaintained (author archived it); pinned by the rustybuzz +
                        # fontdb text-shaping stack (Phase 2 Text source). No vulnerability. Revisit
                        # if/when the shaping stack moves (e.g. to skrifa).
+  "RUSTSEC-2026-0206", # rustybuzz — unmaintained (same archived shaping stack as 2026-0192; the
+                       # advisory reports "no safe upgrade available"). No vulnerability. Goes away
+                       # together with the ttf-parser one when the shaping stack moves.
 ]
 
 [licenses]

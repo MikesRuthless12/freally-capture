@@ -46,7 +46,7 @@ pub enum EncoderEngine {
 }
 
 impl EncoderEngine {
-    fn rank(self) -> u8 {
+    pub(crate) fn rank(self) -> u8 {
         match self {
             EncoderEngine::Nvenc => 0,
             EncoderEngine::QuickSync => 1,

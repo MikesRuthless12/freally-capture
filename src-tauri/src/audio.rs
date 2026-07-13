@@ -365,6 +365,8 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             // Running per-app captures, keyed by source id (owned by this thread).
             let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> =
                 HashMap::new();
+            // Silence/clipping watch over the master mix (CAP-M10).
+            let mut audio_watch = crate::alarms::AudioWatch::default();
             loop {
                 // 1. Model → engine (sources + hotkeys), only on change. The
                 //    revision is a cheap read; the (cloning) spec fetch happens
@@ -396,9 +398,19 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                 //    always send the transition back to empty).
                 let snapshot = engine.snapshot();
                 let has_sources = !snapshot.sources.is_empty();
-                if (has_sources || had_sources)
-                    && app.emit("audio", &snapshot_dto(snapshot)).is_err()
+                let dto = snapshot_dto(snapshot);
+                // CAP-M10: silence/clipping over the master mix, only while
+                // the mix actually goes out (live or recording). A panic
+                // (CAP-M22) mutes deliberately — no alarm for that.
+                let engaged = (app.state::<crate::stream::StreamBridgeState>().is_live()
+                    || app.state::<crate::recording::RecordingState>().is_active())
+                    && !app.state::<StudioState>().is_panicked();
+                let peak = dto.master.peak[0].max(dto.master.peak[1]);
+                for (kind, active) in audio_watch.evaluate(peak, engaged, std::time::Instant::now())
                 {
+                    crate::alarms::emit_alarm(&app, kind, active, None);
+                }
+                if (has_sources || had_sources) && app.emit("audio", &dto).is_err() {
                     return; // the app is gone — wind down
                 }
                 had_sources = has_sources;

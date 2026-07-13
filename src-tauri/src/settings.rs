@@ -137,6 +137,8 @@ pub struct Settings {
     pub transition: TransitionSettings,
     /// Global action hotkeys (Phase 5).
     pub hotkeys: HotkeySettings,
+    /// The panic button's privacy slate (CAP-M22).
+    pub panic_slate: PanicSlateSettings,
     /// The WebSocket remote-control API (Phase 7).
     pub remote_control: RemoteControlSettings,
     /// Browser docks — named URLs opened as dock windows (Phase 7).
@@ -168,6 +170,7 @@ impl Default for Settings {
             replay: ReplaySettings::default(),
             transition: TransitionSettings::default(),
             hotkeys: HotkeySettings::default(),
+            panic_slate: PanicSlateSettings::default(),
             remote_control: RemoteControlSettings::default(),
             browser_docks: Vec::new(),
             scripts: Vec::new(),
@@ -286,6 +289,9 @@ pub struct HotkeySettings {
     pub add_marker: Option<String>,
     /// Grab a still frame of the program (CAP-M08).
     pub still: Option<String>,
+    /// Cut program to the privacy slate + hard-mute everything (CAP-M22).
+    /// Engage only — restoring is the deliberate two-step in the UI.
+    pub panic: Option<String>,
 }
 
 impl HotkeySettings {
@@ -296,6 +302,8 @@ impl HotkeySettings {
             &self.transition,
             &self.save_replay,
             &self.add_marker,
+            &self.still,
+            &self.panic,
         ]
         .into_iter()
         .flatten()
@@ -306,6 +314,42 @@ impl HotkeySettings {
             if key.len() > 64 {
                 return Err("hotkey is too long".to_owned());
             }
+        }
+        Ok(())
+    }
+}
+
+/// The panic button's privacy slate (CAP-M22): a solid colour, optionally
+/// with an image drawn at its native size, centered (make it canvas-sized
+/// for an exact fill). What program shows while panicked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PanicSlateSettings {
+    /// `#rrggbb`.
+    pub color: String,
+    /// Optional image path ("" = colour only).
+    pub image: String,
+}
+
+impl Default for PanicSlateSettings {
+    fn default() -> Self {
+        Self {
+            // A neutral dark — deliberately NOT pure black, so the slate is
+            // distinguishable from a dead feed at a glance.
+            color: "#10141a".to_owned(),
+            image: String::new(),
+        }
+    }
+}
+
+impl PanicSlateSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        let hex = self.color.strip_prefix('#').unwrap_or("");
+        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("the panic slate colour must be #rrggbb".to_owned());
+        }
+        if self.image.len() > 1024 || self.image.chars().any(char::is_control) {
+            return Err("invalid panic slate image path".to_owned());
         }
         Ok(())
     }
@@ -506,6 +550,9 @@ pub struct StreamSettings {
     pub targets: Vec<StreamTargetSettings>,
     /// TASK-508: start a local recording automatically on Go Live.
     pub auto_record: bool,
+    /// CAP-M09: the pre-flight checklist refuses "Go Live anyway" until
+    /// every blocking item is green.
+    pub preflight_hold: bool,
 }
 
 impl Default for StreamSettings {
@@ -513,6 +560,7 @@ impl Default for StreamSettings {
         Self {
             targets: vec![StreamTargetSettings::default()],
             auto_record: false,
+            preflight_hold: false,
         }
     }
 }
@@ -524,6 +572,7 @@ impl Default for StreamSettings {
 struct StreamSettingsWire {
     targets: Option<Vec<StreamTargetSettings>>,
     auto_record: bool,
+    preflight_hold: bool,
     // The 0.70.0 flat single-target fields.
     service: fcap_stream::StreamService,
     ingest_url: String,
@@ -542,6 +591,7 @@ impl Default for StreamSettingsWire {
         Self {
             targets: None,
             auto_record: false,
+            preflight_hold: false,
             service: target.service,
             ingest_url: target.ingest_url,
             stream_key: target.stream_key,
@@ -578,6 +628,7 @@ impl From<StreamSettingsWire> for StreamSettings {
         StreamSettings {
             targets,
             auto_record: wire.auto_record,
+            preflight_hold: wire.preflight_hold,
         }
     }
 }
@@ -734,8 +785,20 @@ pub struct RecordingSettings {
     pub tracks_mask: u8,
     /// Output folder ("" = the OS Videos folder).
     pub folder: String,
-    /// Filename prefix; the timestamp is appended.
+    /// Filename prefix — the `{prefix}` token's value (CAP-M25).
     pub filename_prefix: String,
+    /// Token filename templates (CAP-M25) for recordings, replay saves and
+    /// stills — see `filename::TOKENS`.
+    pub template: String,
+    pub replay_template: String,
+    pub still_template: String,
+    /// Per-output folders ("" = the recordings folder) (CAP-M25).
+    pub replay_folder: String,
+    pub still_folder: String,
+    /// The persisted `{counter}` token value. Server-owned: bumped when a
+    /// template uses it and preserved across `set`, so a settings dialog
+    /// open during a recording can never write a stale count back.
+    pub counter: u32,
     /// Split into playable segments every N minutes (0 = off).
     pub split_minutes: u32,
     /// Also record the second (vertical) canvas when one is configured —
@@ -764,6 +827,12 @@ impl Default for RecordingSettings {
             tracks_mask: 0b1,
             folder: String::new(),
             filename_prefix: "Freally Capture".to_owned(),
+            template: "{prefix} {date} {time}".to_owned(),
+            replay_template: "Replay {date} {time}".to_owned(),
+            still_template: "Still {date} {time}".to_owned(),
+            replay_folder: String::new(),
+            still_folder: String::new(),
+            counter: 0,
             split_minutes: 0,
             record_vertical: false,
             output_width: 0,
@@ -819,6 +888,33 @@ impl RecordingSettings {
         if !prefix_ok {
             return Err("invalid filename prefix".to_owned());
         }
+        // CAP-M25: templates must be sized, filename-safe outside their
+        // tokens, and use only known tokens (catch typos at save time).
+        for (template, what) in [
+            (&self.template, "recording"),
+            (&self.replay_template, "replay"),
+            (&self.still_template, "still"),
+        ] {
+            if template.is_empty() || template.chars().count() > 200 {
+                return Err(format!(
+                    "the {what} filename template must be 1–200 characters"
+                ));
+            }
+            if template.chars().any(|c| {
+                c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            }) {
+                return Err(format!(
+                    "the {what} filename template has characters not allowed in filenames"
+                ));
+            }
+            crate::filename::template_tokens_valid(template)
+                .map_err(|err| format!("{what} filename template: {err}"))?;
+        }
+        for folder in [&self.replay_folder, &self.still_folder] {
+            if folder.len() > 1024 || folder.chars().any(char::is_control) {
+                return Err("invalid output folder".to_owned());
+            }
+        }
         Ok(())
     }
 }
@@ -849,6 +945,7 @@ impl Settings {
         self.replay.validate()?;
         self.transition.validate()?;
         self.hotkeys.validate()?;
+        self.panic_slate.validate()?;
         self.remote_control.validate()?;
         if self.browser_docks.len() > 16 {
             return Err("too many browser docks (16 max)".to_owned());
@@ -938,11 +1035,28 @@ impl SettingsStore {
             let mut guard = self.lock();
             let accepted = guard.accepted_eula_version.clone();
             let onboarded = guard.completed_onboarding;
+            let counter = guard.recording.counter;
             *guard = next;
             guard.accepted_eula_version = accepted;
             guard.completed_onboarding = onboarded;
+            guard.recording.counter = counter;
         }
         self.persist()
+    }
+
+    /// Advance the `{counter}` filename token and return the new value — the
+    /// only path allowed to write it (CAP-M25). A persist failure keeps the
+    /// in-memory bump (the recording must not be blocked on a settings write).
+    pub fn bump_recording_counter(&self) -> u32 {
+        let value = {
+            let mut guard = self.lock();
+            guard.recording.counter = guard.recording.counter.wrapping_add(1);
+            guard.recording.counter
+        };
+        if let Err(err) = self.persist() {
+            eprintln!("settings: could not persist the filename counter: {err}");
+        }
+        value
     }
 
     /// Record acceptance of `version` — the only path allowed to write the EULA
@@ -1151,6 +1265,7 @@ mod tests {
                     },
                 ],
                 auto_record: true,
+                preflight_hold: true,
             },
             replay: ReplaySettings {
                 seconds: 60,
@@ -1168,6 +1283,11 @@ mod tests {
                 save_replay: Some("Ctrl+Shift+S".to_owned()),
                 add_marker: None,
                 still: Some("Ctrl+Shift+P".to_owned()),
+                panic: Some("Ctrl+Shift+F12".to_owned()),
+            },
+            panic_slate: PanicSlateSettings {
+                color: "#221100".to_owned(),
+                image: "C:/art/brb.png".to_owned(),
             },
             remote_control: RemoteControlSettings {
                 enabled: true,

@@ -885,6 +885,13 @@ output-install = Cài đặt…
 output-recordings-folder = Thư mục bản ghi
 output-folder-placeholder = Thư mục Video của HĐH
 output-filename-prefix = Tiền tố tên tệp
+output-recording-template = Tên tệp bản ghi
+output-replay-template = Tên tệp phát lại
+output-still-template = Tên tệp khung hình
+output-template-tokens = Token: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Thư mục phát lại
+output-still-folder = Thư mục khung hình
+output-same-folder-placeholder = Thư mục bản ghi
 output-frame-rate = Tốc độ khung hình
 output-fps-option = { $fps } fps
 output-split-every = Chia mỗi (phút, 0 = tắt)
@@ -1359,3 +1366,102 @@ still-saved-toast = Đã lưu khung hình: { $name }
 still-failed-toast = Chụp khung hình thất bại: { $error }
 hotkeys-still = Chụp khung hình
 hotkeys-still-placeholder = vd. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Tình trạng nguồn…
+health-title = Tình trạng nguồn
+health-col-source = Nguồn
+health-col-state = Trạng thái
+health-col-resolution = Độ phân giải
+health-col-fps = FPS
+health-col-last-frame = Khung hình cuối
+health-col-dropped = Bị bỏ
+health-col-retries = Số lần khởi động lại
+health-col-actions = Hành động
+health-state-live = Trực tiếp
+health-state-waiting = Đang chờ
+health-state-error = Lỗi
+health-state-inactive = Không hoạt động
+health-restart = Khởi động lại
+health-properties = Thuộc tính
+health-empty = Bộ sưu tập này chưa có nguồn nào.
+health-seconds = { $value } giây
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Thoát Freally Capture?
+quit-body = Thoát ngay bây giờ sẽ thực hiện an toàn theo thứ tự:
+quit-consequence-stream = Kết thúc phát trực tiếp và ngắt kết nối khỏi dịch vụ.
+quit-consequence-recording = Dừng ghi hình và hoàn tất các tệp.
+quit-consequence-replay = Tắt bộ đệm phát lại — cảnh phát lại chưa lưu sẽ bị loại bỏ.
+quit-confirm = Thoát an toàn
+quit-quitting = Đang tắt…
+quit-cancel = Hủy
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Khôi phục các bản ghi bị gián đoạn?
+salvage-body = Phiên trước đã kết thúc đột ngột khi các bản ghi này vẫn đang được ghi. Sửa chữa tạo một bản sao phát được bên cạnh bản gốc — tệp gốc không bao giờ bị thay đổi.
+salvage-repair = Sửa chữa
+salvage-repairing = Đang sửa…
+salvage-done = Đã sửa
+salvage-repaired = Đã sửa → { $name }
+salvage-failed = Sửa chữa thất bại: { $error }
+salvage-dismiss = Để sau
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Lỗi bộ mã hóa — đã chuyển từ { $from } sang { $to }. Luồng phát đã kết nối lại và tiếp tục.
+fallback-toast-recording = Lỗi bộ mã hóa — đã chuyển từ { $from } sang { $to }. Bản ghi tiếp tục trong tệp mới.
+fallback-note = Bộ mã hóa dự phòng: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Âm thanh chương trình đã im lặng
+alarm-clipping = Âm thanh chương trình đang bị vỡ tiếng
+alarm-black = Hình ảnh chương trình bị đen
+alarm-frozen = Hình ảnh chương trình đã lâu không thay đổi
+alarm-lowDisk = Dung lượng đĩa: còn khoảng { $minutes } phút với bitrate hiện tại
+alarm-dismiss = Bỏ qua cảnh báo
+alarm-cleared = Đã giải quyết: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Khẩn cấp — chuyển sang màn chắn riêng tư
+panic-banner-title = Khẩn cấp
+panic-banner-body = Chương trình đang hiển thị màn chắn riêng tư; toàn bộ âm thanh bị tắt và các nguồn thu bị dừng. Luồng phát và bản ghi vẫn tiếp tục.
+panic-restore = Khôi phục…
+panic-restore-confirm = Khôi phục chương trình?
+panic-restore-yes = Khôi phục
+panic-restore-cancel = Hủy
+hotkeys-panic = Khẩn cấp (màn chắn riêng tư)
+hotkeys-panic-placeholder = vd: Ctrl+Shift+F12
+panic-slate-color = Màu màn chắn khẩn cấp
+panic-slate-image = Ảnh màn chắn khẩn cấp
+panic-slate-image-placeholder = Đường dẫn ảnh tùy chọn
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Gói chẩn đoán
+diag-intro = Xuất một tệp .zip đã ẩn thông tin nhạy cảm (ảnh chụp cấu hình, thăm dò bộ mã hóa, thống kê gần đây — bí mật, đường dẫn và tên không bao giờ được đưa vào) để đính kèm thủ công vào issue GitHub. Không gửi gì đi đâu cả.
+diag-preview = Xem nội dung
+diag-hide-preview = Ẩn xem trước
+diag-export = Xuất .zip
+diag-exported = Đã xuất: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Kiểm tra trước khi phát
+preflight-intro = Mọi mục chặn phải xanh; phần còn lại là nhắc nhở trung thực.
+preflight-item-targets = Đã cấu hình đích phát (khóa/URL)
+preflight-item-encoder = Có bộ mã hóa dùng được
+preflight-item-sources = Mọi nguồn khỏe mạnh
+preflight-item-disk = Dung lượng đĩa cho bản ghi
+preflight-item-mic = Đo mức micro
+preflight-item-desktopAudio = Đo mức âm thanh máy tính
+preflight-item-replay = Bộ đệm phát lại sẵn sàng
+preflight-targets-detail = { $count } đang bật
+preflight-sources-detail = { $count } nguồn bị lỗi
+preflight-disk-detail = ~{ $minutes } phút với bitrate hiện tại
+preflight-fix-stream = Cài đặt phát…
+preflight-fix-components = Thành phần…
+preflight-fix-sources = Tình trạng nguồn…
+preflight-fix-replay = Kích hoạt
+preflight-optional = tùy chọn
+preflight-hold = Giữ Go Live đến khi tất cả xanh
+preflight-cancel = Hủy
+preflight-go-anyway = Vẫn phát trực tiếp
+preflight-go-live = Phát trực tiếp

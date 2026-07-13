@@ -8,7 +8,7 @@
 //! snake_case parameters, same as the Phase 1 commands.)
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Runtime, State};
 
 use fcap_scene::{
     BlendMode, Corner, FileRef, FileRefKind, Filter, FilterId, FilterKind, GuideLine, ItemId,
@@ -452,6 +452,13 @@ pub fn studio_retry_source(
     source_id: SourceId,
 ) -> Result<(), String> {
     state.retry_source(source_id)
+}
+
+/// Engage or restore the panic slate (CAP-M22). The hotkey and the palette
+/// engage; only the UI's deliberate two-step confirm restores.
+#[tauri::command]
+pub fn studio_panic_set<R: Runtime>(app: AppHandle<R>, state: State<'_, StudioState>, on: bool) {
+    state.set_panic(&app, on);
 }
 
 /// Pause or resume a **Media source** (an embedded video) mid-broadcast — it

@@ -20,8 +20,37 @@
     </header>
 
     <main>
-      <!-- 0.97.0 — scene authoring & monitoring (CAP-M Batch 1) -->
+      <!-- 0.98.0 — broadcast safety & reliability (CAP-M Batch 2) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.98.0</span>
+            <span class="date">Jul 12, 2026 · Broadcast safety &amp; reliability — CAP-M Batch 2</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.98.0">Download</a>
+        </div>
+
+        <h2>0.98.0 — Broadcast safety &amp; reliability (CAP-M Batch 2)</h2>
+        <p class="summary">
+          The second must-have batch: <em>don't lose the show</em>. The studio now catches failures
+          before you go live, while you're live, and after the worst happens — and when you need to
+          hide everything <em>right now</em>, there's a panic button.
+        </p>
+        <ul class="features">
+          <li><strong>A go-live pre-flight checklist</strong> — targets keyed, encoder usable, sources healthy, disk space sufficient, each green/red with a one-click fix, plus honest nudges for mic/desktop-audio metering and the replay buffer. Optionally hold Go Live until every blocking check is green.</li>
+          <li><strong>Broadcast safety alarms</strong> — always-on watchdogs while output runs: silent program audio, sustained clipping, a black or frozen picture (classic CV over the existing readback — no ML), and a low-disk forecast (“~22 min left at the current bitrate”). Non-modal: a dismissible banner plus the screen-reader announcer.</li>
+          <li><strong>A source health dashboard</strong> — every source's live state, fps, last-frame age, dropped frames and restart history, with per-source Restart and Properties.</li>
+          <li><strong>Mid-session encoder failover</strong> — a faulting hardware encoder hot-swaps down a ladder (the other hardware family, then x264) instead of killing the session; an honest toast and a sticky stats note say exactly what happened. Network faults never trigger a swap.</li>
+          <li><strong>Crash-safe recordings + salvage</strong> — mp4/mov now write fragmented (an index flush per keyframe), so a crash leaves a playable file; after an unclean exit the next launch offers a one-click repair into a <code>(repaired)</code> copy, never touching the original.</li>
+          <li><strong>A quit guard + orderly shutdown</strong> — closing while live/recording/replay-armed asks first, then ends the stream, finalizes the recording, and flushes the replay buffer in order. A crash marker now tells clean exits from crashes.</li>
+          <li><strong>A panic button</strong> — one global hotkey cuts program (and projectors) to a configurable privacy slate, stops every capture, and hard-mutes all audio while the stream and recording stay up; restoring is a deliberate two-step confirm.</li>
+          <li><strong>Recording filename templates</strong> — token-based names (<code>{date}</code>, <code>{time}</code>, <code>{scene}</code>, <code>{profile}</code>, <code>{canvas}</code>, <code>{marker-count}</code>, a persisted counter) for recordings, replays and stills, with collision-safe suffixing and per-output folders.</li>
+          <li><strong>A redacted diagnostics bundle</strong> — “Export diagnostics” writes a zip built by a strict allowlist (keys, passwords, paths and names are never read), previewable before export, sent nowhere.</li>
+        </ul>
+      </article>
+
+      <!-- 0.97.0 — scene authoring & monitoring (CAP-M Batch 1) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.97.0</span>

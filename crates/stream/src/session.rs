@@ -28,9 +28,24 @@ pub struct StreamSpec {
     pub fps: u32,
 }
 
-/// Builds a fresh sink for each (re)connect attempt. The app captures the
-/// ffmpeg component + the RTMP plan here; tests inject fakes.
-pub type SinkFactory = Box<dyn Fn() -> Result<Box<dyn RecordSink>, String> + Send>;
+/// Why the previous sink died — handed to the factory on every respawn so
+/// the app can make an informed decision (the CAP-M12 encoder-failover
+/// ladder classifies the error text; a network flap keeps its encoder).
+#[derive(Debug, Clone)]
+pub struct SinkDeath {
+    /// The recorder's error text (usually the ffmpeg stderr tail), or the
+    /// spawn failure when the sink never came up at all.
+    pub error: String,
+    /// How long the dead sink actually lived (zero for a failed spawn) —
+    /// NOT inflated by the reconnect backoff.
+    pub lived: Duration,
+}
+
+/// Builds a fresh sink for each (re)connect attempt; `None` on the first
+/// spawn, `Some` with the previous death on every respawn. The app captures
+/// the ffmpeg component + the RTMP plan here; tests inject fakes.
+pub type SinkFactory =
+    Box<dyn Fn(Option<&SinkDeath>) -> Result<Box<dyn RecordSink>, String> + Send>;
 
 /// Where the session is in its life, honestly.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,6 +233,8 @@ fn supervise(
     let mut attempt: u32 = 0;
     let mut next_attempt_at = Instant::now();
     let mut live_since: Option<Instant> = None;
+    // Why the previous sink died — handed to the factory on each respawn.
+    let mut last_death: Option<SinkDeath> = None;
 
     let set_state = |shared: &Shared, state: StreamState| {
         lock(&shared.status).state = state;
@@ -237,9 +254,10 @@ fn supervise(
             return;
         }
 
-        // 1. (Re)spawn the sink when due.
+        // 1. (Re)spawn the sink when due, telling the factory why the last
+        //    one died so it can adapt (encoder failover, CAP-M12).
         if recorder.is_none() && Instant::now() >= next_attempt_at {
-            match factory() {
+            match factory(last_death.as_ref()) {
                 Ok(sink) => {
                     recorder = Some(Recorder::start(record_spec.clone(), sink));
                     live_since = Some(Instant::now());
@@ -251,6 +269,10 @@ fn supervise(
                         set_state(&shared, StreamState::Ended { error: Some(err) });
                         return;
                     }
+                    last_death = Some(SinkDeath {
+                        error: err.clone(),
+                        lived: Duration::ZERO,
+                    });
                     lock(&shared.status).reconnects = attempt.saturating_sub(1);
                     set_state(&shared, StreamState::Reconnecting { attempt });
                     next_attempt_at = Instant::now() + backoff(attempt - 1);
@@ -286,6 +308,10 @@ fn supervise(
         if let Some(rec) = &recorder {
             if let Some(err) = rec.handle().error() {
                 let _ = recorder.take().expect("checked").stop();
+                last_death = Some(SinkDeath {
+                    error: err.clone(),
+                    lived: live_since.map(|since| since.elapsed()).unwrap_or_default(),
+                });
                 // A stretch of stable Live earns the backoff a reset.
                 if live_since.is_some_and(|since| since.elapsed() > Duration::from_secs(60)) {
                     attempt = 0;
@@ -363,7 +389,7 @@ mod tests {
         let fail_for_factory = Arc::clone(&fail);
         let session = StreamSession::start(
             spec(),
-            Box::new(move || {
+            Box::new(move |_death| {
                 Ok(Box::new(FakeSink {
                     fail_video: Arc::clone(&fail_for_factory),
                 }) as Box<dyn RecordSink>)
@@ -387,8 +413,14 @@ mod tests {
         let spawns_in_factory = Arc::clone(&spawns);
         let session = StreamSession::start(
             spec(),
-            Box::new(move || {
-                spawns_in_factory.fetch_add(1, Ordering::Relaxed);
+            Box::new(move |death| {
+                // The first spawn carries no death; every respawn carries
+                // the previous sink's real error text and lifetime.
+                if spawns_in_factory.fetch_add(1, Ordering::Relaxed) == 0 {
+                    assert!(death.is_none());
+                } else {
+                    assert!(death.is_some_and(|d| !d.error.is_empty()));
+                }
                 Ok(Box::new(FakeSink {
                     fail_video: Arc::clone(&fail_for_factory),
                 }) as Box<dyn RecordSink>)
@@ -429,7 +461,7 @@ mod tests {
 
     #[test]
     fn a_permanently_failing_factory_ends_with_the_error() {
-        let session = StreamSession::start(spec(), Box::new(|| Err("bad ingest".to_string())));
+        let session = StreamSession::start(spec(), Box::new(|_| Err("bad ingest".to_string())));
         let handle = session.handle();
         // 8 attempts ride the backoff ladder — nudge time along by just
         // waiting out the first few (the test budget is the first attempt's

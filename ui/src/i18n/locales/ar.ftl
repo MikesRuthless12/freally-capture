@@ -872,6 +872,13 @@ output-install = تثبيت…
 output-recordings-folder = مجلد التسجيلات
 output-folder-placeholder = مجلد فيديوهات النظام
 output-filename-prefix = بادئة اسم الملف
+output-recording-template = اسم ملف التسجيل
+output-replay-template = اسم ملف الإعادة
+output-still-template = اسم ملف الإطار الثابت
+output-template-tokens = الرموز: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = مجلد الإعادة
+output-still-folder = مجلد الإطارات الثابتة
+output-same-folder-placeholder = مجلد التسجيلات
 output-frame-rate = معدل الإطارات
 output-fps-option = { $fps } fps
 output-split-every = تقسيم كل (دقائق، 0 = إيقاف)
@@ -1346,3 +1353,102 @@ still-saved-toast = تم حفظ الإطار: { $name }
 still-failed-toast = فشل التقاط الإطار: { $error }
 hotkeys-still = التقاط إطار ثابت
 hotkeys-still-placeholder = مثال: Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = صحة المصادر…
+health-title = صحة المصادر
+health-col-source = المصدر
+health-col-state = الحالة
+health-col-resolution = الدقة
+health-col-fps = FPS
+health-col-last-frame = آخر إطار
+health-col-dropped = مُسقَطة
+health-col-retries = عمليات إعادة التشغيل
+health-col-actions = إجراءات
+health-state-live = مباشر
+health-state-waiting = في الانتظار
+health-state-error = خطأ
+health-state-inactive = غير نشط
+health-restart = إعادة تشغيل
+health-properties = خصائص
+health-empty = لا تحتوي هذه المجموعة على مصادر بعد.
+health-seconds = { $value } ث
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = إنهاء Freally Capture؟
+quit-body = الإنهاء الآن سينفّذ ما يلي بأمان وبالترتيب:
+quit-consequence-stream = إنهاء البث المباشر وقطع الاتصال بالخدمة.
+quit-consequence-recording = إيقاف التسجيل وإتمام ملفاته.
+quit-consequence-replay = إيقاف مخزن الإعادة — تُتجاهل لقطات الإعادة غير المحفوظة.
+quit-confirm = إنهاء بأمان
+quit-quitting = جارٍ الإغلاق…
+quit-cancel = إلغاء
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = استعادة التسجيلات المتقطعة؟
+salvage-body = انتهت الجلسة الأخيرة بشكل غير متوقع أثناء كتابة هذه التسجيلات. يُنشئ الإصلاح نسخة قابلة للتشغيل بجوار الأصل — لا يُعدَّل الملف الأصلي أبدًا.
+salvage-repair = إصلاح
+salvage-repairing = جارٍ الإصلاح…
+salvage-done = تم الإصلاح
+salvage-repaired = تم الإصلاح ← { $name }
+salvage-failed = فشل الإصلاح: { $error }
+salvage-dismiss = ليس الآن
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = عطل في المُرمِّز — تم التبديل من { $from } إلى { $to }. أعاد البث الاتصال ويستمر.
+fallback-toast-recording = عطل في المُرمِّز — تم التبديل من { $from } إلى { $to }. يستمر التسجيل في ملف جديد.
+fallback-note = مُرمِّز احتياطي: { $from } ← { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = صمت صوت البرنامج
+alarm-clipping = صوت البرنامج يتشبّع
+alarm-black = صورة البرنامج سوداء
+alarm-frozen = صورة البرنامج لم تتغير منذ فترة
+alarm-lowDisk = مساحة القرص: يتبقى نحو { $minutes } دقيقة بمعدل البت الحالي
+alarm-dismiss = إغلاق التنبيه
+alarm-cleared = تم الحل: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = الطوارئ — القطع إلى شاشة الخصوصية
+panic-banner-title = الطوارئ
+panic-banner-body = يعرض البرنامج شاشة الخصوصية؛ كل الصوت مكتوم والالتقاط متوقف. يستمر البث والتسجيل.
+panic-restore = استعادة…
+panic-restore-confirm = استعادة البرنامج؟
+panic-restore-yes = استعادة
+panic-restore-cancel = إلغاء
+hotkeys-panic = الطوارئ (شاشة الخصوصية)
+hotkeys-panic-placeholder = مثل Ctrl+Shift+F12
+panic-slate-color = لون شاشة الطوارئ
+panic-slate-image = صورة شاشة الطوارئ
+panic-slate-image-placeholder = مسار صورة اختياري
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = حزمة التشخيص
+diag-intro = تصدير ملف .zip منقّح (لقطة الإعدادات، فحص المُرمِّزات، إحصاءات حديثة — لا تُضمَّن الأسرار والمسارات والأسماء أبدًا) لإرفاقه يدويًا بمشكلة على GitHub. لا يُرسَل شيء إلى أي مكان.
+diag-preview = عرض المحتوى
+diag-hide-preview = إخفاء المعاينة
+diag-export = تصدير .zip
+diag-exported = تم التصدير: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = فحص ما قبل البث
+preflight-intro = يجب أن يكون كل بند مانع أخضر؛ والبقية تنبيهات صادقة.
+preflight-item-targets = وجهات البث مُهيأة (مفتاح/رابط)
+preflight-item-encoder = يتوفر مُرمِّز صالح
+preflight-item-sources = كل المصادر سليمة
+preflight-item-disk = مساحة قرص للتسجيل
+preflight-item-mic = قياس الميكروفون
+preflight-item-desktopAudio = قياس صوت سطح المكتب
+preflight-item-replay = مخزن الإعادة جاهز
+preflight-targets-detail = { $count } مفعّلة
+preflight-sources-detail = { $count } مصدر/مصادر بخطأ
+preflight-disk-detail = ~{ $minutes } دقيقة بمعدل البت الحالي
+preflight-fix-stream = إعدادات البث…
+preflight-fix-components = المكوّنات…
+preflight-fix-sources = صحة المصادر…
+preflight-fix-replay = تجهيز
+preflight-optional = اختياري
+preflight-hold = منع البث حتى يصبح كل شيء أخضر
+preflight-cancel = إلغاء
+preflight-go-anyway = ابدأ البث رغم ذلك
+preflight-go-live = ابدأ البث

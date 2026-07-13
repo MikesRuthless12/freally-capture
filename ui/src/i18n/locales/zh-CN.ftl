@@ -891,6 +891,13 @@ output-install = 安装…
 output-recordings-folder = 录制文件夹
 output-folder-placeholder = 操作系统的"视频"文件夹
 output-filename-prefix = 文件名前缀
+output-recording-template = 录制文件名
+output-replay-template = 重放文件名
+output-still-template = 静帧文件名
+output-template-tokens = 占位符： {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = 重放文件夹
+output-still-folder = 静帧文件夹
+output-same-folder-placeholder = 录制文件夹
 output-frame-rate = 帧率
 output-fps-option = { $fps } fps
 output-split-every = 分段间隔（分钟，0 = 关闭）
@@ -1365,3 +1372,102 @@ still-saved-toast = 静帧已保存：{ $name }
 still-failed-toast = 静帧抓取失败：{ $error }
 hotkeys-still = 抓取静帧
 hotkeys-still-placeholder = 例如 Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = 源健康状态…
+health-title = 源健康状态
+health-col-source = 源
+health-col-state = 状态
+health-col-resolution = 分辨率
+health-col-fps = FPS
+health-col-last-frame = 最后一帧
+health-col-dropped = 丢弃
+health-col-retries = 重启次数
+health-col-actions = 操作
+health-state-live = 实时
+health-state-waiting = 等待中
+health-state-error = 错误
+health-state-inactive = 未激活
+health-restart = 重启
+health-properties = 属性
+health-empty = 此场景集合还没有源。
+health-seconds = { $value } 秒
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = 退出 Freally Capture？
+quit-body = 现在退出将按顺序安全执行以下操作：
+quit-consequence-stream = 结束直播并断开与服务的连接。
+quit-consequence-recording = 停止录制并完成文件封装。
+quit-consequence-replay = 关闭重放缓存 — 未保存的重放画面将被丢弃。
+quit-confirm = 安全退出
+quit-quitting = 正在关闭…
+quit-cancel = 取消
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = 恢复中断的录制？
+salvage-body = 上次会话在这些录制仍在写入时意外结束。修复会在原文件旁写入一份可播放的副本 — 原文件绝不会被更改。
+salvage-repair = 修复
+salvage-repairing = 正在修复…
+salvage-done = 已修复
+salvage-repaired = 已修复 → { $name }
+salvage-failed = 修复失败：{ $error }
+salvage-dismiss = 暂不
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = 编码器故障 — 已从 { $from } 切换到 { $to }。直播已重新连接并继续。
+fallback-toast-recording = 编码器故障 — 已从 { $from } 切换到 { $to }。录制在新文件中继续。
+fallback-note = 编码器回退：{ $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = 节目音频已静默
+alarm-clipping = 节目音频正在削波
+alarm-black = 节目画面为黑屏
+alarm-frozen = 节目画面已有一段时间没有变化
+alarm-lowDisk = 磁盘空间：按当前码率约剩 { $minutes } 分钟
+alarm-dismiss = 关闭警报
+alarm-cleared = 已解除：{ $alarm }
+
+# CAP-M22 — panic button
+palette-panic = 紧急 — 切到隐私画面
+panic-banner-title = 紧急
+panic-banner-body = 节目正在显示隐私画面；所有音频已静音，捕获已停止。直播和录制保持运行。
+panic-restore = 恢复…
+panic-restore-confirm = 恢复节目？
+panic-restore-yes = 恢复
+panic-restore-cancel = 取消
+hotkeys-panic = 紧急（隐私画面）
+hotkeys-panic-placeholder = 如 Ctrl+Shift+F12
+panic-slate-color = 隐私画面颜色
+panic-slate-image = 隐私画面图片
+panic-slate-image-placeholder = 可选图片路径
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = 诊断包
+diag-intro = 导出一个已脱敏的 .zip（配置快照、编码器探测、近期统计 — 绝不包含密钥、路径和名称），供手动附加到 GitHub issue。不会向任何地方发送。
+diag-preview = 查看内容
+diag-hide-preview = 隐藏预览
+diag-export = 导出 .zip
+diag-exported = 已导出：{ $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = 开播前检查
+preflight-intro = 所有阻断项必须为绿色；其余是诚实的提醒。
+preflight-item-targets = 已配置推流目标（密钥/URL）
+preflight-item-encoder = 有可用的编码器
+preflight-item-sources = 所有源健康
+preflight-item-disk = 录制所需磁盘空间
+preflight-item-mic = 麦克风电平
+preflight-item-desktopAudio = 桌面音频电平
+preflight-item-replay = 重放缓存已就绪
+preflight-targets-detail = 已启用 { $count } 个
+preflight-sources-detail = { $count } 个源出错
+preflight-disk-detail = 按当前码率约 { $minutes } 分钟
+preflight-fix-stream = 推流设置…
+preflight-fix-components = 组件…
+preflight-fix-sources = 源健康状态…
+preflight-fix-replay = 启用
+preflight-optional = 可选
+preflight-hold = 全部绿色前暂缓开播
+preflight-cancel = 取消
+preflight-go-anyway = 仍然开播
+preflight-go-live = 开播

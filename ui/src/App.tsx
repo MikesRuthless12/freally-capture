@@ -28,21 +28,29 @@ import {
   collectionMissingFiles,
   replaySave,
   recordingAddMarker,
+  salvagePending,
+  studioPanicSet,
 } from "./api/commands";
 import {
+  onAlarm,
   onAudio,
+  onEncoderFallback,
   onProgram,
+  onQuitGuard,
   onRemoteInvite,
   onStillError,
   onStillSaved,
   onStudio,
 } from "./api/events";
 import type {
+  Alarm,
   AudioLevelsPayload,
+  EncoderFallback,
   EulaStatus,
   Health,
   ItemId,
   ProgramStatus,
+  QuitConsequences,
   Settings,
   SourceId,
   SourceSettings,
@@ -70,7 +78,11 @@ import { StudioPreviewPane } from "./panels/StudioPreviewPane";
 import { HistoryDialog } from "./panels/HistoryDialog";
 import { MissingFilesDialog } from "./panels/MissingFilesDialog";
 import { MultiviewDialog } from "./panels/MultiviewDialog";
+import { PanicBanner } from "./panels/PanicBanner";
 import { ProjectorDialog } from "./panels/ProjectorDialog";
+import { QuitGuardDialog } from "./panels/QuitGuardDialog";
+import { SalvageDialog } from "./panels/SalvageDialog";
+import { SourceHealthDialog } from "./panels/SourceHealthDialog";
 import { VerticalCanvasDialog } from "./panels/VerticalCanvasDialog";
 
 type OpenDialog =
@@ -82,6 +94,7 @@ type OpenDialog =
   | { kind: "editTransform"; itemId: ItemId }
   | { kind: "multiview" }
   | { kind: "projector" }
+  | { kind: "sourceHealth" }
   | { kind: "missingFiles" }
   | null;
 
@@ -101,6 +114,16 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   // A transient still-frame-grab confirmation (CAP-M08).
   const [stillToast, setStillToast] = useState<{ ok: boolean; text: string } | null>(null);
+  // Quit guard (CAP-M23): non-null while the confirm is up.
+  const [quitGuard, setQuitGuard] = useState<QuitConsequences | null>(null);
+  // Salvage prompt (CAP-M11): interrupted recordings from an unclean exit.
+  const [salvagePaths, setSalvagePaths] = useState<string[] | null>(null);
+  // Encoder failover toast (CAP-M12) — transient; the sticky note lives in
+  // the stats dock.
+  const [fallbackToast, setFallbackToast] = useState<EncoderFallback | null>(null);
+  // Broadcast-safety alarms (CAP-M10): the active set, keyed by kind.
+  // Dismissing acknowledges (removes) one; it returns on its next raise.
+  const [alarms, setAlarms] = useState<Record<string, Alarm>>({});
 
   const [studio, setStudio] = useState<StudioDto | null>(null);
   const [program, setProgram] = useState<ProgramStatus | null>(null);
@@ -200,6 +223,24 @@ export default function App() {
     const unlistenStillError = onStillError((message) => {
       if (!cancelled) setStillToast({ ok: false, text: message });
     }).catch(() => undefined);
+    // Quit guard (CAP-M23): a close attempt while live output runs.
+    const unlistenQuitGuard = onQuitGuard((pending) => {
+      if (!cancelled) setQuitGuard(pending);
+    }).catch(() => undefined);
+    // Encoder failover (CAP-M12): the honest mid-session toast.
+    const unlistenFallback = onEncoderFallback((fallback) => {
+      if (!cancelled) setFallbackToast(fallback);
+    }).catch(() => undefined);
+    // Broadcast-safety alarms (CAP-M10): keep the active set current.
+    const unlistenAlarm = onAlarm((alarm) => {
+      if (cancelled) return;
+      setAlarms((current) => {
+        const next = { ...current };
+        if (alarm.active) next[alarm.kind] = alarm;
+        else delete next[alarm.kind];
+        return next;
+      });
+    }).catch(() => undefined);
     // A cold-start invite (the link LAUNCHED the app) fired before this
     // listener existed — pick it up once.
     remotePendingInvite()
@@ -215,6 +256,9 @@ export default function App() {
       void unlistenInvite.then((fn) => fn?.());
       void unlistenStillSaved.then((fn) => fn?.());
       void unlistenStillError.then((fn) => fn?.());
+      void unlistenQuitGuard.then((fn) => fn?.());
+      void unlistenFallback.then((fn) => fn?.());
+      void unlistenAlarm.then((fn) => fn?.());
     };
   }, []);
 
@@ -229,6 +273,21 @@ export default function App() {
     collectionMissingFiles()
       .then((list) => {
         if (list.length > 0) setDialog((current) => current ?? { kind: "missingFiles" });
+      })
+      .catch(() => undefined);
+  }, [studio, settingsSettled, settings, wizardDismissed]);
+
+  // Salvage prompt (CAP-M11): the previous session ended uncleanly with
+  // recordings still being written — offer to repair them. Same one-shot
+  // gating as the doctor.
+  const checkedSalvage = useRef(false);
+  useEffect(() => {
+    if (checkedSalvage.current || !studio || !settingsSettled) return;
+    if (settings && !settings.completedOnboarding && !wizardDismissed) return;
+    checkedSalvage.current = true;
+    salvagePending()
+      .then((paths) => {
+        if (paths.length > 0) setSalvagePaths(paths);
       })
       .catch(() => undefined);
   }, [studio, settingsSettled, settings, wizardDismissed]);
@@ -323,6 +382,22 @@ export default function App() {
         label: t("palette-projector"),
         keywords: "projector fullscreen display monitor output",
         run: () => setDialog({ kind: "projector" }),
+      },
+      {
+        id: "action-source-health",
+        group: t("palette-group-actions"),
+        label: t("palette-source-health"),
+        keywords: "source health dashboard fps dropped frames restart capture status",
+        run: () => setDialog({ kind: "sourceHealth" }),
+      },
+      {
+        id: "action-panic",
+        group: t("palette-group-actions"),
+        label: t("palette-panic"),
+        keywords: "panic privacy slate mute emergency hide sensitive",
+        run: () => {
+          studioPanicSet(true).catch((err) => console.error("panic failed:", err));
+        },
       },
       {
         id: "action-doctor",
@@ -483,6 +558,14 @@ export default function App() {
     const timer = setTimeout(() => setStillToast(null), 3500);
     return () => clearTimeout(timer);
   }, [stillToast]);
+
+  // The encoder-failover toast lingers a little longer — it explains a
+  // mid-show change the operator did not initiate (CAP-M12).
+  useEffect(() => {
+    if (!fallbackToast) return;
+    const timer = setTimeout(() => setFallbackToast(null), 8000);
+    return () => clearTimeout(timer);
+  }, [fallbackToast]);
 
   const addItem = useCallback(
     (settings: SourceSettings, name?: string) => {
@@ -795,7 +878,11 @@ export default function App() {
             onSettingsSaved={setSettings}
             onOpenAudioFilters={(sourceId) => setDialog({ kind: "audioFilters", sourceId })}
           />
-          <ControlsDock settings={settings} onSettingsSaved={setSettings} />
+          <ControlsDock
+            settings={settings}
+            onSettingsSaved={setSettings}
+            onOpenSourceHealth={() => setDialog({ kind: "sourceHealth" })}
+          />
           {showStats && <StatsDock />}
         </div>
       </main>
@@ -812,7 +899,18 @@ export default function App() {
       {dialog?.kind === "projector" && (
         <ProjectorDialog collection={collection} onClose={() => setDialog(null)} />
       )}
+      {dialog?.kind === "sourceHealth" && (
+        <SourceHealthDialog
+          studio={studio}
+          program={program}
+          onOpenProperties={(sourceId) => setDialog({ kind: "properties", sourceId })}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog?.kind === "missingFiles" && <MissingFilesDialog onClose={() => setDialog(null)} />}
+      {quitGuard && <QuitGuardDialog pending={quitGuard} onClose={() => setQuitGuard(null)} />}
+      {studio?.panic && <PanicBanner />}
+      {salvagePaths && <SalvageDialog paths={salvagePaths} onClose={() => setSalvagePaths(null)} />}
       {stillToast && (
         <div
           role="status"
@@ -823,6 +921,48 @@ export default function App() {
           {stillToast.ok
             ? t("still-saved-toast", { name: stillToast.text })
             : t("still-failed-toast", { error: stillToast.text })}
+        </div>
+      )}
+      {Object.keys(alarms).length > 0 && (
+        <div className="pointer-events-none fixed top-3 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-1">
+          {Object.values(alarms).map((alarm) => (
+            <div
+              key={alarm.kind}
+              role="alert"
+              className="pointer-events-auto flex items-center gap-2 rounded-md border border-amber-400/50 bg-black/85 px-3 py-1.5 text-xs text-amber-200"
+            >
+              <span>
+                {alarm.kind === "lowDisk"
+                  ? t("alarm-lowDisk", { minutes: alarm.minutesLeft ?? 0 })
+                  : t(`alarm-${alarm.kind}`)}
+              </span>
+              <button
+                type="button"
+                aria-label={t("alarm-dismiss")}
+                onClick={() =>
+                  setAlarms((current) => {
+                    const next = { ...current };
+                    delete next[alarm.kind];
+                    return next;
+                  })
+                }
+                className="rounded px-1 text-amber-200/80 transition-colors hover:text-amber-100"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {fallbackToast && (
+        <div
+          role="status"
+          className="pointer-events-none fixed bottom-12 left-1/2 z-50 -translate-x-1/2 rounded-md border border-amber-400/40 bg-black/80 px-3 py-1.5 text-xs text-amber-200"
+        >
+          {t(
+            fallbackToast.scope === "stream" ? "fallback-toast-stream" : "fallback-toast-recording",
+            { from: fallbackToast.from, to: fallbackToast.to },
+          )}
         </div>
       )}
       {dialog?.kind === "editTransform" && activeScene && transformItem && (

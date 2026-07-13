@@ -885,6 +885,13 @@ output-install = Zainstaluj…
 output-recordings-folder = Folder nagrań
 output-folder-placeholder = Folder Wideo systemu
 output-filename-prefix = Prefiks nazwy pliku
+output-recording-template = Nazwa pliku nagrania
+output-replay-template = Nazwa pliku powtórki
+output-still-template = Nazwa pliku klatki
+output-template-tokens = Tokeny: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Folder powtórek
+output-still-folder = Folder klatek
+output-same-folder-placeholder = Folder nagrań
 output-frame-rate = Liczba klatek
 output-fps-option = { $fps } fps
 output-split-every = Dziel co (minuty, 0 = wył.)
@@ -1359,3 +1366,102 @@ still-saved-toast = Klatka zapisana: { $name }
 still-failed-toast = Przechwytywanie klatki nie powiodło się: { $error }
 hotkeys-still = Przechwyć klatkę
 hotkeys-still-placeholder = np. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Stan źródeł…
+health-title = Stan źródeł
+health-col-source = Źródło
+health-col-state = Stan
+health-col-resolution = Rozdzielczość
+health-col-fps = FPS
+health-col-last-frame = Ostatnia klatka
+health-col-dropped = Porzucone
+health-col-retries = Restarty
+health-col-actions = Akcje
+health-state-live = Na żywo
+health-state-waiting = Oczekiwanie
+health-state-error = Błąd
+health-state-inactive = Nieaktywne
+health-restart = Uruchom ponownie
+health-properties = Właściwości
+health-empty = Ta kolekcja nie ma jeszcze źródeł.
+health-seconds = { $value } s
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Zamknąć Freally Capture?
+quit-body = Zamknięcie teraz bezpiecznie wykona kolejno:
+quit-consequence-stream = Zakończy transmisję na żywo i rozłączy się z usługą.
+quit-consequence-recording = Zatrzyma nagrywanie i sfinalizuje pliki.
+quit-consequence-replay = Wyłączy bufor powtórek — niezapisany materiał zostanie odrzucony.
+quit-confirm = Zamknij bezpiecznie
+quit-quitting = Zamykanie…
+quit-cancel = Anuluj
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Odzyskać przerwane nagrania?
+salvage-body = Ostatnia sesja zakończyła się nieoczekiwanie, gdy te nagrania były jeszcze zapisywane. Naprawa tworzy odtwarzalną kopię obok oryginału — oryginalny plik nigdy nie jest zmieniany.
+salvage-repair = Napraw
+salvage-repairing = Naprawianie…
+salvage-done = Naprawiono
+salvage-repaired = Naprawiono → { $name }
+salvage-failed = Naprawa nie powiodła się: { $error }
+salvage-dismiss = Nie teraz
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Awaria enkodera — przełączono z { $from } na { $to }. Transmisja połączyła się ponownie i trwa dalej.
+fallback-toast-recording = Awaria enkodera — przełączono z { $from } na { $to }. Nagrywanie trwa w nowym pliku.
+fallback-note = Enkoder zapasowy: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Dźwięk programu ucichł
+alarm-clipping = Dźwięk programu jest przesterowany
+alarm-black = Obraz programu jest czarny
+alarm-frozen = Obraz programu od dłuższej chwili się nie zmienia
+alarm-lowDisk = Miejsce na dysku: zostało około { $minutes } min przy obecnym bitrate
+alarm-dismiss = Zamknij alarm
+alarm-cleared = Rozwiązano: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Panika — przełącz na planszę prywatności
+panic-banner-title = Panika
+panic-banner-body = Program pokazuje planszę prywatności; cały dźwięk jest wyciszony, a przechwytywanie zatrzymane. Transmisja i nagrywanie trwają.
+panic-restore = Przywróć…
+panic-restore-confirm = Przywrócić program?
+panic-restore-yes = Przywróć
+panic-restore-cancel = Anuluj
+hotkeys-panic = Panika (plansza prywatności)
+hotkeys-panic-placeholder = np. Ctrl+Shift+F12
+panic-slate-color = Kolor planszy paniki
+panic-slate-image = Obraz planszy paniki
+panic-slate-image-placeholder = Opcjonalna ścieżka obrazu
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Pakiet diagnostyczny
+diag-intro = Eksportuje oczyszczony .zip (migawka konfiguracji, sonda enkoderów, ostatnie statystyki — sekrety, ścieżki i nazwy nigdy nie są dołączane) do ręcznego załączenia do zgłoszenia na GitHubie. Nic nie jest wysyłane.
+diag-preview = Zobacz zawartość
+diag-hide-preview = Ukryj podgląd
+diag-export = Eksportuj .zip
+diag-exported = Wyeksportowano: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Kontrola przed transmisją
+preflight-intro = Każdy blokujący punkt musi być zielony; reszta to uczciwe wskazówki.
+preflight-item-targets = Cele transmisji skonfigurowane (klucz/URL)
+preflight-item-encoder = Dostępny użyteczny enkoder
+preflight-item-sources = Wszystkie źródła sprawne
+preflight-item-disk = Miejsce na dysku na nagranie
+preflight-item-mic = Poziom mikrofonu
+preflight-item-desktopAudio = Poziom dźwięku pulpitu
+preflight-item-replay = Bufor powtórek uzbrojony
+preflight-targets-detail = { $count } włączonych
+preflight-sources-detail = { $count } źródło/a z błędem
+preflight-disk-detail = ~{ $minutes } min przy obecnym bitrate
+preflight-fix-stream = Ustawienia transmisji…
+preflight-fix-components = Komponenty…
+preflight-fix-sources = Stan źródeł…
+preflight-fix-replay = Uzbrój
+preflight-optional = opcjonalne
+preflight-hold = Wstrzymaj Go Live, aż wszystko będzie zielone
+preflight-cancel = Anuluj
+preflight-go-anyway = Mimo to nadawaj
+preflight-go-live = Nadawaj

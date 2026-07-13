@@ -23,6 +23,8 @@ pub struct RuntimeStats {
     vertical_fps: AtomicU32,
     dropped: AtomicU64,
     render_micros: AtomicU64,
+    /// Sources in the "error" state right now (CAP-M09 pre-flight hold).
+    errored_sources: AtomicU32,
     /// Set once the compose loop is actually running.
     running: std::sync::atomic::AtomicBool,
 }
@@ -35,6 +37,29 @@ impl RuntimeStats {
         self.dropped.store(dropped, Ordering::Relaxed);
         self.render_micros.store(render_micros, Ordering::Relaxed);
         self.running.store(true, Ordering::Relaxed);
+    }
+
+    /// Sources currently in the "error" state, from the studio loop's last
+    /// program-event build — the backend half of the CAP-M09 pre-flight
+    /// hold (the hotkey and the remote API never see the dialog).
+    pub fn set_errored_sources(&self, count: u32) {
+        self.errored_sources.store(count, Ordering::Relaxed);
+    }
+
+    pub fn errored_sources(&self) -> u32 {
+        self.errored_sources.load(Ordering::Relaxed)
+    }
+
+    /// The latest render numbers — (running, fps, vertical fps, dropped,
+    /// render µs). The diagnostics bundle's "recent stats" (CAP-M24).
+    pub fn latest(&self) -> (bool, u32, u32, u64, u64) {
+        (
+            self.running.load(Ordering::Relaxed),
+            self.fps.load(Ordering::Relaxed),
+            self.vertical_fps.load(Ordering::Relaxed),
+            self.dropped.load(Ordering::Relaxed),
+            self.render_micros.load(Ordering::Relaxed),
+        )
     }
 }
 

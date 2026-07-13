@@ -908,6 +908,13 @@ output-install = Yükle…
 output-recordings-folder = Kayıtlar klasörü
 output-folder-placeholder = İşletim sistemi Videolar klasörü
 output-filename-prefix = Dosya adı öneki
+output-recording-template = Kayıt dosya adı
+output-replay-template = Tekrar dosya adı
+output-still-template = Kare dosya adı
+output-template-tokens = Belirteçler: {"{prefix}"}, {"{date}"}, {"{time}"}, {"{scene}"}, {"{profile}"}, {"{canvas}"}, {"{marker-count}"}, {"{counter}"}
+output-replay-folder = Tekrar klasörü
+output-still-folder = Kare klasörü
+output-same-folder-placeholder = Kayıtlar klasörü
 output-frame-rate = Kare hızı
 output-fps-option = { $fps } fps
 output-split-every = Şu sürede böl (dakika, 0 = kapalı)
@@ -1382,3 +1389,102 @@ still-saved-toast = Kare kaydedildi: { $name }
 still-failed-toast = Kare yakalama başarısız: { $error }
 hotkeys-still = Kare yakala
 hotkeys-still-placeholder = örn. Ctrl+Shift+P
+
+# CAP-M13 — source health dashboard
+palette-source-health = Kaynak sağlığı…
+health-title = Kaynak Sağlığı
+health-col-source = Kaynak
+health-col-state = Durum
+health-col-resolution = Çözünürlük
+health-col-fps = FPS
+health-col-last-frame = Son kare
+health-col-dropped = Bırakılan
+health-col-retries = Yeniden başlatmalar
+health-col-actions = Eylemler
+health-state-live = Canlı
+health-state-waiting = Bekliyor
+health-state-error = Hata
+health-state-inactive = Devre dışı
+health-restart = Yeniden başlat
+health-properties = Özellikler
+health-empty = Bu koleksiyonda henüz kaynak yok.
+health-seconds = { $value } sn
+
+# CAP-M23 — quit guard + orderly shutdown
+quit-title = Freally Capture'dan çıkılsın mı?
+quit-body = Şimdi çıkmak sırasıyla şunları güvenle yapar:
+quit-consequence-stream = Canlı yayını sonlandırır ve hizmet bağlantısını keser.
+quit-consequence-recording = Kaydı durdurur ve dosyalarını sonlandırır.
+quit-consequence-replay = Tekrar arabelleğini kapatır — kaydedilmemiş görüntüler atılır.
+quit-confirm = Güvenle çık
+quit-quitting = Kapatılıyor…
+quit-cancel = İptal
+
+# CAP-M11 — crash-safe recording salvage
+salvage-title = Kesintiye uğrayan kayıtlar kurtarılsın mı?
+salvage-body = Son oturum, bu kayıtlar hâlâ yazılırken beklenmedik şekilde sona erdi. Onarım, orijinalin yanına oynatılabilir bir kopya yazar — orijinal dosya asla değiştirilmez.
+salvage-repair = Onar
+salvage-repairing = Onarılıyor…
+salvage-done = Onarıldı
+salvage-repaired = Onarıldı → { $name }
+salvage-failed = Onarım başarısız: { $error }
+salvage-dismiss = Şimdi değil
+
+# CAP-M12 — mid-session encoder failover
+fallback-toast-stream = Kodlayıcı arızası — { $from } yerine { $to } kullanılıyor. Yayın yeniden bağlandı ve sürüyor.
+fallback-toast-recording = Kodlayıcı arızası — { $from } yerine { $to } kullanılıyor. Kayıt yeni bir dosyada devam ediyor.
+fallback-note = Yedek kodlayıcı: { $from } → { $to }
+
+# CAP-M10 — broadcast safety alarms
+alarm-silentAudio = Program sesi sessizleşti
+alarm-clipping = Program sesi kırpılıyor
+alarm-black = Program görüntüsü siyah
+alarm-frozen = Program görüntüsü bir süredir değişmedi
+alarm-lowDisk = Disk alanı: mevcut bit hızında yaklaşık { $minutes } dk kaldı
+alarm-dismiss = Alarmı kapat
+alarm-cleared = Çözüldü: { $alarm }
+
+# CAP-M22 — panic button
+palette-panic = Panik — gizlilik ekranına geç
+panic-banner-title = Panik
+panic-banner-body = Program gizlilik ekranını gösteriyor; tüm ses kapalı ve yakalamalar durdu. Yayın ve kayıt sürüyor.
+panic-restore = Geri yükle…
+panic-restore-confirm = Program geri yüklensin mi?
+panic-restore-yes = Geri yükle
+panic-restore-cancel = İptal
+hotkeys-panic = Panik (gizlilik ekranı)
+hotkeys-panic-placeholder = örn. Ctrl+Shift+F12
+panic-slate-color = Panik ekranı rengi
+panic-slate-image = Panik ekranı görseli
+panic-slate-image-placeholder = İsteğe bağlı görsel yolu
+
+# CAP-M24 — redacted diagnostics bundle
+diag-title = Tanılama paketi
+diag-intro = GitHub issue'suna elle eklemek için ayıklanmış bir .zip (yapılandırma anlık görüntüsü, kodlayıcı sondası, son istatistikler — gizli bilgiler, yollar ve adlar asla dahil edilmez) dışa aktarır. Hiçbir şey gönderilmez.
+diag-preview = İçeriği gör
+diag-hide-preview = Önizlemeyi gizle
+diag-export = .zip dışa aktar
+diag-exported = Dışa aktarıldı: { $path }
+
+# CAP-M09 — go-live pre-flight checklist
+preflight-title = Yayın öncesi kontrol
+preflight-intro = Engelleyen her madde yeşil olmalı; kalanlar dürüst hatırlatmadır.
+preflight-item-targets = Yayın hedefleri ayarlı (anahtar/URL)
+preflight-item-encoder = Kullanılabilir kodlayıcı var
+preflight-item-sources = Tüm kaynaklar sağlıklı
+preflight-item-disk = Kayıt için disk alanı
+preflight-item-mic = Mikrofon ölçümü
+preflight-item-desktopAudio = Masaüstü ses ölçümü
+preflight-item-replay = Tekrar arabelleği hazır
+preflight-targets-detail = { $count } etkin
+preflight-sources-detail = { $count } kaynak hatalı
+preflight-disk-detail = Mevcut bit hızında ~{ $minutes } dk
+preflight-fix-stream = Yayın ayarları…
+preflight-fix-components = Bileşenler…
+preflight-fix-sources = Kaynak sağlığı…
+preflight-fix-replay = Hazırla
+preflight-optional = isteğe bağlı
+preflight-hold = Hepsi yeşil olana dek Go Live'ı beklet
+preflight-cancel = İptal
+preflight-go-anyway = Yine de yayına geç
+preflight-go-live = Yayına geç

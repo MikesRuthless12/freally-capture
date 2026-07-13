@@ -90,6 +90,77 @@ pub fn remux_to_mp4(ffmpeg: &Ffmpeg, input: &Path) -> Result<PathBuf, String> {
     Ok(output)
 }
 
+/// `name.mkv` → a non-colliding `name (repaired).mkv` sibling (CAP-M11).
+fn repaired_sibling(input: &Path) -> PathBuf {
+    let stem = input
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("recording");
+    let ext = input
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("mkv");
+    let first = input.with_file_name(format!("{stem} (repaired).{ext}"));
+    if !first.exists() {
+        return first;
+    }
+    for index in 2..1000 {
+        let candidate = input.with_file_name(format!("{stem} (repaired {index}).{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    input.with_file_name(format!("{stem}.repaired.{ext}"))
+}
+
+/// Salvage an interrupted recording (CAP-M11): a tolerant stream-copy remux
+/// into a `(repaired)` sibling — rebuilds the mkv index/duration, turns a
+/// fragmented mp4/mov into a classic faststart file — and never touches the
+/// original. Blocking (pure I/O, no re-encode).
+pub fn repair_recording(ffmpeg: &Ffmpeg, input: &Path) -> Result<PathBuf, String> {
+    let ext = input
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "frec" {
+        return Err(
+            "the owned .frec format is crash-safe by design — nothing to repair".to_owned(),
+        );
+    }
+    if !input.is_file() {
+        return Err(format!("{} is not a file", input.display()));
+    }
+    let output = repaired_sibling(input);
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-y"]);
+    // Tolerate the damage at the truncation point instead of aborting there.
+    cmd.args(["-err_detect", "ignore_err", "-i"]).arg(input);
+    cmd.args(["-map", "0", "-c", "copy"]);
+    if matches!(ext.as_str(), "mp4" | "mov") {
+        cmd.args(["-movflags", "+faststart"]);
+    }
+    cmd.arg(&output);
+
+    let result = run_with_timeout(cmd, Duration::from_secs(30 * 60))?;
+    let salvaged = std::fs::metadata(&output)
+        .map(|meta| meta.len() > 0)
+        .unwrap_or(false);
+    // A truncated tail routinely makes ffmpeg exit non-zero AFTER writing
+    // out everything readable — non-empty output IS the salvage. Only an
+    // empty/missing output is a failure.
+    if !salvaged {
+        let _ = std::fs::remove_file(&output);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "repair failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    Ok(output)
+}
+
 /// One `file '…'` line for the concat demuxer's list, with the only escape
 /// it honors (a quote closes, `\'` re-opens: `'` → `'\''`).
 fn concat_list_line(path: &Path) -> String {
@@ -273,5 +344,37 @@ mod tests {
         };
         let err = remux_to_mp4(&fake, Path::new("clip.mp4")).unwrap_err();
         assert!(err.contains("mkv"));
+    }
+
+    #[test]
+    fn repaired_names_keep_the_extension_and_avoid_collisions() {
+        let dir = std::env::temp_dir().join(format!(
+            "fcap-repair-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let input = dir.join("take.mp4");
+        std::fs::write(&input, b"x").expect("write");
+
+        let first = repaired_sibling(&input);
+        assert_eq!(first.file_name().unwrap(), "take (repaired).mp4");
+        std::fs::write(&first, b"x").expect("write");
+        let second = repaired_sibling(&input);
+        assert_eq!(second.file_name().unwrap(), "take (repaired 2).mp4");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frec_needs_no_repair_and_says_so() {
+        let fake = Ffmpeg {
+            path: PathBuf::from("ffmpeg-not-real"),
+            version: "test".to_string(),
+        };
+        let err = repair_recording(&fake, Path::new("take.frec")).unwrap_err();
+        assert!(err.contains("crash-safe by design"));
     }
 }
