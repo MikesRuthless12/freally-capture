@@ -22,6 +22,8 @@ sha2 = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
 image = { workspace = true } # lossless PNG for still-frame grab (CAP-M08)
+# MIDI control surfaces (CAP-N03) — MIT; recorded in THIRD-PARTY-NOTICES.
+midir = { workspace = true }
 jpeg-encoder = { workspace = true }
 # Prints wgpu's `log` diagnostics (adapter enumeration, surface errors) when
 # RUST_LOG is set; silent by default, so no effect on normal runs.

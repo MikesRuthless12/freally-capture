@@ -16,11 +16,16 @@ use std::time::Duration;
 use crate::ffmpeg::{command, run_with_timeout, Ffmpeg};
 
 /// What a probe learned about a media file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MediaInfo {
     pub width: u32,
     pub height: u32,
     pub has_audio: bool,
+    /// Total duration in seconds, when the banner states one (`N/A` on some
+    /// streams — the transport UI treats `None` as "unknown").
+    pub duration_secs: Option<f32>,
+    /// The video stream's frame rate, when stated (drives the position clock).
+    pub fps: Option<f32>,
 }
 
 /// Probe a file's banner (`ffmpeg -i`) for its video geometry + whether an
@@ -38,27 +43,47 @@ pub fn probe_media(ffmpeg: &Ffmpeg, path: &Path) -> Result<MediaInfo, String> {
     })
 }
 
-/// Parse the `-i` banner: the `Video:` line's `WxH` + any `Audio:` line.
+/// Parse the `-i` banner: the `Video:` line's `WxH` + fps, any `Audio:`
+/// line, and the container `Duration:` line.
 fn parse_banner(banner: &str) -> Option<MediaInfo> {
     let mut dims: Option<(u32, u32)> = None;
     let mut has_audio = false;
+    let mut duration_secs: Option<f32> = None;
+    let mut fps: Option<f32> = None;
     for line in banner.lines() {
         if line.contains("Audio: ") {
             has_audio = true;
         }
+        // `Duration: 00:01:23.45, start: …` — `N/A` stays None.
+        if duration_secs.is_none() {
+            if let Some(rest) = line.trim_start().strip_prefix("Duration: ") {
+                let stamp = rest.split(',').next().unwrap_or("").trim();
+                duration_secs = parse_timestamp(stamp);
+            }
+        }
         if line.contains("Video: ") && dims.is_none() {
             // Fields are comma-separated; the geometry field is `WxH`
-            // (possibly with a trailing ` [SAR …]`).
+            // (possibly with a trailing ` [SAR …]`); the rate field is
+            // `NN fps` (fall back to `NN tbr` when fps is absent).
             for field in line.split(',') {
                 let field = field.trim();
                 let core = field.split_whitespace().next().unwrap_or(field);
-                if let Some((w, h)) = core.split_once('x') {
-                    if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) {
-                        if (16..=16_384).contains(&w) && (16..=16_384).contains(&h) {
-                            dims = Some((w, h));
-                            break;
+                if dims.is_none() {
+                    if let Some((w, h)) = core.split_once('x') {
+                        if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) {
+                            if (16..=16_384).contains(&w) && (16..=16_384).contains(&h) {
+                                dims = Some((w, h));
+                                continue;
+                            }
                         }
                     }
+                }
+                if (field.ends_with(" fps") || (fps.is_none() && field.ends_with(" tbr")))
+                    && core
+                        .parse::<f32>()
+                        .is_ok_and(|rate| rate > 0.0 && rate <= 1000.0)
+                {
+                    fps = core.parse::<f32>().ok();
                 }
             }
         }
@@ -67,7 +92,22 @@ fn parse_banner(banner: &str) -> Option<MediaInfo> {
         width,
         height,
         has_audio,
+        duration_secs,
+        fps,
     })
+}
+
+/// `HH:MM:SS.cc` → seconds (`None` for `N/A` or anything malformed).
+fn parse_timestamp(stamp: &str) -> Option<f32> {
+    let mut parts = stamp.split(':');
+    let hours: f32 = parts.next()?.parse().ok()?;
+    let minutes: f32 = parts.next()?.parse().ok()?;
+    let seconds: f32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(0.0..60.0).contains(&minutes) || !(0.0..60.0).contains(&seconds)
+    {
+        return None;
+    }
+    Some(hours * 3600.0 + minutes * 60.0 + seconds)
 }
 
 /// Spawn the video decoder: raw RGBA frames of exactly `width×height×4`
@@ -77,6 +117,7 @@ pub fn spawn_video_decoder(
     path: &Path,
     looping: bool,
     hw_decode: bool,
+    start_at: f32,
 ) -> Result<Child, String> {
     let mut cmd = command(ffmpeg);
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
@@ -87,6 +128,11 @@ pub fn spawn_video_decoder(
     if looping {
         cmd.args(["-stream_loop", "-1"]);
     }
+    if start_at > 0.0 {
+        // Input-side seek: fast keyframe jump before decode (the transport
+        // scrubber). With `-stream_loop`, later loops replay from the top.
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
+    }
     cmd.args(["-re", "-i"]).arg(path);
     cmd.args(["-an", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     cmd.spawn()
@@ -95,12 +141,20 @@ pub fn spawn_video_decoder(
 
 /// Spawn the audio decoder: interleaved stereo f32le at 48 kHz on stdout,
 /// paced to the file's own clock.
-pub fn spawn_audio_decoder(ffmpeg: &Ffmpeg, path: &Path, looping: bool) -> Result<Child, String> {
+pub fn spawn_audio_decoder(
+    ffmpeg: &Ffmpeg,
+    path: &Path,
+    looping: bool,
+    start_at: f32,
+) -> Result<Child, String> {
     let mut cmd = command(ffmpeg);
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
     cmd.args(["-hide_banner", "-v", "error"]);
     if looping {
         cmd.args(["-stream_loop", "-1"]);
+    }
+    if start_at > 0.0 {
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
     }
     cmd.args(["-re", "-i"]).arg(path);
     cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
@@ -108,34 +162,168 @@ pub fn spawn_audio_decoder(ffmpeg: &Ffmpeg, path: &Path, looping: bool) -> Resul
         .map_err(|err| format!("could not start the media audio decoder: {err}"))
 }
 
+// ---------------------------------------------------------------------------
+// Reverse rendering (the transport's "true reverse playback")
+// ---------------------------------------------------------------------------
+
+/// How long each reversal segment runs. `-vf reverse` buffers a whole input
+/// in RAM (ffmpeg's own docs warn about it), so long files are reversed
+/// segment-by-segment: split (stream copy, cuts on keyframes) → reverse each
+/// short segment → concatenate the reversed segments in reverse order.
+const REVERSE_SEGMENT_SECS: u32 = 10;
+
+/// Render a **reversed copy** of a wire-format media file into `dst`
+/// (H.264/AAC in MP4; audio reversed too when present). Bounded memory at
+/// any input length via segmented reversal; `work_dir` holds the temporary
+/// segments and is cleaned up on success. Slow for long files by nature —
+/// callers surface honest progress/waiting states.
+pub fn reverse_wire_file(
+    ffmpeg: &Ffmpeg,
+    src: &Path,
+    work_dir: &Path,
+    dst: &Path,
+    has_audio: bool,
+) -> Result<(), String> {
+    std::fs::create_dir_all(work_dir)
+        .map_err(|err| format!("could not create {}: {err}", work_dir.display()))?;
+
+    // 1. Split into short segments, stream-copied (fast, cuts at keyframes).
+    let seg_pattern = work_dir.join("seg%05d.mkv");
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+        .arg(src);
+    cmd.args([
+        "-c",
+        "copy",
+        "-f",
+        "segment",
+        "-segment_time",
+        &REVERSE_SEGMENT_SECS.to_string(),
+        "-reset_timestamps",
+        "1",
+    ])
+    .arg(&seg_pattern);
+    run_with_timeout(cmd, Duration::from_secs(600))?;
+
+    let mut segments: Vec<std::path::PathBuf> = std::fs::read_dir(work_dir)
+        .map_err(|err| format!("could not list {}: {err}", work_dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("seg") && name.ends_with(".mkv"))
+        })
+        .collect();
+    segments.sort();
+    if segments.is_empty() {
+        return Err("reversing produced no segments — is the file a video?".into());
+    }
+
+    // 2. Reverse each segment (short → the frame buffer stays small).
+    let mut reversed: Vec<std::path::PathBuf> = Vec::with_capacity(segments.len());
+    for (index, segment) in segments.iter().enumerate() {
+        let out = work_dir.join(format!("rev{index:05}.mkv"));
+        let mut cmd = command(ffmpeg);
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+            .arg(segment);
+        cmd.args(["-vf", "reverse"]);
+        if has_audio {
+            cmd.args(["-af", "areverse"]);
+        } else {
+            cmd.arg("-an");
+        }
+        cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]);
+        cmd.arg(&out);
+        run_with_timeout(cmd, Duration::from_secs(600))?;
+        reversed.push(out);
+    }
+
+    // 3. Concatenate the reversed segments, last first (stream copy).
+    let list_path = work_dir.join("concat.txt");
+    let list: String = reversed
+        .iter()
+        .rev()
+        .map(|path| {
+            format!(
+                "file '{}'\n",
+                path.display().to_string().replace('\'', "'\\''")
+            )
+        })
+        .collect();
+    std::fs::write(&list_path, list)
+        .map_err(|err| format!("could not write {}: {err}", list_path.display()))?;
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args([
+        "-hide_banner",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+    ])
+    .arg(&list_path);
+    cmd.args(["-c", "copy"]).arg(dst);
+    run_with_timeout(cmd, Duration::from_secs(600))?;
+
+    let _ = std::fs::remove_dir_all(work_dir);
+    Ok(())
+}
+
+/// Spawn an encoder that turns raw RGBA frames on stdin into an H.264 MP4 —
+/// the `.frec` → wire bridge the reverse path uses (frec decodes natively,
+/// then this re-encodes it so [`reverse_wire_file`] can work on it).
+pub fn spawn_rawvideo_encoder(
+    ffmpeg: &Ffmpeg,
+    width: u32,
+    height: u32,
+    fps_num: u32,
+    fps_den: u32,
+    dst: &Path,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error", "-y"]);
+    cmd.args(["-f", "rawvideo", "-pix_fmt", "rgba"]);
+    cmd.args(["-s", &format!("{width}x{height}")]);
+    cmd.args(["-r", &format!("{fps_num}/{}", fps_den.max(1))]);
+    cmd.args(["-i", "-"]);
+    cmd.args([
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+    ]);
+    cmd.arg(dst);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the rawvideo encoder: {err}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn banners_parse_geometry_and_audio() {
+    fn banners_parse_geometry_audio_duration_and_fps() {
         let banner = "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'clip.mp4':\n  Duration: 00:00:12.34, start: 0.000000, bitrate: 8123 kb/s\n  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1920x1080 [SAR 1:1 DAR 16:9], 8000 kb/s, 60 fps, 60 tbr, 15360 tbn (default)\n  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 192 kb/s (default)\n";
-        assert_eq!(
-            parse_banner(banner),
-            Some(MediaInfo {
-                width: 1920,
-                height: 1080,
-                has_audio: true
-            })
-        );
+        let info = parse_banner(banner).expect("parses");
+        assert_eq!((info.width, info.height), (1920, 1080));
+        assert!(info.has_audio);
+        assert!((info.duration_secs.expect("duration") - 12.34).abs() < 0.01);
+        assert!((info.fps.expect("fps") - 60.0).abs() < 0.01);
     }
 
     #[test]
     fn soundless_clips_and_junk_parse_honestly() {
         let soundless = "  Stream #0:0: Video: vp9, yuv420p(tv), 1280x720, 30 fps, 30 tbr\n";
-        assert_eq!(
-            parse_banner(soundless),
-            Some(MediaInfo {
-                width: 1280,
-                height: 720,
-                has_audio: false
-            })
-        );
+        let info = parse_banner(soundless).expect("parses");
+        assert_eq!((info.width, info.height), (1280, 720));
+        assert!(!info.has_audio);
+        assert_eq!(info.duration_secs, None, "no Duration line = unknown");
         assert_eq!(parse_banner("clip.xyz: Invalid data found"), None);
         // A matrix-size token that is not a geometry must not fool it.
         let weird = "  Stream #0:0: Video: h264, yuv420p, 640x360 [SAR 1:1], 30 fps\n";
@@ -143,5 +331,19 @@ mod tests {
             parse_banner(weird).map(|info| (info.width, info.height)),
             Some((640, 360))
         );
+    }
+
+    #[test]
+    fn na_durations_and_tbr_fallback_parse_honestly() {
+        // A live-ish stream: `Duration: N/A`, no ` fps` field — `tbr` fills in.
+        let banner = "Input #0, matroska,webm, from 'cap.mkv':\n  Duration: N/A, start: 0.000000, bitrate: N/A\n  Stream #0:0: Video: vp8, yuv420p(progressive), 854x480, SAR 1:1 DAR 427:240, 29.97 tbr, 1k tbn (default)\n";
+        let info = parse_banner(banner).expect("parses");
+        assert_eq!(info.duration_secs, None, "N/A stays unknown");
+        assert!((info.fps.expect("tbr fallback") - 29.97).abs() < 0.01);
+
+        // Timestamp parsing itself.
+        assert!((parse_timestamp("01:02:03.50").expect("parses") - 3723.5).abs() < 0.01);
+        assert_eq!(parse_timestamp("N/A"), None);
+        assert_eq!(parse_timestamp("99:99"), None);
     }
 }

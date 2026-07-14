@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use windows::core::{Interface, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, FALSE, HWND, LPARAM, RECT, TRUE};
+use windows::Win32::Foundation::{CloseHandle, FALSE, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
@@ -23,16 +23,20 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, DXGI_ERROR_NOT_FOUND,
-    DXGI_OUTPUT_DESC,
+    CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput6,
+    DXGI_ERROR_NOT_FOUND, DXGI_OUTPUT_DESC,
 };
+use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetClientRect, GetWindowLongPtrW, GetWindowPlacement,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, GWL_EXSTYLE, WINDOWPLACEMENT, WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
+    GetWindowLongPtrW, GetWindowPlacement, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE, WINDOWPLACEMENT,
+    WS_EX_TOOLWINDOW,
 };
 
 use crate::window_match::{
@@ -42,6 +46,115 @@ use crate::{frame_channel, CaptureError, CaptureSession, SourceInfo, SourceKind}
 
 const DISPLAY_PREFIX: &str = "display:";
 const WINDOW_PREFIX: &str = "window:";
+
+/// The cursor's virtual-desktop position (CAP-N71 follow-pan).
+pub(crate) fn cursor_position() -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+    // SAFETY: plain Win32 out-pointer call.
+    unsafe { GetCursorPos(&mut point) }.ok()?;
+    Some((point.x, point.y))
+}
+
+/// Seconds since the last keyboard/mouse input (CAP-N01's idle trigger).
+pub(crate) fn idle_seconds() -> Option<u32> {
+    let mut info = LASTINPUTINFO {
+        cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    // SAFETY: `info` is a fully-initialized local with its size set.
+    if unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        // SAFETY: no arguments.
+        let now = unsafe { GetTickCount() };
+        Some(now.wrapping_sub(info.dwTime) / 1000)
+    } else {
+        None
+    }
+}
+
+/// The foreground window's exe file name (CAP-N01's focus trigger).
+pub(crate) fn foreground_exe() -> Option<String> {
+    // SAFETY: no arguments; may return an invalid handle (checked).
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_invalid() {
+        return None;
+    }
+    let exe = exe_of(hwnd);
+    (!exe.is_empty()).then_some(exe)
+}
+
+/// Whether a display-capture id targets an HDR-enabled output (CAP-N74's
+/// auto-suggest signal). `None` for window ids or a vanished display.
+pub(crate) fn display_is_hdr(id: &str) -> Option<bool> {
+    let device_name = id.strip_prefix(DISPLAY_PREFIX)?;
+    let (_, output) = find_output_by_name(device_name).ok()?;
+    let output6: IDXGIOutput6 = output.cast().ok()?;
+    // SAFETY: COM getter returning by value in this bindings version.
+    let desc = unsafe { output6.GetDesc1() }.ok()?;
+    Some(
+        desc.ColorSpace
+            != windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+    )
+}
+
+/// The process behind a window-capture id — `(pid, exe file name)`,
+/// re-resolved by window identity per call, so it follows an app restart
+/// (CAP-N73's window↔app-audio link).
+pub(crate) fn window_process(id: &str) -> Option<(u32, String)> {
+    let raw = id.strip_prefix(WINDOW_PREFIX)?;
+    let (stored, key) = decode_window_id(raw)?;
+    let hwnd = HWND(resolve_target_hwnd(stored, &key)? as *mut core::ffi::c_void);
+    let mut pid: u32 = 0;
+    // SAFETY: writes the local out-param; the thread-id return is unused.
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if pid == 0 {
+        return None;
+    }
+    let exe = exe_of(hwnd);
+    if exe.is_empty() {
+        return None;
+    }
+    Some((pid, exe))
+}
+
+/// The desktop rectangle `(x, y, w, h)` a capture id currently covers — a
+/// display's desktop coordinates, or a window's client rect in screen space.
+/// Re-resolved on every call, so a moved window stays mapped (CAP-N71).
+pub(crate) fn source_screen_rect(id: &str) -> Option<(i32, i32, u32, u32)> {
+    if let Some(device_name) = id.strip_prefix(DISPLAY_PREFIX) {
+        let (_, output) = find_output_by_name(device_name).ok()?;
+        // SAFETY: COM getter on a live output.
+        let desc = unsafe { output.GetDesc() }.ok()?;
+        let r = desc.DesktopCoordinates;
+        return Some((
+            r.left,
+            r.top,
+            (r.right - r.left).max(0) as u32,
+            (r.bottom - r.top).max(0) as u32,
+        ));
+    }
+    if let Some(raw) = id.strip_prefix(WINDOW_PREFIX) {
+        let (stored_hwnd, key) = decode_window_id(raw)?;
+        let hwnd = HWND(resolve_target_hwnd(stored_hwnd, &key)? as *mut core::ffi::c_void);
+        let mut rect = RECT::default();
+        // SAFETY: rect out-pointer on a validated HWND; a dead window errors.
+        unsafe { GetClientRect(hwnd, &mut rect) }.ok()?;
+        let mut origin = POINT {
+            x: rect.left,
+            y: rect.top,
+        };
+        // SAFETY: point out-pointer; converts client (0,0) to screen space.
+        if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
+            return None;
+        }
+        return Some((
+            origin.x,
+            origin.y,
+            (rect.right - rect.left).max(0) as u32,
+            (rect.bottom - rect.top).max(0) as u32,
+        ));
+    }
+    None
+}
 
 pub(crate) fn list_sources() -> Result<Vec<SourceInfo>, CaptureError> {
     let mut sources = list_displays()?;

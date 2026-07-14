@@ -176,6 +176,15 @@ pub enum SourceSettings {
         /// Try hardware decode first (falls back to software on its own).
         #[serde(default = "default_true")]
         hw_decode: bool,
+        /// Hold on the first frame until recording starts, then play from
+        /// the top (the backdrop's "start playback with recording" option).
+        #[serde(default)]
+        start_with_recording: bool,
+        /// True reverse playback: GIFs reverse through the owned decoder;
+        /// `.frec`/wire files render a reversed copy once (cached, via the
+        /// labeled ffmpeg component) and play that.
+        #[serde(default)]
+        reverse: bool,
     },
     /// A remote guest's live feed (Remote Guests, P2P/WebRTC) — video frames
     /// *and* mic audio are pushed from the webview's WebRTC session over IPC;
@@ -222,6 +231,12 @@ pub enum SourceSettings {
         /// label; the pid alone is not stable across relaunches.
         #[serde(default)]
         exe: String,
+        /// CAP-N73: the Window-capture source this audio is linked to.
+        /// Hiding that window mutes this strip, removing it removes this
+        /// too, and the engine re-resolves `pid` from the window's live
+        /// process across app restarts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        linked_window: Option<SourceId>,
     },
     /// An ordered set of images cycling on a timer (Phase 6): per-slide
     /// duration, an optional crossfade (equal-size slides only — different

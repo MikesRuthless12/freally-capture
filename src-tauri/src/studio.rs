@@ -187,14 +187,20 @@ enum ProjectorJob {
 pub enum ProjectorTarget {
     Scene(SceneId),
     Source(SourceId),
+    /// CAP-N69: the low-latency passthrough monitor — the device's RAW
+    /// frames, bypassing composition, filters, and every buffer the studio
+    /// path adds. Published straight from the capture drain.
+    Passthrough(SourceId),
 }
 
 impl ProjectorTarget {
-    /// The preview-slot key: `"scene:<id>"` / `"source:<id>"`.
+    /// The preview-slot key: `"scene:<id>"` / `"source:<id>"` /
+    /// `"passthrough:<id>"`.
     fn key(&self) -> String {
         match self {
             ProjectorTarget::Scene(id) => format!("scene:{}", id.0),
             ProjectorTarget::Source(id) => format!("source:{}", id.0),
+            ProjectorTarget::Passthrough(id) => format!("passthrough:{}", id.0),
         }
     }
 }
@@ -209,6 +215,16 @@ struct StudioCore {
     /// the recovery path for errored captures (unplugged camera, permission
     /// granted after a denial, closed window reopened).
     retry_nonces: HashMap<SourceId, u64>,
+    /// Punch-in zoom lenses (CAP-N71, not persisted): per-item target
+    /// zoom/anchor/follow the render loop spring-animates each tick. Drawn
+    /// only — the model's transforms and the undo history never see them.
+    zoom_lenses: HashMap<ItemId, LensTarget>,
+    /// Auto black-bar crop requests (CAP-N72, not persisted): one-shot
+    /// `pending` detections and armed `follow` re-checks, keyed by item.
+    autocrop: HashMap<ItemId, AutocropState>,
+    /// CAP-N69: the passthrough monitor's measured capture→publish latency
+    /// per source, in ms (a rolling mean; runtime-only).
+    passthrough_latency: HashMap<SourceId, f32>,
     /// Studio Mode (Phase 5): the preview-side scene while enabled.
     preview_scene: Option<SceneId>,
     /// The blend a commit is currently rendering, if any.
@@ -343,6 +359,30 @@ pub(crate) fn coalesce_key<T: std::hash::Hash>(tag: &str, target: T) -> u64 {
     hasher.finish()
 }
 
+/// One punch-in lens's target state (CAP-N71) — what the commands set and
+/// the render loop spring-animates toward. Runtime-only, never persisted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LensTarget {
+    /// Target zoom, `1..=8` (1 = flat; the loop forgets settled 1× lenses).
+    pub zoom: f32,
+    /// Zoom anchor in normalized content coordinates (0,0 = top-left).
+    pub anchor: (f32, f32),
+    /// Follow the OS cursor while zoomed (display/window captures;
+    /// Windows-first — elsewhere the anchor stays manual).
+    pub follow: bool,
+}
+
+/// One auto-crop request's state (CAP-N72) — runtime-only, never persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutocropState {
+    pub scene: SceneId,
+    pub source: SourceId,
+    /// Re-detect when the source's resolution changes.
+    pub follow: bool,
+    /// One-shot: detect + apply on the next frame, then clear.
+    pub pending: bool,
+}
+
 /// A timer-control action (CAP-M15) — commands and hotkeys both drive these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimerCmd {
@@ -393,6 +433,9 @@ impl StudioState {
                 path,
                 dirty_since: None,
                 retry_nonces: HashMap::new(),
+                zoom_lenses: HashMap::new(),
+                autocrop: HashMap::new(),
+                passthrough_latency: HashMap::new(),
                 preview_scene: None,
                 transition: None,
                 undo: History::new(),
@@ -512,7 +555,9 @@ impl StudioState {
         let core = self.lock();
         match target {
             ProjectorTarget::Scene(id) => core.collection.scene(id).is_some(),
-            ProjectorTarget::Source(id) => core.collection.source(id).is_some(),
+            ProjectorTarget::Source(id) | ProjectorTarget::Passthrough(id) => {
+                core.collection.source(id).is_some()
+            }
         }
     }
 
@@ -525,6 +570,167 @@ impl StudioState {
     /// Drive one timer source's run state (CAP-M15). Runtime-only — no model
     /// change, no undo history, nothing emitted; the render loop repaints the
     /// face on its next tick. Unknown ids are a quiet no-op.
+    /// Set a punch-in lens's target zoom (CAP-N71). Absolute: `zoom` clamps
+    /// to `1..=8`; `anchor` (normalized content coords) replaces the stored
+    /// one when given, else the existing anchor (center for a new lens)
+    /// stays. A lens at 1× with follow off is removed — the loop animates
+    /// back to flat and forgets it. Runtime-only: no revision, no undo.
+    pub fn zoom_set(&self, item: ItemId, zoom: f32, anchor: Option<(f32, f32)>) {
+        let mut core = self.lock();
+        let entry = core.zoom_lenses.entry(item).or_insert(LensTarget {
+            zoom: 1.0,
+            anchor: (0.5, 0.5),
+            follow: false,
+        });
+        if zoom.is_finite() {
+            entry.zoom = zoom.clamp(1.0, 8.0);
+        }
+        if let Some((ax, ay)) = anchor {
+            if ax.is_finite() && ay.is_finite() {
+                entry.anchor = (ax.clamp(0.0, 1.0), ay.clamp(0.0, 1.0));
+            }
+        }
+        if entry.zoom <= 1.0 + f32::EPSILON && !entry.follow {
+            core.zoom_lenses.remove(&item);
+        }
+    }
+
+    /// Multiply a lens's target zoom (the canvas wheel) about `anchor`.
+    pub fn zoom_scroll(&self, item: ItemId, factor: f32, anchor: (f32, f32)) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let current = self
+            .lock()
+            .zoom_lenses
+            .get(&item)
+            .map_or(1.0, |lens| lens.zoom);
+        self.zoom_set(item, current * factor, Some(anchor));
+    }
+
+    /// Toggle follow-the-cursor panning for a lens (CAP-N71; Windows maps
+    /// the cursor into display/window captures — elsewhere the anchor just
+    /// stays manual and the UI says so).
+    pub fn zoom_follow(&self, item: ItemId, follow: bool) {
+        let mut core = self.lock();
+        if follow {
+            core.zoom_lenses
+                .entry(item)
+                .or_insert(LensTarget {
+                    zoom: 1.0,
+                    anchor: (0.5, 0.5),
+                    follow: false,
+                })
+                .follow = true;
+        } else if let Some(lens) = core.zoom_lenses.get_mut(&item) {
+            lens.follow = false;
+            if lens.zoom <= 1.0 + f32::EPSILON {
+                core.zoom_lenses.remove(&item);
+            }
+        }
+    }
+
+    /// A lens's current target, for the UI (`(zoom, follow)`).
+    pub fn zoom_get(&self, item: ItemId) -> (f32, bool) {
+        self.lock()
+            .zoom_lenses
+            .get(&item)
+            .map_or((1.0, false), |lens| (lens.zoom, lens.follow))
+    }
+
+    /// Request a one-shot auto black-bar crop (CAP-N72) on `item`: the next
+    /// frame of its source is scanned and the detected crop applied as an
+    /// undoable edit. Errors when the item is missing or is the backdrop.
+    pub fn autocrop_request(&self, scene: SceneId, item: ItemId) -> Result<(), String> {
+        let mut core = self.lock();
+        let source = resolve_autocrop_target(&core.collection, scene, item)?;
+        core.autocrop
+            .entry(item)
+            .and_modify(|state| {
+                state.pending = true;
+                state.scene = scene;
+                state.source = source;
+            })
+            .or_insert(AutocropState {
+                scene,
+                source,
+                follow: false,
+                pending: true,
+            });
+        Ok(())
+    }
+
+    /// Arm or disarm continuous re-checks on resolution change (CAP-N72's
+    /// follow mode; off by default per the DoD).
+    pub fn autocrop_set_follow(
+        &self,
+        scene: SceneId,
+        item: ItemId,
+        follow: bool,
+    ) -> Result<(), String> {
+        let mut core = self.lock();
+        if follow {
+            let source = resolve_autocrop_target(&core.collection, scene, item)?;
+            core.autocrop
+                .entry(item)
+                .and_modify(|state| {
+                    state.follow = true;
+                    state.scene = scene;
+                    state.source = source;
+                })
+                .or_insert(AutocropState {
+                    scene,
+                    source,
+                    follow: true,
+                    pending: false,
+                });
+        } else if let Some(state) = core.autocrop.get_mut(&item) {
+            state.follow = false;
+            if !state.pending {
+                core.autocrop.remove(&item);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether `item` has follow-mode auto-crop armed (the UI checkbox).
+    pub fn autocrop_get(&self, item: ItemId) -> bool {
+        self.lock()
+            .autocrop
+            .get(&item)
+            .is_some_and(|state| state.follow)
+    }
+
+    /// Loop-side: a detection ran — clear `pending` (the entry survives only
+    /// while follow keeps it alive). `drop_entirely` removes it regardless
+    /// (the item vanished; never retry per-frame forever).
+    pub fn autocrop_settle(&self, item: ItemId, drop_entirely: bool) {
+        let mut core = self.lock();
+        if drop_entirely {
+            core.autocrop.remove(&item);
+            return;
+        }
+        if let Some(state) = core.autocrop.get_mut(&item) {
+            state.pending = false;
+            if !state.follow {
+                core.autocrop.remove(&item);
+            }
+        }
+    }
+
+    /// CAP-N69: the passthrough monitor's measured latency for `source`
+    /// (capture timestamp → publish), in ms. `None` until it has run.
+    pub fn passthrough_latency(&self, source: SourceId) -> Option<f32> {
+        self.lock().passthrough_latency.get(&source).copied()
+    }
+
+    /// Loop-side: fold one measurement into the rolling mean.
+    fn record_passthrough_latency(&self, source: SourceId, ms: f32) {
+        let mut core = self.lock();
+        let entry = core.passthrough_latency.entry(source).or_insert(ms);
+        *entry = *entry * 0.9 + ms * 0.1; // gentle EMA — a stable readout
+    }
+
     pub fn timer_control(&self, source: SourceId, cmd: TimerCmd) {
         let now = Instant::now();
         let mut core = self.lock();
@@ -619,9 +825,10 @@ impl StudioState {
                         .to_string(),
                 );
             }
-            // The stinger's own audio is not mixed (v1) — video only.
+            // The stinger's own audio is not mixed (v1) — video only,
+            // always forward.
             Some(
-                fcap_sources::media::start_media("stinger-transition", path, false, true)
+                fcap_sources::media::start_media("stinger-transition", path, false, true, false)
                     .map_err(|err| format!("stinger: {err}"))?,
             )
         } else {
@@ -1052,6 +1259,10 @@ pub struct SourceRuntime {
     pub height: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<u32>,
+    /// An HDR display feeds this source (CAP-N74) — the UI offers the
+    /// tone-map controls when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hdr: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1073,6 +1284,7 @@ impl SourceRuntime {
     fn waiting() -> Self {
         SourceRuntime {
             state: "waiting",
+            hdr: false,
             width: None,
             height: None,
             fps: None,
@@ -1230,6 +1442,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
     let started_at = Instant::now();
     let mut seen_revision = 0u64;
+    // CAP-N02: the automation variables revision the source reconcile last ran
+    // against — a variable change repaints Text sources that interpolate it.
+    let mut seen_var_revision = 0u64;
     // The nested-scene pool the compositor resolves against, deep-cloned only
     // when the model revision changes (not per frame) — see the snapshot.
     let mut cached_scene_pool: Vec<fcap_scene::Scene> = Vec::new();
@@ -1264,6 +1479,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut workbench_live = false;
     // Multiview (CAP-M06): its own slow cadence, a round-robin cursor so no tick
     // renders every scene at once, and a was-open flag to clear the slots on close.
+    // Automation (CAP-N01): evaluated at 1 Hz — triggers are human-scale and
+    // a cheap tick keeps the 60 fps budget untouched.
+    let mut last_automation = Instant::now();
+    // CAP-N08: the program scene the PTZ layer last acted on (so a preset is
+    // recalled once per switch, not once per tick).
+    let mut ptz_scene: Option<String> = None;
     let mut last_multiview = Instant::now();
     let mut multiview_cursor = 0usize;
     let mut multiview_was_on = false;
@@ -1290,6 +1511,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut bound_texts: HashMap<SourceId, SourceSettings> = HashMap::new();
     let mut bound_specs: HashMap<SourceId, String> = HashMap::new();
     let mut bound_states: HashMap<SourceId, BoundTextState> = HashMap::new();
+    // Recording-synced media (the backdrop's "start with recording" hold):
+    // the last recording state the loop saw, and sources whose next uploaded
+    // frame becomes their poster (upload once, then pause until recording).
+    let mut was_recording = false;
+    let mut poster_pause: HashSet<SourceId> = HashSet::new();
+    // Punch-in zoom lenses (CAP-N71): the loop-side animated state, keyed by
+    // item. Entries whose target vanished spring back to flat, then drop.
+    let mut lens_anim: HashMap<ItemId, LensAnim> = HashMap::new();
+    // Auto black-bar crop (CAP-N72): the source resolution each armed item
+    // last saw — follow-mode re-detects only when it changes.
+    let mut autocrop_dims: HashMap<ItemId, (u32, u32)> = HashMap::new();
+    // HDR displays (CAP-N74): sources whose output reports an HDR color
+    // space at reconcile — their live status carries the tone-map hint.
+    let mut hdr_sources: HashSet<SourceId> = HashSet::new();
 
     // The native preview surface (the "OBS feel" path): created lazily once
     // the UI reports a non-zero preview region, then presented every frame
@@ -1316,6 +1551,43 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     loop {
         let tick_started = Instant::now();
 
+        // -- 0. Recording-synced media (the backdrop's "start playback with
+        // recording" option): on EITHER recording edge, every flagged Media
+        // source restarts from the top — playing when recording just began,
+        // re-armed to hold on its first frame (the poster, registered at
+        // session start below) when it just ended — so each take starts the
+        // wallpaper video at 0:00 no matter what a preview did to it.
+        let recording_now = app
+            .state::<crate::recording::RecordingState>()
+            .recording_since()
+            .is_some();
+        if recording_now != was_recording {
+            was_recording = recording_now;
+            let mut guard = lock_core(&core);
+            let flagged: Vec<SourceId> = guard
+                .collection
+                .sources
+                .iter()
+                .filter(|source| {
+                    matches!(
+                        source.settings,
+                        SourceSettings::Media {
+                            start_with_recording: true,
+                            ..
+                        }
+                    )
+                })
+                .map(|source| source.id)
+                .collect();
+            if !flagged.is_empty() {
+                for id in &flagged {
+                    *guard.retry_nonces.entry(*id).or_insert(0) += 1;
+                    fcap_sources::media::set_media_paused(&id.0.to_string(), false);
+                }
+                guard.revision += 1;
+            }
+        }
+
         // -- 1. Snapshot the model (brief lock) --------------------------------
         let multiview_due = last_multiview.elapsed() >= MULTIVIEW_INTERVAL;
         let projector_due = last_projector.elapsed() >= READBACK_INTERVAL;
@@ -1338,6 +1610,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             projector_pack,
             panic_active,
             timers_snapshot,
+            zoom_lenses,
+            autocrop_snapshot,
+            passthrough_targets,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -1437,13 +1712,26 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             live_sources.extend(scene.items.iter().map(|item| item.source));
                         }
                     }
-                    ProjectorTarget::Source(id) => {
+                    ProjectorTarget::Source(id) | ProjectorTarget::Passthrough(id) => {
+                        // A passthrough monitor keeps its device alive even
+                        // when no scene shows it — playing off the monitor is
+                        // the whole point (CAP-N69).
                         if guard.collection.source(*id).is_some() {
                             live_sources.push(*id);
                         }
                     }
                 }
             }
+            // CAP-N69: which sources have a passthrough monitor open — the
+            // drain publishes their RAW frames with no composition at all.
+            let passthrough_targets: HashSet<SourceId> = guard
+                .projectors
+                .iter()
+                .filter_map(|target| match target {
+                    ProjectorTarget::Passthrough(id) => Some(*id),
+                    _ => None,
+                })
+                .collect();
             let projector_jobs: Option<Vec<ProjectorJob>> =
                 (!guard.projectors.is_empty() && projector_due).then(|| {
                     guard
@@ -1458,6 +1746,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 .collection
                                 .source(*id)
                                 .map(|_| ProjectorJob::Source(target.key(), *id)),
+                            // CAP-N69: the passthrough monitor publishes raw
+                            // frames straight from the capture drain — it must
+                            // NOT ride the composited readback path.
+                            ProjectorTarget::Passthrough(_) => None,
                         })
                         .collect()
                 });
@@ -1612,12 +1904,65 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 projector_pack,
                 panic_pack.is_some(),
                 guard.timers.clone(),
+                guard.zoom_lenses.clone(),
+                guard.autocrop.clone(),
+                passthrough_targets,
             )
         };
         if let Some(dto) = transition_ended {
             let _ = app.emit("studio", &dto);
         }
         compositor.set_canvas_size(canvas.0, canvas.1);
+
+        // -- 1b. Punch-in zoom lenses (CAP-N71): spring each drawn zoom/anchor
+        // toward its target — a fixed-step, critically-damped spring, so the
+        // motion is deterministic. Follow lenses re-anchor onto the OS cursor
+        // (display/window captures; off-Windows the mapping returns None and
+        // the anchor just stays where it was).
+        {
+            let dt = TICK.as_secs_f32();
+            for (item_id, target) in &zoom_lenses {
+                let anim = lens_anim.entry(*item_id).or_insert(LensAnim {
+                    zoom: 1.0,
+                    zoom_vel: 0.0,
+                    anchor: target.anchor,
+                    anchor_vel: (0.0, 0.0),
+                });
+                let desired_anchor = if target.follow {
+                    follow_anchor(&scene, &scene_sources, *item_id).unwrap_or(anim.anchor)
+                } else {
+                    target.anchor
+                };
+                spring_step(&mut anim.zoom, &mut anim.zoom_vel, target.zoom, dt);
+                spring_step(
+                    &mut anim.anchor.0,
+                    &mut anim.anchor_vel.0,
+                    desired_anchor.0,
+                    dt,
+                );
+                spring_step(
+                    &mut anim.anchor.1,
+                    &mut anim.anchor_vel.1,
+                    desired_anchor.1,
+                    dt,
+                );
+            }
+            lens_anim.retain(|id, anim| {
+                if zoom_lenses.contains_key(id) {
+                    return true;
+                }
+                spring_step(&mut anim.zoom, &mut anim.zoom_vel, 1.0, dt);
+                anim.zoom > 1.0 + 1e-3
+            });
+            compositor.set_lenses(
+                lens_anim
+                    .iter()
+                    .filter(|(_, anim)| anim.zoom > 1.0 + 1e-3)
+                    .map(|(id, anim)| (*id, (anim.zoom, anim.anchor)))
+                    .collect(),
+            );
+        }
+
         // Hand the compositor a fresh nested-scene pool only when the model
         // changed — never a per-frame deep clone.
         if let Some(pool) = scene_pool_rebuild {
@@ -1628,8 +1973,16 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let scene_pool = &cached_scene_pool;
 
         // -- 2. Reconcile sources against the active scene ---------------------
-        if revision != seen_revision {
+        // Also re-run when an automation variable changed (CAP-N02): a Text
+        // source's interpolated face rides its spec, so a variable write must
+        // repaint it even though it bumps no collection revision. The reconcile
+        // is idempotent for unchanged sources (matching specs → no restart).
+        let var_revision = app
+            .state::<crate::automation::AutomationState>()
+            .variables_revision();
+        if revision != seen_revision || var_revision != seen_var_revision {
             seen_revision = revision;
+            seen_var_revision = var_revision;
 
             // Stop sessions whose source left the scene or changed settings.
             let mut keep_ids: Vec<SourceId> = Vec::new();
@@ -1734,8 +2087,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 // The retry nonce is part of the fingerprint: bumping it is
                 // how an errored source gets restarted with equal settings.
                 let nonce = nonces.get(&source.id).copied().unwrap_or(0);
-                let spec = format!("{}#{nonce}", source_spec(&source.settings));
-                let is_capture = is_capture_backed(&source.settings);
+                // CAP-N02: a Text source interpolates `{{variable}}` tokens.
+                // The interpolated text rides the SPEC, so setting a variable
+                // repaints the face on the next tick (and an unchanged
+                // variable costs nothing — the fingerprint is identical).
+                let effective = interpolate_settings(&app, &source.settings);
+                let spec = format!("{}#{nonce}", source_spec(&effective));
+                let is_capture = is_capture_backed(&effective);
                 if is_capture {
                     let changed = capture_specs.get(&source.id) != Some(&spec);
                     if changed {
@@ -1747,6 +2105,30 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         static_specs.remove(&source.id);
                         compositor.remove_source(source.id);
                         capture_specs.insert(source.id, spec);
+                        // CAP-N74: seed the display's tone-map registry from
+                        // settings and remember whether its output is HDR
+                        // (the badge that suggests enabling an operator).
+                        if let SourceSettings::Display { capture_id, .. } = &source.settings {
+                            let config = app
+                                .state::<crate::settings::SettingsStore>()
+                                .hdr_tone_map(capture_id)
+                                .and_then(|tone| {
+                                    Some(fcap_capture::tonemap::ToneMapConfig {
+                                        operator:
+                                            fcap_capture::tonemap::ToneMapOperator::from_name(
+                                                &tone.operator,
+                                            )?,
+                                        paper_white_nits: tone.paper_white_nits as f32,
+                                    })
+                                })
+                                .unwrap_or_default();
+                            fcap_capture::tonemap::set_tone_map(capture_id, config);
+                            if fcap_capture::display_is_hdr(capture_id) == Some(true) {
+                                hdr_sources.insert(source.id);
+                            } else {
+                                hdr_sources.remove(&source.id);
+                            }
+                        }
                         // CAP-M18: the saved control profile rides into every
                         // device (re)open — hotplug/auto-recover included.
                         let camera_profile = match &source.settings {
@@ -1762,6 +2144,26 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             &reactions_queue,
                             camera_profile,
                         );
+                        // Recording-synced media: a fresh session must not
+                        // inherit a stale pause flag (it would freeze before
+                        // its first frame); outside a recording it holds on
+                        // its first frame (the poster) until recording starts.
+                        if matches!(
+                            source.settings,
+                            SourceSettings::Media {
+                                start_with_recording: true,
+                                ..
+                            }
+                        ) {
+                            fcap_sources::media::set_media_paused(&source.id.0.to_string(), false);
+                            if recording_now {
+                                poster_pause.remove(&source.id);
+                            } else {
+                                poster_pause.insert(source.id);
+                            }
+                        } else {
+                            poster_pause.remove(&source.id);
+                        }
                         statuses.insert(source.id, SourceRuntime::waiting());
                         statuses_changed = true;
                     }
@@ -1777,7 +2179,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         starting.remove(&source.id);
                         capture_specs.remove(&source.id);
                         static_specs.insert(source.id, spec);
-                        let status = match render_static(&source.settings) {
+                        let status = match render_static(&effective) {
                             Ok(frame) => {
                                 let (w, h) = (frame.width, frame.height);
                                 match compositor.upload_frame(source.id, &frame) {
@@ -1813,7 +2215,62 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 capture_specs.remove(&id);
                 static_specs.remove(&id);
                 statuses.remove(&id);
+                poster_pause.remove(&id);
                 statuses_changed = true;
+            }
+            // CAP-N73: linked window↔app-audio pairs re-resolve the audio's
+            // pid from the window's LIVE process (a window rebind after an
+            // app restart bumps the revision, which lands here). Windows
+            // resolves; elsewhere `window_process` is None and nothing moves.
+            let mut relinks: Vec<(SourceId, u32, String)> = Vec::new();
+            for audio_source in &scene_sources {
+                let SourceSettings::AppAudio {
+                    pid: old_pid,
+                    linked_window: Some(window_source),
+                    ..
+                } = &audio_source.settings
+                else {
+                    continue;
+                };
+                let Some(capture_id) = scene_sources.iter().find_map(|entry| {
+                    (entry.id == *window_source)
+                        .then(|| match &entry.settings {
+                            SourceSettings::Window { capture_id, .. } => Some(capture_id.clone()),
+                            _ => None,
+                        })
+                        .flatten()
+                }) else {
+                    continue;
+                };
+                if let Some((pid, exe)) = fcap_capture::window_process(&capture_id) {
+                    if pid != *old_pid {
+                        relinks.push((audio_source.id, pid, exe));
+                    }
+                }
+            }
+            if !relinks.is_empty() {
+                let studio = app.state::<StudioState>();
+                for (source_id, pid, exe) in relinks {
+                    let _ = studio.mutate(&app, |collection| {
+                        let Some(entry) = collection
+                            .sources
+                            .iter_mut()
+                            .find(|entry| entry.id == source_id)
+                        else {
+                            return Ok(());
+                        };
+                        if let SourceSettings::AppAudio {
+                            pid: stored_pid,
+                            exe: stored_exe,
+                            ..
+                        } = &mut entry.settings
+                        {
+                            *stored_pid = pid;
+                            *stored_exe = exe;
+                        }
+                        Ok(())
+                    });
+                }
             }
             // Timers: keep only the ones that took the Timer branch this pass.
             // A kind flip (Timer → Color) hands the face to the static branch,
@@ -1990,15 +2447,34 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             crate::calibration::mean_luma(&frame),
                         );
                     }
+                    // CAP-N69: the passthrough monitor gets this frame FIRST
+                    // — raw, unfiltered, uncomposited, and never delayed —
+                    // and its capture→publish latency is measured here.
+                    if passthrough_targets.contains(id) {
+                        let latency_ms = frame.captured_at.elapsed().as_secs_f32() * 1000.0;
+                        if let Some(jpeg) = encode_capture_jpeg(&frame) {
+                            app.state::<crate::preview::PreviewState>()
+                                .publish_projector(&format!("passthrough:{}", id.0), Some(jpeg));
+                            app.state::<StudioState>()
+                                .record_passthrough_latency(*id, latency_ms);
+                        }
+                    }
                     if delay_ms == 0 && slot.delayed.is_empty() {
                         let size = (frame.width, frame.height);
+                        run_autocrop(&app, &frame, *id, &autocrop_snapshot, &mut autocrop_dims);
                         match compositor.upload_frame(*id, &frame) {
                             Ok(()) => {
                                 slot.frames_this_second += 1;
                                 slot.last_frame = Some(Instant::now());
                                 if slot.live_size != Some(size) {
                                     slot.live_size = Some(size);
-                                    statuses.insert(*id, SourceRuntime::live(size.0, size.1));
+                                    statuses.insert(
+                                        *id,
+                                        SourceRuntime {
+                                            hdr: hdr_sources.contains(id),
+                                            ..SourceRuntime::live(size.0, size.1)
+                                        },
+                                    );
                                     statuses_changed = true;
                                 }
                             }
@@ -2016,6 +2492,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 Ok(None) => {}
                 Err(err) => ended.push((*id, err)),
             }
+            // A recording-synced source pauses on its poster: the first
+            // uploaded frame stays on the canvas, playback holds until the
+            // recording edge unpauses it (a preview toggle may too).
+            if slot.last_frame.is_some() && poster_pause.remove(id) {
+                fcap_sources::media::set_media_paused(&id.0.to_string(), true);
+            }
             // Release the newest delayed frame that has come due (all of
             // them at once when the filter was just removed).
             if !slot.delayed.is_empty() {
@@ -2030,13 +2512,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
                 if let Some(frame) = release {
                     let size = (frame.width, frame.height);
+                    run_autocrop(&app, &frame, *id, &autocrop_snapshot, &mut autocrop_dims);
                     match compositor.upload_frame(*id, &frame) {
                         Ok(()) => {
                             slot.frames_this_second += 1;
                             slot.last_frame = Some(Instant::now());
                             if slot.live_size != Some(size) {
                                 slot.live_size = Some(size);
-                                statuses.insert(*id, SourceRuntime::live(size.0, size.1));
+                                statuses.insert(
+                                    *id,
+                                    SourceRuntime {
+                                        hdr: hdr_sources.contains(id),
+                                        ..SourceRuntime::live(size.0, size.1)
+                                    },
+                                );
                                 statuses_changed = true;
                             }
                         }
@@ -2974,6 +3463,39 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
+        // -- 7b. Automation (CAP-N01/N02): evaluate the rules against this
+        // tick's signals and advance any running macros. A no-op while no
+        // rule is enabled (off by default).
+        if last_automation.elapsed() >= Duration::from_secs(1) {
+            last_automation = Instant::now();
+            let (scene_name, source_names) = {
+                let guard = lock_core(&core);
+                let name = guard.collection.active_scene().name.clone();
+                let names: HashMap<SourceId, String> = guard
+                    .collection
+                    .sources
+                    .iter()
+                    .map(|source| (source.id, source.name.clone()))
+                    .collect();
+                (name, names)
+            };
+            let errored: Vec<String> = statuses
+                .iter()
+                .filter(|(_, status)| status.state == "error")
+                .filter_map(|(id, _)| source_names.get(id).cloned())
+                .collect();
+            crate::automation::tick(&app, &scene_name, errored, &source_names);
+            // The rundown (CAP-N09) shares the 1 Hz cadence: it keeps the
+            // countdown live and auto-advances an expired step (when the
+            // operator enabled that).
+            crate::rundown::tick(&app);
+            // PTZ per-scene preset auto-recall (CAP-N08) — on the switch only.
+            if ptz_scene.as_deref() != Some(scene_name.as_str()) {
+                ptz_scene = Some(scene_name.clone());
+                crate::ptz::on_scene(&app, &scene_name);
+            }
+        }
+
         // -- 8. Autosave (debounced behind the last mutation) --------------------
         {
             let mut guard = lock_core(&core);
@@ -3282,9 +3804,17 @@ fn start_session(
                     path,
                     looping,
                     hw_decode,
+                    reverse,
+                    ..
                 } => {
                     // The source id keys the mixer-side audio ring.
-                    fcap_sources::media::start_media(&id.0.to_string(), path, *looping, *hw_decode)
+                    fcap_sources::media::start_media(
+                        &id.0.to_string(),
+                        path,
+                        *looping,
+                        *hw_decode,
+                        *reverse,
+                    )
                 }
                 SourceSettings::Slideshow {
                     paths,
@@ -3389,6 +3919,158 @@ fn is_bound_text(settings: &SourceSettings) -> bool {
     matches!(settings, SourceSettings::Text { source_file, .. } if !source_file.trim().is_empty())
 }
 
+/// The loop-side animated state of one punch-in lens (CAP-N71).
+struct LensAnim {
+    zoom: f32,
+    zoom_vel: f32,
+    anchor: (f32, f32),
+    anchor_vel: (f32, f32),
+}
+
+/// One fixed-step tick of a critically-damped spring — the deterministic
+/// "smooth" behind CAP-N71's zoom/pan (no randomness; snaps once settled).
+fn spring_step(current: &mut f32, velocity: &mut f32, target: f32, dt: f32) {
+    const OMEGA: f32 = 10.0; // rad/s — settles in roughly 0.4 s
+    let accel = -2.0 * OMEGA * *velocity - OMEGA * OMEGA * (*current - target);
+    *velocity += accel * dt;
+    *current += *velocity * dt;
+    if (*current - target).abs() < 1e-3 && velocity.abs() < 1e-3 {
+        *current = target;
+        *velocity = 0.0;
+    }
+}
+
+/// The cursor's position inside `item`'s display/window capture as a
+/// normalized content anchor. `None` for non-capture items, off-Windows, or
+/// while the cursor is outside the captured surface — the caller then holds
+/// the lens's previous anchor instead of snapping around.
+fn follow_anchor(
+    scene: &fcap_scene::Scene,
+    sources: &[fcap_scene::Source],
+    item_id: ItemId,
+) -> Option<(f32, f32)> {
+    let item = scene.item(item_id)?;
+    let source = sources.iter().find(|source| source.id == item.source)?;
+    let capture_id = match &source.settings {
+        SourceSettings::Display { capture_id, .. } | SourceSettings::Window { capture_id, .. } => {
+            capture_id
+        }
+        _ => return None,
+    };
+    let (cx, cy) = fcap_capture::cursor_screen_position()?;
+    let (rx, ry, rw, rh) = fcap_capture::source_screen_rect(capture_id)?;
+    if rw == 0 || rh == 0 {
+        return None;
+    }
+    let ax = (cx - rx) as f32 / rw as f32;
+    let ay = (cy - ry) as f32 / rh as f32;
+    if !(0.0..=1.0).contains(&ax) || !(0.0..=1.0).contains(&ay) {
+        return None;
+    }
+    Some((ax, ay))
+}
+
+/// Validate an auto-crop target and return its source id (CAP-N72): the
+/// item must exist, must not be the backdrop (its layout is engine-owned),
+/// and must be a video kind.
+fn resolve_autocrop_target(
+    collection: &Collection,
+    scene: SceneId,
+    item: ItemId,
+) -> Result<SourceId, String> {
+    let scene_ref = collection
+        .scene(scene)
+        .ok_or_else(|| "scene not found".to_string())?;
+    let item_ref = scene_ref
+        .item(item)
+        .ok_or_else(|| "item not found".to_string())?;
+    if item_ref.backdrop.is_some() {
+        return Err("the backdrop lays itself out; auto-crop applies to ordinary items".into());
+    }
+    let source = collection
+        .source(item_ref.source)
+        .ok_or_else(|| "source not found".to_string())?;
+    if source.settings.is_audio_only() {
+        return Err("auto-crop needs a video source".into());
+    }
+    Ok(source.id)
+}
+
+/// CAP-N72, loop-side: a frame just arrived for `source` — run black-bar
+/// detection when an auto-crop entry wants it (one-shot `pending`, or an
+/// armed `follow` whose resolution changed). The one-click apply is an
+/// undoable edit; follow re-applies go through the untracked path so a
+/// resolution flap never floods the undo stack.
+fn run_autocrop<R: Runtime>(
+    app: &AppHandle<R>,
+    frame: &fcap_capture::Frame,
+    source: SourceId,
+    autocrop: &HashMap<ItemId, AutocropState>,
+    dims_seen: &mut HashMap<ItemId, (u32, u32)>,
+) {
+    for (item_id, request) in autocrop.iter().filter(|(_, req)| req.source == source) {
+        let dims = (frame.width, frame.height);
+        let dims_changed = dims_seen.get(item_id) != Some(&dims);
+        if !(request.pending || (request.follow && dims_changed)) {
+            continue;
+        }
+        dims_seen.insert(*item_id, dims);
+        let bars = fcap_sources::blackbar::detect_bars(frame);
+        let crop = Crop {
+            left: bars.left,
+            top: bars.top,
+            right: bars.right,
+            bottom: bars.bottom,
+        };
+        let studio = app.state::<StudioState>();
+        let scene_id = request.scene;
+        let item = *item_id;
+        let apply = move |collection: &mut Collection| {
+            let current = collection
+                .scene(scene_id)
+                .and_then(|scene| scene.item(item))
+                .map(|entry| entry.transform)
+                .ok_or(SceneError::ItemNotFound)?;
+            if current.crop == crop {
+                return Ok(()); // unchanged: no edit, no event churn
+            }
+            collection.set_item_transform(scene_id, item, Transform { crop, ..current })
+        };
+        let result = if request.pending {
+            studio.mutate_tracked(app, "autoCrop", None, apply)
+        } else {
+            studio.mutate(app, apply)
+        };
+        match result {
+            Ok(()) => studio.autocrop_settle(item, false),
+            Err(_) => studio.autocrop_settle(item, true),
+        }
+    }
+}
+
+/// CAP-N02: substitute studio variables into a Text source's content. Every
+/// other kind passes through untouched (cheaply — no clone when there is
+/// nothing to interpolate).
+fn interpolate_settings<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: &SourceSettings,
+) -> SourceSettings {
+    let SourceSettings::Text { text, .. } = settings else {
+        return settings.clone();
+    };
+    if !text.contains("{{") {
+        return settings.clone();
+    }
+    let expanded = app
+        .state::<crate::automation::AutomationState>()
+        .interpolate(text);
+    let mut next = settings.clone();
+    if let SourceSettings::Text { text, .. } = &mut next {
+        *text = expanded;
+    }
+    next
+}
+
 /// Render a static source (image / color / text) to its frame.
 fn render_static(settings: &SourceSettings) -> Result<fcap_capture::Frame, String> {
     match settings {
@@ -3449,6 +4131,52 @@ fn load_filter_resource(kind: &FilterKind, path: &str) -> Result<FilterResourceD
     }
 }
 
+/// The passthrough monitor's encode budget (CAP-N69): full-ish resolution
+/// but bounded, and a lighter JPEG than the program preview — every
+/// millisecond here lands in the measured latency.
+const PASSTHROUGH_MAX_EDGE: u32 = 1920;
+const PASSTHROUGH_JPEG_QUALITY: u8 = 70;
+
+/// JPEG-encode a RAW capture frame (CAP-N69's passthrough path): capture
+/// frames are strided and may be BGRA, so they are repacked tight-RGBA
+/// first — no compositor, no filters, no GPU round-trip.
+fn encode_capture_jpeg(frame: &fcap_capture::Frame) -> Option<Vec<u8>> {
+    let (width, height) = (frame.width, frame.height);
+    if width == 0 || height == 0 || frame.stride < width * 4 {
+        return None;
+    }
+    let needed = frame.stride as usize * height as usize;
+    if frame.data.len() < needed {
+        return None;
+    }
+    let bgra = matches!(frame.format, fcap_capture::PixelFormat::Bgra8);
+    let mut tight = vec![0u8; width as usize * height as usize * 4];
+    for y in 0..height as usize {
+        let src = &frame.data[y * frame.stride as usize..][..width as usize * 4];
+        let dst = &mut tight[y * width as usize * 4..][..width as usize * 4];
+        if bgra {
+            for x in 0..width as usize {
+                let px = &src[x * 4..x * 4 + 4];
+                let out = &mut dst[x * 4..x * 4 + 4];
+                out[0] = px[2];
+                out[1] = px[1];
+                out[2] = px[0];
+                out[3] = 255;
+            }
+        } else {
+            dst.copy_from_slice(src);
+        }
+    }
+    encode_program_jpeg(
+        width,
+        height,
+        &tight,
+        PASSTHROUGH_MAX_EDGE,
+        PASSTHROUGH_MAX_EDGE,
+        PASSTHROUGH_JPEG_QUALITY,
+    )
+}
+
 /// Downscale (integer nearest-neighbor) + JPEG-encode the program frame.
 fn encode_program_jpeg(
     width: u32,
@@ -3489,6 +4217,27 @@ fn encode_program_jpeg(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spring_step_converges_and_is_deterministic() {
+        let mut a = (1.0f32, 0.0f32);
+        let mut b = (1.0f32, 0.0f32);
+        for _ in 0..120 {
+            super::spring_step(&mut a.0, &mut a.1, 2.0, 1.0 / 60.0);
+            super::spring_step(&mut b.0, &mut b.1, 2.0, 1.0 / 60.0);
+        }
+        assert_eq!(a, b, "identical runs are bit-identical (no randomness)");
+        assert!(
+            (a.0 - 2.0).abs() < 1e-2,
+            "settles at the target, got {}",
+            a.0
+        );
+        // Once settled it snaps exactly and stays put.
+        for _ in 0..120 {
+            super::spring_step(&mut a.0, &mut a.1, 2.0, 1.0 / 60.0);
+        }
+        assert_eq!(a, (2.0, 0.0));
+    }
+
     use super::*;
 
     #[test]

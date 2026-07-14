@@ -11,9 +11,11 @@ import {
   nativePreviewSetSelection,
   studioSetFocus,
   studioSetGuides,
+  studioZoomScroll,
 } from "../api/commands";
 import type {
   AlignmentSettings,
+  BackdropSplit,
   Collection,
   GuideLine,
   ItemId,
@@ -76,6 +78,15 @@ type PreviewPanelProps = {
 
 /** Grab radius for a custom guide line, display px. */
 const GUIDE_GRAB = 6;
+
+/** Normalized canvas regions per backdrop split — mirrors `BackdropSplit::region()`. */
+const BACKDROP_REGIONS: Record<BackdropSplit, { x: number; y: number; w: number; h: number }> = {
+  full: { x: 0, y: 0, w: 1, h: 1 },
+  left: { x: 0, y: 0, w: 0.5, h: 1 },
+  right: { x: 0.5, y: 0, w: 0.5, h: 1 },
+  top: { x: 0, y: 0, w: 1, h: 0.5 },
+  bottom: { x: 0, y: 0.5, w: 1, h: 0.5 },
+};
 /** Persistent custom-guide color (distinct from the pink live snap guides). */
 const GUIDE_COLOR = "#22d3ee";
 
@@ -675,7 +686,9 @@ export function PreviewPanel({
     if (event.shiftKey) {
       for (let index = scene.items.length - 1; index >= 0; index -= 1) {
         const item = scene.items[index];
-        if (!item.visible) continue;
+        // The backdrop wallpaper is not clickable — it can never block
+        // selecting or dragging the capture above it.
+        if (item.backdrop || !item.visible) continue;
         const source = sourceSize(item);
         if (!source) continue;
         const content = contentSize(source.w, source.h, item.transform.crop);
@@ -767,10 +780,11 @@ export function PreviewPanel({
       return;
     }
 
-    // Otherwise: hit-test items top-down (top = last).
+    // Otherwise: hit-test items top-down (top = last). The backdrop
+    // wallpaper is skipped — clicks land on the capture or empty canvas.
     for (let index = scene.items.length - 1; index >= 0; index -= 1) {
       const item = scene.items[index];
-      if (!item.visible) continue;
+      if (item.backdrop || !item.visible) continue;
       const source = sourceSize(item);
       if (!source) continue;
       const content = contentSize(source.w, source.h, item.transform.crop);
@@ -867,6 +881,68 @@ export function PreviewPanel({
     }
   };
 
+  // Mouse zoom (wheel over the canvas): punch into the top-most visible
+  // unlocked item under the cursor, zooming about the pointer. With no item
+  // hit, the backdrop wallpaper zooms instead — its transform is zoom/pan
+  // within its region, mirrored here for smooth steps and clamped again
+  // engine-side, so blank canvas can never show no matter what.
+  const zoomAt = (event: React.WheelEvent) => {
+    if (!scene || dragRef.current) return;
+    const p = toProgram(event);
+    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+    for (let index = scene.items.length - 1; index >= 0; index -= 1) {
+      const item = scene.items[index];
+      if (item.backdrop || !item.visible || item.locked) continue;
+      const source = sourceSize(item);
+      if (!source) continue;
+      const content = contentSize(source.w, source.h, item.transform.crop);
+      if (!content) continue;
+      if (!hitTest(item.transform, content, p)) continue;
+      // Punch-in lens (CAP-N71): the wheel zooms a runtime, spring-smoothed
+      // lens about the cursor — the item's saved transform (and the undo
+      // history) never change.
+      const local = canvasToLocal(item.transform, content, p);
+      if (!local) return;
+      studioZoomScroll(item.id, factor, local.x / content.w, local.y / content.h).catch((err) =>
+        console.error("zoom lens failed:", err),
+      );
+      return;
+    }
+    const backdrop = scene.items.find((item) => item.backdrop && item.visible);
+    if (!backdrop) return;
+    const source = sourceSize(backdrop);
+    if (!source) return;
+    const region = BACKDROP_REGIONS[backdrop.backdrop ?? "full"];
+    const rx = region.x * programW;
+    const ry = region.y * programH;
+    const rw = region.w * programW;
+    const rh = region.h * programH;
+    if (p.x < rx || p.x > rx + rw || p.y < ry || p.y > ry + rh) return;
+    const contain = backdrop.backdrop !== "full";
+    const base = contain
+      ? Math.min(rw / source.w, rh / source.h)
+      : Math.max(rw / source.w, rh / source.h);
+    const t = backdrop.transform;
+    const zoom0 = Math.min(Math.max(t.scaleX, 1), 8);
+    const zoom1 = Math.min(Math.max(zoom0 * factor, 1), 8);
+    if (zoom1 === zoom0 && factor !== 1) return; // already at a zoom stop
+    const clampPan = (pan: number, max: number) => Math.min(Math.max(pan, -max), max);
+    const bound = (zoom: number, size: number, span: number) =>
+      Math.max((size * base * zoom - span) * 0.5, 0);
+    const cx = rx + rw * 0.5 + clampPan(t.x, bound(zoom0, source.w, rw));
+    const cy = ry + rh * 0.5 + clampPan(t.y, bound(zoom0, source.h, rh));
+    const f = zoom1 / zoom0;
+    const pan1x = clampPan(p.x + (cx - p.x) * f - (rx + rw * 0.5), bound(zoom1, source.w, rw));
+    const pan1y = clampPan(p.y + (cy - p.y) * f - (ry + rh * 0.5), bound(zoom1, source.h, rh));
+    onItemTransform(backdrop.id, {
+      ...t,
+      x: pan1x,
+      y: pan1y,
+      scaleX: zoom1,
+      scaleY: zoom1,
+    });
+  };
+
   // Highlight Speaker, "click the slot": double-click an item to spotlight it
   // (fill the canvas); double-click it again — or empty space — to restore.
   const toggleFocusAt = (event: React.MouseEvent) => {
@@ -874,7 +950,9 @@ export function PreviewPanel({
     const p = toProgram(event);
     for (let index = scene.items.length - 1; index >= 0; index -= 1) {
       const item = scene.items[index];
-      if (!item.visible) continue;
+      // The backdrop wallpaper can't be spotlighted (and never eats the
+      // double-click meant for the capture above it).
+      if (item.backdrop || !item.visible) continue;
       const source = sourceSize(item);
       if (!source) continue;
       const content = contentSize(source.w, source.h, item.transform.crop);
@@ -1012,6 +1090,7 @@ export function PreviewPanel({
               onPointerMove={updateDrag}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
+              onWheel={zoomAt}
               onDoubleClick={toggleFocusAt}
             >
               {alignmentOverlay.safe.map((r, index) => (

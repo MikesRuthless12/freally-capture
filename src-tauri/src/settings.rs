@@ -158,6 +158,41 @@ pub struct Settings {
     /// `set_camera_control` and PRESERVED across `set()` (the counter/EULA
     /// pattern) so an open settings dialog can't clobber a live tweak.
     pub camera_profiles: std::collections::HashMap<String, std::collections::HashMap<String, i64>>,
+    /// HDR→SDR tone-map per display capture (CAP-N74): capture id →
+    /// operator + paper-white. Written server-side by `set_hdr_tone_map`
+    /// and PRESERVED across `set()` like the camera profiles.
+    pub hdr_tone_map: std::collections::HashMap<String, HdrToneMapSetting>,
+    /// Automation: rules + macros (CAP-N01/N02). Every rule ships disabled;
+    /// actions are limited to the remote-API allowlist by validation.
+    #[serde(default)]
+    pub automation: crate::automation::AutomationSettings,
+    /// The show rundown (CAP-N09): a timed scene playlist. Auto-advance is
+    /// off by default — a show never runs away from its operator unasked.
+    #[serde(default)]
+    pub rundown: crate::rundown::RundownSettings,
+    /// The LAN touch panel + tally service (CAP-N06/N07). Off by default;
+    /// loopback unless LAN is turned on; a password is required.
+    #[serde(default)]
+    pub web_panel: crate::webpanel::WebPanelSettings,
+    /// OSC control surface (CAP-N04). Off by default, loopback unless LAN.
+    #[serde(default)]
+    pub osc: crate::osc::OscSettings,
+    /// PTZ cameras (CAP-N08). Empty by default — a camera exists only
+    /// because the operator typed its address; nothing is ever discovered.
+    #[serde(default)]
+    pub ptz: crate::ptz::PtzSettings,
+    /// MIDI control surfaces (CAP-N03). No port opens until one is picked.
+    #[serde(default)]
+    pub midi: crate::midi::MidiSettings,
+}
+
+/// One display's HDR→SDR mapping (CAP-N74). `operator` is a wire name the
+/// capture layer parses ("clip" | "maxRgb" | "reinhard" | "bt2408").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HdrToneMapSetting {
+    pub operator: String,
+    pub paper_white_nits: u32,
 }
 
 impl Default for Settings {
@@ -182,6 +217,13 @@ impl Default for Settings {
             accepted_eula_version: None,
             completed_onboarding: false,
             camera_profiles: std::collections::HashMap::new(),
+            hdr_tone_map: std::collections::HashMap::new(),
+            automation: crate::automation::AutomationSettings::default(),
+            rundown: crate::rundown::RundownSettings::default(),
+            web_panel: crate::webpanel::WebPanelSettings::default(),
+            osc: crate::osc::OscSettings::default(),
+            ptz: crate::ptz::PtzSettings::default(),
+            midi: crate::midi::MidiSettings::default(),
         }
     }
 }
@@ -302,6 +344,12 @@ pub struct HotkeySettings {
     pub timer_toggle: Option<String>,
     /// Reset every timer source (CAP-M15).
     pub timer_reset: Option<String>,
+    /// Punch-in zoom presets (CAP-N71): reset the selected capture's lens.
+    pub zoom_100: Option<String>,
+    /// Punch-in zoom to 150%.
+    pub zoom_150: Option<String>,
+    /// Punch-in zoom to 200%.
+    pub zoom_200: Option<String>,
 }
 
 impl HotkeySettings {
@@ -316,6 +364,9 @@ impl HotkeySettings {
             &self.panic,
             &self.timer_toggle,
             &self.timer_reset,
+            &self.zoom_100,
+            &self.zoom_150,
+            &self.zoom_200,
         ]
         .into_iter()
         .flatten()
@@ -976,6 +1027,33 @@ impl Settings {
         if self.camera_profiles.len() > 64 {
             return Err("too many camera profiles (64 devices max)".to_owned());
         }
+        // Automation (CAP-N01/N02): bounded, allowlisted actions only.
+        self.automation.validate()?;
+        // The rundown (CAP-N09) shares that allowlist for its step actions.
+        self.rundown.validate()?;
+        // The LAN panel + tally (CAP-N06/N07): off by default, password-gated.
+        self.web_panel.validate()?;
+        // OSC (CAP-N04): off by default, loopback-first.
+        self.osc.validate()?;
+        // PTZ cameras (CAP-N08): bounded, user-entered addresses only.
+        self.ptz.validate()?;
+        // MIDI (CAP-N03): bounded, allowlisted actions only.
+        self.midi.validate()?;
+        // HDR tone-maps (CAP-N74): bounded, known operators, sane nits.
+        if self.hdr_tone_map.len() > 64 {
+            return Err("too many HDR tone-map entries (64 displays max)".to_owned());
+        }
+        for (capture, tone) in &self.hdr_tone_map {
+            if capture.len() > 256 || capture.chars().any(char::is_control) {
+                return Err("invalid HDR tone-map capture id".to_owned());
+            }
+            if fcap_capture::tonemap::ToneMapOperator::from_name(&tone.operator).is_none() {
+                return Err(format!("unknown tone-map operator: {}", tone.operator));
+            }
+            if !(80..=1000).contains(&tone.paper_white_nits) {
+                return Err("paper white must be 80–1000 nits".to_owned());
+            }
+        }
         for (device, profile) in &self.camera_profiles {
             if device.len() > 256 || device.chars().any(char::is_control) {
                 return Err("invalid camera profile device id".to_owned());
@@ -1070,11 +1148,13 @@ impl SettingsStore {
             // user drags a slider — a stale dialog snapshot must not clobber
             // them (the counter/EULA pattern).
             let camera_profiles = std::mem::take(&mut guard.camera_profiles);
+            let hdr_tone_map = std::mem::take(&mut guard.hdr_tone_map);
             *guard = next;
             guard.accepted_eula_version = accepted;
             guard.completed_onboarding = onboarded;
             guard.recording.counter = counter;
             guard.camera_profiles = camera_profiles;
+            guard.hdr_tone_map = hdr_tone_map;
         }
         self.persist()
     }
@@ -1096,6 +1176,23 @@ impl SettingsStore {
         if let Err(err) = self.persist() {
             eprintln!("settings: could not persist a camera profile: {err}");
         }
+    }
+
+    /// Write one display's HDR→SDR tone-map (CAP-N74) and persist; also the
+    /// reader's counterpart `hdr_tone_map(capture_id)`. The only writer.
+    pub fn set_hdr_tone_map(&self, capture_id: &str, setting: HdrToneMapSetting) {
+        {
+            let mut guard = self.lock();
+            guard.hdr_tone_map.insert(capture_id.to_string(), setting);
+        }
+        if let Err(err) = self.persist() {
+            eprintln!("settings: could not persist an HDR tone-map: {err}");
+        }
+    }
+
+    /// One display's saved tone-map, if any (CAP-N74).
+    pub fn hdr_tone_map(&self, capture_id: &str) -> Option<HdrToneMapSetting> {
+        self.lock().hdr_tone_map.get(capture_id).cloned()
     }
 
     /// Drop a device's whole camera profile (CAP-M18) and persist.
@@ -1357,6 +1454,9 @@ mod tests {
                 panic: Some("Ctrl+Shift+F12".to_owned()),
                 timer_toggle: Some("Ctrl+Shift+T".to_owned()),
                 timer_reset: None,
+                zoom_100: Some("Ctrl+Shift+0".to_owned()),
+                zoom_150: None,
+                zoom_200: Some("Ctrl+Shift+2".to_owned()),
             },
             panic_slate: PanicSlateSettings {
                 color: "#221100".to_owned(),
@@ -1382,6 +1482,89 @@ mod tests {
                 "cam-0".to_owned(),
                 std::collections::HashMap::from([("exposure".to_owned(), -6_i64)]),
             )]),
+            hdr_tone_map: std::collections::HashMap::from([(
+                r"display:\\.\DISPLAY1".to_owned(),
+                HdrToneMapSetting {
+                    operator: "maxRgb".to_owned(),
+                    paper_white_nits: 240,
+                },
+            )]),
+            // Automation (CAP-N01/N02): a real macro + rule round-trips too.
+            automation: crate::automation::AutomationSettings {
+                macros: vec![crate::automation::Macro {
+                    name: "Intro".to_owned(),
+                    steps: vec![crate::automation::MacroStep::Action {
+                        command: "startRecording".to_owned(),
+                        params: serde_json::Value::Null,
+                    }],
+                    repeat: 1,
+                    hotkey: Some("Ctrl+Shift+I".to_owned()),
+                    layer: None,
+                }],
+                rules: vec![crate::automation::Rule {
+                    name: "on-live".to_owned(),
+                    enabled: true,
+                    trigger: crate::automation::Trigger::StreamState { live: true },
+                    conditions: Vec::new(),
+                    actions: Vec::new(),
+                    macro_name: "Intro".to_owned(),
+                }],
+            },
+            // MIDI (CAP-N03) round-trips too.
+            midi: crate::midi::MidiSettings {
+                input: "Launchpad".to_owned(),
+                output: "Launchpad".to_owned(),
+                bindings: vec![crate::midi::MidiBinding {
+                    control: crate::midi::MidiControl::Note {
+                        channel: 0,
+                        note: 60,
+                    },
+                    target: crate::midi::MidiTarget::Action {
+                        command: "startRecording".to_owned(),
+                        params: serde_json::Value::Null,
+                    },
+                    feedback: true,
+                }],
+            },
+            // PTZ (CAP-N08) round-trips too.
+            ptz: crate::ptz::PtzSettings {
+                cameras: vec![crate::ptz::PtzCamera {
+                    name: "Wide".to_owned(),
+                    host: "192.168.1.50".to_owned(),
+                    port: 52381,
+                    presets: vec![crate::ptz::PtzPreset {
+                        name: "Two-shot".to_owned(),
+                        slot: 3,
+                    }],
+                    scene_recalls: vec![crate::ptz::SceneRecall {
+                        scene: "Interview".to_owned(),
+                        slot: 3,
+                    }],
+                }],
+            },
+            // OSC (CAP-N04) round-trips too.
+            osc: crate::osc::OscSettings {
+                enabled: true,
+                port: 9000,
+                lan: true,
+            },
+            // The LAN panel + tally (CAP-N06/N07) round-trips too.
+            web_panel: crate::webpanel::WebPanelSettings {
+                enabled: true,
+                port: 4457,
+                lan: true,
+                password: "panel-pass".to_owned(),
+            },
+            // The show rundown (CAP-N09) round-trips too.
+            rundown: crate::rundown::RundownSettings {
+                steps: vec![crate::rundown::RundownStep {
+                    name: "Start-soon loop".to_owned(),
+                    scene: "Intro".to_owned(),
+                    hold_secs: 300,
+                    actions: Vec::new(),
+                }],
+                auto_advance: true,
+            },
         };
         // `set` never writes the EULA field or the onboarding flag (see its
         // docs) — go through their real writers first, so the round-trip below
@@ -1391,6 +1574,14 @@ mod tests {
         // Camera profiles (CAP-M18) are preserved by `set` too — write the
         // fixture's profile through the real writer.
         store.set_camera_control("cam-0", "exposure", -6);
+        // HDR tone-maps (CAP-N74) are preserved by `set` too — same pattern.
+        store.set_hdr_tone_map(
+            r"display:\\.\DISPLAY1",
+            HdrToneMapSetting {
+                operator: "maxRgb".to_owned(),
+                paper_white_nits: 240,
+            },
+        );
         store.set(next.clone()).expect("save settings");
 
         let reloaded = SettingsStore::load_from(path.clone());
@@ -1417,6 +1608,22 @@ mod tests {
         );
         store.reset_camera_profile("cam-1");
         assert!(store.camera_profile("cam-1").is_empty());
+
+        // The HDR tone-map (CAP-N74) survives a stale save the same way.
+        store.set_hdr_tone_map(
+            "display:X",
+            HdrToneMapSetting {
+                operator: "bt2408".to_owned(),
+                paper_white_nits: 200,
+            },
+        );
+        let stale: Settings = serde_json::from_str(r#"{"language":"de"}"#).expect("parses");
+        store.set(stale).expect("save settings");
+        assert_eq!(
+            store.hdr_tone_map("display:X").map(|tone| tone.operator),
+            Some("bt2408".to_owned()),
+            "the tone-map survives the stale dialog save"
+        );
         let _ = fs::remove_file(&path);
     }
 

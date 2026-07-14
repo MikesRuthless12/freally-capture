@@ -7,8 +7,10 @@ import { useT } from "../i18n/t";
 
 /** What a projector can show. Scene/source (CAP-M07 extension) fullscreen a
  * specific scene or a single source; multiview opens the grid on a display. */
-type Kind = "program" | "preview" | "scene" | "source" | "multiview";
-const KINDS: Kind[] = ["program", "preview", "scene", "source", "multiview"];
+type Kind = "program" | "preview" | "scene" | "source" | "passthrough" | "multiview";
+const KINDS: Kind[] = ["program", "preview", "scene", "source", "passthrough", "multiview"];
+/** CAP-N69: only device-backed sources can drive a passthrough monitor. */
+const PASSTHROUGH_KINDS = new Set(["display", "window", "videoDevice"]);
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -41,6 +43,11 @@ export function ProjectorDialog({
   const [sourceId, setSourceId] = useState<string>("");
   const effectiveSceneId = sceneId || (scenes[0]?.id ?? "");
   const effectiveSourceId = sourceId || (sources[0]?.id ?? "");
+  // CAP-N69: the passthrough monitor only makes sense for device-backed
+  // sources (a display, a window, a capture card / webcam).
+  const passthroughSources = sources.filter((source) => PASSTHROUGH_KINDS.has(source.kind));
+  const [passthroughId, setPassthroughId] = useState<string>("");
+  const effectivePassthroughId = passthroughId || (passthroughSources[0]?.id ?? "");
 
   useEffect(() => {
     listDisplays()
@@ -72,6 +79,17 @@ export function ProjectorDialog({
       title =
         sources.find((source) => source.id === effectiveSourceId)?.name ??
         t("projector-target-source");
+    } else if (kind === "passthrough") {
+      // CAP-N69: raw device frames, no composition — a capture-card game
+      // monitor with a measured latency readout.
+      if (!effectivePassthroughId) {
+        setError(t("projector-passthrough-none"));
+        return;
+      }
+      label = `projector-passthrough:${effectivePassthroughId}`;
+      title =
+        sources.find((source) => source.id === effectivePassthroughId)?.name ??
+        t("projector-target-passthrough");
     } else {
       label = `projector-${kind}`;
       title = t(`projector-target-${kind}`);
@@ -120,6 +138,25 @@ export function ProjectorDialog({
           </label>
         )}
 
+        {kind === "passthrough" && (
+          <>
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-havoc-muted">{t("projector-which-device")}</span>
+              <select
+                value={effectivePassthroughId}
+                onChange={(event) => setPassthroughId(event.target.value)}
+                className={inputClass}
+              >
+                {passthroughSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="m-0 text-havoc-muted">{t("projector-passthrough-about")}</p>
+          </>
+        )}
         {kind === "source" && (
           <label className="flex items-center justify-between gap-3">
             <span className="text-havoc-muted">{t("projector-which-source")}</span>

@@ -12,14 +12,26 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::settings::{HotkeySettings, SettingsStore};
 
 /// What a global hotkey triggers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HotkeyAction {
+    /// Run a named macro (CAP-N02) — macros carry their own accelerator, so
+    /// this needs no new `HotkeySettings` field.
+    RunMacro(String),
+    /// The FIRST stroke of a chord (CAP-N05): arms the chord and registers
+    /// its followers for a short window.
+    ChordLeader(String),
+    /// The SECOND stroke of a chord: runs `macro_name` when `leader` is the
+    /// armed leader (else it is ignored and the chord disarms).
+    ChordFollower {
+        leader: String,
+        macro_name: String,
+    },
     RecordToggle,
     GoLiveToggle,
     Transition,
@@ -34,6 +46,12 @@ pub enum HotkeyAction {
     TimerToggle,
     /// Reset every timer source (CAP-M15).
     TimerReset,
+    /// Punch-in zoom presets (CAP-N71): the UI resolves which capture the
+    /// lens targets (the selected item, else the top-most screen view), so
+    /// these just broadcast the requested factor.
+    Zoom100,
+    Zoom150,
+    Zoom200,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -43,7 +61,22 @@ pub struct ActionHotkeys {
     registered: Mutex<HashSet<Shortcut>>,
     /// Fingerprint of the last-reconciled settings, so the poll is cheap.
     seen: Mutex<Option<HotkeySettings>>,
+    /// Same, for the macros' own accelerators (CAP-N02).
+    seen_macros: Mutex<Option<Vec<MacroBinding>>>,
+    /// CAP-N05: chord followers, `shortcut -> (leader, macro name)`. These
+    /// are registered ONLY while their leader is armed.
+    followers: Mutex<HashMap<Shortcut, (String, String)>>,
+    /// CAP-N05: the follower shortcuts THIS arming actually registered (a
+    /// follower that was already a permanent binding is left alone). Only
+    /// these are torn down when the chord window closes — so a plain hotkey
+    /// that happens to share a follower's key is never unregistered.
+    armed_followers: Mutex<HashSet<Shortcut>>,
+    /// CAP-N05: each macro's layer (`None` = fires on every layer).
+    macro_layers: Mutex<HashMap<String, Option<u8>>>,
 }
+
+/// One macro's binding: `(name, accelerator, layer)` (CAP-N02 / CAP-N05).
+pub type MacroBinding = (String, Option<String>, Option<u8>);
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
@@ -74,15 +107,131 @@ pub fn dispatch<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortcut, state: Shor
     }
     let Some(action) = lock(&app.state::<ActionHotkeys>().bindings)
         .get(shortcut)
-        .copied()
+        .cloned()
     else {
         return true;
     };
+    // CAP-N05: chords and layers gate the action before it runs.
+    match &action {
+        HotkeyAction::ChordLeader(leader) => {
+            arm_chord(app, leader);
+            return true;
+        }
+        HotkeyAction::ChordFollower { leader, macro_name } => {
+            let armed = {
+                let state = app.state::<std::sync::Mutex<crate::chords::ChordState>>();
+                let mut chords = lock(&state);
+                let armed = chords.armed_leader(std::time::Instant::now());
+                chords.disarm();
+                armed
+            };
+            release_followers(app);
+            if armed.as_deref() == Some(leader.as_str()) {
+                let handle = app.clone();
+                let name = macro_name.clone();
+                std::thread::spawn(move || crate::automation::run_macro_by_name(&handle, &name));
+            }
+            return true;
+        }
+        _ => {}
+    }
+    // A layered macro only fires on its own layer (unlayered keys always do).
+    if let HotkeyAction::RunMacro(name) = &action {
+        let layer = lock(&app.state::<ActionHotkeys>().macro_layers)
+            .get(name)
+            .copied()
+            .flatten();
+        let state = app.state::<std::sync::Mutex<crate::chords::ChordState>>();
+        if !lock(&state).fires_on_layer(layer) {
+            return true; // claimed, but this layer doesn't own it
+        }
+    }
     // Off the event-loop thread: record/stream stop do blocking I/O (faststart
     // remux, RTMP flush) that must never freeze the window.
     let handle = app.clone();
     std::thread::spawn(move || run_action(&handle, action));
     true
+}
+
+/// CAP-N05: arm a chord — register its followers for the chord window, so a
+/// bare `3` is only ever claimed while a chord is actually pending.
+fn arm_chord<R: Runtime>(app: &AppHandle<R>, leader: &str) {
+    {
+        let state = app.state::<std::sync::Mutex<crate::chords::ChordState>>();
+        lock(&state).arm(leader, std::time::Instant::now());
+    }
+    let followers: Vec<Shortcut> = lock(&app.state::<ActionHotkeys>().followers)
+        .iter()
+        .filter(|(_, (owner, _))| owner == leader)
+        .map(|(shortcut, _)| *shortcut)
+        .collect();
+    if followers.is_empty() {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let shortcuts = handle.global_shortcut();
+        let state = handle.state::<ActionHotkeys>();
+        let mut bindings = lock(&state.bindings);
+        let mut registered = lock(&state.registered);
+        let table = lock(&state.followers).clone();
+        let mut armed = lock(&state.armed_followers);
+        for shortcut in followers {
+            // A follower key that is ALREADY registered belongs to a permanent
+            // binding (e.g. a plain hotkey on the same key) — leave it, and do
+            // not track it for teardown, so releasing the chord never kills it.
+            if registered.contains(&shortcut) {
+                continue;
+            }
+            match shortcuts.register(shortcut) {
+                Ok(()) => {
+                    registered.insert(shortcut);
+                    armed.insert(shortcut);
+                    if let Some((leader, macro_name)) = table.get(&shortcut) {
+                        bindings.insert(
+                            shortcut,
+                            HotkeyAction::ChordFollower {
+                                leader: leader.clone(),
+                                macro_name: macro_name.clone(),
+                            },
+                        );
+                    }
+                }
+                Err(err) => eprintln!("hotkey: could not arm a chord follower: {err}"),
+            }
+        }
+    });
+    // The window closes on its own even if the operator never finishes the
+    // chord — a half-typed chord must not leave a bare key claimed.
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(crate::chords::CHORD_WINDOW);
+        let state = handle.state::<std::sync::Mutex<crate::chords::ChordState>>();
+        let expired = { !lock(&state).is_armed(std::time::Instant::now()) };
+        if expired {
+            release_followers(&handle);
+        }
+    });
+}
+
+/// Unregister the chord followers THIS session armed (the window closed, or
+/// one matched). Only the shortcuts `arm_chord` actually registered are torn
+/// down — a follower key that was already a permanent binding is untouched.
+fn release_followers<R: Runtime>(app: &AppHandle<R>) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let shortcuts = handle.global_shortcut();
+        let state = handle.state::<ActionHotkeys>();
+        let armed: Vec<Shortcut> = lock(&state.armed_followers).drain().collect();
+        let mut registered = lock(&state.registered);
+        let mut bindings = lock(&state.bindings);
+        for shortcut in armed {
+            if registered.remove(&shortcut) {
+                let _ = shortcuts.unregister(shortcut);
+            }
+            bindings.remove(&shortcut);
+        }
+    });
 }
 
 fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
@@ -147,17 +296,37 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
             app.state::<crate::studio::StudioState>()
                 .timer_control_all(crate::studio::TimerCmd::Reset);
         }
+        HotkeyAction::Zoom100 | HotkeyAction::Zoom150 | HotkeyAction::Zoom200 => {
+            let factor = match action {
+                HotkeyAction::Zoom150 => 1.5f32,
+                HotkeyAction::Zoom200 => 2.0,
+                _ => 1.0,
+            };
+            if let Err(err) = app.emit("zoom-preset", factor) {
+                eprintln!("hotkey: zoom preset event failed: {err}");
+            }
+        }
+        HotkeyAction::RunMacro(name) => {
+            crate::automation::run_macro_by_name(app, &name);
+        }
+        // Chord strokes are fully handled in `dispatch` (they never reach the
+        // worker thread) — listed here so the match stays exhaustive.
+        HotkeyAction::ChordLeader(_) | HotkeyAction::ChordFollower { .. } => {}
     }
 }
 
 /// Reconcile the OS-registered action hotkeys against the settings. Cheap
 /// no-op when the settings haven't changed since last call.
-fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
+fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings, macros: &[MacroBinding]) {
     let state = app.state::<ActionHotkeys>();
-    if lock(&state.seen).as_ref() == Some(settings) {
+    if lock(&state.seen).as_ref() == Some(settings)
+        && lock(&state.seen_macros).as_deref() == Some(macros)
+    {
         return;
     }
     *lock(&state.seen) = Some(settings.clone());
+    *lock(&state.seen_macros) = Some(macros.to_vec());
+    let macros = macros.to_vec();
 
     let mut desired: HashMap<Shortcut, HotkeyAction> = HashMap::new();
     for (key, action) in [
@@ -170,6 +339,9 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
         (&settings.panic, HotkeyAction::Panic),
         (&settings.timer_toggle, HotkeyAction::TimerToggle),
         (&settings.timer_reset, HotkeyAction::TimerReset),
+        (&settings.zoom_100, HotkeyAction::Zoom100),
+        (&settings.zoom_150, HotkeyAction::Zoom150),
+        (&settings.zoom_200, HotkeyAction::Zoom200),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;
@@ -181,6 +353,46 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings) {
             Err(err) => eprintln!("hotkey: unusable accelerator {text:?}: {err}"),
         }
     }
+    // Macros carry their own accelerators (CAP-N02) — plain or a chord
+    // (CAP-N05). Only a chord's LEADER is registered at rest; its follower
+    // goes into the follower table and is registered on demand.
+    let mut followers: HashMap<Shortcut, (String, String)> = HashMap::new();
+    let mut layers: HashMap<String, Option<u8>> = HashMap::new();
+    for (name, accelerator, layer) in &macros {
+        layers.insert(name.clone(), *layer);
+        let Some(text) = accelerator.as_ref().filter(|text| !text.trim().is_empty()) else {
+            continue;
+        };
+        if crate::chords::is_chord(text) {
+            let Some(chord) = crate::chords::parse_chord(text) else {
+                eprintln!("hotkey: unusable chord {text:?}");
+                continue;
+            };
+            match (
+                chord.leader.parse::<Shortcut>(),
+                chord.follower.parse::<Shortcut>(),
+            ) {
+                (Ok(leader), Ok(follower)) => {
+                    desired
+                        .entry(leader)
+                        .or_insert(HotkeyAction::ChordLeader(chord.leader.clone()));
+                    followers.insert(follower, (chord.leader.clone(), name.clone()));
+                }
+                _ => eprintln!("hotkey: unusable chord {text:?}"),
+            }
+            continue;
+        }
+        match text.parse::<Shortcut>() {
+            Ok(shortcut) => {
+                desired
+                    .entry(shortcut)
+                    .or_insert(HotkeyAction::RunMacro(name.clone()));
+            }
+            Err(err) => eprintln!("hotkey: unusable macro accelerator {text:?}: {err}"),
+        }
+    }
+    *lock(&state.followers) = followers;
+    *lock(&state.macro_layers) = layers;
 
     let registered_now = lock(&state.registered).clone();
     let to_register: Vec<Shortcut> = desired
@@ -233,8 +445,14 @@ pub fn spawn_reconcile_thread<R: Runtime>(app: AppHandle<R>) {
     std::thread::Builder::new()
         .name("fcap-action-hotkeys".into())
         .spawn(move || loop {
-            let settings = app.state::<SettingsStore>().get().hotkeys;
-            reconcile(&app, &settings);
+            let settings = app.state::<SettingsStore>().get();
+            let macros: Vec<MacroBinding> = settings
+                .automation
+                .macros
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.hotkey.clone(), entry.layer))
+                .collect();
+            reconcile(&app, &settings.hotkeys, &macros);
             std::thread::sleep(Duration::from_secs(1));
         })
         .expect("action-hotkey thread spawns");

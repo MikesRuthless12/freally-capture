@@ -19,6 +19,7 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
     D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
 use windows::Win32::Graphics::Dxgi::{
     IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_ACCESS_LOST,
     DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTDUPL_POINTER_SHAPE_INFO,
@@ -127,7 +128,7 @@ fn run_inner(
     let Some(mut session) = open_duplication_with_retry(device_name, stop, sender)? else {
         return Ok(()); // stopped before the first frame
     };
-    let mut staging: Option<(u32, u32, ID3D11Texture2D)> = None;
+    let mut staging: Option<(u32, u32, DXGI_FORMAT, ID3D11Texture2D)> = None;
     let mut pointer = PointerState {
         visible: false,
         x: 0,
@@ -193,8 +194,13 @@ fn run_inner(
             // SAFETY: GetDesc writes into the local out-param.
             unsafe { texture.GetDesc(&mut desc) };
 
-            let staging_tex =
-                ensure_staging(&session.device, &mut staging, desc.Width, desc.Height)?;
+            let staging_tex = ensure_staging(
+                &session.device,
+                &mut staging,
+                desc.Width,
+                desc.Height,
+                desc.Format,
+            )?;
             // SAFETY: same-device resources with identical dimensions/format.
             unsafe { session.context.CopyResource(staging_tex, &texture) };
             Ok(Some(read_staging(
@@ -202,6 +208,8 @@ fn run_inner(
                 staging_tex,
                 desc.Width,
                 desc.Height,
+                desc.Format,
+                device_name,
             )?))
         })();
 
@@ -236,18 +244,22 @@ fn run_inner(
 
 fn ensure_staging<'t>(
     device: &ID3D11Device,
-    staging: &'t mut Option<(u32, u32, ID3D11Texture2D)>,
+    staging: &'t mut Option<(u32, u32, DXGI_FORMAT, ID3D11Texture2D)>,
     width: u32,
     height: u32,
+    format: DXGI_FORMAT,
 ) -> Result<&'t ID3D11Texture2D, CaptureError> {
-    let needs_new = !matches!(staging, Some((w, h, _)) if *w == width && *h == height);
+    // Keyed on format too: toggling Windows HDR mid-session flips the
+    // desktop between BGRA8 and FP16, and the staging must follow.
+    let needs_new =
+        !matches!(staging, Some((w, h, f, _)) if *w == width && *h == height && *f == format);
     if needs_new {
         let desc = D3D11_TEXTURE2D_DESC {
             Width: width,
             Height: height,
             MipLevels: 1,
             ArraySize: 1,
-            Format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+            Format: format,
             SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -263,9 +275,9 @@ fn ensure_staging<'t>(
             .map_err(|err| CaptureError::Backend(format!("staging texture: {err}")))?;
         let texture =
             texture.ok_or_else(|| CaptureError::Backend("staging texture missing".into()))?;
-        *staging = Some((width, height, texture));
+        *staging = Some((width, height, format, texture));
     }
-    Ok(&staging.as_ref().expect("staging just ensured").2)
+    Ok(&staging.as_ref().expect("staging just ensured").3)
 }
 
 fn read_staging(
@@ -273,6 +285,8 @@ fn read_staging(
     staging: &ID3D11Texture2D,
     width: u32,
     height: u32,
+    format: DXGI_FORMAT,
+    device_name: &str,
 ) -> Result<Frame, CaptureError> {
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     // SAFETY: staging was created D3D11_USAGE_STAGING + CPU_ACCESS_READ; the
@@ -286,17 +300,40 @@ fn read_staging(
     let len = stride as usize * height as usize;
     // SAFETY: bounds derived from the driver-reported RowPitch and the
     // texture height; copied out before Unmap invalidates the pointer.
-    let data = unsafe { std::slice::from_raw_parts(mapped.pData as *const u8, len) }.to_vec();
+    let raw = unsafe { std::slice::from_raw_parts(mapped.pData as *const u8, len) };
+    let frame = if format == DXGI_FORMAT_R16G16B16A16_FLOAT {
+        // An HDR desktop (CAP-N74): scRGB FP16 → SDR BGRA8 through the
+        // configured tone-map, row by row, so everything downstream keeps
+        // seeing ordinary 8-bit frames. The registry read is live — a
+        // paper-white change applies on the very next frame.
+        let config = crate::tonemap::tone_map_for(&format!("display:{device_name}"));
+        let mut data = vec![0u8; width as usize * height as usize * 4];
+        for y in 0..height as usize {
+            let src = &raw[y * stride as usize..][..width as usize * 8];
+            let dst = &mut data[y * width as usize * 4..][..width as usize * 4];
+            crate::tonemap::convert_row_fp16_to_bgra(src, dst, width as usize, &config);
+        }
+        Frame {
+            width,
+            height,
+            stride: width * 4,
+            format: PixelFormat::Bgra8,
+            data,
+            captured_at: Instant::now(),
+        }
+    } else {
+        Frame {
+            width,
+            height,
+            stride,
+            format: PixelFormat::Bgra8,
+            data: raw.to_vec(),
+            captured_at: Instant::now(),
+        }
+    };
     // SAFETY: paired with the successful Map above.
     unsafe { context.Unmap(staging, 0) };
-    Ok(Frame {
-        width,
-        height,
-        stride,
-        format: PixelFormat::Bgra8,
-        data,
-        captured_at: Instant::now(),
-    })
+    Ok(frame)
 }
 
 // ---------------------------------------------------------------------------

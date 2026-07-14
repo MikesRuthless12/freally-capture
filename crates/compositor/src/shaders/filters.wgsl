@@ -188,3 +188,12 @@ fn fs_crop(in: VsOut) -> @location(0) vec4<f32> {
     let uv = mix(f.p0.xy, f.p0.zw, in.uv);
     return textureSample(t_in, s_clamp, uv);
 }
+
+// -- Flip ------------------------------------------------------------------------
+// p0 = (horizontal, vertical, 0, 0) as 0/1 flags — a mirrored blit.
+@fragment
+fn fs_flip(in: VsOut) -> @location(0) vec4<f32> {
+    let u = mix(in.uv.x, 1.0 - in.uv.x, f.p0.x);
+    let v = mix(in.uv.y, 1.0 - in.uv.y, f.p0.y);
+    return textureSample(t_in, s_clamp, vec2<f32>(u, v));
+}

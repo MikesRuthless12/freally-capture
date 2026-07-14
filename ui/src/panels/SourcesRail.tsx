@@ -18,7 +18,11 @@ import {
   studioMediaSetPaused,
   studioRenameSource,
   studioRetrySource,
+  hdrToneMapSet,
+  studioAddLinkedWindow,
   studioSetCenterView,
+  studioZoomFollow,
+  studioZoomGet,
   studioSetFocus,
   studioSetGroupVisible,
   studioUngroup,
@@ -192,6 +196,11 @@ export function SourcesRail({
   // Paused state of embedded Media sources (videos), keyed by source id — the
   // streamer pauses/resumes a video live on the broadcast.
   const [mediaPaused, setMediaPaused] = useState<Record<string, boolean>>({});
+  // Punch-in follow-pan (CAP-N71): per-item cursor-follow state, hydrated
+  // from the engine so a webview reload doesn't lie about active lenses.
+  const [zoomFollow, setZoomFollow] = useState<Record<string, boolean>>({});
+  // CAP-N74: the display source whose HDR tone-map dialog is open.
+  const [hdrFor, setHdrFor] = useState<{ captureId: string; name: string } | null>(null);
   // Keep the pause buttons synced with the backend for the current Media
   // sources (e.g. after a reload — a video may already be paused).
   const mediaIdsKey = (collection?.sources ?? [])
@@ -210,6 +219,24 @@ export function SourcesRail({
       alive = false;
     };
   }, [mediaIdsKey]);
+
+  // Same hydration for follow-pan lenses on the scene's items.
+  const followIdsKey = (scene?.items ?? [])
+    .filter((item) => !item.backdrop)
+    .map((item) => item.id)
+    .join(",");
+  useEffect(() => {
+    if (!followIdsKey) return;
+    let alive = true;
+    for (const id of followIdsKey.split(",")) {
+      studioZoomGet(id as ItemId)
+        .then((lens) => alive && lens && setZoomFollow((prev) => ({ ...prev, [id]: lens.follow })))
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [followIdsKey]);
 
   const items = scene?.items ?? [];
   const topFirst = [...items].reverse();
@@ -394,13 +421,20 @@ export function SourcesRail({
                   </button>
                   <button
                     type="button"
+                    disabled={Boolean(item.backdrop)}
                     onClick={() => {
                       if (!scene) return;
                       studioSetFocus(scene.id, isFocused ? null : item.id).catch((err) =>
                         console.error("focus toggle failed:", err),
                       );
                     }}
-                    title={isFocused ? t("sources-unfocus-title") : t("sources-focus-title")}
+                    title={
+                      item.backdrop
+                        ? t("sources-backdrop-pinned")
+                        : isFocused
+                          ? t("sources-unfocus-title")
+                          : t("sources-focus-title")
+                    }
                     aria-label={
                       isFocused
                         ? t("sources-unfocus-item", {
@@ -419,7 +453,7 @@ export function SourcesRail({
                   >
                     ⛶
                   </button>
-                  {!audioOnly && (
+                  {!audioOnly && !item.backdrop && (
                     <button
                       type="button"
                       onClick={() => {
@@ -435,6 +469,30 @@ export function SourcesRail({
                       className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
                     >
                       ◉
+                    </button>
+                  )}
+                  {(source?.kind === "display" || source?.kind === "window") && !item.backdrop && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !zoomFollow[item.id];
+                        setZoomFollow((state) => ({ ...state, [item.id]: next }));
+                        studioZoomFollow(item.id, next).catch((err) =>
+                          console.error("zoom follow failed:", err),
+                        );
+                      }}
+                      title={t("sources-follow-title")}
+                      aria-label={t("sources-follow-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
+                      aria-pressed={Boolean(zoomFollow[item.id])}
+                      className={`shrink-0 rounded px-1 text-xs ${
+                        zoomFollow[item.id]
+                          ? "text-havoc-accent"
+                          : "text-havoc-muted opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      🎯
                     </button>
                   )}
                   {isRenaming ? (
@@ -473,6 +531,14 @@ export function SourcesRail({
                           className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
                         >
                           ⊞
+                        </span>
+                      )}
+                      {item.backdrop && (
+                        <span
+                          title={t("sources-backdrop-badge")}
+                          className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
+                        >
+                          🖼
                         </span>
                       )}
                       <span className="truncate">
@@ -570,6 +636,25 @@ export function SourcesRail({
                       {mediaPaused[item.source] ? "▶" : "⏸"}
                     </button>
                   )}
+                  {status != null &&
+                    "hdr" in status &&
+                    status.hdr === true &&
+                    source?.kind === "display" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          source.kind === "display" &&
+                          setHdrFor({ captureId: source.captureId, name: source.name })
+                        }
+                        title={t("sources-hdr-title")}
+                        aria-label={t("sources-hdr-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="shrink-0 rounded bg-amber-400/15 px-1 py-px text-[9px] font-semibold text-amber-300"
+                      >
+                        HDR
+                      </button>
+                    )}
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"
@@ -593,9 +678,11 @@ export function SourcesRail({
                     </button>
                     <button
                       type="button"
-                      disabled={modelIndex === items.length - 1}
+                      disabled={modelIndex === items.length - 1 || Boolean(item.backdrop)}
                       onClick={() => onMove(item.id, modelIndex + 1)}
-                      title={t("sources-raise-title")}
+                      title={
+                        item.backdrop ? t("sources-backdrop-pinned") : t("sources-raise-title")
+                      }
                       aria-label={t("sources-raise-item", {
                         name: source?.name ?? t("sources-fallback-name"),
                       })}
@@ -605,9 +692,15 @@ export function SourcesRail({
                     </button>
                     <button
                       type="button"
-                      disabled={modelIndex === 0}
+                      disabled={
+                        modelIndex === 0 ||
+                        Boolean(item.backdrop) ||
+                        Boolean(items[modelIndex - 1]?.backdrop)
+                      }
                       onClick={() => onMove(item.id, modelIndex - 1)}
-                      title={t("sources-lower-title")}
+                      title={
+                        item.backdrop ? t("sources-backdrop-pinned") : t("sources-lower-title")
+                      }
                       aria-label={t("sources-lower-item", {
                         name: source?.name ?? t("sources-fallback-name"),
                       })}
@@ -656,8 +749,28 @@ export function SourcesRail({
         </ul>
       )}
 
+      {hdrFor && (
+        <HdrToneMapDialog
+          captureId={hdrFor.captureId}
+          name={hdrFor.name}
+          onClose={() => setHdrFor(null)}
+        />
+      )}
+
       {picker === "display" || picker === "window" ? (
-        <CapturePicker mode={picker} onClose={() => setPicker(null)} onPick={pick} />
+        <CapturePicker
+          mode={picker}
+          os={os}
+          onClose={() => setPicker(null)}
+          onPick={pick}
+          onPickLinked={(captureId, label) => {
+            setPicker(null);
+            if (!scene) return;
+            studioAddLinkedWindow(scene.id, captureId, label).catch((err) =>
+              console.error("linked window add failed:", err),
+            );
+          }}
+        />
       ) : picker === "webcam" ? (
         <WebcamPicker onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "audioInput" || picker === "audioOutput" ? (
@@ -1019,16 +1132,25 @@ function NestedSceneForm({
 
 function CapturePicker({
   mode,
+  os,
   onClose,
   onPick,
+  onPickLinked,
 }: {
   mode: "display" | "window";
+  os?: string;
   onClose: () => void;
   onPick: (settings: SourceSettings, name?: string) => void;
+  /** CAP-N73 (Windows): add the window + its app's audio as a linked pair. */
+  onPickLinked: (captureId: string, label: string) => void;
 }) {
   const t = useT();
   const [entries, setEntries] = useState<CaptureSource[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // CAP-N73: "also capture this app's audio" — offered on Windows only
+  // (per-app audio is Windows-first), default on.
+  const [linkAudio, setLinkAudio] = useState(true);
+  const canLink = mode === "window" && os === "windows";
   const loadedRef = useRef(false);
 
   const refresh = useCallback(() => {
@@ -1080,6 +1202,16 @@ function CapturePicker({
         </p>
       ) : (
         <>
+          {canLink && (
+            <label className="mb-2 flex items-center gap-2 text-xs text-havoc-muted">
+              <input
+                type="checkbox"
+                checked={linkAudio}
+                onChange={(event) => setLinkAudio(event.target.checked)}
+              />
+              {t("sources-link-audio")}
+            </label>
+          )}
           {windowTiles.length > 0 && (
             <div className="grid grid-cols-2 gap-2">
               {windowTiles.map((entry, index) => (
@@ -1088,7 +1220,12 @@ function CapturePicker({
                   entry={entry}
                   index={index}
                   onPick={() =>
-                    onPick({ kind: "window", captureId: entry.id, label: entry.label }, entry.label)
+                    canLink && linkAudio
+                      ? onPickLinked(entry.id, entry.label)
+                      : onPick(
+                          { kind: "window", captureId: entry.id, label: entry.label },
+                          entry.label,
+                        )
                   }
                 />
               ))}
@@ -1102,7 +1239,11 @@ function CapturePicker({
                 <li key={entry.id}>
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      if (entry.kind === "window" && canLink && linkAudio) {
+                        onPickLinked(entry.id, entry.label);
+                        return;
+                      }
                       onPick(
                         entry.kind === "portal"
                           ? { kind: "portal" }
@@ -1112,8 +1253,8 @@ function CapturePicker({
                               label: entry.label,
                             },
                         entry.label,
-                      )
-                    }
+                      );
+                    }}
                     className="w-full truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text hover:border-havoc-accent/50"
                   >
                     {entry.label}
@@ -1698,6 +1839,103 @@ function ImageForm({
         >
           {t("sources-image-add")}
         </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** CAP-N74: one display's HDR→SDR tone-map — operator + paper-white,
+ * applied live (the capture retunes on its very next frame). */
+function HdrToneMapDialog({
+  captureId,
+  name,
+  onClose,
+}: {
+  captureId: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [operator, setOperator] = useState("clip");
+  const [paperWhite, setPaperWhite] = useState(200);
+  useEffect(() => {
+    let alive = true;
+    settingsGet()
+      .then((settings) => {
+        const saved = settings.hdrToneMap?.[captureId];
+        if (alive && saved) {
+          setOperator(saved.operator);
+          setPaperWhite(saved.paperWhiteNits);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [captureId]);
+
+  const apply = (nextOperator: string, nextPaperWhite: number) => {
+    setOperator(nextOperator);
+    setPaperWhite(nextPaperWhite);
+    hdrToneMapSet(captureId, nextOperator, nextPaperWhite).catch((err) =>
+      console.error("hdr tone-map failed:", err),
+    );
+  };
+
+  const OPERATORS: Array<[string, string]> = [
+    ["clip", "sources-hdr-op-clip"],
+    ["maxRgb", "sources-hdr-op-maxrgb"],
+    ["reinhard", "sources-hdr-op-reinhard"],
+    ["bt2408", "sources-hdr-op-bt2408"],
+  ];
+
+  return (
+    <PickerShell title={t("sources-hdr-dialog-title", { name })} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-xs text-havoc-text">
+        <p className="m-0 text-havoc-muted">{t("sources-hdr-hint")}</p>
+        {operator === "clip" && (
+          <button
+            type="button"
+            onClick={() => apply("maxRgb", 200)}
+            className="self-start rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 font-semibold enabled:hover:bg-havoc-accent/25"
+          >
+            {t("sources-hdr-enable-suggested")}
+          </button>
+        )}
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          {t("sources-hdr-operator")}
+          <select
+            value={operator}
+            onChange={(event) => apply(event.target.value, paperWhite)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+          >
+            {OPERATORS.map(([value, key]) => (
+              <option key={value} value={value}>
+                {t(key)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          {t("sources-hdr-paper-white")}
+          <input
+            type="number"
+            min={80}
+            max={1000}
+            step={10}
+            value={paperWhite}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isFinite(next) && next >= 80 && next <= 1000) {
+                apply(operator, next);
+              } else {
+                setPaperWhite(next);
+              }
+            }}
+            className="w-24 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+          />
+          <span>{t("sources-hdr-nits")}</span>
+        </label>
       </div>
     </PickerShell>
   );

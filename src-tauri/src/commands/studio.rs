@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 
 use fcap_scene::{
-    BlendMode, Corner, FileRef, FileRefKind, Filter, FilterId, FilterKind, GuideLine, ItemId,
-    NormRect, SceneId, Source, SourceId, SourceSettings, Transform,
+    BackdropSplit, BlendMode, Corner, FileRef, FileRefKind, Filter, FilterId, FilterKind,
+    GuideLine, ItemId, NormRect, ScaleMode, SceneId, Source, SourceId, SourceSettings, Transform,
 };
 
 use crate::studio::{coalesce_key, StillTarget, StudioDto, StudioState, WorkbenchMode};
@@ -228,6 +228,21 @@ pub fn studio_set_item_blend(
 ) -> Result<(), String> {
     state.mutate_tracked(&app, "setBlendMode", None, |collection| {
         collection.set_item_blend(scene_id, item_id, blend)
+    })
+}
+
+/// Pixel-perfect scaling (CAP-N70): smooth / nearest / integer-snapped
+/// nearest / sharp-bilinear, per item.
+#[tauri::command]
+pub fn studio_set_item_scaling(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    scaling: ScaleMode,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "setScaling", None, |collection| {
+        collection.set_item_scaling(scene_id, item_id, scaling)
     })
 }
 
@@ -490,6 +505,260 @@ pub fn studio_media_set_paused(source_id: SourceId, paused: bool) {
 #[tauri::command]
 pub fn studio_media_paused(source_id: SourceId) -> bool {
     fcap_sources::media::is_media_paused(&source_id.0.to_string())
+}
+
+/// Jump a Media source's playback to `seconds` (the transport scrubber).
+/// Applied at the next frame boundary; seeking while paused still shows the
+/// sought frame.
+#[tauri::command]
+pub fn studio_media_seek(source_id: SourceId, seconds: f32) {
+    fcap_sources::media::media_seek(&source_id.0.to_string(), seconds);
+}
+
+/// A Media source's transport state, polled by the scrubber UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaTransport {
+    pub position: f32,
+    /// `0` while unknown (a `.frec` learns its total at first end-of-file).
+    pub duration: f32,
+}
+
+#[tauri::command]
+pub fn studio_media_transport(source_id: SourceId) -> MediaTransport {
+    let (position, duration) = fcap_sources::media::media_transport(&source_id.0.to_string());
+    MediaTransport { position, duration }
+}
+
+// -- passthrough monitor (CAP-N69) ------------------------------------------------
+
+/// The passthrough monitor's measured end-to-end latency for a source, in
+/// milliseconds — the capture timestamp → published-frame delta (an EMA).
+/// `null` until a passthrough monitor has been open long enough to measure.
+/// Honest scope: this is the in-app pipeline latency; the display's own
+/// buffering is not visible to us, which is why the DoD wants a camera-clap
+/// validation on real hardware.
+#[tauri::command]
+pub fn studio_passthrough_latency(
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+) -> Option<f32> {
+    state.passthrough_latency(source_id)
+}
+
+// -- window↔app-audio auto-link (CAP-N73) ----------------------------------------
+
+/// Add a Window Capture together with its app's audio as one linked pair
+/// (one undo entry). The audio follows the window: hidden mutes it, removal
+/// removes it, and the engine re-resolves its pid across app restarts.
+/// Windows-only (process resolution); the picker only offers it there.
+#[tauri::command]
+pub fn studio_add_linked_window(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    capture_id: String,
+    label: String,
+) -> Result<AddedItem, String> {
+    let (pid, exe) = fcap_capture::window_process(&capture_id)
+        .ok_or_else(|| "could not resolve the window's process".to_string())?;
+    state.mutate_tracked(&app, "addLinkedWindow", None, |collection| {
+        let window = Source::new(label.clone(), SourceSettings::Window { capture_id, label });
+        let (window_id, item_id) = collection.add_item_with_new_source(scene_id, window)?;
+        let audio = Source::new(
+            format!("{exe} audio"),
+            SourceSettings::AppAudio {
+                pid,
+                exe,
+                linked_window: Some(window_id),
+            },
+        );
+        collection.add_item_with_new_source(scene_id, audio)?;
+        Ok(AddedItem {
+            source_id: window_id,
+            item_id,
+        })
+    })
+}
+
+// -- auto black-bar crop (CAP-N72) ---------------------------------------------
+
+/// One-shot: scan the item's next frame for letterbox/pillarbox bars and
+/// apply the detected crop as an undoable edit.
+#[tauri::command]
+pub fn studio_autocrop(
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+) -> Result<(), String> {
+    state.autocrop_request(scene_id, item_id)
+}
+
+/// Arm/disarm re-detection when the source's resolution changes (follow
+/// mode; off by default).
+#[tauri::command]
+pub fn studio_autocrop_follow(
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    follow: bool,
+) -> Result<(), String> {
+    state.autocrop_set_follow(scene_id, item_id, follow)
+}
+
+/// Whether follow-mode auto-crop is armed for an item (the UI checkbox).
+#[tauri::command]
+pub fn studio_autocrop_get(state: State<'_, StudioState>, item_id: ItemId) -> bool {
+    state.autocrop_get(item_id)
+}
+
+// -- punch-in zoom (CAP-N71) --------------------------------------------------
+
+/// A punch-in lens's target state, for the UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoomLensState {
+    pub zoom: f32,
+    pub follow: bool,
+}
+
+/// Set a lens's target zoom (absolute, clamped `1..=8`) about an optional
+/// normalized content anchor. Runtime-only: drawn every tick, spring-smoothed,
+/// never written to the item's transform or the undo history.
+#[tauri::command]
+pub fn studio_zoom_set(
+    state: State<'_, StudioState>,
+    item_id: ItemId,
+    zoom: f32,
+    anchor_x: Option<f32>,
+    anchor_y: Option<f32>,
+) {
+    state.zoom_set(item_id, zoom, anchor_x.zip(anchor_y));
+}
+
+/// Multiply a lens's target zoom (the canvas wheel) about an anchor.
+#[tauri::command]
+pub fn studio_zoom_scroll(
+    state: State<'_, StudioState>,
+    item_id: ItemId,
+    factor: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+) {
+    state.zoom_scroll(item_id, factor, (anchor_x, anchor_y));
+}
+
+/// Toggle follow-the-cursor panning while zoomed (Windows maps the cursor
+/// into display/window captures; elsewhere the anchor stays manual).
+#[tauri::command]
+pub fn studio_zoom_follow(state: State<'_, StudioState>, item_id: ItemId, follow: bool) {
+    state.zoom_follow(item_id, follow);
+}
+
+/// A lens's current target (the UI reads this after a reload).
+#[tauri::command]
+pub fn studio_zoom_get(state: State<'_, StudioState>, item_id: ItemId) -> ZoomLensState {
+    let (zoom, follow) = state.zoom_get(item_id);
+    ZoomLensState { zoom, follow }
+}
+
+// -- scene backdrop (wallpaper) ---------------------------------------------------
+
+/// Image extensions a backdrop decodes once (the Image source path).
+const BACKDROP_STILL_EXTS: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"];
+/// Extensions a backdrop plays on a loop (the Media source path — GIFs
+/// animate through the owned decoder, `.frec` through the owned codec, the
+/// wire formats through the labeled ffmpeg component).
+const BACKDROP_MEDIA_EXTS: [&str; 6] = ["gif", "mp4", "mkv", "webm", "mov", "frec"];
+
+/// Set (or clear, with `None`) a scene's backdrop wallpaper: any image, an
+/// animated GIF, or a looping video — a pinned bottom layer the capture
+/// always sits on top of. A video backdrop's audio strip starts muted so the
+/// wallpaper never interferes with the program sound (unmute it in the mixer
+/// to keep it).
+#[tauri::command]
+pub fn studio_set_scene_backdrop(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    path: Option<String>,
+) -> Result<(), String> {
+    let source = match path
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+    {
+        None => None,
+        Some(path) => {
+            let ext = std::path::Path::new(&path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_ascii_lowercase())
+                .unwrap_or_default();
+            if BACKDROP_STILL_EXTS.contains(&ext.as_str()) {
+                // Decode now so a bad pick errors in the dialog, not on air.
+                fcap_sources::image::load_image_rgba(std::path::Path::new(&path))
+                    .map_err(|err| err.to_string())?;
+                Some(Source::new("Backdrop", SourceSettings::Image { path }))
+            } else if BACKDROP_MEDIA_EXTS.contains(&ext.as_str()) {
+                if !std::path::Path::new(&path).is_file() {
+                    return Err(format!("media file not found: {path}"));
+                }
+                let mut source = Source::new(
+                    "Backdrop",
+                    SourceSettings::Media {
+                        path,
+                        looping: true,
+                        hw_decode: true,
+                        start_with_recording: false,
+                        reverse: false,
+                    },
+                );
+                if let Some(audio) = source.audio.as_mut() {
+                    audio.muted = true;
+                }
+                Some(source)
+            } else {
+                return Err(format!(
+                    "a backdrop can be an image, a GIF, or a video — not .{ext}"
+                ));
+            }
+        }
+    };
+    state
+        .mutate_tracked(&app, "setSceneBackdrop", None, |collection| {
+            collection.set_scene_backdrop(scene_id, source)
+        })
+        .map(|_| ())
+}
+
+/// Move a scene's backdrop between the whole canvas and a half split (the
+/// capture is seated into the other half — "video left, capture right" in
+/// one click).
+#[tauri::command]
+pub fn studio_set_backdrop_split(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    split: BackdropSplit,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "setBackdropSplit", None, |collection| {
+        collection.set_backdrop_split(scene_id, split)
+    })
+}
+
+/// Toggle a video backdrop's "start playback with recording" hold: on, the
+/// video shows its first frame and starts from the top the moment recording
+/// begins (each take included); off, it just loops.
+#[tauri::command]
+pub fn studio_set_backdrop_sync(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    start_with_recording: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "setBackdropSync", None, |collection| {
+        collection.set_backdrop_sync(scene_id, start_with_recording)
+    })
 }
 
 // -- filters --------------------------------------------------------------------

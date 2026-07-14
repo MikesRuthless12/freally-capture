@@ -20,8 +20,48 @@
     </header>
 
     <main>
-      <!-- 0.99.0 — sources, devices & calibration (CAP-M Batch 3) -->
+      <!-- 0.200.0 — automation + capture & device depth (CAP-N Phases 1 & 9) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.200.0</span>
+            <span class="date">Jul 13, 2026 · Automation + Capture &amp; Device Depth — CAP-N Phases 1 &amp; 9</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.200.0">Download</a>
+        </div>
+
+        <h2>0.200.0 — Automation + Capture &amp; Device Depth (CAP-N Phases 1 &amp; 9)</h2>
+        <p class="summary">
+          Two themed phases in one release, so the version crosses two rungs at once.
+          <em>Automation</em> makes the studio drive itself, and <em>Capture &amp; Device Depth</em>
+          finishes the glass-to-canvas path. Every rule, macro, MIDI pad, OSC address, panel button,
+          and rundown step dispatches through one fixed, off-by-default command allowlist — the same
+          one the remote API exposes — so no control surface can name a file or reach the internet by
+          construction.
+        </p>
+        <ul class="features">
+          <li><strong>Scene backdrop / wallpaper</strong> — pin any image, looping GIF, or looping video behind the capture as a full-canvas or half-screen backdrop, with wheel zoom, a real-time Flip filter, and a "hold until recording starts" mode with a pre-record preview.</li>
+          <li><strong>True reverse media playback</strong> — a real bounded-memory, segmented reverse render plus scrub, seek-from-anywhere, play/pause and loop, so a backdrop video behaves like an ordinary player on the operator's cue.</li>
+          <li><strong>Automation rules engine</strong> (CAP-N01) — nine edge-triggered triggers (scene switch, stream/recording state, source error, audio-level crossing, system idle, window focus, time of day, a watched file changing) gated by conditions that run studio actions; every rule ships disabled.</li>
+          <li><strong>Macros, variables &amp; sequences</strong> (CAP-N02) — named step sequences (run an action, wait, set a variable) with a repeat count and an optional hotkey, runnable from the UI, a hotkey, a rule, or the remote API; studio variables interpolate <code>{{name}}</code> into any Text source live.</li>
+          <li><strong>MIDI control surfaces</strong> (CAP-N03) — MIDI-learn a pad, knob, or fader onto an action, macro, scene switch, mixer fader, or mute, with LED and motor-fader feedback that mirrors the studio's real state; no port opens until one is chosen.</li>
+          <li><strong>OSC control</strong> (CAP-N04) — TouchOSC-class controllers and lighting desks drive the studio over Open Sound Control (<code>/scene/switch</code>, <code>/record/start</code>, <code>/macro/run</code>, <code>/mixer/vol</code>, and more), off by default and loopback unless LAN.</li>
+          <li><strong>Hotkey chords &amp; layers</strong> (CAP-N05) — two-stroke chords (<code>Ctrl+K, 3</code>) where the bare second key is claimed only while the chord is pending, plus sticky layers so a small keyboard drives many actions.</li>
+          <li><strong>LAN touch panel</strong> (CAP-N06) — the app serves an embedded control page (scene buttons with live tally, mixer faders, action keys) to any phone via a QR code — off by default, a password on every request, loopback unless LAN.</li>
+          <li><strong>Tally light service</strong> (CAP-N07) — a full-screen red/green tally page any spare phone can display; <code>?scene=NAME</code> watches one scene, otherwise it tracks the program's live state.</li>
+          <li><strong>PTZ camera control</strong> (CAP-N08) — pan / tilt / zoom cameras over VISCA-over-IP with named presets and per-scene auto-recall, LAN-only and only for the addresses you enter — nothing is discovered.</li>
+          <li><strong>Show rundown</strong> (CAP-N09) — an ordered playlist of steps (a scene, how long it holds, optional actions) with manual or automatic advance and a live "next up + remaining time", switching scenes the ordinary, undoable way.</li>
+          <li><strong>Low-latency passthrough monitor</strong> (CAP-N69) — a projector that shows a capture device's raw frames — no scenes, filters, or compositor — with a measured capture→display latency readout.</li>
+          <li><strong>Pixel-perfect scaling modes</strong> (CAP-N70) — per-item smooth, nearest-neighbor, integer-snapped, or sharp-bilinear scaling, so retro and pixel-art content reaches the canvas without blur.</li>
+          <li><strong>Punch-in zoom &amp; follow pan</strong> (CAP-N71) — wheel-zoom into any capture with a critically-damped animation, three hotkey presets, and an optional follow mode that tracks the cursor.</li>
+          <li><strong>Auto black-bar crop</strong> (CAP-N72) — detect and crop letterbox/pillarbox bars from a source, one-shot or continuously as the content's aspect changes.</li>
+          <li><strong>Window↔app-audio auto-link</strong> (CAP-N73) — capture a window's application audio alongside it; hiding the window mutes the linked strip and showing it unmutes, without ever clobbering a manual mute.</li>
+          <li><strong>HDR→SDR tone-map for capture</strong> (CAP-N74) — map an HDR display's output to the SDR canvas (clip / hue-preserving maxRGB / Reinhard / BT.2408 knee) with an adjustable paper-white level, tuned live per display.</li>
+        </ul>
+      </article>
+
+      <!-- 0.99.0 — sources, devices & calibration (CAP-M Batch 3) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.99.0</span>

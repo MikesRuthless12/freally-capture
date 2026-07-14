@@ -264,6 +264,7 @@ pub fn import_obs(json: &str) -> Result<ObsImport, ObsImportError> {
         sources: builder.pool,
         scenes,
         active_scene,
+        hidden_muted: std::collections::HashSet::new(),
         vertical: None,
     };
     collection.sanitize();
@@ -365,6 +366,8 @@ impl PoolBuilder {
             pending_fit,
             pending_slot,
             filters,
+            scaling: crate::scene::ScaleMode::Auto,
+            backdrop: None,
         })
     }
 }
@@ -497,6 +500,8 @@ fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
                     .to_string(),
                 looping: get_bool(s, "looping").unwrap_or(false),
                 hw_decode: true,
+                start_with_recording: false,
+                reverse: false,
             },
             vec![ImportNote::ReferencesFile],
         ),
@@ -505,6 +510,8 @@ fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
                 path: first_playlist_path(s),
                 looping: get_bool(s, "loop").unwrap_or(false),
                 hw_decode: true,
+                start_with_recording: false,
+                reverse: false,
             },
             vec![ImportNote::ReferencesFile],
         ),
@@ -550,6 +557,7 @@ fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
             SourceSettings::AppAudio {
                 pid: 0,
                 exe: String::new(),
+                linked_window: None,
             },
             vec![ImportNote::NeedsReselect],
         ),

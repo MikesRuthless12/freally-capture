@@ -73,6 +73,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "android-build"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fc9904ad2ad097c3c1cfe2eacaaf0fc24710936fa9ed941cb310b7c6ed2ab7"
+dependencies = [
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1067,6 +1076,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "coremidi"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1fa14fb8c3ca83d0d7f22f4afc9ecfe5f40947f01ce639a638a9377c2662dde"
+dependencies = [
+ "block2",
+ "core-foundation 0.10.1",
+ "core-foundation-sys 0.8.7",
+ "coremidi-sys",
+]
+
+[[package]]
+name = "coremidi-sys"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc9504310988d938e49fff1b5f1e56e3dafe39bb1bae580c19660b58b83a191e"
+dependencies = [
+ "core-foundation-sys 0.8.7",
+]
+
+[[package]]
 name = "cpal"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1701,7 +1731,7 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fcap-appaudio"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "thiserror 2.0.18",
  "windows 0.58.0",
@@ -1710,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-audio"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "cpal",
  "fcap-scene",
@@ -1720,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-capture"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "ashpd",
  "block2",
@@ -1742,7 +1772,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-compositor"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "bytemuck",
  "fcap-capture",
@@ -1756,7 +1786,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-encode"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "bzip2",
  "directories",
@@ -1775,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-ndi"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "libloading 0.8.9",
  "thiserror 2.0.18",
@@ -1783,14 +1813,14 @@ dependencies = [
 
 [[package]]
 name = "fcap-plugin"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "fcap-plugin-checkerboard"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "fcap-plugin",
  "serde_json",
@@ -1798,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-preview"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "objc2",
  "objc2-core-foundation",
@@ -1812,7 +1842,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-scene"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1822,7 +1852,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-script"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "mlua",
  "serde_json",
@@ -1830,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-sources"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "chrono",
  "fcap-audio",
@@ -1850,7 +1880,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-stream"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "fcap-encode",
  "serde",
@@ -2011,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "freally-capture"
-version = "0.99.0"
+version = "0.200.0"
 dependencies = [
  "chrono",
  "directories",
@@ -2029,6 +2059,7 @@ dependencies = [
  "fcap-stream",
  "image",
  "jpeg-encoder",
+ "midir",
  "raw-window-handle",
  "rfd",
  "serde",
@@ -3001,6 +3032,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "java-locator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09c46c1fe465c59b1474e665e85e1256c3893dd00927b8d55f63b09044c1e64f"
+dependencies = [
+ "glob",
+]
+
+[[package]]
 name = "javascriptcore-rs"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3057,7 +3097,9 @@ dependencies = [
  "cesu8",
  "cfg-if 1.0.4",
  "combine",
+ "java-locator",
  "jni-sys 0.3.1",
+ "libloading 0.7.4",
  "log",
  "thiserror 1.0.69",
  "walkdir",
@@ -3092,6 +3134,18 @@ dependencies = [
  "rustc_version",
  "simd_cesu8",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "jni-min-helper"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd3c57d31c3b3c1d49c7a7b5d7089f9bf0bf1ab9ed5b482d9840eeb6e1334bfd"
+dependencies = [
+ "android-build",
+ "jni 0.21.1",
+ "log",
+ "ndk-context",
 ]
 
 [[package]]
@@ -3496,6 +3550,27 @@ dependencies = [
  "log",
  "objc",
  "paste",
+]
+
+[[package]]
+name = "midir"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c12e74a8604bc07f9a3fcf3d5889a81bc96ca6e07d6a114d63fc0371f3e5a4"
+dependencies = [
+ "alsa",
+ "cc",
+ "coremidi",
+ "jni 0.21.1",
+ "jni-min-helper",
+ "js-sys",
+ "libc",
+ "log",
+ "ndk-context",
+ "parking_lot",
+ "wasm-bindgen",
+ "web-sys",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -5713,9 +5788,9 @@ dependencies = [
 
 [[package]]
 name = "spin"
-version = "0.9.8"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 dependencies = [
  "lock_api",
 ]

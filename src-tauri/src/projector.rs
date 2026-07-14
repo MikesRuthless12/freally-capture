@@ -72,6 +72,11 @@ pub fn parse_target(label: &str) -> Option<crate::studio::ProjectorTarget> {
         let source: fcap_scene::SourceId = serde_json::from_str(&format!("\"{id}\"")).ok()?;
         return Some(ProjectorTarget::Source(source));
     }
+    // CAP-N69: the low-latency passthrough monitor.
+    if let Some(id) = rest.strip_prefix("passthrough:") {
+        let source: fcap_scene::SourceId = serde_json::from_str(&format!("\"{id}\"")).ok()?;
+        return Some(ProjectorTarget::Passthrough(source));
+    }
     None
 }
 
@@ -229,6 +234,18 @@ mod tests {
         assert!(parse_target("multiview").is_none());
         // A malformed id is rejected, not panicked on.
         assert!(parse_target("projector-scene:not-a-uuid").is_none());
+    }
+
+    #[test]
+    fn passthrough_targets_parse_from_labels() {
+        use crate::studio::ProjectorTarget;
+        let uuid = "6f9619ff-8b86-d011-b42d-00cf4fc964ff";
+        assert!(matches!(
+            parse_target(&format!("projector-passthrough:{uuid}")),
+            Some(ProjectorTarget::Passthrough(_))
+        ));
+        assert!(is_valid_label(&format!("projector-passthrough:{uuid}")));
+        assert!(parse_target("projector-passthrough:nope").is_none());
     }
 
     #[test]

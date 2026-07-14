@@ -20,6 +20,7 @@ import type {
   StatsPayload,
   StreamStatus,
   StudioDto,
+  MidiControl,
 } from "./types";
 
 /** Subscribe to the ~2 Hz `stats` event. Resolves to an unlisten function. */
@@ -54,6 +55,17 @@ export function onStudio(handler: (studio: StudioDto) => void): Promise<Unlisten
 }
 
 /** Subscribe to saved still-frame confirmations (the path). CAP-M08. */
+/** MIDI-learn captured a control (CAP-N03). */
+export function onMidiLearned(handler: (control: MidiControl) => void): Promise<UnlistenFn> {
+  return listen<MidiControl>("midi-learned", (event) => handler(event.payload));
+}
+
+/** A punch-in zoom preset hotkey fired (CAP-N71) — the payload is the
+ * factor (1, 1.5, 2); the UI picks which capture's lens it targets. */
+export function onZoomPreset(handler: (factor: number) => void): Promise<UnlistenFn> {
+  return listen<number>("zoom-preset", (event) => handler(event.payload));
+}
+
 export function onStillSaved(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("still-saved", (event) => handler(event.payload));
 }
