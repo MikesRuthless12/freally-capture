@@ -13,6 +13,7 @@ import type {
 } from "../api/types";
 import { kindHasAudio } from "../api/types";
 import { AdvancedAudioFields, ChannelStrip } from "../components/ChannelStrip";
+import { resolveMeterColors } from "../lib/meters";
 import { EmptyHint, Panel } from "../components/Panel";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
@@ -63,6 +64,8 @@ export function MixerDock({
 
   const layout: MixerLayout = settings?.mixerLayout ?? "horizontal";
   const vertical = layout === "vertical";
+  // Settings → Accessibility: the meter palette (default / colorblind / custom).
+  const meterColors = resolveMeterColors(settings?.accessibility);
   const defaultStrip = {
     volumeDb: 0,
     muted: false,
@@ -128,6 +131,7 @@ export function MixerDock({
                   audio={source.audio ?? defaultStrip}
                   levels={audio?.sources[source.id]}
                   orientation="vertical"
+                  meterColors={meterColors}
                   sceneId={scene?.id ?? null}
                   sceneOverride={
                     scene?.audioOverrides?.find((entry) => entry.source === source.id) ?? null
@@ -149,6 +153,7 @@ export function MixerDock({
                   source={source}
                   audio={source.audio ?? defaultStrip}
                   levels={audio?.sources[source.id]}
+                  meterColors={meterColors}
                   sceneId={scene?.id ?? null}
                   sceneOverride={
                     scene?.audioOverrides?.find((entry) => entry.source === source.id) ?? null

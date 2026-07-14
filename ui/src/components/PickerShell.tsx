@@ -27,6 +27,7 @@ export function PickerShell({
   onRefresh,
   children,
   wide = false,
+  sidebar = false,
 }: {
   title: string;
   onClose: () => void;
@@ -34,6 +35,10 @@ export function PickerShell({
   onRefresh?: () => void;
   children: React.ReactNode;
   wide?: boolean;
+  /** OBS-style two-pane layout (Settings): a fixed-height shell whose body
+   * fills edge-to-edge with no padding or scroll of its own — the children
+   * own the sidebar/pane split and each pane's scrolling. Overrides `wide`. */
+  sidebar?: boolean;
 }) {
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -59,7 +64,11 @@ export function PickerShell({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`flex max-h-[80vh] ${wide ? "w-[34rem]" : "w-[26rem]"} max-w-full flex-col rounded-xl border border-white/10 bg-havoc-panel shadow-2xl`}
+        className={`flex ${
+          sidebar
+            ? "h-[40rem] max-h-[85vh] w-[56rem]"
+            : `max-h-[80vh] ${wide ? "w-[34rem]" : "w-[26rem]"}`
+        } max-w-full flex-col rounded-xl border border-white/10 bg-havoc-panel shadow-2xl`}
       >
         <header className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
           <h3 className="m-0 text-xs font-semibold tracking-wider text-havoc-muted uppercase">
@@ -87,7 +96,9 @@ export function PickerShell({
             </button>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
+        <div className={sidebar ? "flex min-h-0 flex-1" : "min-h-0 flex-1 overflow-auto p-3"}>
+          {children}
+        </div>
       </div>
     </div>,
     document.body,

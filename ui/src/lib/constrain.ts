@@ -12,7 +12,7 @@
  */
 
 import type { Transform } from "../api/types";
-import { corners as itemCorners } from "./transform";
+import { contentSize, corners as itemCorners } from "./transform";
 
 /** Scales this small are treated as degenerate (mirrors the drag minimum). */
 export const MIN_SCALE = 0.01;
@@ -107,6 +107,14 @@ export function slideIntoCanvas(t: Transform, content: Size, canvas: Size): Tran
   const box = boundsOf(t, content);
   const { dx, dy } = clampMoveDelta(box, 0, 0, canvas);
   return dx === 0 && dy === 0 ? t : { ...t, x: t.x + dx, y: t.y + dy };
+}
+
+/** Apply a pasted transform, slid back into the canvas when the live source
+ * size is known and left verbatim otherwise — shared by the Edit-Transform
+ * dialog's Paste and the menu bar's Paste Transform so they can't diverge. */
+export function constrainPaste(clip: Transform, source: Size | null, canvas: Size): Transform {
+  const content = source ? contentSize(source.w, source.h, clip.crop) : null;
+  return content ? slideIntoCanvas(clip, content, canvas) : clip;
 }
 
 /**

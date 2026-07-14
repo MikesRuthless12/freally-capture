@@ -235,6 +235,7 @@ fn main() {
             eula::eula_accept,
             commands::settings_get,
             commands::settings_set,
+            commands::reveal_app_folder,
             commands::capture_list_sources,
             commands::capture_window_thumbnail,
             commands::video_devices_list,

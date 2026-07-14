@@ -139,6 +139,42 @@ pub fn settings_complete_onboarding(store: State<'_, SettingsStore>) -> Result<(
         .map_err(|err| format!("could not record onboarding: {err}"))
 }
 
+/// Open one of the app's OWN folders in the OS file browser (the menu bar's
+/// "Show Recordings" / "Show Settings Folder"). Takes an enum, never a path —
+/// the webview cannot name a filesystem location.
+#[tauri::command]
+pub fn reveal_app_folder(store: State<'_, SettingsStore>, kind: String) -> Result<(), String> {
+    let dir = match kind.as_str() {
+        "recordings" => crate::recording::recordings_folder(&store.get().recording),
+        "settings" => directories::ProjectDirs::from("com", "Freally", "Freally Capture")
+            .ok_or_else(|| "no config directory on this system".to_owned())?
+            .config_dir()
+            .to_path_buf(),
+        _ => return Err("unknown app folder".to_owned()),
+    };
+    // The recordings folder is user/profile-settable and could be a UNC path;
+    // `create_dir_all` + a shell open on it forces an SMB/NTLM handshake that
+    // leaks the credential hash (CAP-M16's rule — the same `is_remote` guard
+    // the render loop uses). A hostile imported profile must not turn one
+    // "Show Recordings" click into a leak. Recording *to* a network share is
+    // still fine; the operator opens that folder from their own file manager.
+    if crate::commands::studio::is_remote(&dir.to_string_lossy()) {
+        return Err("that folder is on a network path — open it from your file manager".to_owned());
+    }
+    // The recordings folder may not exist until the first recording lands —
+    // create it rather than erroring on a fresh install.
+    std::fs::create_dir_all(&dir).map_err(|err| format!("could not create the folder: {err}"))?;
+    #[cfg(target_os = "windows")]
+    let spawned = std::process::Command::new("explorer").arg(&dir).spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(&dir).spawn();
+    #[cfg(target_os = "linux")]
+    let spawned = std::process::Command::new("xdg-open").arg(&dir).spawn();
+    spawned
+        .map(|_| ())
+        .map_err(|err| format!("could not open the folder: {err}"))
+}
+
 /// Replace and persist the settings.
 #[tauri::command]
 pub fn settings_set(store: State<'_, SettingsStore>, settings: Settings) -> Result<(), String> {

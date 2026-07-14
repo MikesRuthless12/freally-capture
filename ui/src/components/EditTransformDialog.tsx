@@ -3,7 +3,7 @@ import { useState } from "react";
 import { studioSetItemTransform } from "../api/commands";
 import type { ProgramStatus, SceneId, SceneItem, Transform } from "../api/types";
 import { useT } from "../i18n/t";
-import { clampScalesToCanvas, slideIntoCanvas, type Size } from "../lib/constrain";
+import { clampScalesToCanvas, constrainPaste, slideIntoCanvas, type Size } from "../lib/constrain";
 import { copyTransform, useClipboard } from "../lib/clipboard";
 import {
   ANCHORS,
@@ -99,8 +99,7 @@ export function EditTransformDialog({
   const paste = () => {
     const clip = clipboard.transform;
     if (!clip) return;
-    const pastedContent = source ? contentSize(source.w, source.h, clip.crop) : null;
-    apply(pastedContent ? slideIntoCanvas(clip, pastedContent, canvas) : clip);
+    apply(constrainPaste(clip, source, canvas));
   };
 
   return (

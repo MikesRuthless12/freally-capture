@@ -44,12 +44,35 @@ import { WorkspaceDialog } from "./WorkspaceDialog";
 const buttonBase =
   "w-full rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
+/** Every dialog the dock can open — the menu bar's launchers name these. */
+export type ControlsDialogKind =
+  | "components"
+  | "output"
+  | "stream"
+  | "hotkeys"
+  | "workspace"
+  | "recordings"
+  | "replay"
+  | "remote"
+  | "docks"
+  | "scripts"
+  | "automation"
+  | "rundown"
+  | "panel"
+  | "ptz"
+  | "midi"
+  | "bug"
+  | "updates"
+  | "settings"
+  | "about";
+
 /** The Controls dock: recording (P4); Go Live / Virtual Camera land in 0.70. */
 export function ControlsDock({
   settings,
   sceneNames,
   onSettingsSaved,
   onOpenSourceHealth,
+  menuOpenRef,
 }: {
   settings: Settings | null;
   /** The collection's scene names — the rundown's step targets (CAP-N09). */
@@ -57,35 +80,27 @@ export function ControlsDock({
   onSettingsSaved: (next: Settings) => void;
   /** The pre-flight's "sources" fix (CAP-M09) → the CAP-M13 dashboard. */
   onOpenSourceHealth: () => void;
+  /** The menu-bar seam: while mounted, the dock parks its dialog opener here
+   * so the in-app menus can launch the same dialogs without owning their
+   * state. A ref (not a consumed prop) because a synchronous setState in a
+   * consuming effect trips `react-hooks/set-state-in-effect`. */
+  menuOpenRef?: React.RefObject<((kind: ControlsDialogKind) => void) | null>;
 }) {
   const t = useT();
   const [rec, setRec] = useState<RecordingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<
-    | "components"
-    | "output"
-    | "stream"
-    | "hotkeys"
-    | "workspace"
-    | "recordings"
-    | "replay"
-    | "remote"
-    | "docks"
-    | "scripts"
-    | "automation"
-    | "rundown"
-    | "panel"
-    | "ptz"
-    | "midi"
-    | "bug"
-    | "updates"
-    | "settings"
-    | "about"
-    | null
-  >(null);
+  const [dialog, setDialog] = useState<ControlsDialogKind | null>(null);
 
   const [openedFrec, setOpenedFrec] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!menuOpenRef) return;
+    menuOpenRef.current = setDialog;
+    return () => {
+      menuOpenRef.current = null;
+    };
+  }, [menuOpenRef]);
 
   // Auto-surface the bug-report dialog on startup when the app crashed on a
   // previous run — this is the "relaunch → report" half of the loop. If there is
@@ -301,152 +316,11 @@ export function ControlsDock({
         >
           {t("controls-virtual-camera")}
         </button>
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => setDialog("recordings")}
-            title={t("controls-files-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-files")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("output")}
-            title={t("controls-output-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-output")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("stream")}
-            title={t("controls-stream-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-stream")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("components")}
-            title={t("controls-codecs-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-codecs")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("replay")}
-            title={t("controls-replay-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-replay")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("hotkeys")}
-            title={t("controls-keys-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-keys")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("scripts")}
-            title={t("controls-scripts-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-scripts")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("automation")}
-            title={t("controls-automation-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-automation")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("rundown")}
-            title={t("controls-rundown-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-rundown")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("panel")}
-            title={t("controls-panel-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-panel")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("ptz")}
-            title={t("controls-ptz-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-ptz")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("midi")}
-            title={t("controls-midi-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-midi")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("docks")}
-            title={t("controls-docks-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-docks")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("remote")}
-            title={t("controls-remote-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-remote")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("workspace")}
-            title={t("controls-profiles-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-profiles")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("settings")}
-            title={t("controls-settings-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-settings")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("bug")}
-            title={t("controls-bug-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-bug")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDialog("updates")}
-            title={t("controls-updates-title")}
-            className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text`}
-          >
-            {t("controls-updates")}
-          </button>
-        </div>
+        {/* The dialog LAUNCHERS moved to the menu bar (File/Tools/Help/…);
+            only the live-operation controls stay down here. The dialogs
+            themselves still render below — the menus open them through
+            `menuOpenRef`, and the crash-report / update-available auto-surface
+            keeps working. The removed buttons' i18n keys are left in place. */}
         {shownError && (
           <p role="alert" className="m-0 text-[11px] leading-snug break-words text-red-300">
             {shownError}

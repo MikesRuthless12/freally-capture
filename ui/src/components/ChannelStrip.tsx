@@ -21,6 +21,8 @@ import type {
 } from "../api/types";
 import { MAX_SYNC_OFFSET_MS, MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT } from "../api/types";
 import { useT } from "../i18n/t";
+import type { MeterColors } from "../lib/meters";
+import { DEFAULT_METER_COLORS, meterGradient } from "../lib/meters";
 import { NumberField } from "./NumberField";
 
 const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
@@ -36,28 +38,25 @@ function dbToPercent(db: number): number {
   return ((clamped - MIN_VOLUME_DB) / -MIN_VOLUME_DB) * 100;
 }
 
-/** The green→yellow→red gradient a level bar reveals, shared by both meters. */
-const METER_GRADIENT_H =
-  "linear-gradient(to right, #22c55e 0%, #22c55e 62%, #eab308 78%, #ef4444 95%)";
-const METER_GRADIENT_V =
-  "linear-gradient(to top, #22c55e 0%, #22c55e 62%, #eab308 78%, #ef4444 95%)";
-
 /** The dB ticks drawn beside a vertical meter (OBS-style scale). */
 const DB_TICKS = [0, -6, -12, -24, -36, -48, -60];
 
 /**
- * The VU meter: a green→yellow→red gradient revealed to the RMS level with a
- * peak tick. Horizontal (bar) or vertical (column) per `orientation`. Levels
- * arrive ~20 Hz; a short CSS transition smooths the motion between events.
+ * The VU meter: a low→mid→high gradient (green→yellow→red by default; see
+ * `resolveMeterColors`) revealed to the RMS level with a peak tick. Horizontal
+ * (bar) or vertical (column) per `orientation`. Levels arrive ~20 Hz; a short
+ * CSS transition smooths the motion between events.
  */
 function VuMeter({
   levels,
   dimmed,
   orientation,
+  colors,
 }: {
   levels?: AudioSourceLevels;
   dimmed: boolean;
   orientation: "horizontal" | "vertical";
+  colors: MeterColors;
 }) {
   const t = useT();
   const rms = levels ? Math.max(levels.rms[0], levels.rms[1]) : 0;
@@ -91,7 +90,7 @@ function VuMeter({
           className={`absolute ${vertical ? "bottom-0 left-0 w-full" : "inset-y-0 left-0"}`}
           style={{
             [vertical ? "height" : "width"]: `${innerExtent}%`,
-            background: vertical ? METER_GRADIENT_V : METER_GRADIENT_H,
+            background: meterGradient(vertical ? "to top" : "to right", colors),
           }}
         />
       </div>
@@ -351,6 +350,8 @@ type ChannelStripProps = {
   sceneId?: SceneId | null;
   /** This source's override in that scene, when one exists. */
   sceneOverride?: SceneAudioOverride | null;
+  /** The meter palette (Settings → Accessibility); default sweep when absent. */
+  meterColors?: MeterColors;
   onOpenFilters: () => void;
   onOpenAdvanced: () => void;
 };
@@ -368,6 +369,7 @@ export function ChannelStrip({
   orientation = "horizontal",
   sceneId = null,
   sceneOverride = null,
+  meterColors = DEFAULT_METER_COLORS,
   onOpenFilters,
   onOpenAdvanced,
 }: ChannelStripProps) {
@@ -448,7 +450,7 @@ export function ChannelStrip({
                 <span key={tick}>{tick}</span>
               ))}
             </div>
-            <VuMeter levels={levels} dimmed={gated} orientation="vertical" />
+            <VuMeter levels={levels} dimmed={gated} orientation="vertical" colors={meterColors} />
             <input
               type="range"
               min={MIN_VOLUME_DB}
@@ -524,7 +526,7 @@ export function ChannelStrip({
           {levels?.errorMessage ?? t("channelstrip-audio-device-error")}
         </p>
       ) : (
-        <VuMeter levels={levels} dimmed={gated} orientation="horizontal" />
+        <VuMeter levels={levels} dimmed={gated} orientation="horizontal" colors={meterColors} />
       )}
 
       <div className="flex items-center gap-2">
