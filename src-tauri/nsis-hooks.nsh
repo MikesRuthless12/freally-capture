@@ -26,7 +26,20 @@
   ; SHCNE_ASSOCCHANGED (0x08000000) — tell Explorer the association changed so it
   ; repaints existing .frec files immediately instead of after a sign-out.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
+
+  ; Desktop shortcut. Tauri's NSIS template creates only the Start-Menu entry
+  ; and its config schema has no desktop-shortcut option (verified against the
+  ; 0.300.0 setup on Windows 11: no Desktop icon after install), so it lives
+  ; here. No icon args: the shortcut takes the target exe's own icon. $DESKTOP
+  ; follows the installer's per-user/per-machine context, same as the Start
+  ; Menu entry. Updates re-create it by design — the installer's contract is
+  ; "installed apps have their icon", stated here once.
+  DetailPrint "Creating the Desktop shortcut"
+  CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
 !macroend
 
-; Nothing to undo: `APP_UNASSOCIATE` removes the whole `Freally Recording` ProgId
-; key, and `DefaultIcon` lives under it.
+; `APP_UNASSOCIATE` removes the whole `Freally Recording` ProgId key (and the
+; `DefaultIcon` under it) — only the Desktop shortcut needs our own cleanup.
+!macro NSIS_HOOK_POSTUNINSTALL
+  Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+!macroend
