@@ -20,8 +20,30 @@
     </header>
 
     <main>
-      <!-- 0.300.0 — new sources & overlays (CAP-N Phase 2) -->
+      <!-- 0.300.1 — the Phase 2 simplify pass -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.300.1</span>
+            <span class="date">Jul 14, 2026 · The Phase 2 simplify pass</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.300.1">Download</a>
+        </div>
+
+        <h2>0.300.1 — The Phase 2 simplify pass</h2>
+        <p class="summary">
+          No new features: a four-angle cleanup review (reuse, simplification, efficiency,
+          altitude) of the 0.300.0 changeset, applied. Duplicated pixel compositors, decoder
+          plumbing, session registries, and UI forms now share one implementation each; the
+          audio mix loop and the Freally Link sender shed avoidable per-block/per-frame
+          allocations. One visible fix rode along: the input overlay's glyph edges no longer
+          draw slightly dark over transparency — it now shares the corrected face compositor
+          with every other source.
+        </p>
+      </article>
+
+      <!-- 0.300.0 — new sources & overlays (CAP-N Phase 2) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.300.0</span>

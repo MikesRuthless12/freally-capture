@@ -128,6 +128,65 @@ pub(crate) fn take_seek(id: &str) -> Option<f32> {
         .remove(id)
 }
 
+/// Clamp a seek target inside the clip: 50 ms shy of the end, so a seek to
+/// "the end" still decodes a frame instead of hitting instant EOF. Shared by
+/// every transport-backed source (media, playlist, replay).
+pub(crate) fn clamp_seek(target: f32, duration: f32) -> f32 {
+    let ceiling = if duration > 0.0 {
+        duration - 0.05
+    } else {
+        f32::MAX
+    };
+    target.clamp(0.0, ceiling.max(0.0))
+}
+
+/// Decoded f32-LE bytes → `samples`, trimmed to WHOLE stereo frames
+/// (8 bytes) so a short read never splits a frame across blocks. Fills the
+/// caller's reused buffer — the audio pumps run every 10 ms and must not
+/// allocate per block.
+pub(crate) fn f32_samples_into(bytes: &[u8], samples: &mut Vec<f32>) {
+    let usable = bytes.len() - bytes.len() % 8;
+    samples.clear();
+    for chunk in bytes[..usable].chunks_exact(4) {
+        samples.push(f32::from_le_bytes(chunk.try_into().expect("4 bytes")));
+    }
+}
+
+/// The stop watchdog: kills `children` the moment `stop` is set (or the
+/// returned sender fires/drops), which unblocks any thread sitting in a
+/// pipe read — a wedged decoder can never wedge the studio's reconcile.
+/// Wind down with `let _ = tx.send(()); handle.join()`.
+pub(crate) fn spawn_kill_watchdog(
+    name: &str,
+    stop: &Arc<AtomicBool>,
+    mut children: Vec<std::process::Child>,
+) -> (
+    std::sync::mpsc::Sender<()>,
+    Option<std::thread::JoinHandle<()>>,
+) {
+    let watchdog_stop = Arc::clone(stop);
+    let (kill_tx, kill_rx) = std::sync::mpsc::channel::<()>();
+    let handle = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            loop {
+                if watchdog_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                match kill_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+            for child in &mut children {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        })
+        .ok();
+    (kill_tx, handle)
+}
+
 /// Loop-side: publish the playhead for the transport UI.
 pub(crate) fn publish_transport(id: &str, position: f32, duration: f32) {
     transport_registry()
@@ -983,12 +1042,7 @@ fn run_wire(
             video, audio, &info, fps, duration, seek_base, &hub_id, &sender, &stop,
         ) {
             StretchEnd::Seek(target) => {
-                let ceiling = if duration > 0.0 {
-                    duration - 0.05
-                } else {
-                    f32::MAX
-                };
-                seek_base = target.clamp(0.0, ceiling.max(0.0));
+                seek_base = clamp_seek(target, duration);
                 publish_transport(&hub_id, seek_base, duration);
                 continue 'session;
             }
@@ -1011,12 +1065,7 @@ fn run_wire(
                         return;
                     }
                     if let Some(target) = take_seek(&hub_id) {
-                        let ceiling = if duration > 0.0 {
-                            duration - 0.05
-                        } else {
-                            f32::MAX
-                        };
-                        seek_base = target.clamp(0.0, ceiling.max(0.0));
+                        seek_base = clamp_seek(target, duration);
                         publish_transport(&hub_id, seek_base, duration);
                         continue 'session;
                     }
@@ -1068,28 +1117,9 @@ fn run_wire_stretch(
     let mut audio = audio;
     let audio_stdout = audio.as_mut().and_then(|child| child.stdout.take());
     let video_stdout = video.stdout.take();
-    let watchdog_stop = Arc::clone(stop);
-    let (kill_tx, kill_rx) = std::sync::mpsc::channel::<()>();
-    let watchdog = std::thread::Builder::new()
-        .name("fcap-media-watchdog".into())
-        .spawn(move || {
-            loop {
-                if watchdog_stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match kill_rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                }
-            }
-            let _ = video.kill();
-            let _ = video.wait();
-            if let Some(mut child) = audio {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        })
-        .ok();
+    let mut children = vec![video];
+    children.extend(audio);
+    let (kill_tx, watchdog) = spawn_kill_watchdog("fcap-media-watchdog", stop, children);
 
     let pause = pause_flag(hub_id);
     // The audio pump: decoded 48 kHz stereo straight into the mixer's ring.
@@ -1116,12 +1146,8 @@ fn run_wire_stretch(
                     // end-of-stream — push whatever complete stereo frames it
                     // holds so the clip's last < 10 ms of audio isn't dropped.
                     let (filled, done) = read_available(&mut stdout, &mut bytes);
-                    let usable = filled - filled % 8; // whole stereo f32 frames
-                    if usable > 0 {
-                        samples.clear();
-                        for chunk in bytes[..usable].chunks_exact(4) {
-                            samples.push(f32::from_le_bytes(chunk.try_into().expect("4 bytes")));
-                        }
+                    f32_samples_into(&bytes[..filled], &mut samples);
+                    if !samples.is_empty() {
                         ring.push(&samples);
                     }
                     if done {

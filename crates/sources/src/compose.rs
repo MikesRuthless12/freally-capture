@@ -46,6 +46,23 @@ pub(crate) fn blit(face: &mut [u8], width: usize, height: usize, raster: &Frame,
     }
 }
 
+/// [`blit`], centered on the face (the "waiting"/"connecting" card layouts).
+pub(crate) fn blit_centered(face: &mut [u8], width: usize, height: usize, raster: &Frame) {
+    let x = (width.saturating_sub(raster.width as usize) / 2) as i64;
+    let y = (height.saturating_sub(raster.height as usize) / 2) as i64;
+    blit(face, width, height, raster, x, y);
+}
+
+/// The color at a fraction of its alpha (idle fills, outlines, dimmed rows).
+pub(crate) fn dim(color: [u8; 4], factor: f32) -> [u8; 4] {
+    [
+        color[0],
+        color[1],
+        color[2],
+        (color[3] as f32 * factor) as u8,
+    ]
+}
+
 /// Overwrite a rect with `color` (no blending — callers pre-clamp bounds).
 pub(crate) fn fill_rect(
     face: &mut [u8],

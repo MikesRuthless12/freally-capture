@@ -137,16 +137,23 @@ pub fn ring(target: &VisTarget) -> Arc<VisRing> {
     fresh
 }
 
-/// Engine side: every subscription alive right now (dead entries pruned).
-/// Empty — the overwhelmingly common case — costs one lock and no copies.
-pub fn live_targets() -> Vec<(VisTarget, Arc<VisRing>)> {
+/// Engine side: visit every subscription alive right now (dead entries
+/// pruned). Runs on the mix thread every 10 ms block, so it allocates
+/// nothing: no Vec, no target clones — `f` borrows both. Empty — the
+/// overwhelmingly common case — costs one lock and no copies. `f` runs
+/// under the registry lock; that's fine because callers keep it short
+/// (one `push_block` copy) and the only contender is a renderer
+/// subscribing via [`ring`].
+pub fn for_each_live(mut f: impl FnMut(&VisTarget, &Arc<VisRing>)) {
     let mut hub = hub()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     hub.retain(|_, weak| weak.strong_count() > 0);
-    hub.iter()
-        .filter_map(|(target, weak)| weak.upgrade().map(|ring| (target.clone(), ring)))
-        .collect()
+    for (target, weak) in hub.iter() {
+        if let Some(ring) = weak.upgrade() {
+            f(target, &ring);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -224,10 +231,15 @@ mod tests {
     #[test]
     fn a_dropped_subscription_unsubscribes() {
         let target = VisTarget::Source("vis-test-lifecycle".into());
+        let seen = |target: &VisTarget| {
+            let mut found = false;
+            for_each_live(|t, _| found |= t == target);
+            found
+        };
         let live = ring(&target);
-        assert!(live_targets().iter().any(|(t, _)| *t == target));
+        assert!(seen(&target));
         drop(live);
-        assert!(!live_targets().iter().any(|(t, _)| *t == target));
+        assert!(!seen(&target));
     }
 
     #[test]

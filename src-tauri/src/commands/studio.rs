@@ -994,16 +994,10 @@ pub(crate) fn is_remote(path: &str) -> bool {
     path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
 }
 
-/// A best-effort LAN address for the CAP-N11 ingest URL/QR (the web panel's
-/// probe): a UDP "connect" to a private address sends **nothing** — it just
-/// makes the OS pick the outgoing interface, whose address we read.
+/// A best-effort LAN address for the CAP-N11 ingest URL/QR — the web
+/// panel's probe, called rather than copied.
 pub(crate) fn lan_ip() -> String {
-    fn probe() -> Option<String> {
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-        socket.connect("192.168.1.1:9").ok()?;
-        Some(socket.local_addr().ok()?.ip().to_string())
-    }
-    probe().unwrap_or_else(|| "127.0.0.1".to_owned())
+    crate::webpanel::local_ip().unwrap_or_else(|| "127.0.0.1".to_owned())
 }
 
 /// CAP-N11: the address the ingest pickers show behind the URL + QR.

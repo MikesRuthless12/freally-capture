@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame};
 
+use crate::compose::dim;
 use crate::static_source::rgba_frame;
 use crate::text::{render_text, TextAlign, TextStyle};
 
@@ -64,7 +65,6 @@ pub struct InputOverlayConfig {
 /// compare equal and the repaint gate holds.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PadState {
-    pub connected: bool,
     pub south: bool,
     pub east: bool,
     pub west: bool,
@@ -228,16 +228,6 @@ pub fn layout_size(layout: Layout) -> (u32, u32) {
 // Drawing (pure — unit-testable without any OS input)
 // ---------------------------------------------------------------------------
 
-/// The color at a fraction of its alpha (idle fills, outlines).
-fn dim(color: [u8; 4], factor: f32) -> [u8; 4] {
-    [
-        color[0],
-        color[1],
-        color[2],
-        (color[3] as f32 * factor) as u8,
-    ]
-}
-
 #[derive(Clone, Copy)]
 struct RectF {
     x0: f32,
@@ -338,35 +328,11 @@ impl Canvas<'_> {
         });
     }
 
-    /// Straight-alpha over-blit of a text raster (same math as the split
-    /// timer's face compositor).
+    /// Straight-alpha over-blit of a text raster — the split timer's face
+    /// compositor, shared via `compose` (a hand-rolled copy here had the
+    /// pre-fix blend that darkened glyph edges over transparency).
     fn blit(&mut self, raster: &Frame, x: i64, y: i64) {
-        let stride = raster.stride as usize;
-        for row in 0..raster.height as usize {
-            let dst_y = y + row as i64;
-            if dst_y < 0 || dst_y >= self.h as i64 {
-                continue;
-            }
-            for col in 0..raster.width as usize {
-                let dst_x = x + col as i64;
-                if dst_x < 0 || dst_x >= self.w as i64 {
-                    continue;
-                }
-                let src = row * stride + col * 4;
-                let alpha = raster.data[src + 3] as u32;
-                if alpha == 0 {
-                    continue;
-                }
-                let dst = (dst_y as usize * self.w + dst_x as usize) * 4;
-                for ch in 0..3 {
-                    let over = raster.data[src + ch] as u32;
-                    let under = self.data[dst + ch] as u32;
-                    self.data[dst + ch] = ((over * alpha + under * (255 - alpha)) / 255) as u8;
-                }
-                let under_a = self.data[dst + 3] as u32;
-                self.data[dst + 3] = (alpha + under_a * (255 - alpha) / 255) as u8;
-            }
-        }
+        crate::compose::blit(self.data, self.w, self.h, raster, x, y);
     }
 }
 
@@ -808,7 +774,6 @@ fn sample_pad(gilrs: &mut gilrs::Gilrs) -> PadState {
         |button: Button| -> f32 { pad.button_data(button).map_or(0.0, |data| data.value()) };
     let quantize = |value: f32| (value.clamp(-1.0, 1.0) * 64.0).round() / 64.0;
     PadState {
-        connected: true,
         south: pad.is_pressed(Button::South),
         east: pad.is_pressed(Button::East),
         west: pad.is_pressed(Button::West),
@@ -979,7 +944,6 @@ mod tests {
         let (width, _) = layout_size(Layout::Gamepad);
         let released = render_overlay(&config, &[], &PadState::default(), &mut cache);
         let pad = PadState {
-            connected: true,
             rt: 1.0,
             ..PadState::default()
         };
@@ -997,7 +961,6 @@ mod tests {
         let (width, _) = layout_size(Layout::Fightstick);
         let centered = render_overlay(&config, &[], &PadState::default(), &mut cache);
         let pad = PadState {
-            connected: true,
             dpad_right: true,
             ..PadState::default()
         };

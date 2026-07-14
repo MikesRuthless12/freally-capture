@@ -38,7 +38,7 @@ const DEAD_AIR: Duration = Duration::from_secs(10);
 
 /// Reconnect backoff: 500 ms doubling to an 8 s ceiling. Pure — the session
 /// sleeps this long (in stop-checked slices) after attempt `attempt` failed.
-pub fn backoff_ms(attempt: u32) -> u64 {
+fn backoff_ms(attempt: u32) -> u64 {
     500u64.saturating_mul(1u64 << attempt.min(4))
 }
 
@@ -304,29 +304,10 @@ fn connecting_face(host: &str, port: u16, tick: u32) -> Frame {
     }
 }
 
-/// Alpha-over `raster` centered onto the face buffer.
+/// Alpha-over `raster` centered onto the (opaque) face buffer — the shared
+/// compositor; the face background is opaque, where both alpha rules agree.
 fn blit_center(face: &mut [u8], raster: &Frame) {
-    let x0 = (FACE_W.saturating_sub(raster.width) / 2) as usize;
-    let y0 = (FACE_H.saturating_sub(raster.height) / 2) as usize;
-    for y in 0..raster.height.min(FACE_H) as usize {
-        for x in 0..raster.width.min(FACE_W) as usize {
-            let src = y * raster.stride as usize + x * 4;
-            let alpha = raster.data[src + 3] as u32;
-            if alpha == 0 {
-                continue;
-            }
-            let dst = ((y0 + y) * FACE_W as usize + x0 + x) * 4;
-            if dst + 4 > face.len() {
-                continue;
-            }
-            for channel in 0..3 {
-                let over = raster.data[src + channel] as u32;
-                let under = face[dst + channel] as u32;
-                face[dst + channel] = ((over * alpha + under * (255 - alpha)) / 255) as u8;
-            }
-            face[dst + 3] = face[dst + 3].max(raster.data[src + 3]);
-        }
-    }
+    crate::compose::blit_centered(face, FACE_W as usize, FACE_H as usize, raster);
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@ use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 
 use super::pointer::{self, CursorKey, CursorTracker, KeyGhost};
-use crate::cursorfx::{self, FxState};
+use crate::cursorfx::{self, CursorFxConfig, FxState};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
 /// Keep-alive tick: cursor pump cadence + how often the HWND is re-validated.
@@ -57,6 +57,37 @@ struct CursorShared {
     fx: FxState,
     /// Keystroke-badge label cache (CAP-N19).
     ghost: KeyGhost,
+}
+
+impl CursorShared {
+    /// Decorate one outgoing frame: blend the cursor, draw the enabled
+    /// effects on top, and record `key` as drawn (the synthesis gate).
+    /// `config` must be the same lookup the tick ran with, or a live retune
+    /// could tick one config and draw another.
+    fn decorate(
+        &mut self,
+        frame: &mut Frame,
+        key: CursorKey,
+        config: Option<&CursorFxConfig>,
+        now: Instant,
+    ) {
+        if key.over {
+            self.tracker.blend(frame, key);
+        }
+        if let Some(config) = config {
+            pointer::fx_draw(
+                frame,
+                &self.fx,
+                &mut self.ghost,
+                config,
+                key.x,
+                key.y,
+                key.over,
+                now,
+            );
+        }
+        self.last_drawn = key;
+    }
 }
 
 /// Everything the FrameArrived handler needs, serialized behind one lock
@@ -231,22 +262,7 @@ fn pump_cursor(cursor: &Mutex<CursorShared>, hwnd_raw: isize, sender: &FrameSend
     }
     let mut frame = base.clone();
     frame.captured_at = now;
-    if key.over {
-        state.tracker.blend(&mut frame, key);
-    }
-    if let Some(config) = config.as_ref() {
-        pointer::fx_draw(
-            &mut frame,
-            &state.fx,
-            &mut state.ghost,
-            config,
-            key.x,
-            key.y,
-            key.over,
-            now,
-        );
-    }
-    state.last_drawn = key;
+    state.decorate(&mut frame, key, config.as_ref(), now);
     drop(guard);
     sender.send(frame);
 }
@@ -331,25 +347,10 @@ fn on_frame(
         let state = &mut *guard;
         let key = CursorTracker::sample(hwnd_raw, width, height);
         state.base = Some(frame.clone());
-        if key.over {
-            state.tracker.blend(&mut frame, key);
-        }
         let config = cursorfx::cursor_fx_for(&state.capture_id);
         let now = Instant::now();
         let _ = pointer::fx_tick(&mut state.fx, config.as_ref(), key.x, key.y, key.over, now);
-        if let Some(config) = config.as_ref() {
-            pointer::fx_draw(
-                &mut frame,
-                &state.fx,
-                &mut state.ghost,
-                config,
-                key.x,
-                key.y,
-                key.over,
-                now,
-            );
-        }
-        state.last_drawn = key;
+        state.decorate(&mut frame, key, config.as_ref(), now);
     }
     sender.send(frame);
 

@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import qrcode from "qrcode-generator";
+import { useEffect, useState } from "react";
 
 import {
   audioInputDevices,
@@ -8,7 +7,6 @@ import {
   cameraControlsList,
   cameraProfileReset,
   captureListSources,
-  localLanIp,
   replayRollSource,
   studioPlaylistControl,
   studioPlaylistCue,
@@ -29,7 +27,6 @@ import type {
   DeinterlaceMode,
   FieldOrder,
   FileBinding,
-  IngestProtocol,
   InputLayout,
   PlaylistEntry,
   ReplaySpeed,
@@ -45,8 +42,11 @@ import type {
   VisStyle,
 } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
-import { LAN_DEFAULT_PORTS, lanIngestUrl, lanPassphraseUsable } from "../lib/lanIngest";
+import { INPUT_LAYOUTS, REPLAY_SPEEDS, VIS_STYLES } from "../lib/sourceOptions";
+import { titleTextLayer } from "../lib/titleLayers";
+import { parseVisTarget, visTargetKey } from "../lib/visTarget";
 import { useT } from "../i18n/t";
+import { LanIngestFields } from "./LanIngestFields";
 import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
 
@@ -94,6 +94,65 @@ function CueListField({
         className={`${inputClass} font-mono`}
       />
     </label>
+  );
+}
+
+/** A fresh copy with rows `index` and `index + 1` swapped — the ↑/↓ move. */
+function swapAt<T>(list: T[], index: number): T[] {
+  const next = [...list];
+  [next[index], next[index + 1]] = [next[index + 1], next[index]];
+  return next;
+}
+
+/** The ↑/↓/× buttons shared by the playlist-item and title-layer rows.
+ * `onSwap(at)` swaps rows `at` and `at + 1`; labels are the callers'
+ * existing i18n strings. */
+function RowControls({
+  index,
+  count,
+  upLabel,
+  downLabel,
+  removeLabel,
+  onSwap,
+  onRemove,
+}: {
+  index: number;
+  count: number;
+  upLabel: string;
+  downLabel: string;
+  removeLabel: string;
+  onSwap: (at: number) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        disabled={index === 0}
+        onClick={() => onSwap(index - 1)}
+        aria-label={upLabel}
+        className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        disabled={index === count - 1}
+        onClick={() => onSwap(index)}
+        aria-label={downLabel}
+        className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+      >
+        ↓
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={removeLabel}
+        className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted hover:text-red-400"
+      >
+        ×
+      </button>
+    </>
   );
 }
 
@@ -500,12 +559,7 @@ function SettingsEditor({
         </div>
       );
     case "audioVisualizer": {
-      const target =
-        draft.target === "master"
-          ? "master"
-          : draft.target === "track"
-            ? `track:${draft.track}`
-            : `source:${draft.source ?? ""}`;
+      const target = visTargetKey(draft);
       const bound = draft.source ? audioSources.some((entry) => entry.id === draft.source) : true;
       return (
         <div className="flex flex-col gap-2">
@@ -516,9 +570,11 @@ function SettingsEditor({
               onChange={(event) => onChange({ ...draft, style: event.target.value as VisStyle })}
               className={inputClass}
             >
-              <option value="bars">{t("sources-visualizer-style-bars")}</option>
-              <option value="scope">{t("sources-visualizer-style-scope")}</option>
-              <option value="vu">{t("sources-visualizer-style-vu")}</option>
+              {VIS_STYLES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {t(label)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
@@ -526,13 +582,12 @@ function SettingsEditor({
             <select
               value={target}
               onChange={(event) => {
-                const value = event.target.value;
+                const next = parseVisTarget(event.target.value);
                 onChange({
                   ...draft,
-                  target:
-                    value === "master" ? "master" : value.startsWith("track:") ? "track" : "source",
-                  track: value.startsWith("track:") ? Number(value.slice(6)) : draft.track,
-                  source: value.startsWith("source:") ? value.slice(7) : null,
+                  target: next.target,
+                  track: next.track ?? draft.track,
+                  source: next.source,
                 });
               }}
               className={inputClass}
@@ -631,10 +686,11 @@ function SettingsEditor({
               }
               className={inputClass}
             >
-              <option value="wasd">{t("sources-input-layout-wasd")}</option>
-              <option value="keyboard">{t("sources-input-layout-keyboard")}</option>
-              <option value="gamepad">{t("sources-input-layout-gamepad")}</option>
-              <option value="fightstick">{t("sources-input-layout-fightstick")}</option>
+              {INPUT_LAYOUTS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {t(label)}
+                </option>
+              ))}
             </select>
           </label>
           <div className="flex items-end gap-3">
@@ -696,45 +752,20 @@ function SettingsEditor({
                       placeholder="C:\vt\clip.mp4"
                       className={`${inputClass} flex-1 font-mono`}
                     />
-                    <button
-                      type="button"
-                      disabled={index === 0}
-                      onClick={() => {
-                        const items = [...draft.items];
-                        [items[index - 1], items[index]] = [items[index], items[index - 1]];
-                        onChange({ ...draft, items });
-                      }}
-                      aria-label={t("properties-playlist-up")}
-                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      disabled={index === draft.items.length - 1}
-                      onClick={() => {
-                        const items = [...draft.items];
-                        [items[index], items[index + 1]] = [items[index + 1], items[index]];
-                        onChange({ ...draft, items });
-                      }}
-                      aria-label={t("properties-playlist-down")}
-                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
+                    <RowControls
+                      index={index}
+                      count={draft.items.length}
+                      upLabel={t("properties-playlist-up")}
+                      downLabel={t("properties-playlist-down")}
+                      removeLabel={t("properties-playlist-remove")}
+                      onSwap={(at) => onChange({ ...draft, items: swapAt(draft.items, at) })}
+                      onRemove={() =>
                         onChange({
                           ...draft,
                           items: draft.items.filter((_, at) => at !== index),
                         })
                       }
-                      aria-label={t("properties-playlist-remove")}
-                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted hover:text-red-400"
-                    >
-                      ×
-                    </button>
+                    />
                   </div>
                   <div className="flex items-end gap-2">
                     <NumberField
@@ -871,9 +902,11 @@ function SettingsEditor({
                 }
                 className={inputClass}
               >
-                <option value="full">{t("sources-replay-speed-full")}</option>
-                <option value="half">{t("sources-replay-speed-half")}</option>
-                <option value="quarter">{t("sources-replay-speed-quarter")}</option>
+                {REPLAY_SPEEDS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {t(label)}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -1854,42 +1887,17 @@ function TitleEditor({
               ) : (
                 <span className="flex-1" />
               )}
-              <button
-                type="button"
-                disabled={index === 0}
-                onClick={() => {
-                  const layers = [...draft.layers];
-                  [layers[index - 1], layers[index]] = [layers[index], layers[index - 1]];
-                  onChange({ ...draft, layers });
-                }}
-                aria-label={t("properties-title-up")}
-                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                disabled={index === draft.layers.length - 1}
-                onClick={() => {
-                  const layers = [...draft.layers];
-                  [layers[index], layers[index + 1]] = [layers[index + 1], layers[index]];
-                  onChange({ ...draft, layers });
-                }}
-                aria-label={t("properties-title-down")}
-                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                onClick={() =>
+              <RowControls
+                index={index}
+                count={draft.layers.length}
+                upLabel={t("properties-title-up")}
+                downLabel={t("properties-title-down")}
+                removeLabel={t("properties-title-remove")}
+                onSwap={(at) => onChange({ ...draft, layers: swapAt(draft.layers, at) })}
+                onRemove={() =>
                   onChange({ ...draft, layers: draft.layers.filter((_, at) => at !== index) })
                 }
-                aria-label={t("properties-title-remove")}
-                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted hover:text-red-400"
-              >
-                ×
-              </button>
+              />
             </div>
             <div className="flex items-end gap-2">
               <NumberField
@@ -2071,7 +2079,7 @@ function TitleEditor({
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => addLayer({ ...titleTextDefaults(), text: t("sources-text-default") })}
+          onClick={() => addLayer(titleTextLayer({ text: t("sources-text-default") }))}
           className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
         >
           {t("properties-title-add-text")}
@@ -2103,30 +2111,6 @@ function TitleEditor({
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("properties-title-note")}</p>
     </div>
   );
-}
-
-/** A fresh, fully-populated text layer for the “+ Text” button (the call
- * site swaps in the localized seed text). */
-function titleTextDefaults(): Extract<TitleLayer, { kind: "text" }> {
-  return {
-    kind: "text",
-    x: 0,
-    y: 0,
-    text: "",
-    fontFamily: null,
-    fontFile: null,
-    sizePx: 48,
-    color: { r: 255, g: 255, b: 255, a: 255 },
-    align: "left",
-    outlinePx: 0,
-    outlineColor: { r: 0, g: 0, b: 0, a: 255 },
-    shadow: false,
-    sourceFile: "",
-    binding: "whole",
-    csvRow: 1,
-    csvColumn: "",
-    jsonPointer: "",
-  };
 }
 
 function TextEditor({
@@ -2311,122 +2295,10 @@ function LanIngestEditor({
   onChange: (settings: SourceSettings) => void;
 }) {
   const t = useT();
-  const [host, setHost] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    localLanIp()
-      .then((ip) => {
-        if (!cancelled) setHost(ip);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const passUsable = lanPassphraseUsable(draft.protocol, draft.passphrase);
-  const url = lanIngestUrl(
-    draft.protocol,
-    host ?? "…",
-    draft.port,
-    draft.protocol === "srt" ? draft.passphrase : "",
-  );
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-end gap-2">
-        <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-          {t("sources-lan-protocol-label")}
-          <select
-            value={draft.protocol}
-            onChange={(event) => {
-              const protocol = event.target.value as IngestProtocol;
-              // Follow the protocol's default port unless the user set one.
-              const port =
-                draft.port === LAN_DEFAULT_PORTS[draft.protocol]
-                  ? LAN_DEFAULT_PORTS[protocol]
-                  : draft.port;
-              onChange({ ...draft, protocol, port });
-            }}
-            className={inputClass}
-          >
-            <option value="srt">{t("sources-lan-protocol-srt")}</option>
-            <option value="rtmp">{t("sources-lan-protocol-rtmp")}</option>
-          </select>
-        </label>
-        <NumberField
-          label={t("sources-lan-port-label")}
-          value={draft.port}
-          min={1024}
-          max={65535}
-          onCommit={(port) => onChange({ ...draft, port })}
-          className="flex-1"
-        />
-      </div>
-      {draft.protocol === "srt" && (
-        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          {t("sources-lan-passphrase-label")}
-          <input
-            value={draft.passphrase}
-            onChange={(event) => onChange({ ...draft, passphrase: event.target.value })}
-            className={`${inputClass} font-mono`}
-          />
-          <span className={passUsable ? "" : "text-amber-300"}>
-            {t("sources-lan-passphrase-hint")}
-          </span>
-        </label>
-      )}
-      {draft.protocol === "rtmp" ? (
-        <p className="m-0 text-[10px] leading-snug text-amber-300">
-          {t("sources-lan-rtmp-warning")}
-        </p>
-      ) : (
-        draft.passphrase === "" && (
-          <p className="m-0 text-[10px] leading-snug text-amber-300">
-            {t("sources-lan-open-warning")}
-          </p>
-        )
-      )}
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="m-0 text-[11px] text-havoc-muted">{t("sources-lan-url-label")}</p>
-          <p className="m-0 break-all font-mono text-xs text-havoc-text">{url}</p>
-        </div>
-        {host && <LanQr link={url} />}
-      </div>
+      <LanIngestFields value={draft} onChange={(next) => onChange({ ...draft, ...next })} />
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("properties-lan-note")}</p>
     </div>
-  );
-}
-
-/** The ingest URL as a QR code — the SourcesRail invite-QR pattern (vendored
- * zero-dep encoder, plain SVG path, CSP-safe). */
-function LanQr({ link }: { link: string }) {
-  const t = useT();
-  const rendered = useMemo(() => {
-    try {
-      const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
-      qr.addData(link);
-      qr.make();
-      const count = qr.getModuleCount();
-      let path = "";
-      for (let row = 0; row < count; row += 1) {
-        for (let col = 0; col < count; col += 1) {
-          if (qr.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`;
-        }
-      }
-      return { count, path };
-    } catch {
-      return null; // an over-long payload — the copyable URL still works
-    }
-  }, [link]);
-  if (!rendered) return null;
-  return (
-    <svg
-      viewBox={`0 0 ${rendered.count} ${rendered.count}`}
-      role="img"
-      aria-label={t("sources-lan-qr-aria")}
-      className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
-    >
-      <path d={rendered.path} fill="#000" />
-    </svg>
   );
 }

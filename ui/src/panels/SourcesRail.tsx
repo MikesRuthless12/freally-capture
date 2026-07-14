@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import qrcode from "qrcode-generator";
 
 import {
   appAudioApps,
@@ -10,7 +9,6 @@ import {
   captureWindowThumbnail,
   gameCaptureStatus,
   linkDiscover,
-  localLanIp,
   openPrivacySettings,
   settingsGet,
   settingsSet,
@@ -40,7 +38,6 @@ import type {
   Corner,
   CornerSlot,
   GameCaptureStatus,
-  IngestProtocol,
   InputLayout,
   ItemId,
   LinkPeer,
@@ -62,10 +59,15 @@ import type {
 import { CORNERS, kindHasAudio } from "../api/types";
 import { useT } from "../i18n/t";
 import { EmptyHint, Panel } from "../components/Panel";
+import { LanIngestFields, type LanIngestValue } from "../components/LanIngestFields";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
+import { QrSvg } from "../components/QrSvg";
 import { hexToRgba } from "../lib/color";
-import { LAN_DEFAULT_PORTS, lanIngestUrl, lanPassphraseUsable } from "../lib/lanIngest";
+import { LAN_DEFAULT_PORTS, lanPassphraseUsable } from "../lib/lanIngest";
+import { INPUT_LAYOUTS, REPLAY_SPEEDS, VIS_STYLES } from "../lib/sourceOptions";
+import { titleTextLayer } from "../lib/titleLayers";
+import { parseVisTarget } from "../lib/visTarget";
 import { useDismiss } from "../lib/useDismiss";
 import {
   spikeGetState,
@@ -2099,13 +2101,6 @@ function MediaForm({
   );
 }
 
-/** The three CAP-N10 roll speeds, in menu order. Values are i18n keys. */
-const REPLAY_SPEEDS: Array<[ReplaySpeed, string]> = [
-  ["full", "sources-replay-speed-full"],
-  ["half", "sources-replay-speed-half"],
-  ["quarter", "sources-replay-speed-quarter"],
-];
-
 function ReplayPlaybackForm({
   onClose,
   onPick,
@@ -2423,30 +2418,6 @@ function SplitTimerForm({
   );
 }
 
-/** A fully-populated text layer for the title starter templates (CAP-N16). */
-function titleTextLayer(overrides: Partial<Extract<TitleLayer, { kind: "text" }>>): TitleLayer {
-  return {
-    kind: "text",
-    x: 0,
-    y: 0,
-    text: "",
-    fontFamily: null,
-    fontFile: null,
-    sizePx: 48,
-    color: { r: 255, g: 255, b: 255, a: 255 },
-    align: "left",
-    outlinePx: 0,
-    outlineColor: { r: 0, g: 0, b: 0, a: 255 },
-    shadow: false,
-    sourceFile: "",
-    binding: "whole",
-    csvRow: 1,
-    csvColumn: "",
-    jsonPointer: "",
-    ...overrides,
-  };
-}
-
 /** Lower-third starter: an accent bar + name + subtitle, scaled to the canvas. */
 function lowerThirdLayers(w: number, h: number, t: (key: string) => string): TitleLayer[] {
   return [
@@ -2600,80 +2571,16 @@ function LanIngestForm({
   onPick: (settings: SourceSettings, name?: string) => void;
 }) {
   const t = useT();
-  const [protocol, setProtocol] = useState<IngestProtocol>("srt");
-  const [port, setPort] = useState(LAN_DEFAULT_PORTS.srt);
-  const [passphrase, setPassphrase] = useState("");
-  const [host, setHost] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    localLanIp()
-      .then((ip) => {
-        if (!cancelled) setHost(ip);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const switchProtocol = (next: IngestProtocol) => {
-    // Follow the protocol's default port unless the user picked their own.
-    if (port === LAN_DEFAULT_PORTS[protocol]) setPort(LAN_DEFAULT_PORTS[next]);
-    setProtocol(next);
-  };
-  const passUsable = lanPassphraseUsable(protocol, passphrase);
-  const url = lanIngestUrl(protocol, host ?? "…", port, protocol === "srt" ? passphrase : "");
+  const [value, setValue] = useState<LanIngestValue>({
+    protocol: "srt",
+    port: LAN_DEFAULT_PORTS.srt,
+    passphrase: "",
+  });
+  const passUsable = lanPassphraseUsable(value.protocol, value.passphrase);
   return (
     <PickerShell title={t("sources-lan-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
-        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-          {t("sources-lan-protocol-label")}
-          <select
-            value={protocol}
-            onChange={(event) => switchProtocol(event.target.value as IngestProtocol)}
-            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
-          >
-            <option value="srt">{t("sources-lan-protocol-srt")}</option>
-            <option value="rtmp">{t("sources-lan-protocol-rtmp")}</option>
-          </select>
-        </label>
-        <NumberField
-          label={t("sources-lan-port-label")}
-          value={port}
-          min={1024}
-          max={65535}
-          onCommit={setPort}
-        />
-        {protocol === "srt" && (
-          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
-            {t("sources-lan-passphrase-label")}
-            <input
-              value={passphrase}
-              onChange={(event) => setPassphrase(event.target.value)}
-              className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 font-mono text-xs text-havoc-text"
-            />
-            <span className={passUsable ? "" : "text-amber-300"}>
-              {t("sources-lan-passphrase-hint")}
-            </span>
-          </label>
-        )}
-        {protocol === "rtmp" ? (
-          <p className="m-0 text-[10px] leading-snug text-amber-300">
-            {t("sources-lan-rtmp-warning")}
-          </p>
-        ) : (
-          passphrase === "" && (
-            <p className="m-0 text-[10px] leading-snug text-amber-300">
-              {t("sources-lan-open-warning")}
-            </p>
-          )
-        )}
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="m-0 text-[11px] text-havoc-muted">{t("sources-lan-url-label")}</p>
-            <p className="m-0 break-all font-mono text-xs text-havoc-text">{url}</p>
-          </div>
-          {host && <InviteQr link={url} ariaKey="sources-lan-qr-aria" />}
-        </div>
+        <LanIngestFields value={value} onChange={setValue} />
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-lan-note")}</p>
         <button
           type="button"
@@ -2681,9 +2588,8 @@ function LanIngestForm({
           onClick={() =>
             onPick({
               kind: "lanIngest",
-              protocol,
-              port,
-              passphrase: protocol === "srt" ? passphrase : "",
+              ...value,
+              passphrase: value.protocol === "srt" ? value.passphrase : "",
             })
           }
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
@@ -2811,7 +2717,7 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
                 {t("sources-remote-share-note")}
               </p>
               <div className="flex items-center gap-2">
-                <InviteQr link={qrLink ?? link} />
+                <QrSvg link={qrLink ?? link} />
                 <p className="m-0 text-[10px] leading-snug text-havoc-muted">
                   {t("sources-remote-qr-note")}
                 </p>
@@ -2872,47 +2778,6 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
         </div>
       </div>
     </PickerShell>
-  );
-}
-
-/** The invite link as a QR code (TASK-R3) — vendored zero-dep encoder, drawn
- * as a plain SVG path (no innerHTML, CSP-safe). `ariaKey` names the payload
- * for screen readers (the LAN ingest form shares this component). */
-function InviteQr({
-  link,
-  ariaKey = "sources-invite-qr-aria",
-}: {
-  link: string;
-  ariaKey?: string;
-}) {
-  const t = useT();
-  const rendered = useMemo(() => {
-    try {
-      const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
-      qr.addData(link);
-      qr.make();
-      const count = qr.getModuleCount();
-      let path = "";
-      for (let row = 0; row < count; row += 1) {
-        for (let col = 0; col < count; col += 1) {
-          if (qr.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`;
-        }
-      }
-      return { count, path };
-    } catch {
-      return null; // an over-long payload — the copyable link still works
-    }
-  }, [link]);
-  if (!rendered) return null;
-  return (
-    <svg
-      viewBox={`0 0 ${rendered.count} ${rendered.count}`}
-      role="img"
-      aria-label={t(ariaKey)}
-      className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
-    >
-      <path d={rendered.path} fill="#000" />
-    </svg>
   );
 }
 
@@ -3290,13 +3155,6 @@ function SystemStatsForm({
   );
 }
 
-/** The three CAP-N15 visualizer faces, in menu order. Values are i18n keys. */
-const VIS_STYLES: Array<[VisStyle, string]> = [
-  ["bars", "sources-visualizer-style-bars"],
-  ["scope", "sources-visualizer-style-scope"],
-  ["vu", "sources-visualizer-style-vu"],
-];
-
 function VisualizerForm({
   sources,
   onClose,
@@ -3351,22 +3209,22 @@ function VisualizerForm({
         </p>
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            const parsed = parseVisTarget(target);
             onPick({
               kind: "audioVisualizer",
               style,
-              target:
-                target === "master" ? "master" : target.startsWith("track:") ? "track" : "source",
-              track: target.startsWith("track:") ? Number(target.slice(6)) : 1,
-              source: target.startsWith("source:") ? target.slice(7) : null,
+              target: parsed.target,
+              track: parsed.track ?? 1,
+              source: parsed.source,
               width: 800,
               height: 240,
               bands: 48,
               color: { r: 74, g: 158, b: 255, a: 255 },
               peakHold: true,
               decay: 30,
-            })
-          }
+            });
+          }}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
           {t("sources-visualizer-add")}
@@ -3375,14 +3233,6 @@ function VisualizerForm({
     </PickerShell>
   );
 }
-
-/** The four CAP-N13 layout presets, in menu order. Values are i18n keys. */
-const INPUT_LAYOUTS: Array<[InputLayout, string]> = [
-  ["wasd", "sources-input-layout-wasd"],
-  ["keyboard", "sources-input-layout-keyboard"],
-  ["gamepad", "sources-input-layout-gamepad"],
-  ["fightstick", "sources-input-layout-fightstick"],
-];
 
 function InputOverlayForm({
   onClose,

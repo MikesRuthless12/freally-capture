@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame};
@@ -27,7 +27,7 @@ use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame};
 use crate::compose::blit;
 use crate::image::load_image_rgba;
 use crate::static_source::{check_dimension, rgba_frame};
-use crate::text::{render_text, TextAlign, TextStyle};
+use crate::text::{remote_path, render_text, TextAlign, TextStyle};
 use crate::textfile;
 
 /// The generator's frame cadence while an animation runs.
@@ -126,13 +126,14 @@ pub fn set_variables(vars: HashMap<String, String>) {
     *lock(variables()) = vars;
 }
 
-/// Substitute `{{name}}` tokens; unknown names stay verbatim (a typo shows
-/// itself instead of vanishing) — the automation engine's exact rule.
-fn interpolate(text: &str) -> String {
+/// Substitute `{{name}}` tokens using `vars`; unknown names stay verbatim
+/// (a typo shows itself instead of vanishing). The grammar is user-visible
+/// and shared — titles and the automation engine call THIS function, so
+/// they can never drift apart.
+pub fn interpolate_vars(text: &str, vars: &HashMap<String, String>) -> String {
     if !text.contains("{{") {
         return text.to_owned();
     }
-    let vars = lock(variables());
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("{{") {
@@ -155,6 +156,14 @@ fn interpolate(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// [`interpolate_vars`] against the studio-variable registry.
+fn interpolate(text: &str) -> String {
+    if !text.contains("{{") {
+        return text.to_owned();
+    }
+    interpolate_vars(text, &lock(variables()))
 }
 
 // ---------------------------------------------------------------------------
@@ -249,15 +258,12 @@ impl TitleSession {
     }
 }
 
-fn registry() -> &'static Mutex<HashMap<String, Weak<Mutex<TitleSession>>>> {
-    static REG: OnceLock<Mutex<HashMap<String, Weak<Mutex<TitleSession>>>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
-}
+static REGISTRY: crate::registry::WeakRegistry<Mutex<TitleSession>> =
+    crate::registry::WeakRegistry::new();
 
 /// Drive one live title (the properties dialog). `false` = not running.
 pub fn control(id: &str, action: TitleAction) -> bool {
-    let live = lock(registry()).get(id).and_then(Weak::upgrade);
-    match live {
+    match REGISTRY.get(id) {
         Some(session) => {
             lock(&session).control(action);
             true
@@ -447,13 +453,10 @@ fn effective_text(spec_text: &str, override_value: Option<&str>, bound: Option<&
 // Bound files (CAP-M16 rules)
 // ---------------------------------------------------------------------------
 
-/// Mirrors `commands::studio::is_remote` (that crate sits above this one):
-/// a UNC / URL path is never statted — on Windows the stat alone forces an
-/// SMB/NTLM handshake. The studio refuses these before the session starts;
-/// this is the generator's own belt to that suspenders.
-fn remote_path(path: &str) -> bool {
-    path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
-}
+// The remote-path check itself lives in `text::remote_path` — the same
+// funnel that guards every font read. The studio refuses remote paths
+// before the session starts; the generator's own checks below are the
+// belt to that suspenders.
 
 #[derive(Default)]
 struct BoundState {
@@ -533,7 +536,7 @@ pub fn start_title(id: &str, config: TitleConfig) -> Result<CaptureSession, Capt
     }
 
     let session = Arc::new(Mutex::new(TitleSession::new()));
-    lock(registry()).insert(id.to_string(), Arc::downgrade(&session));
+    REGISTRY.insert(id, &session);
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -836,7 +839,7 @@ mod tests {
     #[test]
     fn control_registry_runs_the_fire_and_override_lifecycle() {
         let session = Arc::new(Mutex::new(TitleSession::new()));
-        lock(registry()).insert("title-test-live".into(), Arc::downgrade(&session));
+        REGISTRY.insert("title-test-live", &session);
         assert!(lock(&session).animating(), "a fresh title is animating in");
         // A zero duration settles instantly; Out then hides it.
         assert_eq!(lock(&session).progress(Duration::ZERO), 1.0);

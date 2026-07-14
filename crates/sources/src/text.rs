@@ -135,11 +135,25 @@ fn font_cache() -> &'static Mutex<HashMap<String, Arc<LoadedFont>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Mirrors `commands::studio::is_remote` (that crate sits above this one):
+/// a UNC / URL path is never statted or read — on Windows the access alone
+/// forces an SMB/NTLM handshake that leaks the user's credential hash.
+pub(crate) fn remote_path(path: &str) -> bool {
+    path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
+}
+
 /// Resolve the styled font to raw bytes: explicit file > named family >
 /// platform sans-serif > any face at all (an honest error only when the
 /// machine truly has no fonts).
 fn resolve_font(style: &TextStyle) -> Result<Arc<LoadedFont>, StaticSourceError> {
-    let key = match (&style.font_file, &style.font_family) {
+    // The CAP-M16 rule, enforced at the funnel so EVERY face generator
+    // (Timer, Text, stats HUD, titles, splits…) is covered at once: a
+    // remote font path is never read — the style falls back to its family.
+    let font_file = style
+        .font_file
+        .as_ref()
+        .filter(|path| !remote_path(&path.to_string_lossy()));
+    let key = match (font_file, &style.font_family) {
         (Some(path), _) => format!("file:{}", path.display()),
         (None, Some(family)) => format!("family:{family}"),
         (None, None) => "family:<sans-serif>".to_string(),
@@ -152,7 +166,7 @@ fn resolve_font(style: &TextStyle) -> Result<Arc<LoadedFont>, StaticSourceError>
         return Ok(Arc::clone(found));
     }
 
-    let loaded = if let Some(path) = &style.font_file {
+    let loaded = if let Some(path) = font_file {
         let data = std::fs::read(path).map_err(|err| StaticSourceError::Io {
             path: path.display().to_string(),
             message: err.to_string(),
@@ -768,6 +782,23 @@ mod tests {
             red.0 < fill.0 && red.1 > fill.1,
             "outline ink sits outside the fill on both sides ({red:?} vs {fill:?})"
         );
+    }
+
+    #[test]
+    fn remote_font_paths_are_never_read() {
+        // The CAP-M16 rule at the funnel: a UNC/URL font path must not be
+        // touched (on Windows the read alone leaks an NTLM handshake) — the
+        // style falls back to the family font instead of erroring, so every
+        // face generator (Timer, Text, stats HUD…) is covered at once.
+        let mut hostile = style("H");
+        hostile.font_file = Some(std::path::PathBuf::from("\\\\evil\\share\\face.ttf"));
+        let (Some(with), Some(without)) = (render(&hostile), render(&style("H"))) else {
+            return;
+        };
+        assert_eq!(with.data, without.data, "the fallback face is identical");
+        assert!(remote_path("//evil/share/face.ttf"));
+        assert!(remote_path("https://evil.example/face.ttf"));
+        assert!(!remote_path("C:/fonts/face.ttf"));
     }
 
     #[test]

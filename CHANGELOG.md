@@ -15,6 +15,32 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.300.1] — 2026-07-14 (The Phase 2 simplify pass)
+
+> No new features: a four-angle cleanup review (reuse / simplification / efficiency / altitude)
+> of the 0.300.0 changeset, applied. One visible fix rode along: the **input overlay's face
+> compositor** still used the pre-fix alpha blend, so glyph edges drawn over transparency came
+> out slightly dark — it now shares the corrected `compose::blit` with every other face source.
+
+### Changed
+
+- **Shared what 0.300.0 built and then bypassed.** The four hand-rolled alpha blits now call one
+  compositor; the seek clamp, audio-sample decode, and child-process watchdog live once in
+  `media.rs` (media, playlist, replay, and LAN ingest all adopt them); the four weak session
+  registries are one `WeakRegistry`; the `{{variable}}` grammar is ONE function shared by titles
+  and the automation engine (they can no longer drift); the LAN-ingest form, QR renderer,
+  title-layer defaults, and option tables are single shared UI modules; the LAN IP probe, the
+  Link sender's JPEG encoder, and the playlist's shuffle all call the helpers that already
+  existed instead of carrying copies.
+- **Real-time hygiene.** The mixer's visualizer tap no longer allocates per 10 ms block; the
+  Freally Link sender writes frames header-then-payload instead of copying every JPEG program
+  frame into an intermediate buffer; the split timer computes its comparison column once per
+  session instead of per repaint; the LAN-ingest status check stopped re-stringing the source
+  id on every drained frame.
+- Assorted dead surface removed (an unread gamepad field, unused derives, over-public helpers)
+  and ffmpeg argument prologues/probes deduplicated inside the decode module — byte-identical
+  commands, stated once.
+
 ## [0.300.0] — 2026-07-14 (New Sources & Overlays — CAP-N Phase 2)
 
 > **Ten new things to put on the canvas — all local.** Instant replay rolls the buffer *into* the

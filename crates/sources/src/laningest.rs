@@ -345,24 +345,8 @@ fn pump_stretch(
             .ok()
     });
 
-    let watchdog_stop = Arc::clone(stop);
-    let (kill_tx, kill_rx) = std::sync::mpsc::channel::<()>();
-    let watchdog = std::thread::Builder::new()
-        .name("fcap-lan-ingest-watchdog".into())
-        .spawn(move || {
-            loop {
-                if watchdog_stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match kill_rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                }
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-        })
-        .ok();
+    let (kill_tx, watchdog) =
+        crate::media::spawn_kill_watchdog("fcap-lan-ingest-watchdog", stop, vec![child]);
 
     let ring = fcap_audio::media_hub::ring(hub_id);
     ring.clear();
@@ -468,11 +452,8 @@ fn next_event(reader: &mut impl Read, frame_bytes: usize) -> AviEvent {
                 }
                 skip(reader, padded - size as u64);
                 // Whole stereo f32 frames only (8 bytes); a torn tail drops.
-                let usable = bytes.len() - bytes.len() % 8;
-                let samples: Vec<f32> = bytes[..usable]
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("4 bytes")))
-                    .collect();
+                let mut samples = Vec::new();
+                crate::media::f32_samples_into(&bytes, &mut samples);
                 if samples.is_empty() {
                     continue;
                 }
@@ -528,25 +509,7 @@ fn compose_face(raster: Option<Frame>) -> Frame {
         data.extend_from_slice(&FACE_BG);
     }
     if let Some(raster) = raster {
-        let off_x = (CANVAS_W.saturating_sub(raster.width) / 2) as usize;
-        let off_y = (CANVAS_H.saturating_sub(raster.height) / 2) as usize;
-        let rows = raster.height.min(CANVAS_H) as usize;
-        let cols = raster.width.min(CANVAS_W) as usize;
-        for row in 0..rows {
-            for col in 0..cols {
-                let src = (row * raster.stride as usize + col * 4).min(raster.data.len() - 4);
-                let alpha = raster.data[src + 3] as u32;
-                if alpha == 0 {
-                    continue;
-                }
-                let dst = ((off_y + row) * CANVAS_W as usize + off_x + col) * 4;
-                for channel in 0..3 {
-                    let over = raster.data[src + channel] as u32;
-                    let under = data[dst + channel] as u32;
-                    data[dst + channel] = ((over * alpha + under * (255 - alpha)) / 255) as u8;
-                }
-            }
-        }
+        crate::compose::blit_centered(&mut data, CANVAS_W as usize, CANVAS_H as usize, &raster);
     }
     Frame {
         width: CANVAS_W,
