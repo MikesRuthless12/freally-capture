@@ -16,8 +16,9 @@ use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame, PixelForm
 use crate::image::load_image_rgba;
 
 /// A tiny deterministic LCG (numerical-recipes constants) — enough to
-/// shuffle slides without pulling a rand dependency into the workspace.
-struct Lcg(u64);
+/// shuffle slides (and the playlist) without pulling a rand dependency
+/// into the workspace.
+pub(crate) struct Lcg(pub(crate) u64);
 
 impl Lcg {
     fn next(&mut self) -> u64 {
@@ -29,7 +30,7 @@ impl Lcg {
     }
 }
 
-fn shuffled(order: &mut [usize], rng: &mut Lcg) {
+pub(crate) fn shuffled(order: &mut [usize], rng: &mut Lcg) {
     for i in (1..order.len()).rev() {
         let j = (rng.next() as usize) % (i + 1);
         order.swap(i, j);

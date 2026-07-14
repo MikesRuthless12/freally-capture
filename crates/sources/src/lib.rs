@@ -31,6 +31,7 @@ pub mod laningest;
 pub mod link;
 pub mod media;
 pub mod playlist;
+pub(crate) mod registry;
 pub mod replaysrc;
 pub mod slideshow;
 pub mod splits;

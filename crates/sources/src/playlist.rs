@@ -21,15 +21,15 @@
 //!   (fit + pad), so the pipe stays one frame size.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame, FrameSender, PixelFormat};
 use fcap_encode::decode::{self, ConcatItem};
 
 use crate::media::{
-    media_seek, media_transport, pause_flag, publish_transport, read_available, read_exact_or_end,
-    seek_pending, take_seek,
+    clamp_seek, f32_samples_into, media_seek, media_transport, pause_flag, publish_transport,
+    read_available, read_exact_or_end, seek_pending, spawn_kill_watchdog, take_seek,
 };
 use crate::text::{render_text, TextAlign, TextStyle};
 
@@ -39,7 +39,7 @@ const AUDIO_FACE_H: u32 = 160;
 const AUDIO_FACE_POLL: Duration = Duration::from_millis(500);
 
 /// One playlist entry as configured (trims in seconds; 0 = edge).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PlaylistItemSpec {
     pub path: String,
     pub in_s: f32,
@@ -83,18 +83,11 @@ impl PlaylistTable {
     }
 }
 
-fn registry() -> &'static Mutex<std::collections::HashMap<String, Weak<PlaylistTable>>> {
-    static REG: OnceLock<Mutex<std::collections::HashMap<String, Weak<PlaylistTable>>>> =
-        OnceLock::new();
-    REG.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
-}
+static REGISTRY: crate::registry::WeakRegistry<PlaylistTable> =
+    crate::registry::WeakRegistry::new();
 
 fn table(id: &str) -> Option<Arc<PlaylistTable>> {
-    registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(id)
-        .and_then(Weak::upgrade)
+    REGISTRY.get(id)
 }
 
 /// Manual transport: jump between items.
@@ -143,14 +136,7 @@ pub fn control(id: &str, action: PlaylistAction) -> bool {
 
 /// Drive EVERY live playlist (the global hotkeys).
 pub fn control_all(action: PlaylistAction) {
-    let ids: Vec<String> = {
-        let mut registry = registry()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        registry.retain(|_, weak| weak.strong_count() > 0);
-        registry.keys().cloned().collect()
-    };
-    for id in ids {
+    for id in REGISTRY.live_ids() {
         control(&id, action);
     }
 }
@@ -192,14 +178,7 @@ fn display_name(path: &str) -> String {
 /// The slideshow's tiny LCG, reused for the shuffle draw (no rand dep).
 fn shuffled_order(count: usize, seed: u64) -> Vec<usize> {
     let mut order: Vec<usize> = (0..count).collect();
-    let mut state = seed | 1;
-    for index in (1..count).rev() {
-        state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let pick = (state >> 33) as usize % (index + 1);
-        order.swap(index, pick);
-    }
+    crate::slideshow::shuffled(&mut order, &mut crate::slideshow::Lcg(seed | 1));
     order
 }
 
@@ -321,10 +300,7 @@ pub fn start_playlist(
         .fold(0.0_f32, f32::max);
     let fps = if probed_max > 0.0 { probed_max } else { 30.0 };
 
-    registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(hub_id.to_string(), Arc::downgrade(&table));
+    REGISTRY.insert(hub_id, &table);
 
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
@@ -414,12 +390,7 @@ fn run_playlist(run: PlaylistRun, hub_id: String, sender: FrameSender, stop: Arc
             &run, video, audio, duration, seek_base, &hub_id, &sender, &stop,
         ) {
             StretchEnd::Seek(target) => {
-                let ceiling = if duration > 0.0 {
-                    duration - 0.05
-                } else {
-                    f32::MAX
-                };
-                seek_base = target.clamp(0.0, ceiling.max(0.0));
+                seek_base = clamp_seek(target, duration);
                 publish_transport(&hub_id, seek_base, duration);
                 continue 'session;
             }
@@ -448,12 +419,7 @@ fn run_playlist(run: PlaylistRun, hub_id: String, sender: FrameSender, stop: Arc
                         return;
                     }
                     if let Some(target) = take_seek(&hub_id) {
-                        let ceiling = if duration > 0.0 {
-                            duration - 0.05
-                        } else {
-                            f32::MAX
-                        };
-                        seek_base = target.clamp(0.0, ceiling.max(0.0));
+                        seek_base = clamp_seek(target, duration);
                         publish_transport(&hub_id, seek_base, duration);
                         continue 'session;
                     }
@@ -487,36 +453,14 @@ fn run_stretch(
     let audio_stdout = audio.as_mut().and_then(|child| child.stdout.take());
 
     // Stop watchdog: kills the children so pipe reads always unblock.
-    let watchdog_stop = Arc::clone(stop);
-    let (kill_tx, kill_rx) = std::sync::mpsc::channel::<()>();
-    let watchdog = std::thread::Builder::new()
-        .name("fcap-playlist-watchdog".into())
-        .spawn(move || {
-            loop {
-                if watchdog_stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match kill_rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                }
-            }
-            if let Some(mut child) = video {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            if let Some(mut child) = audio {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        })
-        .ok();
+    let children: Vec<std::process::Child> = video.into_iter().chain(audio).collect();
+    let (kill_tx, watchdog) = spawn_kill_watchdog("fcap-playlist-watchdog", stop, children);
 
     let pause = pause_flag(hub_id);
     // Audio-lane position clock: samples pushed → seconds (the audio-only
     // lane has no frame clock to count).
     let audio_seconds = Arc::new(Mutex::new(0.0f32));
-    let audio_thread = audio_stdout.map(|mut stdout| {
+    let audio_thread = audio_stdout.and_then(|mut stdout| {
         let ring = fcap_audio::media_hub::ring(hub_id);
         ring.clear();
         let audio_stop = Arc::clone(stop);
@@ -534,14 +478,10 @@ fn run_stretch(
                         std::thread::sleep(Duration::from_millis(30));
                     }
                     let (filled, done) = read_available(&mut stdout, &mut bytes);
-                    let usable = filled - filled % 8;
-                    if usable > 0 {
-                        samples.clear();
-                        for chunk in bytes[..usable].chunks_exact(4) {
-                            samples.push(f32::from_le_bytes(chunk.try_into().expect("4 bytes")));
-                        }
+                    f32_samples_into(&bytes[..filled], &mut samples);
+                    if !samples.is_empty() {
                         ring.push(&samples);
-                        pushed_frames += (usable / 8) as u64;
+                        pushed_frames += (samples.len() / 2) as u64;
                         *clock
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner) =
@@ -640,7 +580,7 @@ fn run_stretch(
                 last_face = Some(name);
             }
             // The audio pump ending is this lane's EOF signal.
-            if let Some(Some(handle)) = audio_thread.as_ref() {
+            if let Some(handle) = audio_thread.as_ref() {
                 if handle.is_finished() && !stop.load(Ordering::Relaxed) {
                     break StretchEnd::Ended;
                 }
@@ -653,7 +593,7 @@ fn run_stretch(
     if let Some(handle) = watchdog {
         let _ = handle.join();
     }
-    if let Some(Some(handle)) = audio_thread {
+    if let Some(handle) = audio_thread {
         let _ = handle.join();
     }
     if matches!(end, StretchEnd::Ended) && stop.load(Ordering::Relaxed) {
@@ -707,10 +647,7 @@ mod tests {
     #[test]
     fn cues_map_through_the_shuffle_order_and_the_in_trim() {
         let table = Arc::new(test_table());
-        registry()
-            .lock()
-            .unwrap()
-            .insert("playlist-test-cue".into(), Arc::downgrade(&table));
+        REGISTRY.insert("playlist-test-cue", &table);
         // Original item 0 plays second (starts 10.0) with a 3 s in-trim: a
         // cue at 7 s into the FILE is 4 s into the played span.
         assert!(cue("playlist-test-cue", 0, 7.0));

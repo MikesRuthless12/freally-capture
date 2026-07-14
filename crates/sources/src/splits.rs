@@ -13,14 +13,13 @@
 //!   errors readably instead of guessing.
 //! - Times shown are RTA (`RealTime`); game-time is not modeled.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame};
 
-use crate::compose::{blit, fill_rect};
+use crate::compose::{blit, dim, fill_rect};
 use crate::static_source::{check_dimension, rgba_frame};
 use crate::text::{render_text, TextAlign, TextStyle};
 
@@ -459,16 +458,8 @@ impl SplitSession {
 
 /// Weak registry keyed by source id — sessions register on start and
 /// unsubscribe by dropping (same shape as the visualizer taps).
-fn registry() -> &'static Mutex<HashMap<String, Weak<Mutex<SplitSession>>>> {
-    static REG: OnceLock<Mutex<HashMap<String, Weak<Mutex<SplitSession>>>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn lock_registry() -> std::sync::MutexGuard<'static, HashMap<String, Weak<Mutex<SplitSession>>>> {
-    registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
+static REGISTRY: crate::registry::WeakRegistry<Mutex<SplitSession>> =
+    crate::registry::WeakRegistry::new();
 
 fn lock_session(session: &Mutex<SplitSession>) -> std::sync::MutexGuard<'_, SplitSession> {
     session
@@ -478,8 +469,7 @@ fn lock_session(session: &Mutex<SplitSession>) -> std::sync::MutexGuard<'_, Spli
 
 /// Drive one timer (the properties dialog). `false` = no live timer here.
 pub fn control(id: &str, action: SplitAction) -> bool {
-    let live = lock_registry().get(id).and_then(Weak::upgrade);
-    match live {
+    match REGISTRY.get(id) {
         Some(session) => {
             lock_session(&session).control(action);
             true
@@ -491,12 +481,7 @@ pub fn control(id: &str, action: SplitAction) -> bool {
 /// Drive EVERY live split timer (the global hotkeys — a global key can't
 /// name a source, exactly like the CAP-M15 timer keys).
 pub fn control_all(action: SplitAction) {
-    let live: Vec<Arc<Mutex<SplitSession>>> = {
-        let mut registry = lock_registry();
-        registry.retain(|_, weak| weak.strong_count() > 0);
-        registry.values().filter_map(Weak::upgrade).collect()
-    };
-    for session in live {
+    for session in REGISTRY.live() {
         lock_session(&session).control(action);
     }
 }
@@ -543,15 +528,6 @@ pub struct SplitTimerConfig {
     pub gold: [u8; 4],
 }
 
-fn dim(color: [u8; 4], factor: f32) -> [u8; 4] {
-    [
-        color[0],
-        color[1],
-        color[2],
-        (color[3] as f32 * factor) as u8,
-    ]
-}
-
 fn raster(text: &str, size_px: f32, color: [u8; 4]) -> Option<Frame> {
     if text.is_empty() {
         return None;
@@ -572,8 +548,11 @@ fn raster(text: &str, size_px: f32, color: [u8; 4]) -> Option<Frame> {
 }
 
 /// One face. Pure given a state snapshot — unit-testable without a session.
+/// `comparison` is [`comparison_cum`]'s column, constant for the session —
+/// the caller computes it once, not per 10 Hz repaint.
 fn render_face(
     config: &SplitTimerConfig,
+    comparison: &[Option<u64>],
     machine: &RunMachine,
     elapsed_ms: u64,
     started: bool,
@@ -584,7 +563,6 @@ fn render_face(
     let pad = (size * 0.4) as usize;
     let row_h = (size * 1.5) as usize;
     let big_h = (size * 3.0) as usize;
-    let comparison = comparison_cum(&config.file, config.comparison);
 
     // Title.
     let title = match (config.file.game.is_empty(), config.file.category.is_empty()) {
@@ -630,11 +608,8 @@ fn render_face(
         match machine.splits().get(index) {
             // Completed: actual cumulative time + colored delta.
             Some(Some(cum)) => {
-                let time_color = if machine.is_gold(index, &config.file) {
-                    config.gold
-                } else {
-                    config.color
-                };
+                let gold = machine.is_gold(index, &config.file);
+                let time_color = if gold { config.gold } else { config.color };
                 if let Some(time) = raster(&format_ms(*cum), size, time_color) {
                     blit(
                         &mut face,
@@ -646,7 +621,7 @@ fn render_face(
                     );
                 }
                 if let Some(reference) = comparison[index] {
-                    let delta_color = if machine.is_gold(index, &config.file) {
+                    let delta_color = if gold {
                         config.gold
                     } else if *cum <= reference {
                         config.ahead
@@ -730,13 +705,15 @@ pub fn start_split_timer(
         .and_then(|()| check_dimension("split timer height", config.height))
         .map_err(|err| CaptureError::Backend(err.to_string()))?;
     let session = Arc::new(Mutex::new(SplitSession::new(config.file.segments.len())));
-    lock_registry().insert(id.to_string(), Arc::downgrade(&session));
+    REGISTRY.insert(id, &session);
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let join = std::thread::Builder::new()
         .name("fcap-splittimer".into())
         .spawn(move || {
+            // Constant for the session — computed once, not per repaint.
+            let comparison = comparison_cum(&config.file, config.comparison);
             let period = Duration::from_micros(1_000_000 / u64::from(FPS));
             let mut next = Instant::now();
             let mut last_face: Option<(RunMachine, u64, bool)> = None;
@@ -756,7 +733,7 @@ pub fn start_split_timer(
                 // at 10 Hz; idle timers paint once).
                 let shown = (machine, elapsed / 100, started);
                 if last_face.as_ref() != Some(&shown) {
-                    let face = render_face(&config, &shown.0, elapsed, started);
+                    let face = render_face(&config, &comparison, &shown.0, elapsed, started);
                     sender.send(rgba_frame(config.width, config.height, face));
                     last_face = Some(shown);
                 }
@@ -935,7 +912,7 @@ mod tests {
     #[test]
     fn registry_control_reaches_live_sessions_only() {
         let session = Arc::new(Mutex::new(SplitSession::new(2)));
-        lock_registry().insert("split-test-live".into(), Arc::downgrade(&session));
+        REGISTRY.insert("split-test-live", &session);
         assert!(control("split-test-live", SplitAction::Split));
         assert!(lock_session(&session).running());
         control_all(SplitAction::Reset);
@@ -972,7 +949,13 @@ mod tests {
         };
         let mut machine = RunMachine::new(3);
         machine.split(50_000);
-        let face = render_face(&config, &machine, 65_000, true);
+        let face = render_face(
+            &config,
+            &comparison_cum(&config.file, config.comparison),
+            &machine,
+            65_000,
+            true,
+        );
         assert_eq!(face.len(), 320 * 240 * 4);
         let painted = face.chunks_exact(4).filter(|px| px[3] > 0).count();
         assert!(painted > 500, "the face has ink: {painted} px");

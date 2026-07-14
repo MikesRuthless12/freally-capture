@@ -17,16 +17,17 @@
 //! - The source idles transparent until the first roll; the replay buffer
 //!   must be armed for a roll to have anything to snapshot.
 
-use std::collections::HashMap;
-use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame, FrameSender, PixelFormat};
 use fcap_encode::decode;
 
-use crate::media::{pause_flag, publish_transport, read_exact_or_end, seek_pending, take_seek};
+use crate::media::{
+    clamp_seek, f32_samples_into, pause_flag, publish_transport, read_available, read_exact_or_end,
+    seek_pending, take_seek,
+};
 
 /// Idle poll cadence (waiting for a roll).
 const IDLE_POLL: Duration = Duration::from_millis(100);
@@ -52,18 +53,11 @@ impl Speed {
 /// One session's roll slot: the newest requested clip path (latest wins).
 type RollSlot = Mutex<Option<std::path::PathBuf>>;
 
-fn registry() -> &'static Mutex<HashMap<String, Weak<RollSlot>>> {
-    static REG: OnceLock<Mutex<HashMap<String, Weak<RollSlot>>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
-}
+static REGISTRY: crate::registry::WeakRegistry<RollSlot> = crate::registry::WeakRegistry::new();
 
 /// The ids of every live replay source (the roll hotkey's fan-out).
 pub fn live_ids() -> Vec<String> {
-    let mut registry = registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    registry.retain(|_, weak| weak.strong_count() > 0);
-    registry.keys().cloned().collect()
+    REGISTRY.live_ids()
 }
 
 /// Hand a fresh clip to one live replay source. `false` = not running.
@@ -71,12 +65,7 @@ pub fn live_ids() -> Vec<String> {
 /// latest-wins-replaced clip would never be played, so they are deleted
 /// here rather than stranded in the temp folder.
 pub fn roll(id: &str, clip: std::path::PathBuf) -> bool {
-    let slot = registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(id)
-        .and_then(Weak::upgrade);
-    match slot {
+    match REGISTRY.get(id) {
         Some(slot) => {
             let replaced = slot
                 .lock()
@@ -119,10 +108,7 @@ pub fn start_replay_source(
     config: ReplaySourceConfig,
 ) -> Result<CaptureSession, CaptureError> {
     let slot: Arc<RollSlot> = Arc::new(Mutex::new(None));
-    registry()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(hub_id.to_string(), Arc::downgrade(&slot));
+    REGISTRY.insert(hub_id, &slot);
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
@@ -227,7 +213,7 @@ fn play_clip(
         };
         let audio_stdout = audio_child.as_mut().and_then(|child| child.stdout.take());
         let audio_stop = Arc::new(AtomicBool::new(false));
-        let audio_thread = audio_stdout.map(|mut pipe| {
+        let audio_thread = audio_stdout.and_then(|mut pipe| {
             let ring = fcap_audio::media_hub::ring(hub_id);
             ring.clear();
             let flag = Arc::clone(&audio_stop);
@@ -255,22 +241,10 @@ fn play_clip(
                             next = Instant::now();
                             continue;
                         }
-                        let mut filled = 0usize;
-                        while filled < bytes.len() {
-                            match pipe.read(&mut bytes[filled..]) {
-                                Ok(0) => break,
-                                Ok(n) => filled += n,
-                                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
-                                Err(_) => break,
-                            }
-                        }
-                        let usable = filled - filled % 8;
-                        if usable == 0 {
+                        let (filled, _done) = read_available(&mut pipe, &mut bytes);
+                        f32_samples_into(&bytes[..filled], &mut samples);
+                        if samples.is_empty() {
                             return; // end of the clip's audio
-                        }
-                        samples.clear();
-                        for chunk in bytes[..usable].chunks_exact(4) {
-                            samples.push(f32::from_le_bytes(chunk.try_into().expect("4 bytes")));
                         }
                         ring.push(&samples);
                         next += Duration::from_millis(10);
@@ -348,17 +322,12 @@ fn play_clip(
             let _ = child.kill();
             let _ = child.wait();
         }
-        if let Some(Some(handle)) = audio_thread {
+        if let Some(handle) = audio_thread {
             let _ = handle.join();
         }
         match end {
             Some(target) => {
-                let ceiling = if duration > 0.0 {
-                    duration - 0.05
-                } else {
-                    f32::MAX
-                };
-                seek_base = target.clamp(0.0, ceiling.max(0.0));
+                seek_base = clamp_seek(target, duration);
                 publish_transport(hub_id, seek_base, duration);
                 continue 'stretch;
             }
@@ -381,10 +350,7 @@ mod tests {
     #[test]
     fn a_roll_reaches_a_live_slot_and_dies_with_it() {
         let slot: Arc<RollSlot> = Arc::new(Mutex::new(None));
-        registry()
-            .lock()
-            .unwrap()
-            .insert("replay-test".into(), Arc::downgrade(&slot));
+        REGISTRY.insert("replay-test", &slot);
         assert!(roll("replay-test", "C:/tmp/clip.mkv".into()));
         assert_eq!(
             take_slot(&slot),
@@ -399,10 +365,7 @@ mod tests {
     #[test]
     fn the_latest_roll_wins() {
         let slot: Arc<RollSlot> = Arc::new(Mutex::new(None));
-        registry()
-            .lock()
-            .unwrap()
-            .insert("replay-test-latest".into(), Arc::downgrade(&slot));
+        REGISTRY.insert("replay-test-latest", &slot);
         assert!(roll("replay-test-latest", "a.mkv".into()));
         assert!(roll("replay-test-latest", "b.mkv".into()));
         assert_eq!(take_slot(&slot), Some(std::path::PathBuf::from("b.mkv")));

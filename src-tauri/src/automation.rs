@@ -428,34 +428,11 @@ impl Engine {
         self.variables.clone()
     }
 
-    /// Substitute `{{name}}` tokens in `text` with variable values (unknown
-    /// names are left verbatim — a typo shows itself instead of vanishing).
+    /// Substitute `{{name}}` tokens in `text` with variable values — the
+    /// shared grammar (`title::interpolate_vars`), so titles and automation
+    /// can never drift apart.
     pub fn interpolate(&self, text: &str) -> String {
-        if !text.contains("{{") {
-            return text.to_owned();
-        }
-        let mut out = String::with_capacity(text.len());
-        let mut rest = text;
-        while let Some(start) = rest.find("{{") {
-            out.push_str(&rest[..start]);
-            let after = &rest[start + 2..];
-            let Some(end) = after.find("}}") else {
-                out.push_str(&rest[start..]);
-                return out;
-            };
-            let name = after[..end].trim();
-            match self.variables.get(name) {
-                Some(value) => out.push_str(value),
-                None => {
-                    out.push_str("{{");
-                    out.push_str(&after[..end]);
-                    out.push_str("}}");
-                }
-            }
-            rest = &after[end + 2..];
-        }
-        out.push_str(rest);
-        out
+        fcap_sources::title::interpolate_vars(text, &self.variables)
     }
 }
 

@@ -153,8 +153,9 @@ impl FxState {
         now: Instant,
     ) -> bool {
         let mut dirty = false;
-        if self.last_config != config.copied() {
-            self.last_config = config.copied();
+        let config_now = config.copied();
+        if self.last_config != config_now {
+            self.last_config = config_now;
             dirty = true;
         }
         // Press EDGES spawn ripples — a held button draws exactly one.
@@ -166,23 +167,16 @@ impl FxState {
                 // ripple is the nearly-invisible one, so drop it first.
                 self.ripples.remove(0);
             }
-            if pressed & BUTTON_LEFT != 0 {
-                self.ripples.push(Ripple {
-                    x,
-                    y,
-                    right: false,
-                    born: now,
-                });
-                dirty = true;
-            }
-            if pressed & BUTTON_RIGHT != 0 {
-                self.ripples.push(Ripple {
-                    x,
-                    y,
-                    right: true,
-                    born: now,
-                });
-                dirty = true;
+            for (button, right) in [(BUTTON_LEFT, false), (BUTTON_RIGHT, true)] {
+                if pressed & button != 0 {
+                    self.ripples.push(Ripple {
+                        x,
+                        y,
+                        right,
+                        born: now,
+                    });
+                    dirty = true;
+                }
             }
         }
         let life = Duration::from_millis(RIPPLE_LIFE_MS);

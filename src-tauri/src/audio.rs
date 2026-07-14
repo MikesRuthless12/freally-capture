@@ -305,40 +305,21 @@ fn specs_to_configs(
                 SourceSettings::AudioOutput { device_id } => InputSpec::Loopback {
                     device_id: device_id.clone(),
                 },
-                // Media audio: the decode thread feeds the hub ring keyed
-                // by the source id; the engine drains it like any capture.
-                SourceSettings::Media { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // Playlist audio (CAP-N17): the concat decode thread feeds
-                // the same hub ring.
-                SourceSettings::Playlist { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // Replay playback (CAP-N10): full-speed rolls feed the ring
-                // (slow-mo is silent by design).
-                SourceSettings::ReplayPlayback { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // Remote-guest mic: the webview pushes the guest's WebRTC
-                // audio into the same hub ring (keyed by the source id).
-                SourceSettings::RemoteGuest { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // LAN ingest (CAP-N11): the listener's demux thread feeds
-                // the same hub ring — the sender's audio gets its own strip.
-                SourceSettings::LanIngest { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // Freally Link (CAP-N12): the receiver session pushes the
-                // sender's master audio into the same hub ring.
-                SourceSettings::FreallyLink { .. } => InputSpec::Media {
-                    id: spec.id.0.to_string(),
-                },
-                // Per-app audio: the WASAPI process-loopback capture feeds the
-                // same hub ring (keyed by the source id); the manager thread
-                // starts/stops the capture (see `reconcile_app_audio`).
-                SourceSettings::AppAudio { .. } => InputSpec::Media {
+                // Hub-ring sources — someone else's thread feeds the ring
+                // keyed by the source id and the engine drains it like any
+                // capture: Media's decode thread, the Playlist concat decode
+                // (CAP-N17), full-speed Replay rolls (CAP-N10; slow-mo is
+                // silent by design), the Remote-guest webview's WebRTC push,
+                // the LAN-ingest demux (CAP-N11), the Freally Link receiver
+                // (CAP-N12), and the WASAPI process-loopback capture
+                // (per-app audio; see `reconcile_app_audio`).
+                SourceSettings::Media { .. }
+                | SourceSettings::Playlist { .. }
+                | SourceSettings::ReplayPlayback { .. }
+                | SourceSettings::RemoteGuest { .. }
+                | SourceSettings::LanIngest { .. }
+                | SourceSettings::FreallyLink { .. }
+                | SourceSettings::AppAudio { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
                 // Test signals (CAP-M21): the tone generator runs on this

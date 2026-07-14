@@ -43,6 +43,7 @@ const SCALE_MODE_KEYS: Record<ScaleMode, string> = {
 };
 import { hexToRgba, rgbaToHex } from "../lib/color";
 import { useT } from "../i18n/t";
+import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
 
 /**
@@ -444,24 +445,15 @@ function CursorFxSection({ captureId }: { captureId: string }) {
                 className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
               />
             </label>
-            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-              {t("filters-cursorfx-halo-radius")}
-              <input
-                type="number"
-                min={8}
-                max={128}
-                step={4}
-                value={fx.haloRadius}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  if (Number.isFinite(next) && next >= 8 && next <= 128) {
-                    apply({ ...fx, haloRadius: Math.round(next) });
-                  }
-                }}
-                aria-label={t("filters-cursorfx-halo-radius")}
-                className="w-16 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
-              />
-            </label>
+            <NumberField
+              label={t("filters-cursorfx-halo-radius")}
+              value={fx.haloRadius}
+              min={8}
+              max={128}
+              step={4}
+              onCommit={(haloRadius) => apply({ ...fx, haloRadius: Math.round(haloRadius) })}
+              className="w-20"
+            />
           </>
         )}
       </div>

@@ -94,6 +94,21 @@ pub fn encode_frame(kind: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Write one frame as header-then-payload — the same bytes as
+/// [`encode_frame`] with no intermediate copy, for the sender's hot loop
+/// where the payload is a whole JPEG program frame.
+pub fn write_frame(
+    writer: &mut impl std::io::Write,
+    kind: u8,
+    payload: &[u8],
+) -> std::io::Result<()> {
+    let mut header = [0u8; 5];
+    header[0] = kind;
+    header[1..5].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    writer.write_all(&header)?;
+    writer.write_all(payload)
+}
+
 fn cap_for(kind: u8) -> u32 {
     match kind {
         FRAME_VIDEO => MAX_VIDEO_BYTES,
@@ -496,6 +511,7 @@ pub fn parse_response(packet: &[u8]) -> Vec<LinkPeer> {
     }
 
     // Collect the records we care about.
+    #[derive(Default)]
     struct Instance {
         srv: Option<(u16, String)>, // port + target host name
         txt_name: Option<String>,
@@ -521,13 +537,8 @@ pub fn parse_response(packet: &[u8]) -> Vec<LinkPeer> {
             TYPE_SRV if rdlen >= 7 => {
                 let port = u16::from_be_bytes([rdata[4], rdata[5]]);
                 if let Some((target, _)) = read_name(packet, rdata_at + 6) {
-                    instances
-                        .entry(owner.to_ascii_lowercase())
-                        .or_insert(Instance {
-                            srv: None,
-                            txt_name: None,
-                        })
-                        .srv = Some((port, target.to_ascii_lowercase()));
+                    instances.entry(owner.to_ascii_lowercase()).or_default().srv =
+                        Some((port, target.to_ascii_lowercase()));
                 }
             }
             TYPE_TXT => {
@@ -541,10 +552,7 @@ pub fn parse_response(packet: &[u8]) -> Vec<LinkPeer> {
                     if let Some(value) = String::from_utf8_lossy(chunk).strip_prefix("name=") {
                         instances
                             .entry(owner.to_ascii_lowercase())
-                            .or_insert(Instance {
-                                srv: None,
-                                txt_name: None,
-                            })
+                            .or_default()
                             .txt_name = Some(value.to_owned());
                     }
                     at += 1 + len;

@@ -785,6 +785,9 @@ export default function App() {
     dialog?.kind === "filters"
       ? (activeScene?.items.find((item) => item.id === dialog.itemId) ?? null)
       : null;
+  const dialogItemSource = dialogItem
+    ? collection?.sources.find((source) => source.id === dialogItem.source)
+    : undefined;
   const transformItem =
     dialog?.kind === "editTransform"
       ? (activeScene?.items.find((item) => item.id === dialog.itemId) ?? null)
@@ -1063,11 +1066,8 @@ export default function App() {
         <FiltersDialog
           sceneId={activeScene.id}
           item={dialogItem}
-          sourceName={
-            collection?.sources.find((source) => source.id === dialogItem.source)?.name ??
-            t("filters-source-fallback")
-          }
-          source={collection?.sources.find((source) => source.id === dialogItem.source)}
+          sourceName={dialogItemSource?.name ?? t("filters-source-fallback")}
+          source={dialogItemSource}
           onClose={() => setDialog(null)}
         />
       )}

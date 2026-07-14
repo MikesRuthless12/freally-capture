@@ -10,7 +10,7 @@
 //! no fake toggles, no double plumbing.
 
 use std::path::Path;
-use std::process::{Child, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use crate::ffmpeg::{command, run_with_timeout, Ffmpeg};
@@ -31,61 +31,42 @@ pub struct MediaInfo {
 /// Probe a file's banner (`ffmpeg -i`) for its video geometry + whether an
 /// audio stream exists.
 pub fn probe_media(ffmpeg: &Ffmpeg, path: &Path) -> Result<MediaInfo, String> {
-    let mut cmd = command(ffmpeg);
-    cmd.args(["-hide_banner", "-i"]).arg(path);
-    let output = run_with_timeout(cmd, Duration::from_secs(30))?;
-    let banner = String::from_utf8_lossy(&output.stderr);
-    parse_banner(&banner).ok_or_else(|| {
-        format!(
-            "could not read a video stream from {} — is it a media file?",
-            path.display()
-        )
-    })
+    let banner = run_probe(ffmpeg, path)?;
+    parse_banner(&banner)
+        .filter(|info| info.width > 0)
+        .ok_or_else(|| {
+            format!(
+                "could not read a video stream from {} — is it a media file?",
+                path.display()
+            )
+        })
 }
 
 /// Probe accepting **audio-only** files too (the playlist's music lane):
 /// `width`/`height` are 0 when no video stream exists. Errors only when the
 /// file has neither stream.
 pub fn probe_media_any(ffmpeg: &Ffmpeg, path: &Path) -> Result<MediaInfo, String> {
+    let banner = run_probe(ffmpeg, path)?;
+    parse_banner(&banner).ok_or_else(|| {
+        format!(
+            "could not read a media stream from {} — is it a media file?",
+            path.display()
+        )
+    })
+}
+
+/// Run `ffmpeg -hide_banner -i <path>` and return its stderr banner.
+fn run_probe(ffmpeg: &Ffmpeg, path: &Path) -> Result<String, String> {
     let mut cmd = command(ffmpeg);
     cmd.args(["-hide_banner", "-i"]).arg(path);
     let output = run_with_timeout(cmd, Duration::from_secs(30))?;
-    let banner = String::from_utf8_lossy(&output.stderr);
-    if let Some(info) = parse_banner(&banner) {
-        return Ok(info);
-    }
-    // No video stream — accept a pure audio file.
-    let mut has_audio = false;
-    let mut duration_secs: Option<f32> = None;
-    for line in banner.lines() {
-        if line.contains("Audio: ") {
-            has_audio = true;
-        }
-        if duration_secs.is_none() {
-            if let Some(rest) = line.trim_start().strip_prefix("Duration: ") {
-                let stamp = rest.split(',').next().unwrap_or("").trim();
-                duration_secs = parse_timestamp(stamp);
-            }
-        }
-    }
-    if has_audio {
-        Ok(MediaInfo {
-            width: 0,
-            height: 0,
-            has_audio: true,
-            duration_secs,
-            fps: None,
-        })
-    } else {
-        Err(format!(
-            "could not read a media stream from {} — is it a media file?",
-            path.display()
-        ))
-    }
+    Ok(String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
 /// Parse the `-i` banner: the `Video:` line's `WxH` + fps, any `Audio:`
-/// line, and the container `Duration:` line.
+/// line, and the container `Duration:` line. An audio-only banner yields
+/// `width`/`height` 0 (and no fps — that field belongs to a video stream);
+/// `None` means neither stream was found.
 fn parse_banner(banner: &str) -> Option<MediaInfo> {
     let mut dims: Option<(u32, u32)> = None;
     let mut has_audio = false;
@@ -129,13 +110,24 @@ fn parse_banner(banner: &str) -> Option<MediaInfo> {
             }
         }
     }
-    dims.map(|(width, height)| MediaInfo {
-        width,
-        height,
-        has_audio,
-        duration_secs,
-        fps,
-    })
+    match dims {
+        Some((width, height)) => Some(MediaInfo {
+            width,
+            height,
+            has_audio,
+            duration_secs,
+            fps,
+        }),
+        // No video stream — a pure audio file.
+        None if has_audio => Some(MediaInfo {
+            width: 0,
+            height: 0,
+            has_audio: true,
+            duration_secs,
+            fps: None,
+        }),
+        None => None,
+    }
 }
 
 /// `HH:MM:SS.cc` → seconds (`None` for `N/A` or anything malformed).
@@ -149,6 +141,27 @@ fn parse_timestamp(stamp: &str) -> Option<f32> {
         return None;
     }
     Some(hours * 3600.0 + minutes * 60.0 + seconds)
+}
+
+/// The shared PCM output tail: no video, interleaved stereo f32le at
+/// 48 kHz on stdout.
+fn pcm_out(cmd: &mut Command) {
+    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+}
+
+/// The shared raw-video output tail: no audio, raw RGBA frames on stdout.
+fn rawvideo_out(cmd: &mut Command) {
+    cmd.args(["-an", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+}
+
+/// The fit+pad video filter: scale into `width`×`height` preserving aspect,
+/// pad the rest with black, output RGBA — the pipe's frame size never
+/// changes whatever the input geometry is.
+fn fit_pad_filter(width: u32, height: u32) -> String {
+    format!(
+        "scale={width}:{height}:force_original_aspect_ratio=decrease,\
+         pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba"
+    )
 }
 
 /// Spawn the video decoder: raw RGBA frames of exactly `width×height×4`
@@ -175,7 +188,7 @@ pub fn spawn_video_decoder(
         cmd.args(["-ss", &format!("{start_at:.3}")]);
     }
     cmd.args(["-re", "-i"]).arg(path);
-    cmd.args(["-an", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    rawvideo_out(&mut cmd);
     cmd.spawn()
         .map_err(|err| format!("could not start the media decoder: {err}"))
 }
@@ -198,7 +211,7 @@ pub fn spawn_audio_decoder(
         cmd.args(["-ss", &format!("{start_at:.3}")]);
     }
     cmd.args(["-re", "-i"]).arg(path);
-    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+    pcm_out(&mut cmd);
     cmd.spawn()
         .map_err(|err| format!("could not start the media audio decoder: {err}"))
 }
@@ -222,7 +235,7 @@ pub fn spawn_video_decoder_unpaced(
         cmd.args(["-ss", &format!("{start_at:.3}")]);
     }
     cmd.args(["-i"]).arg(path);
-    cmd.args(["-an", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    rawvideo_out(&mut cmd);
     cmd.spawn()
         .map_err(|err| format!("could not start the replay decoder: {err}"))
 }
@@ -241,7 +254,7 @@ pub fn spawn_audio_decoder_unpaced(
         cmd.args(["-ss", &format!("{start_at:.3}")]);
     }
     cmd.args(["-i"]).arg(path);
-    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+    pcm_out(&mut cmd);
     cmd.spawn()
         .map_err(|err| format!("could not start the replay audio decoder: {err}"))
 }
@@ -315,11 +328,7 @@ pub fn spawn_concat_video_decoder(
     // the pipe stays a fixed frame size — and mixed FRAME RATES normalize
     // to `fps`, so the caller's `frames / fps` position clock is exact for
     // every item (a native-rate pipe drifted it on mixed-fps playlists).
-    let filter = format!(
-        "fps={fps:.3},\
-         scale={width}:{height}:force_original_aspect_ratio=decrease,\
-         pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba"
-    );
+    let filter = format!("fps={fps:.3},{}", fit_pad_filter(width, height));
     cmd.args([
         "-an", "-vf", &filter, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
     ]);
@@ -346,7 +355,7 @@ pub fn spawn_concat_audio_decoder(
     }
     cmd.args(["-re", "-f", "concat", "-safe", "0", "-i"])
         .arg(script);
-    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+    pcm_out(&mut cmd);
     cmd.spawn()
         .map_err(|err| format!("could not start the playlist audio decoder: {err}"))
 }
@@ -388,10 +397,7 @@ pub fn spawn_url_av_decoder(
     }
     cmd.args(["-i", url]);
     cmd.args(["-map", "0:v:0", "-map", "0:a:0?"]);
-    let filter = format!(
-        "scale={width}:{height}:force_original_aspect_ratio=decrease,\
-         pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba"
-    );
+    let filter = fit_pad_filter(width, height);
     cmd.args(["-vf", &filter, "-c:v", "rawvideo"]);
     cmd.args(["-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2"]);
     cmd.args(["-f", "avi", "pipe:1"]);
@@ -562,6 +568,13 @@ mod tests {
         assert!(!info.has_audio);
         assert_eq!(info.duration_secs, None, "no Duration line = unknown");
         assert_eq!(parse_banner("clip.xyz: Invalid data found"), None);
+        // Audio-only (the playlist's music lane): zero geometry, no fps.
+        let music = "Input #0, mp3, from 'song.mp3':\n  Duration: 00:03:00.00, start: 0.000000, bitrate: 192 kb/s\n  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 192 kb/s\n";
+        let info = parse_banner(music).expect("audio-only parses");
+        assert_eq!((info.width, info.height), (0, 0));
+        assert!(info.has_audio);
+        assert!((info.duration_secs.expect("duration") - 180.0).abs() < 0.01);
+        assert_eq!(info.fps, None);
         // A matrix-size token that is not a geometry must not fool it.
         let weird = "  Stream #0:0: Video: h264, yuv420p, 640x360 [SAR 1:1], 30 fps\n";
         assert_eq!(

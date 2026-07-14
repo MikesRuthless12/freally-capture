@@ -614,7 +614,7 @@ pub enum SourceSettings {
 }
 
 /// The Freally Link stream's default TCP port (CAP-N12).
-pub fn default_link_port() -> u16 {
+fn default_link_port() -> u16 {
     9720
 }
 

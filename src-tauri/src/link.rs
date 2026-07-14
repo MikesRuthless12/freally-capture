@@ -282,30 +282,29 @@ fn start(settings: &LinkSettings, shared: Arc<Shared>) -> Result<LinkServer, Str
     Ok(LinkServer { shutdown, port })
 }
 
+/// The one place the handshake framing lives: magic, then a hello frame
+/// carrying our name and the busy/denied verdict.
+fn send_hello(stream: &mut TcpStream, name: &str, busy: bool, denied: bool) -> std::io::Result<()> {
+    let hello = wire::encode_hello(&wire::Hello {
+        version: wire::PROTOCOL_VERSION,
+        busy,
+        denied,
+        name: name.to_owned(),
+    });
+    stream.write_all(wire::MAGIC)?;
+    wire::write_frame(stream, wire::FRAME_HELLO, &hello)
+}
+
 /// A second receiver while one is connected: say busy, close. Never silent.
 fn refuse_politely(mut stream: TcpStream, name: &str) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let hello = wire::encode_hello(&wire::Hello {
-        version: wire::PROTOCOL_VERSION,
-        busy: true,
-        denied: false,
-        name: name.to_owned(),
-    });
-    let _ = stream.write_all(wire::MAGIC);
-    let _ = stream.write_all(&wire::encode_frame(wire::FRAME_HELLO, &hello));
+    let _ = send_hello(&mut stream, name, true, false);
 }
 
 /// Turn a receiver away with an honest reason and NO program bytes.
 fn deny(mut stream: TcpStream, name: &str) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let hello = wire::encode_hello(&wire::Hello {
-        version: wire::PROTOCOL_VERSION,
-        busy: false,
-        denied: true,
-        name: name.to_owned(),
-    });
-    let _ = stream.write_all(wire::MAGIC);
-    let _ = stream.write_all(&wire::encode_frame(wire::FRAME_HELLO, &hello));
+    let _ = send_hello(&mut stream, name, false, true);
 }
 
 /// The pairing gate: the receiver must present the key as its FIRST frame,
@@ -357,17 +356,7 @@ fn serve_client(
     // Past the gate the socket is write-driven; a lingering read timeout
     // would be meaningless (we never read again) but clear it honestly.
     let _ = stream.set_read_timeout(None);
-    let hello = wire::encode_hello(&wire::Hello {
-        version: wire::PROTOCOL_VERSION,
-        busy: false,
-        denied: false,
-        name: name.to_owned(),
-    });
-    if stream.write_all(wire::MAGIC).is_err()
-        || stream
-            .write_all(&wire::encode_frame(wire::FRAME_HELLO, &hello))
-            .is_err()
-    {
+    if send_hello(&mut stream, name, false, false).is_err() {
         return;
     }
 
@@ -391,10 +380,7 @@ fn serve_client(
         // 10 ms blocks (480 stereo frames), the mixer's native block size.
         for block in samples.chunks(960) {
             let payload = wire::encode_audio_payload(block);
-            if stream
-                .write_all(&wire::encode_frame(wire::FRAME_AUDIO, &payload))
-                .is_err()
-            {
+            if wire::write_frame(&mut stream, wire::FRAME_AUDIO, &payload).is_err() {
                 return;
             }
         }
@@ -410,11 +396,11 @@ fn serve_client(
             };
             if let Some((width, height, data)) = slot {
                 if let Some(jpeg) = encode_jpeg(width, height, &data) {
+                    // Header + payload written straight to the socket — the
+                    // payload is a whole program frame, so the intermediate
+                    // copies `encode_frame` would make are real bandwidth.
                     let payload = wire::encode_video_payload(width, height, &jpeg);
-                    if stream
-                        .write_all(&wire::encode_frame(wire::FRAME_VIDEO, &payload))
-                        .is_err()
-                    {
+                    if wire::write_frame(&mut stream, wire::FRAME_VIDEO, &payload).is_err() {
                         return;
                     }
                 }
@@ -424,28 +410,15 @@ fn serve_client(
     }
 }
 
-/// Full-resolution RGBA → RGB → JPEG at quality 80 (the preview encoders'
-/// approach, without their downscale — the receiver re-composes this).
+/// Full-resolution RGBA → JPEG at quality 80 — the preview encoder at
+/// factor 1 (no downscale). The length guard stays HERE: the frame buffer
+/// crossed a thread boundary and a short one must fail, not panic.
 fn encode_jpeg(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let pixels = width as usize * height as usize;
     if width == 0 || height == 0 || width > 16_384 || height > 16_384 || rgba.len() < pixels * 4 {
         return None;
     }
-    let mut rgb = Vec::with_capacity(pixels * 3);
-    for px in rgba.chunks_exact(4).take(pixels) {
-        rgb.extend_from_slice(&px[..3]);
-    }
-    let mut out = Vec::new();
-    let encoder = jpeg_encoder::Encoder::new(&mut out, JPEG_QUALITY);
-    encoder
-        .encode(
-            &rgb,
-            width as u16,
-            height as u16,
-            jpeg_encoder::ColorType::Rgb,
-        )
-        .ok()?;
-    Some(out)
+    crate::studio::encode_program_jpeg(width, height, rgba, width, height, JPEG_QUALITY)
 }
 
 /// The discovery responder: answer PTR queries for our service, unicast,

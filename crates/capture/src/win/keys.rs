@@ -9,15 +9,26 @@
 
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
+/// Whether the virtual key is down at this instant.
+pub(crate) fn is_down(vk: i32) -> bool {
+    // The high bit is "down right now". The low "pressed since the last
+    // call" bit is deliberately ignored — reading it would make this a
+    // (shared, racy) event consumer instead of a pure state peek.
+    // SAFETY: plain global key-state read; no memory contract.
+    let state = unsafe { GetAsyncKeyState(vk) } as u16;
+    state & 0x8000 != 0
+}
+
+/// Whether each virtual key in `vks` is down at this instant, written into
+/// `out` (cleared first) — the allocation-free form.
+pub(crate) fn keys_down_into(vks: &[u16], out: &mut Vec<bool>) {
+    out.clear();
+    out.extend(vks.iter().map(|vk| is_down(i32::from(*vk))));
+}
+
 /// Whether each virtual key in `vks` is down at this instant.
 pub(crate) fn keys_down(vks: &[u16]) -> Vec<bool> {
-    vks.iter()
-        // The high bit is "down right now". The low "pressed since the last
-        // call" bit is deliberately ignored — reading it would make this a
-        // (shared, racy) event consumer instead of a pure state peek.
-        .map(|vk| {
-            let state = unsafe { GetAsyncKeyState(i32::from(*vk)) } as u16;
-            state & 0x8000 != 0
-        })
-        .collect()
+    let mut out = Vec::with_capacity(vks.len());
+    keys_down_into(vks, &mut out);
+    out
 }

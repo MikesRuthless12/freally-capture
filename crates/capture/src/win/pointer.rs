@@ -25,14 +25,15 @@ use windows::Win32::Graphics::Gdi::{
     CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DIB_RGB_COLORS, OUT_DEFAULT_PRECIS, TRANSPARENT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_LBUTTON,
-    VK_LEFT, VK_LWIN, VK_MENU, VK_RBUTTON, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_LBUTTON, VK_LEFT, VK_LWIN,
+    VK_MENU, VK_RBUTTON, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DrawIconEx, GetAncestor, GetCursorInfo, GetIconInfo, GetWindowRect, WindowFromPoint,
     CURSORINFO, CURSOR_SHOWING, DI_NORMAL, GA_ROOT, HICON, ICONINFO,
 };
 
+use super::keys;
 use crate::cursorfx::{self, CursorFxConfig, FxState, KeyBadge};
 use crate::Frame;
 
@@ -478,14 +479,11 @@ fn draw_cursor_on(hicon: HICON, width: u32, height: u32, bg: u8) -> Option<Vec<u
 /// ever reads the buttons.
 pub(crate) fn sample_buttons() -> u8 {
     let mut mask = 0u8;
-    // SAFETY: plain global key-state reads; no memory contract.
-    unsafe {
-        if GetAsyncKeyState(i32::from(VK_LBUTTON.0)) as u16 & 0x8000 != 0 {
-            mask |= cursorfx::BUTTON_LEFT;
-        }
-        if GetAsyncKeyState(i32::from(VK_RBUTTON.0)) as u16 & 0x8000 != 0 {
-            mask |= cursorfx::BUTTON_RIGHT;
-        }
+    if keys::is_down(i32::from(VK_LBUTTON.0)) {
+        mask |= cursorfx::BUTTON_LEFT;
+    }
+    if keys::is_down(i32::from(VK_RBUTTON.0)) {
+        mask |= cursorfx::BUTTON_RIGHT;
     }
     mask
 }
@@ -513,8 +511,7 @@ pub(crate) fn sample_ghost_keys() -> Vec<i32> {
         if held.len() >= MAX_BADGES {
             break;
         }
-        // SAFETY: plain global key-state read.
-        if unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0 {
+        if keys::is_down(vk) {
             held.push(vk);
         }
     }
@@ -524,28 +521,38 @@ pub(crate) fn sample_ghost_keys() -> Vec<i32> {
 /// A fixed-set VK's badge label. `None` for anything outside the set (never
 /// sampled anyway — belt and braces).
 fn ghost_label(vk: i32) -> Option<&'static str> {
-    const LETTERS: [&str; 26] = [
-        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R",
-        "S", "T", "U", "V", "W", "X", "Y", "Z",
-    ];
-    const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    const CTRL: i32 = VK_CONTROL.0 as i32;
+    const SHIFT: i32 = VK_SHIFT.0 as i32;
+    const ALT: i32 = VK_MENU.0 as i32;
+    const WIN: i32 = VK_LWIN.0 as i32;
+    const ESC: i32 = VK_ESCAPE.0 as i32;
+    const TAB: i32 = VK_TAB.0 as i32;
+    const ENTER: i32 = VK_RETURN.0 as i32;
+    const SPACE: i32 = VK_SPACE.0 as i32;
+    const BKSP: i32 = VK_BACK.0 as i32;
+    const DEL: i32 = VK_DELETE.0 as i32;
+    const LEFT: i32 = VK_LEFT.0 as i32;
+    const UP: i32 = VK_UP.0 as i32;
+    const RIGHT: i32 = VK_RIGHT.0 as i32;
+    const DOWN: i32 = VK_DOWN.0 as i32;
     match vk {
-        0x41..=0x5A => Some(LETTERS[(vk - 0x41) as usize]),
-        0x30..=0x39 => Some(DIGITS[(vk - 0x30) as usize]),
-        vk if vk == i32::from(VK_CONTROL.0) => Some("Ctrl"),
-        vk if vk == i32::from(VK_SHIFT.0) => Some("Shift"),
-        vk if vk == i32::from(VK_MENU.0) => Some("Alt"),
-        vk if vk == i32::from(VK_LWIN.0) => Some("Win"),
-        vk if vk == i32::from(VK_ESCAPE.0) => Some("Esc"),
-        vk if vk == i32::from(VK_TAB.0) => Some("Tab"),
-        vk if vk == i32::from(VK_RETURN.0) => Some("Enter"),
-        vk if vk == i32::from(VK_SPACE.0) => Some("Space"),
-        vk if vk == i32::from(VK_BACK.0) => Some("Bksp"),
-        vk if vk == i32::from(VK_DELETE.0) => Some("Del"),
-        vk if vk == i32::from(VK_LEFT.0) => Some("←"),
-        vk if vk == i32::from(VK_UP.0) => Some("↑"),
-        vk if vk == i32::from(VK_RIGHT.0) => Some("→"),
-        vk if vk == i32::from(VK_DOWN.0) => Some("↓"),
+        // Letter/digit VKs are their ASCII codes — slice the label out.
+        0x41..=0x5A => "ABCDEFGHIJKLMNOPQRSTUVWXYZ".get((vk - 0x41) as usize..(vk - 0x40) as usize),
+        0x30..=0x39 => "0123456789".get((vk - 0x30) as usize..(vk - 0x2F) as usize),
+        CTRL => Some("Ctrl"),
+        SHIFT => Some("Shift"),
+        ALT => Some("Alt"),
+        WIN => Some("Win"),
+        ESC => Some("Esc"),
+        TAB => Some("Tab"),
+        ENTER => Some("Enter"),
+        SPACE => Some("Space"),
+        BKSP => Some("Bksp"),
+        DEL => Some("Del"),
+        LEFT => Some("←"),
+        UP => Some("↑"),
+        RIGHT => Some("→"),
+        DOWN => Some("↓"),
         _ => None,
     }
 }
@@ -614,7 +621,7 @@ fn render_label(label: &str) -> Option<KeyBadge> {
             PCWSTR(face.as_ptr()),
         );
         let old_font = (!font.is_invalid()).then(|| SelectObject(hdc, font));
-        let release_font_dc = |old_font: Option<_>| {
+        let release_font_dc = || {
             if let Some(old) = old_font {
                 SelectObject(hdc, old);
             }
@@ -626,7 +633,7 @@ fn render_label(label: &str) -> Option<KeyBadge> {
 
         let mut size = SIZE::default();
         if !GetTextExtentPoint32W(hdc, &text, &mut size).as_bool() || size.cx <= 0 || size.cy <= 0 {
-            release_font_dc(old_font);
+            release_font_dc();
             return None;
         }
         let (width, height) = (size.cx as u32, size.cy as u32);
@@ -645,12 +652,12 @@ fn render_label(label: &str) -> Option<KeyBadge> {
         };
         let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
         let Ok(dib) = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
-            release_font_dc(old_font);
+            release_font_dc();
             return None;
         };
         if bits.is_null() {
             let _ = DeleteObject(dib);
-            release_font_dc(old_font);
+            release_font_dc();
             return None;
         }
         let old_bmp = SelectObject(hdc, dib);
@@ -674,7 +681,7 @@ fn render_label(label: &str) -> Option<KeyBadge> {
         });
         SelectObject(hdc, old_bmp);
         let _ = DeleteObject(dib);
-        release_font_dc(old_font);
+        release_font_dc();
         out
     }
 }

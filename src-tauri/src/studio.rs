@@ -1546,7 +1546,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // LAN listeners (CAP-N11): their runtime state follows the session's
     // "sender connected" flag, not bare frame arrival — the waiting face
     // they draw is a frame too, and calling it "live" would lie.
-    let mut lan_sources: HashSet<SourceId> = HashSet::new();
+    // Keyed with the id's STRING form too — the drain consults the ingest
+    // registry per drained frame, and re-stringing the uuid each time is a
+    // per-frame allocation.
+    let mut lan_sources: HashMap<SourceId, String> = HashMap::new();
 
     // The native preview surface (the "OBS feel" path): created lazily once
     // the UI reports a non-zero preview region, then presented every frame
@@ -2182,7 +2185,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         // the frame drain below mirrors their session's
                         // connected flag into the runtime state.
                         if matches!(&source.settings, SourceSettings::LanIngest { .. }) {
-                            lan_sources.insert(source.id);
+                            lan_sources
+                                .entry(source.id)
+                                .or_insert_with(|| source.id.0.to_string());
                         } else {
                             lan_sources.remove(&source.id);
                         }
@@ -2566,9 +2571,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 // session's own connected flag instead. Every
                                 // transition is accompanied by a frame (face or
                                 // feed), so checking here catches them all.
-                                if lan_sources.contains(id) {
-                                    let connected =
-                                        fcap_sources::laningest::receiving(&id.0.to_string());
+                                if let Some(key) = lan_sources.get(id) {
+                                    let connected = fcap_sources::laningest::receiving(key);
                                     let desired = if connected { "live" } else { "waiting" };
                                     if statuses.get(id).map(|runtime| runtime.state)
                                         != Some(desired)
@@ -2942,13 +2946,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 let style = text::TextStyle {
                     text: face.clone(),
                     font_family: font_family.clone(),
-                    // The CAP-M16 rule for EVERY user path: a UNC font path
-                    // would be read over SMB (NTLM handshake leak) — refuse
-                    // it here and fall back to the family font.
-                    font_file: font_file
-                        .as_ref()
-                        .filter(|file| !crate::commands::studio::is_remote(file.trim()))
-                        .map(PathBuf::from),
+                    // A remote font path is refused inside render_text's
+                    // font funnel (text::resolve_font) — no guard needed here.
+                    font_file: font_file.as_ref().map(PathBuf::from),
                     size_px: *size_px,
                     color: [color.r, color.g, color.b, color.a],
                     align: text::TextAlign::Left,
@@ -3854,6 +3854,21 @@ fn auto_recoverable(settings: &SourceSettings) -> bool {
     )
 }
 
+/// Read + parse a `.lss` split file: existence, the size cap, UTF-8, and the
+/// parse, each mapped to one honest "split file: …" error. The caller has
+/// already refused remote paths (the CAP-M16 rule).
+fn load_lss(path: &str) -> Result<fcap_sources::splits::SplitFile, CaptureError> {
+    let meta = std::fs::metadata(path)
+        .map_err(|err| CaptureError::Backend(format!("split file: {err}")))?;
+    if meta.len() > fcap_sources::splits::MAX_LSS_BYTES {
+        return Err(CaptureError::Backend("split file is too large".into()));
+    }
+    let content = std::fs::read_to_string(path)
+        .map_err(|err| CaptureError::Backend(format!("split file: {err}")))?;
+    fcap_sources::splits::parse_lss(&content)
+        .map_err(|err| CaptureError::Backend(format!("split file: {err}")))
+}
+
 /// The native preview's selection overlay, computed from the model: the
 /// selected item's four content corners (canvas px) + its locked flag, or
 /// `None` when nothing usable is selected (no selection, awaiting first frame,
@@ -4214,22 +4229,7 @@ fn start_session(
                             "network paths are not read — use a local split file".into(),
                         ))
                     } else {
-                        std::fs::metadata(trimmed)
-                            .map_err(|err| CaptureError::Backend(format!("split file: {err}")))
-                            .and_then(|meta| {
-                                if meta.len() > fcap_sources::splits::MAX_LSS_BYTES {
-                                    Err(CaptureError::Backend("split file is too large".into()))
-                                } else {
-                                    std::fs::read_to_string(trimmed).map_err(|err| {
-                                        CaptureError::Backend(format!("split file: {err}"))
-                                    })
-                                }
-                            })
-                            .and_then(|content| {
-                                fcap_sources::splits::parse_lss(&content).map_err(|err| {
-                                    CaptureError::Backend(format!("split file: {err}"))
-                                })
-                            })
+                        load_lss(trimmed)
                             .and_then(|file| {
                                 fcap_sources::splits::start_split_timer(
                                     &id.0.to_string(),
@@ -4824,7 +4824,9 @@ fn encode_capture_jpeg(frame: &fcap_capture::Frame) -> Option<Vec<u8>> {
 }
 
 /// Downscale (integer nearest-neighbor) + JPEG-encode the program frame.
-fn encode_program_jpeg(
+/// `max_w/max_h` = the frame's own size means factor 1 — no downscale
+/// (the Freally Link sender's full-resolution path).
+pub(crate) fn encode_program_jpeg(
     width: u32,
     height: u32,
     data: &[u8],
