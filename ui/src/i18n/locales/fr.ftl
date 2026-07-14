@@ -1473,6 +1473,7 @@ distribute-v = Répartir verticalement
 guides-group = Repères
 guides-add-v = Ajouter un repère vertical
 guides-add-h = Ajouter un repère horizontal
+guides-clear = Effacer tous les repères
 history-arrangeItems = Organiser les éléments
 history-editGuides = Modifier les repères
 

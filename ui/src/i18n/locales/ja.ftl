@@ -1473,6 +1473,7 @@ distribute-v = 垂直方向に分布
 guides-group = ガイド
 guides-add-v = 垂直ガイドを追加
 guides-add-h = 水平ガイドを追加
+guides-clear = すべてのガイドを消去
 history-arrangeItems = アイテムを整列
 history-editGuides = ガイドを編集
 

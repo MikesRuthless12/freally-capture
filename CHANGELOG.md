@@ -41,6 +41,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   and ffmpeg argument prologues/probes deduplicated inside the decode module — byte-identical
   commands, stated once.
 
+### Fixed
+
+- **The Windows installer now creates a Desktop shortcut.** Tauri's NSIS template only makes a
+  Start-Menu entry and offers no desktop-shortcut option, so no install ever put an icon on the
+  Desktop — the installer hooks now create `Freally Capture.lnk` (the app's own icon) on every
+  install and remove it on uninstall.
+- **Alignment guides can now be cleared with one click.** Removing a guide meant dragging a
+  1-pixel line off the canvas — precision work where a miss starts an item drag instead (whose
+  magenta snap lines then read as "a new guide appeared", a live report). The guide toolbar
+  gains a **Clear all guides** button, and the grab lane around each guide is wider.
+
 ## [0.300.0] — 2026-07-14 (New Sources & Overlays — CAP-N Phase 2)
 
 > **Ten new things to put on the canvas — all local.** Instant replay rolls the buffer *into* the

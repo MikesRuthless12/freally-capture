@@ -1437,6 +1437,7 @@ distribute-v = Распределить по вертикали
 guides-group = Направляющие
 guides-add-v = Добавить вертикальную направляющую
 guides-add-h = Добавить горизонтальную направляющую
+guides-clear = Убрать все направляющие
 history-arrangeItems = Упорядочить элементы
 history-editGuides = Изменить направляющие
 

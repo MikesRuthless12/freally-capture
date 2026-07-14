@@ -76,8 +76,10 @@ type PreviewPanelProps = {
   alignment: AlignmentSettings;
 };
 
-/** Grab radius for a custom guide line, display px. */
-const GUIDE_GRAB = 6;
+/** Grab radius for a custom guide line, display px. Generous on purpose: the
+ * line is 1 px and a miss starts an item drag instead — whose magenta snap
+ * lines then read as "a new guide appeared" (a real operator report). */
+const GUIDE_GRAB = 10;
 
 /** Normalized canvas regions per backdrop split — mirrors `BackdropSplit::region()`. */
 const BACKDROP_REGIONS: Record<BackdropSplit, { x: number; y: number; w: number; h: number }> = {
@@ -653,6 +655,13 @@ export function PreviewPanel({
     studioSetGuides(scene.id, [...customGuides, { orientation, position }]).catch((err) =>
       console.error("add guide failed:", err),
     );
+  };
+
+  /** Remove every custom guide in the scene — an absolute write, immune to
+   * the stale-array hazards of per-guide edits. */
+  const clearGuides = () => {
+    if (!scene) return;
+    studioSetGuides(scene.id, []).catch((err) => console.error("clear guides failed:", err));
   };
 
   /** Align the multi-selection to each other (one undo step). */
@@ -1281,7 +1290,12 @@ export function PreviewPanel({
           ) : (
             selected && !selected.locked && <AlignBar onAlign={alignSelected} t={t} />
           )}
-          <GuideButtons onAdd={addGuide} t={t} />
+          <GuideButtons
+            onAdd={addGuide}
+            onClear={clearGuides}
+            hasGuides={customGuides.length > 0}
+            t={t}
+          />
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
             {program.width}×{program.height}
@@ -1416,12 +1430,18 @@ function ArrangeBar({
   );
 }
 
-/** Add a vertical / horizontal custom guide (CAP-M04 follow-on). */
+/** Add a vertical / horizontal custom guide, or clear them all — dragging a
+ * 1-px line off the canvas is precision work, so removal must not depend on
+ * it (CAP-M04 follow-on). */
 function GuideButtons({
   onAdd,
+  onClear,
+  hasGuides,
   t,
 }: {
   onAdd: (orientation: "v" | "h") => void;
+  onClear: () => void;
+  hasGuides: boolean;
   t: (key: string) => string;
 }) {
   return (
@@ -1453,6 +1473,45 @@ function GuideButtons({
           </svg>
         </button>
       ))}
+      <button
+        type="button"
+        title={t("guides-clear")}
+        aria-label={t("guides-clear")}
+        disabled={!hasGuides}
+        onClick={onClear}
+        className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+      >
+        <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+          <rect
+            x={1}
+            y={1}
+            width={10}
+            height={10}
+            fill="none"
+            stroke="currentColor"
+            opacity={0.4}
+          />
+          <line
+            x1={6}
+            y1={1}
+            x2={6}
+            y2={11}
+            stroke={GUIDE_COLOR}
+            strokeWidth={1.5}
+            opacity={0.45}
+          />
+          <line
+            x1={1}
+            y1={6}
+            x2={11}
+            y2={6}
+            stroke={GUIDE_COLOR}
+            strokeWidth={1.5}
+            opacity={0.45}
+          />
+          <line x1={2.5} y1={9.5} x2={9.5} y2={2.5} stroke="currentColor" strokeWidth={1.5} />
+        </svg>
+      </button>
     </div>
   );
 }

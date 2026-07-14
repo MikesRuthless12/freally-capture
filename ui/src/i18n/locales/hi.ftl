@@ -1437,6 +1437,7 @@ distribute-v = लंबवत रूप से वितरित करें
 guides-group = गाइड
 guides-add-v = लंबवत गाइड जोड़ें
 guides-add-h = क्षैतिज गाइड जोड़ें
+guides-clear = सभी गाइड हटाएँ
 history-arrangeItems = आइटम व्यवस्थित करें
 history-editGuides = गाइड संपादित करें
 

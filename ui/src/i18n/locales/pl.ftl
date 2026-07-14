@@ -1450,6 +1450,7 @@ distribute-v = Rozmieść pionowo
 guides-group = Prowadnice
 guides-add-v = Dodaj prowadnicę pionową
 guides-add-h = Dodaj prowadnicę poziomą
+guides-clear = Usuń wszystkie prowadnice
 history-arrangeItems = Rozmieść elementy
 history-editGuides = Edytuj prowadnice
 

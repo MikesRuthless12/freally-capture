@@ -1450,6 +1450,7 @@ distribute-v = Distribuir verticalmente
 guides-group = Guías
 guides-add-v = Añadir guía vertical
 guides-add-h = Añadir guía horizontal
+guides-clear = Quitar todas las guías
 history-arrangeItems = Organizar elementos
 history-editGuides = Editar guías
 
