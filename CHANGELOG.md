@@ -83,6 +83,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   border blend. It now holds each texel's centre and crosses to its neighbour inside a narrow seam,
   which is what the mode is for. The new per-scaler golden-frame tests (owed since 0.200.0) pin it.
 
+### Packaging note
+
+- **The Windows MSI carries ProductVersion `0.230.0` internally.** Windows Installer caps the MSI
+  minor version at 255, which the 0.300.0 rung exceeds — the first release where the "+100 per
+  phase" scheme meets that limit. The mapping is `MSI minor = 200 + app-minor ÷ 10`
+  (0.400.0 → `0.240.0` … 0.900.0 → `0.290.0`, then 1.0.0 → `1.0.0`), strictly increasing so MSI
+  upgrades keep replacing older installs. Only the MSI's internal version differs: the app, the
+  NSIS installer, the updater, and About all say **0.300.0**.
+
 ## [0.200.0] — 2026-07-13 (Automation + Capture & Device Depth — CAP-N Phases 1 & 9)
 
 > Two themed phases in one release, so the version crosses two rungs (0.99.0 → 0.200.0). **Phase 1

@@ -76,6 +76,9 @@
     ],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "wix": {
+        "version": "0.230.0"
+      },
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installerHooks": "nsis-hooks.nsh"
