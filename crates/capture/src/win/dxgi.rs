@@ -25,11 +25,16 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTDUPL_POINTER_SHAPE_INFO,
 };
 
-use super::pointer::{blend_shape, PointerShape};
+use super::pointer::{blend_shape, fx_draw, fx_tick, KeyGhost, PointerShape};
+use crate::cursorfx::{self, CursorFxConfig, FxState};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
 /// How long one AcquireNextFrame waits before we re-check the stop flag.
 const ACQUIRE_TIMEOUT_MS: u32 = 100;
+/// The faster acquire wait while cursor effects sample input (CAP-N19):
+/// clicks and key edges arrive between desktop updates, and ripples animate
+/// at this cadence over a perfectly still desktop.
+const FX_ACQUIRE_TIMEOUT_MS: u32 = 16;
 
 struct PointerState {
     visible: bool,
@@ -141,8 +146,27 @@ fn run_inner(
     // so the recorded cursor keeps moving even when nothing else repaints.
     let mut last_base: Option<Frame> = None;
     let mut last_drawn = pointer.key();
+    // Cursor effects (CAP-N19): the registry key matches the scene's capture
+    // id, and the state/label cache live for the session.
+    let fx_id = format!("display:{device_name}");
+    let mut fx = FxState::new();
+    let mut ghost = KeyGhost::new();
 
     while !stop.load(Ordering::Relaxed) && sender.is_open() {
+        // The config read is live (the tone-map precedent): a retune applies
+        // on the very next frame. While effects sample input, acquire on a
+        // short leash — clicks and key edges arrive between desktop updates,
+        // and duplication never wakes for them.
+        let fx_config = cursorfx::cursor_fx_for(&fx_id);
+        let wants_input = fx_config
+            .as_ref()
+            .is_some_and(|c| c.ripples || c.keystrokes);
+        let timeout = if wants_input {
+            FX_ACQUIRE_TIMEOUT_MS
+        } else {
+            ACQUIRE_TIMEOUT_MS
+        };
+
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource: Option<IDXGIResource> = None;
         // SAFETY: out-params are locals; on success the frame is released
@@ -150,12 +174,14 @@ fn run_inner(
         let acquired = unsafe {
             session
                 .duplication
-                .AcquireNextFrame(ACQUIRE_TIMEOUT_MS, &mut info, &mut resource)
+                .AcquireNextFrame(timeout, &mut info, &mut resource)
         };
 
-        match acquired {
-            Ok(()) => {}
-            Err(err) if err.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
+        let got_update = match acquired {
+            Ok(()) => true,
+            // A timeout means "no desktop change" — the effects may still
+            // need a synthesized frame, so fall through instead of looping.
+            Err(err) if err.code() == DXGI_ERROR_WAIT_TIMEOUT => false,
             Err(err) if err.code() == DXGI_ERROR_ACCESS_LOST => {
                 // Mode switch, fullscreen-exclusive handoff, secure desktop,
                 // or an adapter migration: rebuild device + duplication
@@ -175,62 +201,94 @@ fn run_inner(
             Err(err) => {
                 return Err(CaptureError::Backend(format!("AcquireNextFrame: {err}")));
             }
-        }
+        };
 
-        let result = (|| -> Result<Option<Frame>, CaptureError> {
-            update_pointer(&session.duplication, &info, &mut pointer);
+        let result: Result<Option<Frame>, CaptureError> = if got_update {
+            let copied = (|| -> Result<Option<Frame>, CaptureError> {
+                update_pointer(&session.duplication, &info, &mut pointer);
 
-            // A pointer-only update carries no desktop image.
-            let Some(resource) = resource.as_ref() else {
-                return Ok(None);
-            };
-            if info.LastPresentTime == 0 && info.AccumulatedFrames == 0 {
-                return Ok(None);
-            }
-            let texture: ID3D11Texture2D = resource
-                .cast()
-                .map_err(|err| CaptureError::Backend(format!("frame texture: {err}")))?;
-            let mut desc = D3D11_TEXTURE2D_DESC::default();
-            // SAFETY: GetDesc writes into the local out-param.
-            unsafe { texture.GetDesc(&mut desc) };
+                // A pointer-only update carries no desktop image.
+                let Some(resource) = resource.as_ref() else {
+                    return Ok(None);
+                };
+                if info.LastPresentTime == 0 && info.AccumulatedFrames == 0 {
+                    return Ok(None);
+                }
+                let texture: ID3D11Texture2D = resource
+                    .cast()
+                    .map_err(|err| CaptureError::Backend(format!("frame texture: {err}")))?;
+                let mut desc = D3D11_TEXTURE2D_DESC::default();
+                // SAFETY: GetDesc writes into the local out-param.
+                unsafe { texture.GetDesc(&mut desc) };
 
-            let staging_tex = ensure_staging(
-                &session.device,
-                &mut staging,
-                desc.Width,
-                desc.Height,
-                desc.Format,
-            )?;
-            // SAFETY: same-device resources with identical dimensions/format.
-            unsafe { session.context.CopyResource(staging_tex, &texture) };
-            Ok(Some(read_staging(
-                &session.context,
-                staging_tex,
-                desc.Width,
-                desc.Height,
-                desc.Format,
-                device_name,
-            )?))
-        })();
+                let staging_tex = ensure_staging(
+                    &session.device,
+                    &mut staging,
+                    desc.Width,
+                    desc.Height,
+                    desc.Format,
+                )?;
+                // SAFETY: same-device resources with identical dimensions/format.
+                unsafe { session.context.CopyResource(staging_tex, &texture) };
+                Ok(Some(read_staging(
+                    &session.context,
+                    staging_tex,
+                    desc.Width,
+                    desc.Height,
+                    desc.Format,
+                    device_name,
+                )?))
+            })();
+            // SAFETY: every successful acquire is paired with exactly one release.
+            let _ = unsafe { session.duplication.ReleaseFrame() };
+            copied
+        } else {
+            Ok(None)
+        };
 
-        // SAFETY: every successful acquire is paired with exactly one release.
-        let _ = unsafe { session.duplication.ReleaseFrame() };
+        // One effects tick per loop pass — press edges spawn ripples, dead
+        // ones age out, key badges follow the held set (CAP-N19). Sampling
+        // happens ONLY while a config enables it.
+        let now = Instant::now();
+        let fx_dirty = fx_tick(
+            &mut fx,
+            fx_config.as_ref(),
+            pointer.x,
+            pointer.y,
+            pointer.visible,
+            now,
+        );
 
         match result {
             Ok(Some(mut frame)) => {
                 last_base = Some(frame.clone());
-                blend_pointer(&mut frame, &pointer);
+                draw_overlays(
+                    &mut frame,
+                    &pointer,
+                    &fx,
+                    &mut ghost,
+                    fx_config.as_ref(),
+                    now,
+                );
                 last_drawn = pointer.key();
                 sender.send(frame);
             }
             Ok(None) => {
-                // Pointer-only update: synthesize a frame from the last
-                // desktop image so the cursor still tracks.
-                if pointer.key() != last_drawn {
+                // Pointer-only update (or an effects-only change): synthesize
+                // a frame from the last desktop image so the cursor — and any
+                // animating ripple — still tracks.
+                if pointer.key() != last_drawn || fx_dirty {
                     if let Some(base) = last_base.as_ref() {
                         let mut frame = base.clone();
-                        frame.captured_at = Instant::now();
-                        blend_pointer(&mut frame, &pointer);
+                        frame.captured_at = now;
+                        draw_overlays(
+                            &mut frame,
+                            &pointer,
+                            &fx,
+                            &mut ghost,
+                            fx_config.as_ref(),
+                            now,
+                        );
                         last_drawn = pointer.key();
                         sender.send(frame);
                     }
@@ -240,6 +298,31 @@ fn run_inner(
         }
     }
     Ok(())
+}
+
+/// Blend the cursor and any enabled cursor effects (CAP-N19) into a frame
+/// about to be published.
+fn draw_overlays(
+    frame: &mut Frame,
+    pointer: &PointerState,
+    fx: &FxState,
+    ghost: &mut KeyGhost,
+    config: Option<&CursorFxConfig>,
+    now: Instant,
+) {
+    blend_pointer(frame, pointer);
+    if let Some(config) = config {
+        fx_draw(
+            frame,
+            fx,
+            ghost,
+            config,
+            pointer.x,
+            pointer.y,
+            pointer.visible,
+            now,
+        );
+    }
 }
 
 fn ensure_staging<'t>(

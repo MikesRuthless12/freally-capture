@@ -6,6 +6,7 @@
 //! `ui/src/api/types.ts` — keep in lockstep.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -63,6 +64,18 @@ impl RuntimeStats {
     }
 }
 
+/// The emitter's newest (CPU%, memory MiB) sample, shared with in-canvas
+/// consumers — the CAP-N14 stats HUD paints on the studio loop, which must
+/// not run sysinfo itself.
+static LATEST_SYSTEM: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
+
+/// The newest (CPU%, memory MiB) the ~2 Hz emitter sampled.
+pub fn latest_system() -> (f32, f32) {
+    *LATEST_SYSTEM
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The `stats` event payload.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +128,9 @@ pub fn spawn_stats_emitter(app: AppHandle) {
                 ),
                 None => (0.0, 0.0),
             };
+            *LATEST_SYSTEM
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = (cpu, memory_mb);
 
             let stats = app.state::<RuntimeStats>();
             let running = stats.running.load(Ordering::Relaxed);

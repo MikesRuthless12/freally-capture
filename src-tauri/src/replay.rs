@@ -172,18 +172,28 @@ fn ring_dir() -> PathBuf {
     std::env::temp_dir().join(format!("fcap-replay-{}", std::process::id()))
 }
 
+/// This run's roll-clip folder (CAP-N10) — sibling of the ring dir, same
+/// per-process scratch contract.
+fn roll_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("fcap-replay-roll-{}", std::process::id()))
+}
+
 /// Reclaim `fcap-replay-*` ring directories left by earlier runs that
 /// crashed or were force-killed while armed (a clean disarm removes its
 /// own). Best-effort; keeps our own current directory. Called at arm so a
 /// stale buffer's gigabytes can never silently accumulate across crashes.
 fn sweep_stale_rings() {
     let ours = ring_dir();
+    // This run's roll folder is live playback material (CAP-N10) — a re-arm
+    // must not rip a playing clip out from under a replay source. Stale
+    // roll folders from earlier runs match the prefix and ARE swept.
+    let our_rolls = roll_dir();
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == ours {
+        if path == ours || path == our_rolls {
             continue;
         }
         let is_ring = path
@@ -412,6 +422,127 @@ pub fn save<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(out)
 }
 
+/// CAP-N10: snapshot the last `seconds` into a TEMPORARY clip for a replay
+/// playback source (stream copy — fast; never touches the recordings
+/// folder). Alternating file names, so a clip still playing is never
+/// overwritten by the next roll.
+fn snapshot_clip<R: Runtime>(app: &AppHandle<R>, seconds: u32) -> Result<PathBuf, String> {
+    static ROLL_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let state = app.state::<ReplayState>();
+    let (dir, armed_seconds, save_lock) = {
+        let inner = state.lock_inner();
+        let Some(active) = inner.as_ref() else {
+            return Err("arm the replay buffer first".to_string());
+        };
+        (
+            active.dir.clone(),
+            active.seconds,
+            Arc::clone(&active.save_lock),
+        )
+    };
+    if state.saving.swap(true, Ordering::SeqCst) {
+        return Err("a replay save is already running".to_string());
+    }
+    let _reset = ResetOnDrop(&state.saving);
+    save_lock.store(true, Ordering::SeqCst);
+    let _release = ResetOnDrop(&save_lock);
+
+    let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
+        "the replay buffer needs the ffmpeg component — install it from Components".to_string()
+    })?;
+    let segments = ring::list_segments(&dir);
+    let take = seconds.clamp(2, armed_seconds.max(2));
+    let picked = ring::pick_for_save(&segments, take, ring::SEGMENT_SEC);
+    if picked.is_empty() {
+        return Err("the replay buffer is still empty — give it a moment".to_string());
+    }
+    let folder = roll_dir();
+    std::fs::create_dir_all(&folder)
+        .map_err(|err| format!("could not create the roll folder: {err}"))?;
+    let out = folder.join(format!(
+        "roll-{}.mkv",
+        ROLL_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    concat_copy(&ready, &picked, &out)?;
+    Ok(out)
+}
+
+/// CAP-N10: roll every LIVE replay playback source — each gets a clip cut
+/// to its own configured length. The hotkey's action.
+pub fn roll_sources<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let live = fcap_sources::replaysrc::live_ids();
+    if live.is_empty() {
+        return Err("no Instant Replay source is in the scene".to_string());
+    }
+    let wanted: Vec<(String, u32)> =
+        app.state::<crate::studio::StudioState>()
+            .with_collection(|collection| {
+                collection
+                    .sources
+                    .iter()
+                    .filter_map(|source| match &source.settings {
+                        fcap_scene::SourceSettings::ReplayPlayback { seconds, .. } => {
+                            Some((source.id.0.to_string(), *seconds))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            });
+    let mut rolled = false;
+    let mut failures: Vec<String> = Vec::new();
+    for (id, seconds) in wanted {
+        if !live.contains(&id) {
+            continue;
+        }
+        // One source's snapshot failing must not strand the rest un-rolled —
+        // try every live source, then report honestly.
+        match snapshot_clip(app, seconds) {
+            Ok(clip) => rolled = fcap_sources::replaysrc::roll(&id, clip) || rolled,
+            Err(err) => failures.push(err),
+        }
+    }
+    if let Some(detail) = failures.first() {
+        return Err(if rolled {
+            format!("some Instant Replay sources did not roll: {detail}")
+        } else {
+            detail.clone()
+        });
+    }
+    if rolled {
+        Ok(())
+    } else {
+        Err("no Instant Replay source is live".to_string())
+    }
+}
+
+/// CAP-N10: roll ONE replay source (the properties-dialog button).
+pub fn roll_one<R: Runtime>(
+    app: &AppHandle<R>,
+    source_id: fcap_scene::SourceId,
+) -> Result<(), String> {
+    let seconds = app
+        .state::<crate::studio::StudioState>()
+        .with_collection(|collection| {
+            collection
+                .sources
+                .iter()
+                .find_map(|source| match &source.settings {
+                    fcap_scene::SourceSettings::ReplayPlayback { seconds, .. }
+                        if source.id == source_id =>
+                    {
+                        Some(*seconds)
+                    }
+                    _ => None,
+                })
+        })
+        .ok_or_else(|| "that source is not an Instant Replay".to_string())?;
+    let clip = snapshot_clip(app, seconds)?;
+    if !fcap_sources::replaysrc::roll(&source_id.0.to_string(), clip) {
+        return Err("that Instant Replay source is not live — put it in the scene".to_string());
+    }
+    Ok(())
+}
+
 // -- commands -----------------------------------------------------------------
 
 /// Arm the replay buffer. Off the UI thread — encoder detection + the
@@ -443,6 +574,18 @@ pub async fn replay_save<R: Runtime>(app: AppHandle<R>) -> Result<String, String
 #[tauri::command]
 pub fn replay_status(state: tauri::State<'_, ReplayState>) -> ReplayDto {
     state.status()
+}
+
+/// CAP-N10: roll one Instant Replay source (the properties button). Off
+/// the UI thread — the snapshot's stream copy is blocking.
+#[tauri::command]
+pub async fn replay_roll_source<R: Runtime>(
+    app: AppHandle<R>,
+    source_id: fcap_scene::SourceId,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || roll_one(&app, source_id))
+        .await
+        .map_err(|err| format!("replay roll task failed: {err}"))?
 }
 
 /// ~1 Hz status while armed (buffer health + honest failure); winds down

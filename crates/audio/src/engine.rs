@@ -395,6 +395,25 @@ fn run(
         // -- mix one block -----------------------------------------------------
         core.process(&inputs, &controls);
 
+        // -- the visualizer taps (CAP-N15): push this block for every live
+        //    subscription — post-fader strips, track buses, or the master.
+        //    No subscribers (the common case) costs one map lock, no copies.
+        for (target, ring) in crate::vis::live_targets() {
+            match &target {
+                crate::vis::VisTarget::Master => ring.push_block(core.master()),
+                crate::vis::VisTarget::Track(index) => {
+                    if *index < fcap_scene::TRACK_COUNT {
+                        ring.push_block(core.track(*index));
+                    }
+                }
+                crate::vis::VisTarget::Source(key) => {
+                    if let Some(block) = core.strip_block(key) {
+                        ring.push_block(block);
+                    }
+                }
+            }
+        }
+
         // -- the recording tap (P4): every block, whether sources exist or
         //    not — a video-only scene records silent tracks, correctly ------
         if let Some(tap) = &mut record_tap {

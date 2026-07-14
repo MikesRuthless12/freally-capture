@@ -43,6 +43,47 @@ pub fn probe_media(ffmpeg: &Ffmpeg, path: &Path) -> Result<MediaInfo, String> {
     })
 }
 
+/// Probe accepting **audio-only** files too (the playlist's music lane):
+/// `width`/`height` are 0 when no video stream exists. Errors only when the
+/// file has neither stream.
+pub fn probe_media_any(ffmpeg: &Ffmpeg, path: &Path) -> Result<MediaInfo, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-i"]).arg(path);
+    let output = run_with_timeout(cmd, Duration::from_secs(30))?;
+    let banner = String::from_utf8_lossy(&output.stderr);
+    if let Some(info) = parse_banner(&banner) {
+        return Ok(info);
+    }
+    // No video stream — accept a pure audio file.
+    let mut has_audio = false;
+    let mut duration_secs: Option<f32> = None;
+    for line in banner.lines() {
+        if line.contains("Audio: ") {
+            has_audio = true;
+        }
+        if duration_secs.is_none() {
+            if let Some(rest) = line.trim_start().strip_prefix("Duration: ") {
+                let stamp = rest.split(',').next().unwrap_or("").trim();
+                duration_secs = parse_timestamp(stamp);
+            }
+        }
+    }
+    if has_audio {
+        Ok(MediaInfo {
+            width: 0,
+            height: 0,
+            has_audio: true,
+            duration_secs,
+            fps: None,
+        })
+    } else {
+        Err(format!(
+            "could not read a media stream from {} — is it a media file?",
+            path.display()
+        ))
+    }
+}
+
 /// Parse the `-i` banner: the `Video:` line's `WxH` + fps, any `Audio:`
 /// line, and the container `Duration:` line.
 fn parse_banner(banner: &str) -> Option<MediaInfo> {
@@ -160,6 +201,202 @@ pub fn spawn_audio_decoder(
     cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
     cmd.spawn()
         .map_err(|err| format!("could not start the media audio decoder: {err}"))
+}
+
+/// Spawn an **unpaced** video decoder (no `-re`): frames come as fast as
+/// they decode, and the CALLER paces them — the CAP-N10 replay source
+/// retimes playback (100/50/25%) by pacing the pipe itself.
+pub fn spawn_video_decoder_unpaced(
+    ffmpeg: &Ffmpeg,
+    path: &Path,
+    hw_decode: bool,
+    start_at: f32,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error"]);
+    if hw_decode {
+        cmd.args(["-hwaccel", "auto"]);
+    }
+    if start_at > 0.0 {
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
+    }
+    cmd.args(["-i"]).arg(path);
+    cmd.args(["-an", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the replay decoder: {err}"))
+}
+
+/// Spawn an **unpaced** audio decoder (no `-re`); the caller pushes blocks
+/// on its own clock.
+pub fn spawn_audio_decoder_unpaced(
+    ffmpeg: &Ffmpeg,
+    path: &Path,
+    start_at: f32,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error"]);
+    if start_at > 0.0 {
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
+    }
+    cmd.args(["-i"]).arg(path);
+    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the replay audio decoder: {err}"))
+}
+
+// ---------------------------------------------------------------------------
+// Gapless playlist decoding (CAP-N17) — the concat demuxer
+// ---------------------------------------------------------------------------
+
+/// One playlist entry for the gapless concat decoders.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConcatItem {
+    pub path: std::path::PathBuf,
+    /// In-trim, seconds (0 = from the top).
+    pub inpoint: f32,
+    /// Out-trim, seconds (0 = to the end).
+    pub outpoint: f32,
+}
+
+/// Write the `ffconcat` script the demuxer reads — one process plays the
+/// whole trimmed list **gaplessly**. Returns the script path.
+pub fn write_concat_script(dir: &Path, items: &[ConcatItem]) -> Result<std::path::PathBuf, String> {
+    let mut script = String::from("ffconcat version 1.0\n");
+    for item in items {
+        // Concat-syntax quoting: single-quoted, embedded quotes escaped as
+        // '\'' — and forward slashes keep Windows paths unambiguous.
+        let path = item.path.to_string_lossy().replace('\\', "/");
+        let quoted = path.replace('\'', "'\\''");
+        script.push_str(&format!("file '{quoted}'\n"));
+        if item.inpoint > 0.0 {
+            script.push_str(&format!("inpoint {:.3}\n", item.inpoint));
+        }
+        if item.outpoint > 0.0 {
+            script.push_str(&format!("outpoint {:.3}\n", item.outpoint));
+        }
+    }
+    std::fs::create_dir_all(dir).map_err(|err| format!("playlist workdir: {err}"))?;
+    let path = dir.join("playlist.ffconcat");
+    std::fs::write(&path, script).map_err(|err| format!("playlist script: {err}"))?;
+    Ok(path)
+}
+
+/// Spawn the playlist video decoder: the concat demuxer over the script,
+/// every item scaled/padded to one geometry, raw RGBA on stdout. `start_at`
+/// seeks on the concat timeline (a next/previous jump).
+#[allow(clippy::too_many_arguments)] // one call site (the playlist run); a struct would just rename these
+pub fn spawn_concat_video_decoder(
+    ffmpeg: &Ffmpeg,
+    script: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    looping: bool,
+    hw_decode: bool,
+    start_at: f32,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error"]);
+    if hw_decode {
+        cmd.args(["-hwaccel", "auto"]);
+    }
+    if looping {
+        cmd.args(["-stream_loop", "-1"]);
+    }
+    if start_at > 0.0 {
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
+    }
+    cmd.args(["-re", "-f", "concat", "-safe", "0", "-i"])
+        .arg(script);
+    // Mixed resolutions normalize to the playlist geometry (fit + pad) so
+    // the pipe stays a fixed frame size — and mixed FRAME RATES normalize
+    // to `fps`, so the caller's `frames / fps` position clock is exact for
+    // every item (a native-rate pipe drifted it on mixed-fps playlists).
+    let filter = format!(
+        "fps={fps:.3},\
+         scale={width}:{height}:force_original_aspect_ratio=decrease,\
+         pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba"
+    );
+    cmd.args([
+        "-an", "-vf", &filter, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+    ]);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the playlist decoder: {err}"))
+}
+
+/// Spawn the playlist audio decoder over the same script (48 kHz stereo
+/// f32le on stdout).
+pub fn spawn_concat_audio_decoder(
+    ffmpeg: &Ffmpeg,
+    script: &Path,
+    looping: bool,
+    start_at: f32,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["-hide_banner", "-v", "error"]);
+    if looping {
+        cmd.args(["-stream_loop", "-1"]);
+    }
+    if start_at > 0.0 {
+        cmd.args(["-ss", &format!("{start_at:.3}")]);
+    }
+    cmd.args(["-re", "-f", "concat", "-safe", "0", "-i"])
+        .arg(script);
+    cmd.args(["-vn", "-f", "f32le", "-ar", "48000", "-ac", "2", "pipe:1"]);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the playlist audio decoder: {err}"))
+}
+
+// ---------------------------------------------------------------------------
+// LAN ingest (CAP-N11) — the SRT/RTMP listener/decoder
+// ---------------------------------------------------------------------------
+
+/// Spawn the LAN-ingest LISTENER/decoder: ffmpeg both accepts the sender's
+/// connection (SRT `mode=listener` / RTMP `-listen 1` via
+/// `extra_input_args`) and decodes the feed. It must be ONE process — two
+/// cannot bind one listen port — so video and audio come back together:
+/// video scaled+padded to a fixed `width`×`height` canvas (the playlist's
+/// fit+pad precedent, so the pipe never changes frame size and no probe
+/// roundtrip burns the sender's connection) and 48 kHz stereo f32 audio,
+/// INTERLEAVED as rawvideo/pcm_f32le chunks of a streamed AVI on stdout
+/// (`00dc`/`01wb` — the caller demuxes; layout verified against the pinned
+/// 8.1.2 build). No `-re` (a live feed paces itself), no `-stream_loop`;
+/// audio is mapped optionally so a video-only sender still plays. The
+/// process exits when the sender disconnects — the caller re-listens.
+pub fn spawn_url_av_decoder(
+    ffmpeg: &Ffmpeg,
+    url: &str,
+    extra_input_args: &[String],
+    width: u32,
+    height: u32,
+) -> Result<Child, String> {
+    let mut cmd = command(ffmpeg);
+    // stderr is PIPED (unlike the file decoders): a live listener that dies
+    // names its real cause there — e.g. a sender that delivered no video
+    // stream — and the caller reports it instead of guessing at the port.
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(["-hide_banner", "-v", "error"]);
+    // Bound the live-stream probe (default is seconds of buffering) so the
+    // first frames land fast once a sender connects.
+    cmd.args(["-analyzeduration", "2000000", "-probesize", "1000000"]);
+    for arg in extra_input_args {
+        cmd.arg(arg);
+    }
+    cmd.args(["-i", url]);
+    cmd.args(["-map", "0:v:0", "-map", "0:a:0?"]);
+    let filter = format!(
+        "scale={width}:{height}:force_original_aspect_ratio=decrease,\
+         pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba"
+    );
+    cmd.args(["-vf", &filter, "-c:v", "rawvideo"]);
+    cmd.args(["-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2"]);
+    cmd.args(["-f", "avi", "pipe:1"]);
+    cmd.spawn()
+        .map_err(|err| format!("could not start the LAN ingest listener: {err}"))
 }
 
 // ---------------------------------------------------------------------------

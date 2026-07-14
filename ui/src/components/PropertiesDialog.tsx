@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import qrcode from "qrcode-generator";
 
 import {
   audioInputDevices,
@@ -7,8 +8,15 @@ import {
   cameraControlsList,
   cameraProfileReset,
   captureListSources,
+  localLanIp,
+  replayRollSource,
+  studioPlaylistControl,
+  studioPlaylistCue,
   studioRenameSource,
+  studioSplitControl,
   studioTimerControl,
+  studioTitleFire,
+  studioTitleSetText,
   studioUpdateSourceSettings,
   videoDeviceFormats,
   videoDevicesList,
@@ -21,14 +29,23 @@ import type {
   DeinterlaceMode,
   FieldOrder,
   FileBinding,
+  IngestProtocol,
+  InputLayout,
+  PlaylistEntry,
+  ReplaySpeed,
   Source,
   SourceSettings,
   TextAlign,
+  SplitComparison,
   TimerMode,
+  TitleAnimation,
+  TitleLayer,
   VideoDevice,
   VideoFormat,
+  VisStyle,
 } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
+import { LAN_DEFAULT_PORTS, lanIngestUrl, lanPassphraseUsable } from "../lib/lanIngest";
 import { useT } from "../i18n/t";
 import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
@@ -36,15 +53,66 @@ import { PickerShell } from "./PickerShell";
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
 
+/** Comma-separated cue seconds with a local draft (NumberField's idiom).
+ * Parsing on every keystroke made the field unusable: the controlled value
+ * snapped back mid-word, and a trailing comma's empty segment parsed as
+ * Number("") === 0, injecting phantom 0 s cues. The draft commits on blur
+ * or Enter; empty segments are dropped, not zeroed. */
+function CueListField({
+  label,
+  cues,
+  onCommit,
+}: {
+  label: string;
+  cues: number[];
+  onCommit: (cues: number[]) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    onCommit(
+      draft
+        .split(",")
+        .map((cue) => cue.trim())
+        .filter((cue) => cue.length > 0)
+        .map(Number)
+        .filter((cue) => Number.isFinite(cue) && cue >= 0),
+    );
+    setDraft(null);
+  };
+  return (
+    <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
+      {label}
+      <input
+        value={draft ?? cues.join(", ")}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+        }}
+        placeholder="10, 42.5"
+        className={`${inputClass} font-mono`}
+      />
+    </label>
+  );
+}
+
 type PropertiesDialogProps = {
   source: Source;
   /** The scenes a Nested Scene source can point at (cycle-checked on Apply). */
   scenes?: Array<{ id: string; name: string }>;
+  /** The audio-capable sources a visualizer (CAP-N15) can listen to. */
+  audioSources?: Array<{ id: string; name: string }>;
   onClose: () => void;
 };
 
 /** Per-kind source settings + rename. Apply pushes to the engine live. */
-export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDialogProps) {
+export function PropertiesDialog({
+  source,
+  scenes = [],
+  audioSources = [],
+  onClose,
+}: PropertiesDialogProps) {
   const t = useT();
   const [name, setName] = useState(source.name);
   const [draft, setDraft] = useState<SourceSettings>(() => {
@@ -81,7 +149,13 @@ export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDia
           />
         </label>
 
-        <SettingsEditor draft={draft} scenes={scenes} sourceId={source.id} onChange={setDraft} />
+        <SettingsEditor
+          draft={draft}
+          scenes={scenes}
+          audioSources={audioSources}
+          sourceId={source.id}
+          onChange={setDraft}
+        />
 
         {error && (
           <p role="alert" className="m-0 text-xs text-red-400">
@@ -112,11 +186,13 @@ export function PropertiesDialog({ source, scenes = [], onClose }: PropertiesDia
 function SettingsEditor({
   draft,
   scenes,
+  audioSources,
   sourceId,
   onChange,
 }: {
   draft: SourceSettings;
   scenes: Array<{ id: string; name: string }>;
+  audioSources: Array<{ id: string; name: string }>;
   sourceId: string;
   onChange: (settings: SourceSettings) => void;
 }) {
@@ -370,8 +446,599 @@ function SettingsEditor({
       );
     case "text":
       return <TextEditor draft={draft} onChange={onChange} />;
+    case "title":
+      return <TitleEditor draft={draft} sourceId={sourceId} onChange={onChange} />;
     case "timer":
       return <TimerEditor draft={draft} scenes={scenes} sourceId={sourceId} onChange={onChange} />;
+    case "systemStats":
+      return (
+        <div className="flex flex-col gap-2">
+          {(
+            [
+              ["showFps", "properties-stats-show-fps"],
+              ["showCpu", "properties-stats-show-cpu"],
+              ["showMemory", "properties-stats-show-memory"],
+              ["showRenderMs", "properties-stats-show-render"],
+              ["showDropped", "properties-stats-show-dropped"],
+              ["showBitrate", "properties-stats-show-bitrate"],
+            ] as const
+          ).map(([field, label]) => (
+            <label key={field} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <input
+                type="checkbox"
+                checked={draft[field]}
+                onChange={(event) => onChange({ ...draft, [field]: event.target.checked })}
+              />
+              {t(label)}
+            </label>
+          ))}
+          <div className="flex items-end gap-2">
+            <NumberField
+              label={t("properties-stats-size")}
+              value={draft.sizePx}
+              min={8}
+              max={512}
+              onCommit={(sizePx) => onChange({ ...draft, sizePx })}
+              className="flex-1"
+            />
+            <label className="flex items-center gap-2 pb-1 text-[11px] text-havoc-muted">
+              {t("properties-color")}
+              <input
+                type="color"
+                value={rgbaToHex(draft.color)}
+                onChange={(event) =>
+                  onChange({ ...draft, color: hexToRgba(event.target.value, draft.color.a) })
+                }
+                aria-label={t("properties-color")}
+                className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+          </div>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("properties-stats-note")}
+          </p>
+        </div>
+      );
+    case "audioVisualizer": {
+      const target =
+        draft.target === "master"
+          ? "master"
+          : draft.target === "track"
+            ? `track:${draft.track}`
+            : `source:${draft.source ?? ""}`;
+      const bound = draft.source ? audioSources.some((entry) => entry.id === draft.source) : true;
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-visualizer-style-label")}
+            <select
+              value={draft.style}
+              onChange={(event) => onChange({ ...draft, style: event.target.value as VisStyle })}
+              className={inputClass}
+            >
+              <option value="bars">{t("sources-visualizer-style-bars")}</option>
+              <option value="scope">{t("sources-visualizer-style-scope")}</option>
+              <option value="vu">{t("sources-visualizer-style-vu")}</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-visualizer-target-label")}
+            <select
+              value={target}
+              onChange={(event) => {
+                const value = event.target.value;
+                onChange({
+                  ...draft,
+                  target:
+                    value === "master" ? "master" : value.startsWith("track:") ? "track" : "source",
+                  track: value.startsWith("track:") ? Number(value.slice(6)) : draft.track,
+                  source: value.startsWith("source:") ? value.slice(7) : null,
+                });
+              }}
+              className={inputClass}
+            >
+              <option value="master">{t("sources-visualizer-target-master")}</option>
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={`track:${n}`}>
+                  {t("sources-visualizer-target-track", { n })}
+                </option>
+              ))}
+              {audioSources.map((entry) => (
+                <option key={entry.id} value={`source:${entry.id}`}>
+                  {entry.name}
+                </option>
+              ))}
+              {!bound && draft.source && (
+                <option value={`source:${draft.source}`} disabled>
+                  {t("properties-vis-missing-source")}
+                </option>
+              )}
+            </select>
+          </label>
+          <div className="flex items-end gap-2">
+            <NumberField
+              label={t("properties-width")}
+              value={draft.width}
+              min={1}
+              max={16384}
+              onCommit={(width) => onChange({ ...draft, width })}
+              className="flex-1"
+            />
+            <NumberField
+              label={t("properties-height")}
+              value={draft.height}
+              min={1}
+              max={16384}
+              onCommit={(height) => onChange({ ...draft, height })}
+              className="flex-1"
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            {draft.style === "bars" && (
+              <NumberField
+                label={t("properties-vis-bands")}
+                value={draft.bands}
+                min={8}
+                max={128}
+                onCommit={(bands) => onChange({ ...draft, bands })}
+                className="flex-1"
+              />
+            )}
+            <NumberField
+              label={t("properties-vis-decay")}
+              value={draft.decay}
+              min={6}
+              max={120}
+              onCommit={(decay) => onChange({ ...draft, decay })}
+              className="flex-1"
+            />
+            <label className="flex items-center gap-2 pb-1 text-[11px] text-havoc-muted">
+              {t("properties-color")}
+              <input
+                type="color"
+                value={rgbaToHex(draft.color)}
+                onChange={(event) =>
+                  onChange({ ...draft, color: hexToRgba(event.target.value, draft.color.a) })
+                }
+                aria-label={t("properties-color")}
+                className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.peakHold}
+              onChange={(event) => onChange({ ...draft, peakHold: event.target.checked })}
+            />
+            {t("properties-vis-peak-hold")}
+          </label>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("sources-visualizer-note")}
+          </p>
+        </div>
+      );
+    }
+    case "inputOverlay":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-input-layout-label")}
+            <select
+              value={draft.layout}
+              onChange={(event) =>
+                onChange({ ...draft, layout: event.target.value as InputLayout })
+              }
+              className={inputClass}
+            >
+              <option value="wasd">{t("sources-input-layout-wasd")}</option>
+              <option value="keyboard">{t("sources-input-layout-keyboard")}</option>
+              <option value="gamepad">{t("sources-input-layout-gamepad")}</option>
+              <option value="fightstick">{t("sources-input-layout-fightstick")}</option>
+            </select>
+          </label>
+          <div className="flex items-end gap-3">
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("sources-input-color-label")}
+              <input
+                type="color"
+                value={rgbaToHex(draft.color)}
+                onChange={(event) =>
+                  onChange({ ...draft, color: hexToRgba(event.target.value, draft.color.a) })
+                }
+                aria-label={t("sources-input-color-label")}
+                className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("sources-input-accent-label")}
+              <input
+                type="color"
+                value={rgbaToHex(draft.accent)}
+                onChange={(event) =>
+                  onChange({ ...draft, accent: hexToRgba(event.target.value, draft.accent.a) })
+                }
+                aria-label={t("sources-input-accent-label")}
+                className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+          </div>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("sources-input-privacy-note")}
+          </p>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("sources-input-os-note")}
+          </p>
+        </div>
+      );
+    case "playlist":
+      return (
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] text-havoc-muted">{t("properties-playlist-items")}</span>
+          <div className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
+            {draft.items.map((item, index) => {
+              const update = (next: Partial<PlaylistEntry>) =>
+                onChange({
+                  ...draft,
+                  items: draft.items.map((entry, at) =>
+                    at === index ? { ...entry, ...next } : entry,
+                  ),
+                });
+              return (
+                <div
+                  key={index}
+                  className="flex flex-col gap-1 rounded-md border border-white/10 p-2"
+                >
+                  <div className="flex items-center gap-1">
+                    <input
+                      value={item.path}
+                      onChange={(event) => update({ path: event.target.value })}
+                      placeholder="C:\vt\clip.mp4"
+                      className={`${inputClass} flex-1 font-mono`}
+                    />
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() => {
+                        const items = [...draft.items];
+                        [items[index - 1], items[index]] = [items[index], items[index - 1]];
+                        onChange({ ...draft, items });
+                      }}
+                      aria-label={t("properties-playlist-up")}
+                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === draft.items.length - 1}
+                      onClick={() => {
+                        const items = [...draft.items];
+                        [items[index], items[index + 1]] = [items[index + 1], items[index]];
+                        onChange({ ...draft, items });
+                      }}
+                      aria-label={t("properties-playlist-down")}
+                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...draft,
+                          items: draft.items.filter((_, at) => at !== index),
+                        })
+                      }
+                      aria-label={t("properties-playlist-remove")}
+                      className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted hover:text-red-400"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <NumberField
+                      label={t("properties-playlist-in")}
+                      value={item.in}
+                      min={0}
+                      max={359999}
+                      onCommit={(value) => update({ in: value })}
+                      className="flex-1"
+                    />
+                    <NumberField
+                      label={t("properties-playlist-out")}
+                      value={item.out}
+                      min={0}
+                      max={359999}
+                      onCommit={(value) => update({ out: value })}
+                      className="flex-1"
+                    />
+                    <CueListField
+                      label={t("properties-playlist-cues")}
+                      cues={item.cues}
+                      onCommit={(cues) => update({ cues })}
+                    />
+                  </div>
+                  {item.cues.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.cues.map((cue, cueIndex) => (
+                        <button
+                          key={cueIndex}
+                          type="button"
+                          onClick={() =>
+                            studioPlaylistCue(sourceId, index, cue).catch((err) =>
+                              console.error("playlist cue failed:", err),
+                            )
+                          }
+                          className="rounded border border-white/10 px-2 py-0.5 text-[10px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+                        >
+                          ▶ {cue}s
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...draft,
+                items: [...draft.items, { path: "", in: 0, out: 0, cues: [] }],
+              })
+            }
+            className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+          >
+            {t("properties-playlist-add-item")}
+          </button>
+          <div className="flex flex-wrap gap-3">
+            {(
+              [
+                ["loop", "properties-playlist-loop"],
+                ["shuffle", "properties-playlist-shuffle"],
+                ["holdLast", "properties-playlist-hold-last"],
+                ["hwDecode", "properties-playlist-hw"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                <input
+                  type="checkbox"
+                  checked={draft[field]}
+                  onChange={(event) => onChange({ ...draft, [field]: event.target.checked })}
+                />
+                {t(label)}
+              </label>
+            ))}
+          </div>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("properties-playlist-variable")}
+            <input
+              value={draft.nowPlayingVariable}
+              onChange={(event) => onChange({ ...draft, nowPlayingVariable: event.target.value })}
+              placeholder="nowPlaying"
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                studioPlaylistControl(sourceId, "previous").catch((err) =>
+                  console.error("playlist control failed:", err),
+                )
+              }
+              className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-text hover:border-havoc-accent/50"
+            >
+              {t("properties-playlist-previous")}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                studioPlaylistControl(sourceId, "next").catch((err) =>
+                  console.error("playlist control failed:", err),
+                )
+              }
+              className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-text hover:border-havoc-accent/50"
+            >
+              {t("properties-playlist-next")}
+            </button>
+          </div>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("properties-playlist-note")}
+          </p>
+        </div>
+      );
+    case "replayPlayback":
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-end gap-2">
+            <NumberField
+              label={t("sources-replay-seconds-label")}
+              value={draft.seconds}
+              min={2}
+              max={300}
+              onCommit={(seconds) => onChange({ ...draft, seconds })}
+              className="flex-1"
+            />
+            <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
+              {t("sources-replay-speed-label")}
+              <select
+                value={draft.speed}
+                onChange={(event) =>
+                  onChange({ ...draft, speed: event.target.value as ReplaySpeed })
+                }
+                className={inputClass}
+              >
+                <option value="full">{t("sources-replay-speed-full")}</option>
+                <option value="half">{t("sources-replay-speed-half")}</option>
+                <option value="quarter">{t("sources-replay-speed-quarter")}</option>
+              </select>
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.hwDecode}
+              onChange={(event) => onChange({ ...draft, hwDecode: event.target.checked })}
+            />
+            {t("properties-playlist-hw")}
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              replayRollSource(sourceId).catch((err) => console.error("replay roll failed:", err))
+            }
+            className="self-start rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+          >
+            {t("properties-replay-roll")}
+          </button>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("properties-replay-note")}
+          </p>
+        </div>
+      );
+    case "freallyLink":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-link-host")}
+            <input
+              value={draft.host}
+              onChange={(event) => onChange({ ...draft, host: event.target.value })}
+              placeholder="192.168.1.20"
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <NumberField
+            label={t("sources-link-port")}
+            value={draft.port}
+            min={1}
+            max={65535}
+            onCommit={(port) => onChange({ ...draft, port })}
+          />
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-link-key")}
+            <input
+              value={draft.key}
+              onChange={(event) => onChange({ ...draft, key: event.target.value })}
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("sources-link-key-hint")}
+          </p>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("properties-link-note")}
+          </p>
+        </div>
+      );
+    case "splitTimer":
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-splits-file-label")}
+            <input
+              value={draft.path}
+              onChange={(event) => onChange({ ...draft, path: event.target.value })}
+              placeholder="C:\runs\any-percent.lss"
+              className={`${inputClass} font-mono`}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-splits-comparison-label")}
+            <select
+              value={draft.comparison}
+              onChange={(event) =>
+                onChange({ ...draft, comparison: event.target.value as SplitComparison })
+              }
+              className={inputClass}
+            >
+              <option value="personalBest">{t("sources-splits-comparison-pb")}</option>
+              <option value="bestSegments">{t("sources-splits-comparison-best")}</option>
+              <option value="average">{t("sources-splits-comparison-average")}</option>
+            </select>
+          </label>
+          <div className="flex items-end gap-2">
+            <NumberField
+              label={t("properties-width")}
+              value={draft.width}
+              min={1}
+              max={16384}
+              onCommit={(width) => onChange({ ...draft, width })}
+              className="flex-1"
+            />
+            <NumberField
+              label={t("properties-height")}
+              value={draft.height}
+              min={1}
+              max={16384}
+              onCommit={(height) => onChange({ ...draft, height })}
+              className="flex-1"
+            />
+            <NumberField
+              label={t("properties-splits-size")}
+              value={draft.sizePx}
+              min={8}
+              max={96}
+              onCommit={(sizePx) => onChange({ ...draft, sizePx })}
+              className="flex-1"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {(
+              [
+                ["color", "properties-color"],
+                ["ahead", "properties-splits-ahead"],
+                ["behind", "properties-splits-behind"],
+                ["gold", "properties-splits-gold"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                {t(label)}
+                <input
+                  type="color"
+                  value={rgbaToHex(draft[field])}
+                  onChange={(event) =>
+                    onChange({ ...draft, [field]: hexToRgba(event.target.value, draft[field].a) })
+                  }
+                  aria-label={t(label)}
+                  className="h-7 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            {(
+              [
+                ["split", "properties-splits-split"],
+                ["undo", "properties-splits-undo"],
+                ["skip", "properties-splits-skip"],
+                ["reset", "properties-splits-reset"],
+              ] as const
+            ).map(([action, label]) => (
+              <button
+                key={action}
+                type="button"
+                onClick={() =>
+                  studioSplitControl(sourceId, action).catch((err) =>
+                    console.error("split control failed:", err),
+                  )
+                }
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-text hover:border-havoc-accent/50"
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
+          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+            {t("properties-splits-note")}
+          </p>
+        </div>
+      );
+    case "lanIngest":
+      return <LanIngestEditor draft={draft} onChange={onChange} />;
     case "testBars":
     case "testGrid":
     case "testSweep":
@@ -1058,6 +1725,410 @@ function TimerEditor({
   );
 }
 
+/** CAP-N16: the compact layer editor + live fire/edit controls. A separate
+ * control dock is out of v1 — the live controls live here, said in-product
+ * by the note below the buttons. */
+function TitleEditor({
+  draft,
+  sourceId,
+  onChange,
+}: {
+  draft: Extract<SourceSettings, { kind: "title" }>;
+  sourceId: string;
+  onChange: (settings: SourceSettings) => void;
+}) {
+  const t = useT();
+  const updateLayer = (index: number, next: TitleLayer) =>
+    onChange({
+      ...draft,
+      layers: draft.layers.map((layer, at) => (at === index ? next : layer)),
+    });
+  const addLayer = (layer: TitleLayer) => onChange({ ...draft, layers: [...draft.layers, layer] });
+  const kindLabel = (layer: TitleLayer) =>
+    layer.kind === "text"
+      ? t("properties-title-kind-text")
+      : layer.kind === "image"
+        ? t("properties-title-kind-image")
+        : t("properties-title-kind-rect");
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        <NumberField
+          label={t("properties-width")}
+          value={draft.width}
+          min={16}
+          max={16384}
+          onCommit={(width) => onChange({ ...draft, width })}
+          className="flex-1"
+        />
+        <NumberField
+          label={t("properties-height")}
+          value={draft.height}
+          min={16}
+          max={16384}
+          onCommit={(height) => onChange({ ...draft, height })}
+          className="flex-1"
+        />
+        <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("properties-title-animation")}
+          <select
+            value={draft.animation}
+            onChange={(event) =>
+              onChange({ ...draft, animation: event.target.value as TitleAnimation })
+            }
+            className={inputClass}
+          >
+            <option value="none">{t("properties-title-anim-none")}</option>
+            <option value="fade">{t("properties-title-anim-fade")}</option>
+            <option value="slideLeft">{t("properties-title-anim-slide-left")}</option>
+            <option value="slideUp">{t("properties-title-anim-slide-up")}</option>
+            <option value="wipe">{t("properties-title-anim-wipe")}</option>
+          </select>
+        </label>
+        <NumberField
+          label={t("properties-title-duration")}
+          value={draft.durationMs}
+          min={0}
+          max={10000}
+          onCommit={(durationMs) => onChange({ ...draft, durationMs: Math.round(durationMs) })}
+          className="w-24"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            studioTitleFire(sourceId, "in").catch((err) => console.error("title fire failed:", err))
+          }
+          className="rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("properties-title-fire-in")}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            studioTitleFire(sourceId, "out").catch((err) =>
+              console.error("title fire failed:", err),
+            )
+          }
+          className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-text hover:border-havoc-accent/50"
+        >
+          {t("properties-title-fire-out")}
+        </button>
+      </div>
+      <span className="text-[11px] text-havoc-muted">{t("properties-title-layers")}</span>
+      <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
+        {draft.layers.map((layer, index) => (
+          <div key={index} className="flex flex-col gap-1 rounded-md border border-white/10 p-2">
+            <div className="flex items-center gap-1">
+              <span className="rounded bg-havoc-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-havoc-muted">
+                {kindLabel(layer)}
+              </span>
+              {layer.kind === "text" ? (
+                <>
+                  <input
+                    value={layer.text}
+                    onChange={(event) => updateLayer(index, { ...layer, text: event.target.value })}
+                    className={`${inputClass} flex-1`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      studioTitleSetText(sourceId, index, layer.text).catch((err) =>
+                        console.error("title set-text failed:", err),
+                      )
+                    }
+                    title={t("properties-title-set-live-note")}
+                    className="rounded border border-havoc-accent/60 bg-havoc-accent/15 px-1.5 py-1 text-[11px] text-havoc-text hover:bg-havoc-accent/25"
+                  >
+                    {t("properties-title-set-live")}
+                  </button>
+                </>
+              ) : layer.kind === "image" ? (
+                <input
+                  value={layer.path}
+                  onChange={(event) => updateLayer(index, { ...layer, path: event.target.value })}
+                  placeholder="C:\overlays\badge.png"
+                  className={`${inputClass} flex-1 font-mono`}
+                />
+              ) : (
+                <span className="flex-1" />
+              )}
+              <button
+                type="button"
+                disabled={index === 0}
+                onClick={() => {
+                  const layers = [...draft.layers];
+                  [layers[index - 1], layers[index]] = [layers[index], layers[index - 1]];
+                  onChange({ ...draft, layers });
+                }}
+                aria-label={t("properties-title-up")}
+                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                disabled={index === draft.layers.length - 1}
+                onClick={() => {
+                  const layers = [...draft.layers];
+                  [layers[index], layers[index + 1]] = [layers[index + 1], layers[index]];
+                  onChange({ ...draft, layers });
+                }}
+                aria-label={t("properties-title-down")}
+                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({ ...draft, layers: draft.layers.filter((_, at) => at !== index) })
+                }
+                aria-label={t("properties-title-remove")}
+                className="rounded border border-white/10 px-1.5 py-1 text-[11px] text-havoc-muted hover:text-red-400"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex items-end gap-2">
+              <NumberField
+                label={t("properties-title-x")}
+                value={layer.x}
+                min={-16384}
+                max={16384}
+                onCommit={(x) => updateLayer(index, { ...layer, x: Math.round(x) })}
+                className="w-20"
+              />
+              <NumberField
+                label={t("properties-title-y")}
+                value={layer.y}
+                min={-16384}
+                max={16384}
+                onCommit={(y) => updateLayer(index, { ...layer, y: Math.round(y) })}
+                className="w-20"
+              />
+              {layer.kind === "rect" && (
+                <>
+                  <NumberField
+                    label={t("properties-width")}
+                    value={layer.width}
+                    min={1}
+                    max={16384}
+                    onCommit={(width) => updateLayer(index, { ...layer, width })}
+                    className="w-20"
+                  />
+                  <NumberField
+                    label={t("properties-height")}
+                    value={layer.height}
+                    min={1}
+                    max={16384}
+                    onCommit={(height) => updateLayer(index, { ...layer, height })}
+                    className="w-20"
+                  />
+                </>
+              )}
+              {layer.kind === "text" && (
+                <>
+                  <NumberField
+                    label={t("properties-size-px")}
+                    value={layer.sizePx}
+                    min={4}
+                    max={512}
+                    onCommit={(sizePx) => updateLayer(index, { ...layer, sizePx })}
+                    className="w-20"
+                  />
+                  <NumberField
+                    label={t("properties-title-outline")}
+                    value={layer.outlinePx}
+                    min={0}
+                    max={32}
+                    onCommit={(outlinePx) => updateLayer(index, { ...layer, outlinePx })}
+                    className="w-20"
+                  />
+                  <label className="flex items-center gap-1 pb-1 text-[11px] text-havoc-muted">
+                    {t("properties-title-outline-color")}
+                    <input
+                      type="color"
+                      value={rgbaToHex(layer.outlineColor)}
+                      onChange={(event) =>
+                        updateLayer(index, {
+                          ...layer,
+                          outlineColor: hexToRgba(event.target.value, layer.outlineColor.a),
+                        })
+                      }
+                      aria-label={t("properties-title-outline-color")}
+                      className="h-7 w-8 cursor-pointer rounded border border-white/10 bg-transparent"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 pb-1.5 text-[11px] text-havoc-muted">
+                    <input
+                      type="checkbox"
+                      checked={layer.shadow}
+                      onChange={(event) =>
+                        updateLayer(index, { ...layer, shadow: event.target.checked })
+                      }
+                    />
+                    {t("properties-title-shadow")}
+                  </label>
+                </>
+              )}
+              {(layer.kind === "text" || layer.kind === "rect") && (
+                <label className="flex items-center gap-1 pb-1 text-[11px] text-havoc-muted">
+                  {t("properties-color")}
+                  <input
+                    type="color"
+                    value={rgbaToHex(layer.color)}
+                    onChange={(event) =>
+                      updateLayer(index, {
+                        ...layer,
+                        color: hexToRgba(event.target.value, layer.color.a),
+                      })
+                    }
+                    aria-label={t("properties-color")}
+                    className="h-7 w-8 cursor-pointer rounded border border-white/10 bg-transparent"
+                  />
+                </label>
+              )}
+            </div>
+            {layer.kind === "text" && (
+              <div className="flex items-end gap-2">
+                <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
+                  {t("properties-text-file")}
+                  <input
+                    value={layer.sourceFile}
+                    onChange={(event) =>
+                      updateLayer(index, { ...layer, sourceFile: event.target.value })
+                    }
+                    placeholder="C:\data\score.csv"
+                    className={`${inputClass} font-mono`}
+                  />
+                </label>
+                {layer.sourceFile.trim() !== "" && (
+                  <>
+                    <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                      {t("properties-text-binding")}
+                      <select
+                        value={layer.binding}
+                        onChange={(event) =>
+                          updateLayer(index, {
+                            ...layer,
+                            binding: event.target.value as FileBinding,
+                          })
+                        }
+                        className={inputClass}
+                      >
+                        <option value="whole">{t("properties-text-binding-whole")}</option>
+                        <option value="csvCell">{t("properties-text-binding-csv")}</option>
+                        <option value="jsonPointer">{t("properties-text-binding-json")}</option>
+                      </select>
+                    </label>
+                    {layer.binding === "csvCell" && (
+                      <>
+                        <NumberField
+                          label={t("properties-text-csv-row")}
+                          value={layer.csvRow}
+                          min={1}
+                          max={100000}
+                          onCommit={(csvRow) =>
+                            updateLayer(index, { ...layer, csvRow: Math.round(csvRow) })
+                          }
+                          className="w-20"
+                        />
+                        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                          {t("properties-text-csv-column")}
+                          <input
+                            value={layer.csvColumn}
+                            onChange={(event) =>
+                              updateLayer(index, { ...layer, csvColumn: event.target.value })
+                            }
+                            placeholder={t("properties-text-csv-column-placeholder")}
+                            className={`${inputClass} w-24 font-mono`}
+                          />
+                        </label>
+                      </>
+                    )}
+                    {layer.binding === "jsonPointer" && (
+                      <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                        {t("properties-text-json-pointer")}
+                        <input
+                          value={layer.jsonPointer}
+                          onChange={(event) =>
+                            updateLayer(index, { ...layer, jsonPointer: event.target.value })
+                          }
+                          placeholder="/teams/0/score"
+                          className={`${inputClass} w-36 font-mono`}
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => addLayer({ ...titleTextDefaults(), text: t("sources-text-default") })}
+          className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+        >
+          {t("properties-title-add-text")}
+        </button>
+        <button
+          type="button"
+          onClick={() => addLayer({ kind: "image", x: 0, y: 0, path: "" })}
+          className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+        >
+          {t("properties-title-add-image")}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            addLayer({
+              kind: "rect",
+              x: 0,
+              y: 0,
+              width: 400,
+              height: 120,
+              color: { r: 74, g: 158, b: 255, a: 230 },
+            })
+          }
+          className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+        >
+          {t("properties-title-add-rect")}
+        </button>
+      </div>
+      <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("properties-title-note")}</p>
+    </div>
+  );
+}
+
+/** A fresh, fully-populated text layer for the “+ Text” button (the call
+ * site swaps in the localized seed text). */
+function titleTextDefaults(): Extract<TitleLayer, { kind: "text" }> {
+  return {
+    kind: "text",
+    x: 0,
+    y: 0,
+    text: "",
+    fontFamily: null,
+    fontFile: null,
+    sizePx: 48,
+    color: { r: 255, g: 255, b: 255, a: 255 },
+    align: "left",
+    outlinePx: 0,
+    outlineColor: { r: 0, g: 0, b: 0, a: 255 },
+    shadow: false,
+    sourceFile: "",
+    binding: "whole",
+    csvRow: 1,
+    csvColumn: "",
+    jsonPointer: "",
+  };
+}
+
 function TextEditor({
   draft,
   onChange,
@@ -1224,5 +2295,138 @@ function TextEditor({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * CAP-N11: the LAN ingest listener's settings + the live connect URL/QR.
+ * Applying a change restarts the listener (the sender must reconnect) —
+ * the note says so.
+ */
+function LanIngestEditor({
+  draft,
+  onChange,
+}: {
+  draft: Extract<SourceSettings, { kind: "lanIngest" }>;
+  onChange: (settings: SourceSettings) => void;
+}) {
+  const t = useT();
+  const [host, setHost] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    localLanIp()
+      .then((ip) => {
+        if (!cancelled) setHost(ip);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const passUsable = lanPassphraseUsable(draft.protocol, draft.passphrase);
+  const url = lanIngestUrl(
+    draft.protocol,
+    host ?? "…",
+    draft.port,
+    draft.protocol === "srt" ? draft.passphrase : "",
+  );
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-lan-protocol-label")}
+          <select
+            value={draft.protocol}
+            onChange={(event) => {
+              const protocol = event.target.value as IngestProtocol;
+              // Follow the protocol's default port unless the user set one.
+              const port =
+                draft.port === LAN_DEFAULT_PORTS[draft.protocol]
+                  ? LAN_DEFAULT_PORTS[protocol]
+                  : draft.port;
+              onChange({ ...draft, protocol, port });
+            }}
+            className={inputClass}
+          >
+            <option value="srt">{t("sources-lan-protocol-srt")}</option>
+            <option value="rtmp">{t("sources-lan-protocol-rtmp")}</option>
+          </select>
+        </label>
+        <NumberField
+          label={t("sources-lan-port-label")}
+          value={draft.port}
+          min={1024}
+          max={65535}
+          onCommit={(port) => onChange({ ...draft, port })}
+          className="flex-1"
+        />
+      </div>
+      {draft.protocol === "srt" && (
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-lan-passphrase-label")}
+          <input
+            value={draft.passphrase}
+            onChange={(event) => onChange({ ...draft, passphrase: event.target.value })}
+            className={`${inputClass} font-mono`}
+          />
+          <span className={passUsable ? "" : "text-amber-300"}>
+            {t("sources-lan-passphrase-hint")}
+          </span>
+        </label>
+      )}
+      {draft.protocol === "rtmp" ? (
+        <p className="m-0 text-[10px] leading-snug text-amber-300">
+          {t("sources-lan-rtmp-warning")}
+        </p>
+      ) : (
+        draft.passphrase === "" && (
+          <p className="m-0 text-[10px] leading-snug text-amber-300">
+            {t("sources-lan-open-warning")}
+          </p>
+        )
+      )}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="m-0 text-[11px] text-havoc-muted">{t("sources-lan-url-label")}</p>
+          <p className="m-0 break-all font-mono text-xs text-havoc-text">{url}</p>
+        </div>
+        {host && <LanQr link={url} />}
+      </div>
+      <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("properties-lan-note")}</p>
+    </div>
+  );
+}
+
+/** The ingest URL as a QR code — the SourcesRail invite-QR pattern (vendored
+ * zero-dep encoder, plain SVG path, CSP-safe). */
+function LanQr({ link }: { link: string }) {
+  const t = useT();
+  const rendered = useMemo(() => {
+    try {
+      const qr = qrcode(0, "M"); // type 0 = auto-size for the payload
+      qr.addData(link);
+      qr.make();
+      const count = qr.getModuleCount();
+      let path = "";
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (qr.isDark(row, col)) path += `M${col} ${row}h1v1h-1z`;
+        }
+      }
+      return { count, path };
+    } catch {
+      return null; // an over-long payload — the copyable URL still works
+    }
+  }, [link]);
+  if (!rendered) return null;
+  return (
+    <svg
+      viewBox={`0 0 ${rendered.count} ${rendered.count}`}
+      role="img"
+      aria-label={t("sources-lan-qr-aria")}
+      className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
+    >
+      <path d={rendered.path} fill="#000" />
+    </svg>
   );
 }

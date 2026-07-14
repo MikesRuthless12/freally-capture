@@ -60,6 +60,7 @@ works © Mike Weaver, covered by [`LICENSE`](LICENSE) — they are not third-par
 | [`zip`](https://crates.io/crates/zip) *(Windows/macOS)* | unpack the fetched ffmpeg archive | MIT |
 | [`tar`](https://crates.io/crates/tar) + [`lzma-rs`](https://crates.io/crates/lzma-rs) *(Linux only)* | unpack the fetched ffmpeg tar.xz archive | MIT OR Apache-2.0 / MIT |
 | [`midir`](https://crates.io/crates/midir) | MIDI control surfaces (CAP-N03): pads/knobs/faders in, LED + motor-fader feedback out. No MIDI port is opened until the user picks one. | MIT |
+| [`gilrs`](https://crates.io/crates/gilrs) | gamepad state for the input overlay source (CAP-N13) — polled only while an overlay source is live; nothing is logged or stored. (Linux builds link `libudev`.) | Apache-2.0 OR MIT |
 
 Transitive Rust dependencies are MIT / Apache-2.0 / BSD / Zlib / MPL / IJG.
 

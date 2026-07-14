@@ -179,6 +179,173 @@ mod tests {
         frame.data[idx..idx + 4].try_into().unwrap()
     }
 
+    /// A 2×2 white/black checkerboard — the scaler goldens' probe pattern.
+    fn checker_frame() -> Frame {
+        let (w, b) = ([255u8, 255, 255, 255], [0u8, 0, 0, 255]);
+        let mut data = Vec::with_capacity(16);
+        for px in [w, b, b, w] {
+            data.extend_from_slice(&px);
+        }
+        Frame {
+            width: 2,
+            height: 2,
+            stride: 8,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        }
+    }
+
+    fn pure(px: [u8; 4]) -> bool {
+        px == [255, 255, 255, 255] || px == [0, 0, 0, 255]
+    }
+
+    /// The checkerboard scene at `scale` with one CAP-N70 scaling mode.
+    fn scaled_checker_scene(
+        canvas: (u32, u32),
+        source: SourceId,
+        scale: f32,
+        mode: fcap_scene::ScaleMode,
+    ) -> Collection {
+        let mut transform = centered(canvas);
+        transform.scale_x = scale;
+        transform.scale_y = scale;
+        let mut collection = scene_with_item(canvas, source, transform, BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = collection.active_scene().items[0].id;
+        collection
+            .set_item_scaling(scene, item, mode)
+            .expect("set scaling");
+        collection
+    }
+
+    // -- CAP-N70 per-scaler goldens (the 0.200.0 close-out owed these) -------
+
+    #[test]
+    fn nearest_scaling_keeps_every_checkerboard_pixel_pure() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &checker_frame()).expect("upload");
+        let collection = scaled_checker_scene((8, 8), source, 4.0, fcap_scene::ScaleMode::Nearest);
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        for y in 0..8 {
+            for x in 0..8 {
+                assert!(
+                    pure(pixel(&program, x, y)),
+                    "nearest must never blend: ({x},{y}) = {:?}",
+                    pixel(&program, x, y)
+                );
+            }
+        }
+        // The quadrants land where the texels say, edges razor-sharp.
+        assert_eq!(pixel(&program, 1, 1), [255, 255, 255, 255]);
+        assert_eq!(pixel(&program, 6, 1), [0, 0, 0, 255]);
+        assert_eq!(pixel(&program, 3, 1), [255, 255, 255, 255]);
+        assert_eq!(pixel(&program, 4, 1), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn auto_scaling_blends_the_checkerboard_boundary() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &checker_frame()).expect("upload");
+        let collection = scaled_checker_scene((8, 8), source, 4.0, fcap_scene::ScaleMode::Auto);
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        // Smooth (linear) sampling must produce at least one in-between
+        // value along the texel boundary — that mix IS the filter.
+        let mixed = (0..8)
+            .flat_map(|y| (0..8).map(move |x| (x, y)))
+            .any(|(x, y)| !pure(pixel(&program, x, y)));
+        assert!(mixed, "auto/linear scaling should blend somewhere");
+    }
+
+    #[test]
+    fn sharp_bilinear_is_sharper_than_plain_bilinear_at_fractional_scale() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &checker_frame()).expect("upload");
+        // A fractional scale (×3.5) — where plain bilinear smears and
+        // sharp-bilinear is supposed to keep pixels closer to the two
+        // source values. The golden is the whole-frame RELATION (total
+        // distance from purity), which is stable across rasterizers and
+        // indifferent to where each mode places its transition band.
+        let mut deviation = |mode: fcap_scene::ScaleMode| -> u32 {
+            let collection = scaled_checker_scene((8, 8), source, 3.5, mode);
+            comp.render(collection.active_scene(), 0.0).expect("render");
+            let program = comp.read_program().expect("readback");
+            (0..8)
+                .flat_map(|y| (0..8).map(move |x| (x, y)))
+                .map(|(x, y)| {
+                    let r = pixel(&program, x, y)[0];
+                    u32::from(r.min(255 - r))
+                })
+                .sum()
+        };
+        let auto = deviation(fcap_scene::ScaleMode::Auto);
+        let sharp = deviation(fcap_scene::ScaleMode::SharpBilinear);
+        assert!(
+            auto > 0,
+            "plain bilinear should blend somewhere at a fractional scale"
+        );
+        assert!(
+            sharp < auto,
+            "sharp-bilinear ({sharp}) must stay closer to the source than plain bilinear ({auto})"
+        );
+    }
+
+    #[test]
+    fn integer_scaling_snaps_the_drawn_size_to_whole_multiples() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &checker_frame()).expect("upload");
+        // ×3.5 rounds UP to ×4 (integer_snap rounds; reciprocals go down).
+        // The item center sits off-grid at (4.25, 4.25) so the snap is
+        // visible at a pixel CENTER: snapped ×4 spans 0.25..8.25 and paints
+        // (0,0); an unsnapped ×3.5 draw would span 0.75..7.75 and leave
+        // (0,0)'s center (0.5) uncovered.
+        let mut transform = Transform {
+            x: 4.25,
+            y: 4.25,
+            ..Transform::default()
+        };
+        transform.scale_x = 3.5;
+        transform.scale_y = 3.5;
+        let mut collection = scene_with_item((8, 8), source, transform, BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = collection.active_scene().items[0].id;
+        collection
+            .set_item_scaling(scene, item, fcap_scene::ScaleMode::Integer)
+            .expect("set scaling");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&program, 0, 0),
+            [255, 255, 255, 255],
+            "×3.5 must snap to ×4 and cover (0,0) with the white texel"
+        );
+        // Integer mode samples nearest — every covered pixel stays pure,
+        // and the quadrants land where ×4 texels (boundary at 4.25) say.
+        for y in 0..8 {
+            for x in 0..8 {
+                let px = pixel(&program, x, y);
+                assert!(pure(px), "integer scaling must be hard: ({x},{y}) = {px:?}");
+            }
+        }
+        assert_eq!(pixel(&program, 6, 1), [0, 0, 0, 255]);
+        assert_eq!(pixel(&program, 1, 6), [0, 0, 0, 255]);
+        assert_eq!(pixel(&program, 6, 6), [255, 255, 255, 255]);
+    }
+
     #[test]
     fn rgba_source_fills_the_canvas() {
         let Some(mut comp) = compositor(8, 8) else {

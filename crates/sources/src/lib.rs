@@ -23,15 +23,24 @@ pub mod blackbar;
 pub mod camera_controls;
 pub mod chat;
 pub mod color;
+pub(crate) mod compose;
 pub mod deinterlace;
 pub mod image;
+pub mod inputoverlay;
+pub mod laningest;
+pub mod link;
 pub mod media;
+pub mod playlist;
+pub mod replaysrc;
 pub mod slideshow;
+pub mod splits;
 pub mod static_source;
 pub mod testsignal;
 pub mod text;
 pub mod textfile;
+pub mod title;
 pub mod video_device;
+pub mod visualizer;
 
 pub use static_source::{StaticSourceError, MAX_STATIC_DIMENSION};
 

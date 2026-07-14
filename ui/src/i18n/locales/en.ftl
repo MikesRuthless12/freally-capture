@@ -126,6 +126,15 @@ sources-badge-test-sweep = Sweep
 sources-badge-test-tone = Tone
 sources-badge-test-sync = Sync
 sources-badge-timer = Timer
+sources-badge-stats = Stats
+sources-badge-visualizer = Visualizer
+sources-badge-splits = Splits
+sources-badge-input = Input
+sources-badge-playlist = Playlist
+sources-badge-replay = Replay
+sources-badge-lan-ingest = LAN
+sources-badge-title = Title
+sources-badge-link = Link
 
 # Add-source menu items
 sources-add-display = Display Capture
@@ -134,10 +143,19 @@ sources-add-game = Game Capture (read first)
 sources-add-webcam = Video Capture Device
 sources-add-image = Image
 sources-add-media = Media (video/image file)
+sources-add-playlist = Media Playlist (gapless)
+sources-add-replay = Instant Replay
 sources-add-remote-guest = Remote Guest (P2P spike)
+sources-add-lan-ingest = LAN Ingest (SRT/RTMP listener)
+sources-add-freally-link = Freally Link (another instance)
 sources-add-color = Color
 sources-add-text = Text
+sources-add-title = Title / Scoreboard
 sources-add-timer = Timer / Clock
+sources-add-system-stats = Performance Stats (HUD)
+sources-add-visualizer = Audio Visualizer
+sources-add-split-timer = Speedrun Split Timer
+sources-add-input-overlay = Input Overlay (keys/pad)
 sources-add-nested-scene = Nested Scene
 sources-add-slideshow = Image Slideshow
 sources-add-chat-overlay = Live Chat Overlay
@@ -392,6 +410,109 @@ sources-timer-since-live = Time since live
 sources-timer-since-recording = Time since recording
 sources-timer-note = Duration, format, styling and end-of-countdown actions live in the source's Properties.
 sources-timer-add = Add timer
+
+# Instant replay picker (CAP-N10)
+sources-replay-title = Add an Instant Replay
+sources-replay-seconds-label = Roll length (seconds)
+sources-replay-speed-label = Speed
+sources-replay-speed-full = 100% (with audio)
+sources-replay-speed-half = 50% slow-mo (silent)
+sources-replay-speed-quarter = 25% slow-mo (silent)
+sources-replay-note = Idles transparent until you roll. Arm the replay buffer (Controls dock) and bind the Roll hotkey — a roll snapshots the buffer's last moments and plays them into the program, then clears back to transparency.
+sources-replay-add = Add instant replay
+
+# Freally Link picker (CAP-N12)
+sources-link-title = Add a Freally Link
+sources-link-about = Receives another Freally Capture's program — video and master audio — over your own network. Enable "Freally Link output" on the sending instance first. v1 streams motion-JPEG over TCP: great on wired LAN or good Wi-Fi, honest about bandwidth on weak links.
+sources-link-scan = Scan the LAN
+sources-link-scanning = Scanning…
+sources-link-none = No Freally Link outputs found. Enable "Freally Link output" on the other instance (Controls → LAN panel), or type its address below.
+sources-link-host = Address
+sources-link-port = Port
+sources-link-key = Pairing key
+sources-link-key-hint = The key from the sender's "Freally Link output" settings — without it the sender refuses to serve a single frame.
+sources-link-add = Add link
+properties-link-note = While unconnected the source shows a "connecting" face and retries on its own with backoff — it never freezes on a stale frame. One receiver per sender; a busy sender is retried politely.
+
+# Media playlist picker (CAP-N17)
+sources-playlist-title = Add a Media Playlist
+sources-playlist-files-label = Files (one per line, played top to bottom)
+sources-playlist-browse = Browse…
+sources-playlist-loop = Loop
+sources-playlist-shuffle = Shuffle (one draw per start; a looping shuffle repeats its order)
+sources-playlist-hold-last = Hold the last frame at the end
+sources-playlist-note = Plays the whole trimmed list gaplessly through the labeled ffmpeg component (wire formats only — .frec and stills play through Media/Slideshow). Items are all-video or all-audio, never mixed. Per-item trims, cue points, and the "now playing" variable live in the source's Properties.
+sources-playlist-add = Add playlist
+
+# Split timer picker (CAP-N18)
+sources-splits-title = Add a Split Timer
+sources-splits-file-label = LiveSplit .lss file
+sources-splits-comparison-label = Compare against
+sources-splits-comparison-pb = Personal best
+sources-splits-comparison-best = Best segments
+sources-splits-comparison-average = Average
+sources-splits-note = Imports the file read-only — nothing is ever written back. Bind the global Split / Undo / Skip / Reset keys in Settings → Hotkeys. Process-memory auto-splitters are deliberately not supported.
+sources-splits-add = Add split timer
+
+# LAN ingest picker (CAP-N11)
+sources-lan-title = Add a LAN Ingest listener
+sources-lan-protocol-label = Protocol
+sources-lan-protocol-srt = SRT (encryptable — recommended)
+sources-lan-protocol-rtmp = RTMP (no authentication)
+sources-lan-port-label = Port (1024–65535)
+sources-lan-passphrase-label = Passphrase (empty = open)
+sources-lan-passphrase-hint = SRT passphrases are 10–79 characters; the sender must use the same one.
+sources-lan-open-warning = No passphrase: anyone on this network can feed this source, unencrypted. Set one unless the network is yours alone.
+sources-lan-rtmp-warning = RTMP has no authentication — anyone on this network can send to this port. Prefer SRT with a passphrase.
+sources-lan-url-label = Point the sender's app at
+sources-lan-qr-aria = Ingest URL QR code
+sources-lan-note = LAN only: listens on this machine's local address, only while the source exists, and never touches the internet — nothing leaves the machine unless a sender on your network sends first. Decoding rides the labeled ffmpeg component. The canvas shows this URL until a sender connects.
+sources-lan-add = Start listening
+
+# Title designer picker (CAP-N16)
+sources-title-title = Add a Title
+sources-title-template-label = Start from
+sources-title-template-lower-third = Lower third (bar + name + subtitle)
+sources-title-template-scoreboard = Scoreboard (plate + 4 cells)
+sources-title-template-blank = Blank canvas
+sources-title-width-label = Canvas width
+sources-title-height-label = Canvas height
+sources-title-template-name = Name
+sources-title-template-subtitle = Title
+sources-title-template-home = HOME
+sources-title-template-away = AWAY
+sources-title-note = Layered text / image / box titles with an animate-in/out pass, composed locally — no browser source. Layers, bindings to files and {"{{"}variables{"}}"}, and the live Fire / edit controls live in the source's Properties.
+sources-title-add = Add title
+
+# Input overlay picker (CAP-N13)
+sources-input-title = Add an Input Overlay
+sources-input-layout-label = Layout
+sources-input-layout-wasd = WASD + mouse
+sources-input-layout-keyboard = Compact keyboard + mouse
+sources-input-layout-gamepad = Gamepad (dual stick)
+sources-input-layout-fightstick = Fight stick
+sources-input-color-label = Keys
+sources-input-accent-label = Pressed
+sources-input-privacy-note = Privacy: input is read only while this source is live in a scene, and only the layout's fixed keys are polled — a point-in-time "is it down?" peek, never a hook. Nothing is logged, stored, or sent anywhere, and typed text is never captured.
+sources-input-os-note = Keyboard and mouse state is read on Windows only today — other systems draw the caps unpressed (said honestly, never faked). Gamepads work everywhere via the gilrs library; the first connected controller is drawn, and with none found the layout draws unpressed.
+sources-input-add = Add input overlay
+
+# Audio visualizer picker (CAP-N15)
+sources-visualizer-title = Add an Audio Visualizer
+sources-visualizer-style-label = Style
+sources-visualizer-style-bars = Spectrum bars
+sources-visualizer-style-scope = Oscilloscope
+sources-visualizer-style-vu = VU meters
+sources-visualizer-target-label = Listens to
+sources-visualizer-target-master = Master mix
+sources-visualizer-target-track = Track { $n }
+sources-visualizer-note = Draws the signal that actually mixes (post-fader) — a muted source visualizes flat, exactly like it sounds. Size, color, bar count, and fall rate live in the source's Properties.
+sources-visualizer-add = Add visualizer
+
+# System-stats HUD picker (CAP-N14)
+sources-stats-title = Add a Performance HUD
+sources-stats-note = Puts the studio's real measured numbers on the program for your viewers — fps, CPU, memory, render time, dropped frames, and live bitrate. Which lines show, plus size and color, live in the source's Properties. GPU usage is not shown because it is not measured.
+sources-stats-add = Add stats HUD
 
 # Text picker
 sources-text-title = Add Text
@@ -658,6 +779,73 @@ properties-timer-size = Size (px)
 properties-timer-start = Start
 properties-timer-pause = Pause
 properties-timer-reset = Reset
+properties-stats-show-fps = Show FPS
+properties-stats-show-cpu = Show CPU
+properties-stats-show-memory = Show memory
+properties-stats-show-render = Show render time
+properties-stats-show-dropped = Show dropped frames
+properties-stats-show-bitrate = Show bitrate
+properties-stats-size = Size (px)
+properties-vis-bands = Bars
+properties-vis-decay = Fall rate (dB/s)
+properties-vis-peak-hold = Peak-hold markers
+properties-vis-missing-source = (missing source)
+properties-splits-size = Size (px)
+properties-splits-ahead = Ahead
+properties-splits-behind = Behind
+properties-splits-gold = Gold
+properties-splits-split = Split
+properties-splits-undo = Undo
+properties-splits-skip = Skip
+properties-splits-reset = Reset
+properties-splits-note = The buttons drive the live timer (the global hotkeys do the same from any app). The run is never written back to the .lss file.
+properties-playlist-items = Items (played top to bottom)
+properties-playlist-up = Move up
+properties-playlist-down = Move down
+properties-playlist-remove = Remove item
+properties-playlist-in = In (s)
+properties-playlist-out = Out (s)
+properties-playlist-cues = Cues (s, comma-separated)
+properties-playlist-add-item = + Add item
+properties-playlist-loop = Loop
+properties-playlist-shuffle = Shuffle
+properties-playlist-hold-last = Hold last frame
+properties-playlist-hw = Hardware decode
+properties-playlist-variable = "Now playing" variable (blank = off)
+properties-playlist-previous = ⏮ Previous
+properties-playlist-next = ⏭ Next
+properties-playlist-note = The cue buttons and Next/Previous drive the LIVE playlist; item edits apply on Apply (the playlist restarts). Put {"{{"}yourVariable{"}}"} in a Text source to show the playing item's name.
+properties-title-layers = Layers (drawn in order — later rows on top)
+properties-title-kind-text = Text
+properties-title-kind-image = Image
+properties-title-kind-rect = Box
+properties-title-x = X
+properties-title-y = Y
+properties-title-outline = Outline (px)
+properties-title-outline-color = Outline
+properties-title-shadow = Shadow
+properties-title-animation = Animate in/out
+properties-title-anim-none = None (cut)
+properties-title-anim-fade = Fade
+properties-title-anim-slide-left = Slide left
+properties-title-anim-slide-up = Slide up
+properties-title-anim-wipe = Wipe
+properties-title-duration = Duration (ms)
+properties-title-fire-in = ▶ Fire in
+properties-title-fire-out = ◼ Fire out
+properties-title-set-live = Set live
+properties-title-set-live-note = Push this text into the LIVE title now — no Apply, no restart
+properties-title-up = Move layer up
+properties-title-down = Move layer down
+properties-title-remove = Remove layer
+properties-title-add-text = + Text
+properties-title-add-image = + Image
+properties-title-add-rect = + Box
+properties-title-note = Fire in/out and Set live drive the RUNNING title; layer edits apply on Apply (the title restarts and fires its In pass again). Text cells can bind to a watched file (CSV cell / JSON value / whole file) and interpolate {"{{"}variables{"}}"} — overrides from Set live win over both.
+properties-replay-roll = ⏵ Roll replay
+properties-replay-note = Roll snapshots the ARMED replay buffer into a clip and plays it at the chosen speed — retimed, never interpolated. Slow motion is silent by design. Scrub and pause work while it plays; at the end the source clears back to transparency.
+properties-lan-note = Applying a protocol, port, or passphrase change restarts the listener — the sender must reconnect. The stream is fitted onto a 1920×1080 canvas.
+properties-stats-note = The HUD renders compact universal labels (FPS, CPU, MEM, RENDER, DROPPED, BITRATE) straight onto the program; while nothing streams, the bitrate line shows “—”.
 properties-text-file = Read from file (path; empty = use the text above)
 properties-text-binding = Parse as
 properties-text-binding-whole = Whole file
@@ -725,6 +913,13 @@ hotkey-audit-action-still = Capture still
 hotkey-audit-action-panic = Panic slate
 hotkey-audit-action-timer-toggle = Start/pause all timers
 hotkey-audit-action-timer-reset = Reset all timers
+hotkey-audit-action-split-split = Split (split timer)
+hotkey-audit-action-split-undo = Undo split
+hotkey-audit-action-split-skip = Skip segment
+hotkey-audit-action-split-reset = Reset split timer
+hotkey-audit-action-playlist-next = Playlist next
+hotkey-audit-action-playlist-previous = Playlist previous
+hotkey-audit-action-replay-roll = Roll instant replay
 hotkey-audit-action-ptt = Push-to-talk
 hotkey-audit-action-ptm = Push-to-mute
 hotkey-audit-feature-recording = Recording
@@ -735,6 +930,8 @@ hotkey-audit-feature-markers = Markers
 hotkey-audit-feature-stills = Stills
 hotkey-audit-feature-panic = Panic
 hotkey-audit-feature-timers = Timers
+hotkey-audit-feature-split-timer = Split timer
+hotkey-audit-feature-playlist = Playlist
 hotkey-audit-feature-audio = Audio (per source)
 properties-text = Text
 properties-font-family = Font family (system; blank = default)
@@ -892,6 +1089,16 @@ filters-crop-top = top
 filters-crop-right = right
 filters-crop-bottom = bottom
 filters-crop-aria = crop { $side }
+filters-cursorfx-header = Cursor effects
+filters-cursorfx-hint = On Windows (which draws the cursor itself) these are painted straight into the capture, so they show up in recordings and streams. macOS and Linux composite the cursor OS-side, so these effects are Windows-only. Changes apply live.
+filters-cursorfx-halo = Cursor halo
+filters-cursorfx-halo-color = Color
+filters-cursorfx-halo-radius = Radius (px)
+filters-cursorfx-ripples = Click ripples
+filters-cursorfx-left-color = Left click
+filters-cursorfx-right-color = Right click
+filters-cursorfx-keystrokes = Keystroke ghosting
+filters-cursorfx-keystrokes-hint = Shows a fixed key set (letters, digits, modifiers, arrows) near the cursor while held. Keys are read only while this is on, drawn straight into the frame, and never stored or logged.
 
 
 # --- PickerShell.tsx ---
@@ -1699,6 +1906,16 @@ hotkeys-zoom-100 = Zoom: reset (100%)
 hotkeys-zoom-150 = Zoom: punch in 150%
 hotkeys-zoom-200 = Zoom: punch in 2×
 hotkeys-zoom-placeholder = Ctrl+Shift+2
+hotkeys-split-split = Split timer: start / split
+hotkeys-split-undo = Split timer: undo split
+hotkeys-split-skip = Split timer: skip segment
+hotkeys-split-reset = Split timer: reset
+hotkeys-split-placeholder = e.g. Numpad1
+hotkeys-playlist-next = Playlist: next item
+hotkeys-playlist-previous = Playlist: previous item
+hotkeys-playlist-placeholder = e.g. Ctrl+Alt+Right
+hotkeys-replay-roll = Instant replay: roll
+hotkeys-replay-roll-placeholder = e.g. Ctrl+Shift+I
 sources-follow-title = Follow the cursor while zoomed (Windows; scroll the canvas to zoom)
 sources-follow-item = Toggle cursor-follow for { $name }
 filters-autocrop = ✂ Auto-crop black bars
@@ -1819,6 +2036,15 @@ panel-qr-alt = QR code for the control panel
 panel-tally-hint = Tally page (open it on a spare phone; add ?scene=NAME to watch one scene):
 panel-off-hint = Enable the panel and set a password to get a link and QR code.
 panel-save = Save
+link-title = Freally Link output
+link-about = Share this instance's program — video and master audio — with ONE other Freally Capture on your own network; it appears there as a "Freally Link" source (two-PC streaming, overflow monitors). Off by default; nothing announces or listens until enabled. v1 streams motion-JPEG + uncompressed audio over TCP — built for wired LAN or good Wi-Fi, never the internet.
+link-enable = Share the program on my network
+link-name = Instance name
+link-key = Pairing key
+link-key-hint = At least 8 characters — receivers must enter this key before a single frame is served.
+link-lan-warning = ⚠ Receivers must present the pairing key before anything is served, but the stream itself is not encrypted in v1 — use it only on a network you trust.
+link-serving = Receivers can find this instance with "Scan the LAN", or add it manually at:
+link-off-hint = Enable sharing to open the port and announce this instance to LAN scans.
 osc-title = OSC control surface
 osc-about = TouchOSC-class controllers and lighting desks. Off by default; LAN-only, never the internet; it accepts only the same commands the app's own buttons do.
 osc-enable = Listen for OSC

@@ -8,6 +8,7 @@
 #![allow(unsafe_code)]
 
 pub(crate) mod dxgi;
+pub(crate) mod keys;
 pub(crate) mod pointer;
 pub(crate) mod wgc;
 
@@ -190,9 +191,13 @@ pub(crate) fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
         let (sender, receiver) = frame_channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
+        // The session carries its own capture id: the cursor-effects registry
+        // (CAP-N19) is keyed by the id the scene stores, and window ids embed
+        // durable identity — the re-resolved HWND is not a stable key.
+        let capture_id = id.to_owned();
         let join = std::thread::Builder::new()
             .name("fcap-wgc".into())
-            .spawn(move || wgc::run(hwnd_raw, sender, stop_thread))
+            .spawn(move || wgc::run(hwnd_raw, capture_id, sender, stop_thread))
             .map_err(|err| CaptureError::Backend(format!("could not spawn capture: {err}")))?;
         return Ok(CaptureSession::from_parts(receiver, stop, join));
     }

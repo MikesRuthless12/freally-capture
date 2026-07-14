@@ -23,6 +23,7 @@ import type {
   CaptureSource,
   CefStatus,
   CornerSlot,
+  CursorFxSetting,
   DisplayInfo,
   EncoderCatalog,
   EulaStatus,
@@ -36,6 +37,7 @@ import type {
   HotkeyAuditEntry,
   IntegrationsStatus,
   ItemId,
+  LinkPeer,
   LoopbackDevices,
   MonitorMode,
   NormRect,
@@ -352,6 +354,56 @@ export function studioTimerControl(
   action: "start" | "pause" | "toggle" | "reset",
 ): Promise<void> {
   return invoke("studio_timer_control", { sourceId, action });
+}
+
+/** CAP-N18: drive a split-timer source's run. Runtime-only (no undo). */
+export function studioSplitControl(
+  sourceId: SourceId,
+  action: "split" | "undo" | "skip" | "reset",
+): Promise<void> {
+  return invoke("studio_split_control", { sourceId, action });
+}
+
+/** CAP-N17: jump a playlist to its next/previous item. Runtime-only. */
+export function studioPlaylistControl(
+  sourceId: SourceId,
+  action: "next" | "previous",
+): Promise<void> {
+  return invoke("studio_playlist_control", { sourceId, action });
+}
+
+/** CAP-N17: jump a playlist to a cue — `seconds` into item `item`'s file. */
+export function studioPlaylistCue(
+  sourceId: SourceId,
+  item: number,
+  seconds: number,
+): Promise<void> {
+  return invoke("studio_playlist_cue", { sourceId, item, seconds });
+}
+
+/** CAP-N16: fire a title's animate-in/out. Runtime-only. */
+export function studioTitleFire(sourceId: SourceId, action: "in" | "out"): Promise<void> {
+  return invoke("studio_title_fire", { sourceId, action });
+}
+
+/** CAP-N16: push live text into title layer `layer` (no session restart). */
+export function studioTitleSetText(
+  sourceId: SourceId,
+  layer: number,
+  value: string,
+): Promise<void> {
+  return invoke("studio_title_set_text", { sourceId, layer, value });
+}
+
+/** CAP-N10: roll one Instant Replay source (needs the armed buffer). */
+export function replayRollSource(sourceId: SourceId): Promise<void> {
+  return invoke("replay_roll_source", { sourceId });
+}
+
+/** CAP-N11: this machine's best-effort LAN address (for the ingest URL/QR).
+ * The probe sends nothing — it only asks the OS which interface faces the LAN. */
+export function localLanIp(): Promise<string> {
+  return invoke<string>("local_lan_ip");
 }
 
 /** Place an existing pool source on top of a scene (source sharing). */
@@ -1062,6 +1114,16 @@ export function panelUrl(): Promise<string | null> {
   return invoke<string | null>("panel_url");
 }
 
+/** Scan the LAN for Freally Link outputs (~2 s; CAP-N12). User-initiated. */
+export function linkDiscover(): Promise<LinkPeer[]> {
+  return invoke<LinkPeer[]>("link_discover");
+}
+
+/** The Freally Link output's address (CAP-N12), or null while it is off. */
+export function linkUrl(): Promise<string | null> {
+  return invoke<string | null>("link_url");
+}
+
 /** Switch the active hotkey layer (CAP-N05; sticky — see the docs). */
 export function hotkeySetLayer(layer: number): Promise<void> {
   return invoke("hotkey_set_layer", { layer });
@@ -1121,6 +1183,13 @@ export function hdrToneMapSet(
   paperWhiteNits: number,
 ): Promise<void> {
   return invoke("hdr_tone_map_set", { captureId, operator, paperWhiteNits });
+}
+
+/** Set one capture's cursor effects (CAP-N19) — persisted and applied to the
+ * very next captured frame (no restart). Windows captures only (macOS/Linux
+ * composite their own cursor). */
+export function cursorFxSet(captureId: string, fx: CursorFxSetting): Promise<void> {
+  return invoke("cursor_fx_set", { captureId, fx });
 }
 
 /** Add a Window Capture together with its app's audio as one linked pair

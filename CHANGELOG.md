@@ -15,6 +15,74 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.300.0] — 2026-07-14 (New Sources & Overlays — CAP-N Phase 2)
+
+> **Ten new things to put on the canvas — all local.** Instant replay rolls the buffer *into* the
+> show, a gapless media playlist replaces the "one file at a time" media source, titles and
+> scoreboards get a real layered designer with live control, and the canvas gains an audio
+> visualizer, a performance HUD, a speedrun split timer, an input overlay, and cursor effects.
+> Two LAN sources round it out: an SRT/RTMP listener so a phone or second PC can feed a scene, and
+> **Freally Link**, an owned instance-to-instance share that needs no ffmpeg on either end.
+>
+> **The network invariant holds:** both LAN features are **off until you add them**, bind only the
+> local machine, and never touch the internet. Nothing discovers, nothing dials out, and the app
+> says so in every language. The input overlay and cursor effects read input **only while enabled**
+> and never log or store a keystroke.
+
+### Added
+
+- **Instant-replay playback source** (CAP-N10). Roll the armed replay buffer straight into the
+  program: a hotkey snapshots the last N seconds (stream copy — no re-encode) and plays them at
+  100 / 50 / 25 %, **retimed, never frame-interpolated**. Scrub and pause while it plays; at the end
+  the source clears back to transparent, so the show returns to live by itself. *Slow motion is
+  silent by design — retimed audio would smear, and we don't fake it.*
+- **LAN ingest source** (CAP-N11). A built-in **SRT/RTMP listener**: point any phone camera app,
+  encoder, or second PC at the URL (shown with a QR code) and it lands in a scene with its own mixer
+  strip. Off until added, binds the local machine only, never the internet. SRT carries an optional
+  passphrase (AES); *RTMP has no authentication of its own — the form says so and prefers SRT.*
+- **Freally Link** (CAP-N12). Two Freally instances on one LAN: enable the Link output on the
+  sending machine and set its **pairing key** (the output cannot be enabled without one), hit
+  **Scan the LAN** on the receiving one, type the key, and the program appears as a source —
+  gaming PC to encoding PC, or an overflow-room monitor. A receiver that cannot present the key
+  never sees a frame (constant-time compare, an honest "refused" error instead of a retry loop).
+  An owned, hand-rolled wire protocol and mDNS discovery: **no ffmpeg needed on either end**, no
+  broker, no server.
+- **Input overlay source** (CAP-N13). Live keyboard, mouse, and gamepad visualization with four
+  layouts (WASD, compact keyboard, dual-stick pad, 8-way fight stick) — pressed keys light up,
+  clicks flash, sticks and triggers move. **Reads input only while the source is enabled, and never
+  logs or stores anything.** Keyboard/mouse are Windows-first (said honestly in-product); gamepads
+  work on all three OSes.
+- **System-stats overlay source** (CAP-N14). The stats dock's *real measured numbers* — fps, CPU,
+  memory, GPU compose time, dropped frames, and live bitrate — composited for your viewers, with
+  per-line toggles. *GPU utilization is deliberately absent: we don't measure it, so we don't guess.*
+- **Audio visualizer source** (CAP-N15). Classic FFT spectrum bars, an oscilloscope, or stereo VU
+  meters, bound to any mixer strip, track bus, or the master mix. Tapped **post-fader** — a muted
+  source visualizes flat, exactly as it sounds. Owned radix-2 FFT; no ML anywhere.
+- **Title & scoreboard designer** (CAP-N16). Layered templates (text, image, shape) with outline and
+  drop-shadow text, animate-in/out (fade, slide, wipe), fields bound to a watched file (CSV cell,
+  JSON pointer) or a studio variable, and live control — swap a name, edit the score, fire the
+  animation — without touching the scene.
+- **Media playlist source** (CAP-N17). An ordered playlist that plays **truly gaplessly** (the whole
+  trimmed list runs through one decode, so item boundaries are frame-exact), with per-item in/out
+  trims and cue points, loop / shuffle / hold-last, next-previous hotkeys, and a "now playing"
+  variable any Text source can show.
+- **Speedrun split timer source** (CAP-N18). Import a LiveSplit `.lss` file and run it: comparisons
+  against personal best, best segments, or average, gold-segment highlights, and global split / undo
+  / skip / reset hotkeys. The file is read **only** — a run is never written back. *Process-memory
+  auto-splitters are deliberately not supported (anti-cheat adjacency); splitting is by file and
+  hotkey.*
+- **Cursor highlight & click effects** (CAP-N19). A cursor halo, colour-coded left/right click
+  ripples, and optional keystroke ghosting drawn onto display and window captures — tutorial-maker
+  table stakes, on the owned cursor path. Windows-only, honestly (macOS and Linux composite their own
+  cursor); keystrokes are drawn, never logged.
+
+### Fixed
+
+- **Sharp-bilinear scaling was blurrier than plain bilinear** (regression in 0.200.0's CAP-N70).
+  The shader measured texel *edges* rather than centres, so most of every texel landed on the 50/50
+  border blend. It now holds each texel's centre and crosses to its neighbour inside a narrow seam,
+  which is what the mode is for. The new per-scaler golden-frame tests (owed since 0.200.0) pin it.
+
 ## [0.200.0] — 2026-07-13 (Automation + Capture & Device Depth — CAP-N Phases 1 & 9)
 
 > Two themed phases in one release, so the version crosses two rungs (0.99.0 → 0.200.0). **Phase 1

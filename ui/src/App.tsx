@@ -62,6 +62,7 @@ import type {
   SceneItem,
   Collection,
 } from "./api/types";
+import { kindHasAudio } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { EditTransformDialog } from "./components/EditTransformDialog";
@@ -1066,6 +1067,7 @@ export default function App() {
             collection?.sources.find((source) => source.id === dialogItem.source)?.name ??
             t("filters-source-fallback")
           }
+          source={collection?.sources.find((source) => source.id === dialogItem.source)}
           onClose={() => setDialog(null)}
         />
       )}
@@ -1073,6 +1075,11 @@ export default function App() {
         <PropertiesDialog
           source={dialogSource}
           scenes={collection?.scenes.map((entry) => ({ id: entry.id, name: entry.name })) ?? []}
+          audioSources={
+            collection?.sources
+              .filter((entry) => kindHasAudio(entry.kind))
+              .map((entry) => ({ id: entry.id, name: entry.name })) ?? []
+          }
           onClose={() => setDialog(null)}
         />
       )}

@@ -26,6 +26,7 @@ mod events;
 mod filename;
 mod hotkey_audit;
 mod hotkeys;
+mod link;
 mod midi;
 mod native_preview;
 mod openfile;
@@ -44,6 +45,7 @@ mod salvage;
 mod scripting;
 mod settings;
 mod shutdown;
+mod statshud;
 mod stream;
 mod studio;
 mod timers;
@@ -164,6 +166,7 @@ fn main() {
         .manage(automation::AutomationState::default())
         .manage(rundown::RundownState::default())
         .manage(webpanel::WebPanelState::default())
+        .manage(link::LinkState::default())
         .manage(osc::OscState::default())
         .manage(midi::MidiState::default())
         .manage(std::sync::Mutex::new(chords::ChordState::default()))
@@ -260,6 +263,12 @@ fn main() {
             commands::studio::studio_reorder_scene,
             commands::studio::studio_add_item,
             commands::studio::studio_timer_control,
+            commands::studio::studio_split_control,
+            commands::studio::studio_playlist_control,
+            commands::studio::studio_playlist_cue,
+            commands::studio::local_lan_ip,
+            commands::studio::studio_title_fire,
+            commands::studio::studio_title_set_text,
             commands::studio::studio_add_existing_source,
             commands::studio::studio_remove_item,
             commands::studio::studio_reorder_item,
@@ -325,6 +334,7 @@ fn main() {
             replay::replay_disarm,
             replay::replay_save,
             replay::replay_status,
+            replay::replay_roll_source,
             reactions::studio_send_reaction,
             profiles::profiles_list,
             profiles::profile_create,
@@ -356,6 +366,7 @@ fn main() {
             commands::camera_controls_list,
             commands::camera_control_set,
             commands::hdr_tone_map_set,
+            commands::cursor_fx_set,
             commands::midi_ports,
             commands::midi_learn,
             commands::ptz_move,
@@ -363,6 +374,8 @@ fn main() {
             commands::ptz_preset_recall,
             commands::ptz_preset_store,
             webpanel::panel_url,
+            link::link_discover,
+            link::link_url,
             commands::hotkey_set_layer,
             commands::hotkey_layer,
             commands::rundown_start,
@@ -471,6 +484,9 @@ fn main() {
             // The LAN touch panel + tally service (CAP-N06/N07) — off by
             // default; same allowlist, password required, loopback unless LAN.
             webpanel::spawn_manager(app.handle().clone());
+            // Freally Link output (CAP-N12) — off by default; shares the
+            // program with one other Freally instance on the LAN.
+            link::spawn_manager(app.handle().clone());
             // OSC (CAP-N04) — off by default, LAN-only, same allowlist.
             osc::spawn_manager(app.handle().clone());
             // MIDI control surfaces (CAP-N03) — no port opens until picked.

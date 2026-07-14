@@ -50,7 +50,7 @@ fn pause_registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn pause_flag(id: &str) -> Arc<AtomicBool> {
+pub(crate) fn pause_flag(id: &str) -> Arc<AtomicBool> {
     pause_registry()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -111,8 +111,17 @@ pub fn media_seek(id: &str, seconds: f32) {
     }
 }
 
+/// Loop-side: whether a seek request is pending (peek, no consume) — the
+/// pause-wait uses it to break out without eating the request.
+pub(crate) fn seek_pending(id: &str) -> bool {
+    seek_registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains_key(id)
+}
+
 /// Loop-side: consume the pending seek request, if any.
-fn take_seek(id: &str) -> Option<f32> {
+pub(crate) fn take_seek(id: &str) -> Option<f32> {
     seek_registry()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -120,7 +129,7 @@ fn take_seek(id: &str) -> Option<f32> {
 }
 
 /// Loop-side: publish the playhead for the transport UI.
-fn publish_transport(id: &str, position: f32, duration: f32) {
+pub(crate) fn publish_transport(id: &str, position: f32, duration: f32) {
     transport_registry()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1201,7 +1210,7 @@ fn run_wire_stretch(
 }
 
 /// `read_exact` that treats EOF/broken pipe as a clean end.
-fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> bool {
+pub(crate) fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> bool {
     let mut filled = 0usize;
     while filled < buf.len() {
         match reader.read(&mut buf[filled..]) {
@@ -1218,7 +1227,7 @@ fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> bool {
 /// true at EOF/broken pipe — the last read of a stream may be a short block,
 /// and its bytes must not be discarded (unlike `read_exact_or_end`, which
 /// drops a partial final block).
-fn read_available(reader: &mut impl Read, buf: &mut [u8]) -> (usize, bool) {
+pub(crate) fn read_available(reader: &mut impl Read, buf: &mut [u8]) -> (usize, bool) {
     let mut filled = 0usize;
     while filled < buf.len() {
         match reader.read(&mut buf[filled..]) {

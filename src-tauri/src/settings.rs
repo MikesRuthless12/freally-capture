@@ -162,6 +162,11 @@ pub struct Settings {
     /// operator + paper-white. Written server-side by `set_hdr_tone_map`
     /// and PRESERVED across `set()` like the camera profiles.
     pub hdr_tone_map: std::collections::HashMap<String, HdrToneMapSetting>,
+    /// Cursor effects per display/window capture (CAP-N19): capture id →
+    /// halo/ripples/keystroke config. Written server-side by `set_cursor_fx`
+    /// and PRESERVED across `set()` like the tone-maps.
+    #[serde(default)]
+    pub cursor_fx: std::collections::HashMap<String, CursorFxSetting>,
     /// Automation: rules + macros (CAP-N01/N02). Every rule ships disabled;
     /// actions are limited to the remote-API allowlist by validation.
     #[serde(default)]
@@ -184,6 +189,11 @@ pub struct Settings {
     /// MIDI control surfaces (CAP-N03). No port opens until one is picked.
     #[serde(default)]
     pub midi: crate::midi::MidiSettings,
+    /// The Freally Link output (CAP-N12): share the program with one other
+    /// Freally instance on the LAN. Off by default; no port opens until
+    /// enabled; nothing announces until enabled.
+    #[serde(default)]
+    pub link: crate::link::LinkSettings,
 }
 
 /// One display's HDR→SDR mapping (CAP-N74). `operator` is a wire name the
@@ -193,6 +203,70 @@ pub struct Settings {
 pub struct HdrToneMapSetting {
     pub operator: String,
     pub paper_white_nits: u32,
+}
+
+/// One capture's cursor effects (CAP-N19): halo, click ripples, keystroke
+/// ghosting — drawn into the frames on the owned (Windows) cursor path.
+/// Colors are `#rrggbb`; the capture layer parses them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CursorFxSetting {
+    pub halo: bool,
+    pub halo_color: String,
+    /// Halo radius in frame pixels (validated to 8–128).
+    pub halo_radius: u32,
+    pub ripples: bool,
+    pub left_color: String,
+    pub right_color: String,
+    pub keystrokes: bool,
+}
+
+impl Default for CursorFxSetting {
+    fn default() -> Self {
+        // Everything OFF; the colors are just sane starting points for the
+        // pickers (amber halo, blue left / red right — the screencast idiom).
+        Self {
+            halo: false,
+            halo_color: "#ffd54a".to_owned(),
+            halo_radius: 24,
+            ripples: false,
+            left_color: "#4ac1ff".to_owned(),
+            right_color: "#ff5a5a".to_owned(),
+            keystrokes: false,
+        }
+    }
+}
+
+impl CursorFxSetting {
+    pub fn validate(&self) -> Result<(), String> {
+        for color in [&self.halo_color, &self.left_color, &self.right_color] {
+            if fcap_capture::cursorfx::parse_color(color).is_none() {
+                return Err(format!("invalid cursor-effect color: {color}"));
+            }
+        }
+        if !(8..=128).contains(&self.halo_radius) {
+            return Err("cursor halo radius must be 8–128 px".to_owned());
+        }
+        Ok(())
+    }
+
+    /// The live capture-registry config — `None` when every effect is off,
+    /// so the capture thread samples no input at all.
+    pub fn to_config(&self) -> Option<fcap_capture::cursorfx::CursorFxConfig> {
+        if !(self.halo || self.ripples || self.keystrokes) {
+            return None;
+        }
+        let parse = fcap_capture::cursorfx::parse_color;
+        Some(fcap_capture::cursorfx::CursorFxConfig {
+            halo: self.halo,
+            halo_color: parse(&self.halo_color)?,
+            halo_radius: self.halo_radius,
+            ripples: self.ripples,
+            left_color: parse(&self.left_color)?,
+            right_color: parse(&self.right_color)?,
+            keystrokes: self.keystrokes,
+        })
+    }
 }
 
 impl Default for Settings {
@@ -218,12 +292,14 @@ impl Default for Settings {
             completed_onboarding: false,
             camera_profiles: std::collections::HashMap::new(),
             hdr_tone_map: std::collections::HashMap::new(),
+            cursor_fx: std::collections::HashMap::new(),
             automation: crate::automation::AutomationSettings::default(),
             rundown: crate::rundown::RundownSettings::default(),
             web_panel: crate::webpanel::WebPanelSettings::default(),
             osc: crate::osc::OscSettings::default(),
             ptz: crate::ptz::PtzSettings::default(),
             midi: crate::midi::MidiSettings::default(),
+            link: crate::link::LinkSettings::default(),
         }
     }
 }
@@ -350,6 +426,20 @@ pub struct HotkeySettings {
     pub zoom_150: Option<String>,
     /// Punch-in zoom to 200%.
     pub zoom_200: Option<String>,
+    /// Start / split every split-timer source (CAP-N18).
+    pub split_timer_split: Option<String>,
+    /// Undo the last split (CAP-N18).
+    pub split_timer_undo: Option<String>,
+    /// Skip the current segment (CAP-N18).
+    pub split_timer_skip: Option<String>,
+    /// Reset every split timer (CAP-N18).
+    pub split_timer_reset: Option<String>,
+    /// Jump every playlist to its next item (CAP-N17).
+    pub playlist_next: Option<String>,
+    /// Jump every playlist back (CAP-N17).
+    pub playlist_previous: Option<String>,
+    /// Roll every live Instant Replay source (CAP-N10).
+    pub replay_roll: Option<String>,
 }
 
 impl HotkeySettings {
@@ -367,6 +457,13 @@ impl HotkeySettings {
             &self.zoom_100,
             &self.zoom_150,
             &self.zoom_200,
+            &self.split_timer_split,
+            &self.split_timer_undo,
+            &self.split_timer_skip,
+            &self.split_timer_reset,
+            &self.playlist_next,
+            &self.playlist_previous,
+            &self.replay_roll,
         ]
         .into_iter()
         .flatten()
@@ -1039,6 +1136,8 @@ impl Settings {
         self.ptz.validate()?;
         // MIDI (CAP-N03): bounded, allowlisted actions only.
         self.midi.validate()?;
+        // Freally Link (CAP-N12): off by default, sane port + name.
+        self.link.validate()?;
         // HDR tone-maps (CAP-N74): bounded, known operators, sane nits.
         if self.hdr_tone_map.len() > 64 {
             return Err("too many HDR tone-map entries (64 displays max)".to_owned());
@@ -1053,6 +1152,16 @@ impl Settings {
             if !(80..=1000).contains(&tone.paper_white_nits) {
                 return Err("paper white must be 80–1000 nits".to_owned());
             }
+        }
+        // Cursor effects (CAP-N19): bounded, parseable colors, sane radius.
+        if self.cursor_fx.len() > 64 {
+            return Err("too many cursor-effect entries (64 captures max)".to_owned());
+        }
+        for (capture, fx) in &self.cursor_fx {
+            if capture.is_empty() || capture.len() > 512 || capture.chars().any(char::is_control) {
+                return Err("invalid cursor-effect capture id".to_owned());
+            }
+            fx.validate()?;
         }
         for (device, profile) in &self.camera_profiles {
             if device.len() > 256 || device.chars().any(char::is_control) {
@@ -1149,12 +1258,14 @@ impl SettingsStore {
             // them (the counter/EULA pattern).
             let camera_profiles = std::mem::take(&mut guard.camera_profiles);
             let hdr_tone_map = std::mem::take(&mut guard.hdr_tone_map);
+            let cursor_fx = std::mem::take(&mut guard.cursor_fx);
             *guard = next;
             guard.accepted_eula_version = accepted;
             guard.completed_onboarding = onboarded;
             guard.recording.counter = counter;
             guard.camera_profiles = camera_profiles;
             guard.hdr_tone_map = hdr_tone_map;
+            guard.cursor_fx = cursor_fx;
         }
         self.persist()
     }
@@ -1193,6 +1304,23 @@ impl SettingsStore {
     /// One display's saved tone-map, if any (CAP-N74).
     pub fn hdr_tone_map(&self, capture_id: &str) -> Option<HdrToneMapSetting> {
         self.lock().hdr_tone_map.get(capture_id).cloned()
+    }
+
+    /// Write one capture's cursor effects (CAP-N19) and persist; also the
+    /// reader's counterpart `cursor_fx(capture_id)`. The only writer.
+    pub fn set_cursor_fx(&self, capture_id: &str, setting: CursorFxSetting) {
+        {
+            let mut guard = self.lock();
+            guard.cursor_fx.insert(capture_id.to_string(), setting);
+        }
+        if let Err(err) = self.persist() {
+            eprintln!("settings: could not persist cursor effects: {err}");
+        }
+    }
+
+    /// One capture's saved cursor effects, if any (CAP-N19).
+    pub fn cursor_fx(&self, capture_id: &str) -> Option<CursorFxSetting> {
+        self.lock().cursor_fx.get(capture_id).cloned()
     }
 
     /// Drop a device's whole camera profile (CAP-M18) and persist.
@@ -1457,6 +1585,13 @@ mod tests {
                 zoom_100: Some("Ctrl+Shift+0".to_owned()),
                 zoom_150: None,
                 zoom_200: Some("Ctrl+Shift+2".to_owned()),
+                split_timer_split: Some("Numpad1".to_owned()),
+                split_timer_undo: Some("Numpad8".to_owned()),
+                split_timer_skip: None,
+                split_timer_reset: Some("Numpad3".to_owned()),
+                playlist_next: Some("Ctrl+Alt+Right".to_owned()),
+                playlist_previous: None,
+                replay_roll: Some("Ctrl+Shift+I".to_owned()),
             },
             panic_slate: PanicSlateSettings {
                 color: "#221100".to_owned(),
@@ -1487,6 +1622,18 @@ mod tests {
                 HdrToneMapSetting {
                     operator: "maxRgb".to_owned(),
                     paper_white_nits: 240,
+                },
+            )]),
+            cursor_fx: std::collections::HashMap::from([(
+                r"display:\\.\DISPLAY1".to_owned(),
+                CursorFxSetting {
+                    halo: true,
+                    halo_color: "#ffd54a".to_owned(),
+                    halo_radius: 32,
+                    ripples: true,
+                    left_color: "#4ac1ff".to_owned(),
+                    right_color: "#ff5a5a".to_owned(),
+                    keystrokes: true,
                 },
             )]),
             // Automation (CAP-N01/N02): a real macro + rule round-trips too.
@@ -1555,6 +1702,13 @@ mod tests {
                 lan: true,
                 password: "panel-pass".to_owned(),
             },
+            // The Freally Link output (CAP-N12) round-trips too.
+            link: crate::link::LinkSettings {
+                enabled: true,
+                port: 9725,
+                name: "Studio PC".to_owned(),
+                key: "studio-link-key".to_owned(),
+            },
             // The show rundown (CAP-N09) round-trips too.
             rundown: crate::rundown::RundownSettings {
                 steps: vec![crate::rundown::RundownStep {
@@ -1580,6 +1734,19 @@ mod tests {
             HdrToneMapSetting {
                 operator: "maxRgb".to_owned(),
                 paper_white_nits: 240,
+            },
+        );
+        // Cursor effects (CAP-N19) are preserved by `set` too — same pattern.
+        store.set_cursor_fx(
+            r"display:\\.\DISPLAY1",
+            CursorFxSetting {
+                halo: true,
+                halo_color: "#ffd54a".to_owned(),
+                halo_radius: 32,
+                ripples: true,
+                left_color: "#4ac1ff".to_owned(),
+                right_color: "#ff5a5a".to_owned(),
+                keystrokes: true,
             },
         );
         store.set(next.clone()).expect("save settings");
@@ -1623,6 +1790,22 @@ mod tests {
             store.hdr_tone_map("display:X").map(|tone| tone.operator),
             Some("bt2408".to_owned()),
             "the tone-map survives the stale dialog save"
+        );
+
+        // Cursor effects (CAP-N19) survive a stale save the same way.
+        store.set_cursor_fx(
+            "display:X",
+            CursorFxSetting {
+                halo: true,
+                ..CursorFxSetting::default()
+            },
+        );
+        let stale: Settings = serde_json::from_str(r#"{"language":"it"}"#).expect("parses");
+        store.set(stale).expect("save settings");
+        assert_eq!(
+            store.cursor_fx("display:X").map(|fx| fx.halo),
+            Some(true),
+            "the cursor effects survive the stale dialog save"
         );
         let _ = fs::remove_file(&path);
     }

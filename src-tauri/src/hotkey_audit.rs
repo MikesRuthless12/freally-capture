@@ -106,6 +106,13 @@ fn gather<R: Runtime>(app: &AppHandle<R>) -> Vec<RawBinding> {
         (&settings.panic, "panic", "panic"),
         (&settings.timer_toggle, "timerToggle", "timers"),
         (&settings.timer_reset, "timerReset", "timers"),
+        (&settings.split_timer_split, "splitTimerSplit", "splitTimer"),
+        (&settings.split_timer_undo, "splitTimerUndo", "splitTimer"),
+        (&settings.split_timer_skip, "splitTimerSkip", "splitTimer"),
+        (&settings.split_timer_reset, "splitTimerReset", "splitTimer"),
+        (&settings.playlist_next, "playlistNext", "playlist"),
+        (&settings.playlist_previous, "playlistPrevious", "playlist"),
+        (&settings.replay_roll, "replayRoll", "replay"),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

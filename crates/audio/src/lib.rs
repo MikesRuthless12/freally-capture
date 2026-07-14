@@ -27,6 +27,7 @@ pub mod media_hub;
 pub mod meter;
 pub mod monitor;
 pub mod resample;
+pub mod vis;
 pub mod vst;
 
 pub use devices::{

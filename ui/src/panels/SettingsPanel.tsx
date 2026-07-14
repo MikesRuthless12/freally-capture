@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import qrcode from "qrcode-generator";
 
-import { panelUrl, settingsSet } from "../api/commands";
-import type { OscSettings, Settings, WebPanelSettings } from "../api/types";
+import { linkUrl, panelUrl, settingsSet } from "../api/commands";
+import type { LinkSettings, OscSettings, Settings, WebPanelSettings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
 
@@ -43,12 +43,21 @@ export function SettingsPanel({
   const [osc, setOsc] = useState<OscSettings>(
     settings?.osc ?? { enabled: false, port: 9000, lan: false },
   );
+  // Freally Link output (CAP-N12) — off by default; one receiver at a time.
+  const [link, setLink] = useState<LinkSettings>(
+    settings?.link ?? { enabled: false, port: 9720, name: "", key: "" },
+  );
+  const [showLinkKey, setShowLinkKey] = useState(false);
+  const [linkAddress, setLinkAddress] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     const load = () => {
       panelUrl()
         .then((next) => alive && setUrl(next ?? null))
+        .catch(() => undefined);
+      linkUrl()
+        .then((next) => alive && setLinkAddress(next ?? null))
         .catch(() => undefined);
     };
     load();
@@ -62,7 +71,7 @@ export function SettingsPanel({
   if (!settings || !draft) return null;
 
   const save = () => {
-    const next = { ...settings, webPanel: draft, osc };
+    const next = { ...settings, webPanel: draft, osc, link };
     setError(null);
     settingsSet(next)
       .then(() => onSaved(next))
@@ -178,6 +187,71 @@ export function SettingsPanel({
           </label>
           {osc.lan && <p className="m-0 text-amber-400">{t("osc-lan-warning")}</p>}
           <p className="m-0 font-mono text-[10px] text-havoc-muted">{t("osc-addresses")}</p>
+        </section>
+
+        <section className="flex flex-col gap-2 border-t border-white/5 pt-3">
+          <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+            {t("link-title")}
+          </span>
+          <p className="m-0 text-havoc-muted">{t("link-about")}</p>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={link.enabled}
+              onChange={(event) => setLink({ ...link, enabled: event.target.checked })}
+            />
+            {t("link-enable")}
+          </label>
+          {link.enabled && <p className="m-0 text-amber-400">{t("link-lan-warning")}</p>}
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-havoc-muted">{t("panel-port")}</span>
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              value={link.port}
+              onChange={(event) =>
+                setLink({ ...link, port: Number(event.target.value) || link.port })
+              }
+              className={`${inputClass} w-28`}
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-havoc-muted">{t("link-name")}</span>
+            <input
+              value={link.name}
+              onChange={(event) => setLink({ ...link, name: event.target.value })}
+              placeholder="Freally Capture"
+              className={`${inputClass} w-40`}
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-havoc-muted">{t("link-key")}</span>
+            <span className="flex items-center gap-1">
+              <input
+                type={showLinkKey ? "text" : "password"}
+                value={link.key}
+                onChange={(event) => setLink({ ...link, key: event.target.value })}
+                className={`${inputClass} w-40`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowLinkKey((shown) => !shown)}
+                className="rounded px-1.5 text-havoc-muted hover:text-havoc-text"
+              >
+                {showLinkKey ? t("panel-hide") : t("panel-show")}
+              </button>
+            </span>
+          </label>
+          <p className="m-0 text-havoc-muted">{t("link-key-hint")}</p>
+          {link.enabled && linkAddress ? (
+            <p className="m-0 text-havoc-muted">
+              {t("link-serving")}{" "}
+              <code className="font-mono text-[10px] text-havoc-text">{linkAddress}</code>
+            </p>
+          ) : (
+            <p className="m-0 text-havoc-muted">{t("link-off-hint")}</p>
+          )}
         </section>
 
         <button

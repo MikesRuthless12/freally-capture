@@ -69,6 +69,9 @@ const TIMER_FLASH_COLOR: [u8; 4] = [239, 68, 68, 255];
 /// How often a bound Text source's file is polled (CAP-M16) — one stat per
 /// poll while unchanged; OBS-comparable freshness.
 const BOUND_TEXT_POLL: Duration = Duration::from_millis(500);
+/// How often the stats HUD (CAP-N14) re-reads its numbers — matches the
+/// stats emitter's sampling cadence; the face repaints only on change.
+const STATS_FACE_INTERVAL: Duration = Duration::from_millis(500);
 /// The system emoji face reaction sprites rasterize from (monochrome
 /// outlines tinted per emoji — we own no color-emoji rasterizer, honestly).
 #[cfg(target_os = "windows")]
@@ -1511,6 +1514,21 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut bound_texts: HashMap<SourceId, SourceSettings> = HashMap::new();
     let mut bound_specs: HashMap<SourceId, String> = HashMap::new();
     let mut bound_states: HashMap<SourceId, BoundTextState> = HashMap::new();
+    // System-stats HUD faces (CAP-N14): the live set (rebuilt at reconcile)
+    // + the last face painted per source (repaint only on change), refreshed
+    // at the samplers' cadence, not per frame.
+    let mut stats_sources: HashMap<SourceId, SourceSettings> = HashMap::new();
+    let mut stats_specs: HashMap<SourceId, String> = HashMap::new();
+    let mut stats_faces: HashMap<SourceId, String> = HashMap::new();
+    let mut last_stats_face = Instant::now() - STATS_FACE_INTERVAL;
+    // Playlist "now playing" variables (CAP-N17): last value written per
+    // source, polled at 1 Hz — a variable write only happens on change.
+    let mut last_now_playing = Instant::now();
+    let mut now_playing_cache: HashMap<SourceId, String> = HashMap::new();
+    // Title variables (CAP-N16): the variables revision last handed to the
+    // title registry — checked at 1 Hz, fed only when it moved.
+    let mut last_title_vars = Instant::now();
+    let mut fed_title_vars: Option<u64> = None;
     // Recording-synced media (the backdrop's "start with recording" hold):
     // the last recording state the loop saw, and sources whose next uploaded
     // frame becomes their poster (upload once, then pause until recording).
@@ -1525,6 +1543,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // HDR displays (CAP-N74): sources whose output reports an HDR color
     // space at reconcile — their live status carries the tone-map hint.
     let mut hdr_sources: HashSet<SourceId> = HashSet::new();
+    // LAN listeners (CAP-N11): their runtime state follows the session's
+    // "sender connected" flag, not bare frame arrival — the waiting face
+    // they draw is a frame too, and calling it "live" would lie.
+    let mut lan_sources: HashSet<SourceId> = HashSet::new();
 
     // The native preview surface (the "OBS feel" path): created lazily once
     // the UI reports a non-zero preview region, then presented every frame
@@ -1992,6 +2014,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // alone would strand the old face and keep painting a ghost.
             let mut timer_seen: HashSet<SourceId> = HashSet::new();
             let mut bound_seen: HashSet<SourceId> = HashSet::new();
+            let mut stats_seen: HashSet<SourceId> = HashSet::new();
             for source in &scene_sources {
                 // Audio-only sources belong to the audio engine (their state
                 // rides the `audio` event) — shed any stale video pipeline
@@ -2029,6 +2052,32 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         timer_faces.remove(&source.id);
                     }
                     timer_seen.insert(source.id);
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        statuses.entry(source.id)
+                    {
+                        slot.insert(SourceRuntime::waiting());
+                        statuses_changed = true;
+                    }
+                    keep_ids.push(source.id);
+                    continue;
+                }
+                // The system-stats HUD (CAP-N14) paints from its own refresh
+                // step (§5b2) — no OS pipeline. Same fingerprint gate as the
+                // timer faces above.
+                if matches!(source.settings, SourceSettings::SystemStats { .. }) {
+                    if let Some(slot) = sessions.remove(&source.id) {
+                        slot.session.stop();
+                    }
+                    starting.remove(&source.id);
+                    capture_specs.remove(&source.id);
+                    static_specs.remove(&source.id);
+                    let face_spec = source_spec(&source.settings);
+                    if stats_specs.get(&source.id) != Some(&face_spec) {
+                        stats_specs.insert(source.id, face_spec);
+                        stats_sources.insert(source.id, source.settings.clone());
+                        stats_faces.remove(&source.id);
+                    }
+                    stats_seen.insert(source.id);
                     if let std::collections::hash_map::Entry::Vacant(slot) =
                         statuses.entry(source.id)
                     {
@@ -2128,6 +2177,27 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                             } else {
                                 hdr_sources.remove(&source.id);
                             }
+                        }
+                        // CAP-N11: remember which sources are LAN listeners —
+                        // the frame drain below mirrors their session's
+                        // connected flag into the runtime state.
+                        if matches!(&source.settings, SourceSettings::LanIngest { .. }) {
+                            lan_sources.insert(source.id);
+                        } else {
+                            lan_sources.remove(&source.id);
+                        }
+                        // CAP-N19: seed the capture's cursor-effects registry
+                        // from settings — both owned-cursor paths (display +
+                        // window). Live retunes go through `cursor_fx_set`;
+                        // this covers session (re)starts and app relaunches.
+                        if let SourceSettings::Display { capture_id, .. }
+                        | SourceSettings::Window { capture_id, .. } = &source.settings
+                        {
+                            let fx = app
+                                .state::<crate::settings::SettingsStore>()
+                                .cursor_fx(capture_id)
+                                .and_then(|fx| fx.to_config());
+                            fcap_capture::cursorfx::set_cursor_fx(capture_id, fx);
                         }
                         // CAP-M18: the saved control profile rides into every
                         // device (re)open — hotplug/auto-recover included.
@@ -2306,6 +2376,19 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             });
             bound_specs.retain(|id, _| bound_texts.contains_key(id));
             bound_states.retain(|id, _| bound_texts.contains_key(id));
+            // Stats HUDs: same rule as the timers — they live in no
+            // session/spec map, so the `gone` union above can't see them.
+            stats_sources.retain(|id, _| {
+                if stats_seen.contains(id) {
+                    return true;
+                }
+                if !keep_ids.contains(id) && statuses.remove(id).is_some() {
+                    statuses_changed = true;
+                }
+                false
+            });
+            stats_specs.retain(|id, _| stats_sources.contains_key(id));
+            stats_faces.retain(|id, _| stats_sources.contains_key(id));
             compositor.retain_sources(&keep_ids);
 
             // Filter files (LUT lattices, mask images) — the preview pane's,
@@ -2476,6 +2559,30 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                         },
                                     );
                                     statuses_changed = true;
+                                }
+                                // CAP-N11: a LAN listener's waiting face rides
+                                // this same pipe at the same fixed geometry, so
+                                // frame arrival can't mean "live" — mirror the
+                                // session's own connected flag instead. Every
+                                // transition is accompanied by a frame (face or
+                                // feed), so checking here catches them all.
+                                if lan_sources.contains(id) {
+                                    let connected =
+                                        fcap_sources::laningest::receiving(&id.0.to_string());
+                                    let desired = if connected { "live" } else { "waiting" };
+                                    if statuses.get(id).map(|runtime| runtime.state)
+                                        != Some(desired)
+                                    {
+                                        statuses.insert(
+                                            *id,
+                                            if connected {
+                                                SourceRuntime::live(size.0, size.1)
+                                            } else {
+                                                SourceRuntime::waiting()
+                                            },
+                                        );
+                                        statuses_changed = true;
+                                    }
                                 }
                             }
                             Err(err) => {
@@ -2729,6 +2836,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     line_spacing: 1.0,
                     force_rtl: false,
                     wrap_width: None,
+                    ..text::TextStyle::default()
                 };
                 match text::render_text(&style) {
                     Ok(frame) => {
@@ -2776,6 +2884,158 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 };
                 if let Some(dto) = dto {
                     let _ = app.emit("studio", &dto);
+                }
+            }
+        }
+
+        // -- 5b2. System-stats HUD faces (CAP-N14) -------------------------------
+        // Re-read the numbers at the samplers' cadence (not per frame) and
+        // repaint a face only when its formatted text changed — the rounding
+        // in `format_hud` pins that to visible movement, so painting stays
+        // ~2 Hz worst-case per HUD.
+        if !stats_sources.is_empty() && last_stats_face.elapsed() >= STATS_FACE_INTERVAL {
+            last_stats_face = Instant::now();
+            let (_, fps, _, dropped, render_micros) =
+                app.state::<crate::events::RuntimeStats>().latest();
+            let (cpu, memory_mb) = crate::events::latest_system();
+            let stream = app.state::<crate::stream::StreamBridgeState>().status();
+            let bitrate_kbps = matches!(stream.state.as_str(), "live" | "reconnecting")
+                .then(|| stream.targets.iter().map(|target| target.kbps).sum());
+            let numbers = crate::statshud::StatsNumbers {
+                fps,
+                cpu_percent: cpu,
+                memory_mb,
+                render_ms: render_micros as f32 / 1000.0,
+                dropped,
+                bitrate_kbps,
+            };
+            for (id, settings) in &stats_sources {
+                let SourceSettings::SystemStats {
+                    show_fps,
+                    show_cpu,
+                    show_memory,
+                    show_render_ms,
+                    show_dropped,
+                    show_bitrate,
+                    font_family,
+                    font_file,
+                    size_px,
+                    color,
+                } = settings
+                else {
+                    continue;
+                };
+                let face = crate::statshud::format_hud(
+                    &numbers,
+                    &crate::statshud::HudToggles {
+                        fps: *show_fps,
+                        cpu: *show_cpu,
+                        memory: *show_memory,
+                        render_ms: *show_render_ms,
+                        dropped: *show_dropped,
+                        bitrate: *show_bitrate,
+                    },
+                );
+                if stats_faces.get(id) == Some(&face) {
+                    continue;
+                }
+                let style = text::TextStyle {
+                    text: face.clone(),
+                    font_family: font_family.clone(),
+                    // The CAP-M16 rule for EVERY user path: a UNC font path
+                    // would be read over SMB (NTLM handshake leak) — refuse
+                    // it here and fall back to the family font.
+                    font_file: font_file
+                        .as_ref()
+                        .filter(|file| !crate::commands::studio::is_remote(file.trim()))
+                        .map(PathBuf::from),
+                    size_px: *size_px,
+                    color: [color.r, color.g, color.b, color.a],
+                    align: text::TextAlign::Left,
+                    line_spacing: 1.0,
+                    force_rtl: false,
+                    wrap_width: None,
+                    ..text::TextStyle::default()
+                };
+                match text::render_text(&style) {
+                    Ok(frame) => {
+                        let (w, h) = (frame.width, frame.height);
+                        match compositor.upload_frame(*id, &frame) {
+                            Ok(()) => {
+                                stats_faces.insert(*id, face);
+                                let stale = statuses.get(id).map_or(true, |prev| {
+                                    prev.state != "live"
+                                        || prev.width != Some(w)
+                                        || prev.height != Some(h)
+                                });
+                                if stale {
+                                    statuses.insert(*id, SourceRuntime::live(w, h));
+                                    statuses_changed = true;
+                                }
+                            }
+                            Err(err) => eprintln!("studio: stats face dropped: {err}"),
+                        }
+                    }
+                    Err(err) => {
+                        // Cache the failed face too — no retry storm; a
+                        // settings edit clears the cache and tries again.
+                        stats_faces.insert(*id, face);
+                        statuses.insert(*id, SourceRuntime::error("backend", err.to_string()));
+                        statuses_changed = true;
+                    }
+                }
+            }
+        }
+
+        // -- 5b3. Playlist "now playing" variables (CAP-N17) ---------------------
+        // At 1 Hz: copy each playlist's playing-item name into its configured
+        // studio variable (CAP-N02). Text sources interpolating it repaint
+        // through the ordinary variable-revision path; writes happen only on
+        // an actual change, so an idle playlist costs one registry read.
+        if last_now_playing.elapsed() >= Duration::from_secs(1) {
+            last_now_playing = Instant::now();
+            for source in &scene_sources {
+                let SourceSettings::Playlist {
+                    now_playing_variable,
+                    ..
+                } = &source.settings
+                else {
+                    continue;
+                };
+                let variable = now_playing_variable.trim();
+                if variable.is_empty() {
+                    continue;
+                }
+                let Some(playing) = fcap_sources::playlist::now_playing(&source.id.0.to_string())
+                else {
+                    continue;
+                };
+                if now_playing_cache.get(&source.id) != Some(&playing) {
+                    app.state::<crate::automation::AutomationState>()
+                        .set_variable(variable, &playing);
+                    now_playing_cache.insert(source.id, playing);
+                }
+            }
+            now_playing_cache.retain(|id, _| scene_sources.iter().any(|source| source.id == *id));
+        }
+
+        // -- 5b4. Title variables (CAP-N16) --------------------------------------
+        // The playlist pattern inverted: at 1 Hz, when the automation
+        // variables revision moved, hand the whole (bounded) map to the
+        // title registry — running titles interpolate {{name}} on their next
+        // tick, with no session restart and no spec change (unlike Text,
+        // whose interpolated content rides the spec).
+        if last_title_vars.elapsed() >= Duration::from_secs(1) {
+            last_title_vars = Instant::now();
+            let any_titles = scene_sources
+                .iter()
+                .any(|source| matches!(source.settings, SourceSettings::Title { .. }));
+            if any_titles {
+                let automation = app.state::<crate::automation::AutomationState>();
+                let revision = automation.variables_revision();
+                if fed_title_vars != Some(revision) {
+                    fed_title_vars = Some(revision);
+                    fcap_sources::title::set_variables(automation.variables());
                 }
             }
         }
@@ -3077,11 +3337,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let recording = app.state::<crate::recording::RecordingState>();
         let streaming = app.state::<crate::stream::StreamBridgeState>();
         let replaying = app.state::<crate::replay::ReplayState>();
+        let linking = app.state::<crate::link::LinkState>();
         let record_due = recording.wants_frames();
         let stream_due = streaming.wants_frames();
         let replay_due = replaying.wants_frames();
+        // Freally Link (CAP-N12): only while a receiver is connected; the
+        // link thread JPEG-encodes on its own time — this hands it an Arc.
+        let link_due = linking.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if record_due || stream_due || replay_due || preview_due {
+        if record_due || stream_due || replay_due || link_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
@@ -3094,6 +3358,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     }
                     if replay_due {
                         replaying.push_video(Arc::clone(&data));
+                    }
+                    if link_due {
+                        linking.push_video(Arc::clone(&data), frame_w, frame_h);
                     }
                     // CAP-M10: black/frozen watch over THIS readback (never
                     // an extra one); it only alarms while the picture goes
@@ -3563,6 +3830,14 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::RemoteGuest { .. }
             | SourceSettings::TestSweep { .. }
             | SourceSettings::TestFlashBeep { .. }
+            | SourceSettings::AudioVisualizer { .. }
+            | SourceSettings::SplitTimer { .. }
+            | SourceSettings::Playlist { .. }
+            | SourceSettings::ReplayPlayback { .. }
+            | SourceSettings::LanIngest { .. }
+            | SourceSettings::InputOverlay { .. }
+            | SourceSettings::Title { .. }
+            | SourceSettings::FreallyLink { .. }
     )
 }
 
@@ -3866,6 +4141,301 @@ fn start_session(
                     // The source id keys the mixer-side audio ring (like Media).
                     fcap_sources::testsignal::start_flash_beep(&id.0.to_string(), *width, *height)
                 }
+                SourceSettings::AudioVisualizer {
+                    style,
+                    target,
+                    track,
+                    source,
+                    width,
+                    height,
+                    bands,
+                    color,
+                    peak_hold,
+                    decay,
+                } => {
+                    let target = match target {
+                        fcap_scene::VisTargetKind::Master => {
+                            Some(fcap_audio::vis::VisTarget::Master)
+                        }
+                        fcap_scene::VisTargetKind::Track => {
+                            let bus = (*track).clamp(1, fcap_scene::TRACK_COUNT as u32);
+                            Some(fcap_audio::vis::VisTarget::Track((bus - 1) as usize))
+                        }
+                        fcap_scene::VisTargetKind::Source => source
+                            .as_ref()
+                            .map(|id| fcap_audio::vis::VisTarget::Source(id.0.to_string())),
+                    };
+                    match target {
+                        Some(target) => fcap_sources::visualizer::start_visualizer(
+                            fcap_sources::visualizer::VisualizerConfig {
+                                style: match style {
+                                    fcap_scene::VisStyle::Bars => {
+                                        fcap_sources::visualizer::Style::Bars
+                                    }
+                                    fcap_scene::VisStyle::Scope => {
+                                        fcap_sources::visualizer::Style::Scope
+                                    }
+                                    fcap_scene::VisStyle::Vu => fcap_sources::visualizer::Style::Vu,
+                                },
+                                target,
+                                width: *width,
+                                height: *height,
+                                bands: *bands,
+                                color: [color.r, color.g, color.b, color.a],
+                                peak_hold: *peak_hold,
+                                decay_db_per_s: *decay,
+                            },
+                        ),
+                        // No strip picked yet — an honest error beats a
+                        // guessed signal (the properties dialog fixes it).
+                        None => Err(CaptureError::Backend(
+                            "pick an audio source for the visualizer".into(),
+                        )),
+                    }
+                }
+                SourceSettings::SplitTimer {
+                    path,
+                    comparison,
+                    width,
+                    height,
+                    size_px,
+                    color,
+                    ahead,
+                    behind,
+                    gold,
+                } => {
+                    let trimmed = path.trim();
+                    if trimmed.is_empty() {
+                        Err(CaptureError::Backend("pick a .lss split file".into()))
+                    } else if crate::commands::studio::is_remote(trimmed) {
+                        // The CAP-M16 rule: statting a UNC path on Windows
+                        // forces an SMB/NTLM handshake — never probe one.
+                        Err(CaptureError::Backend(
+                            "network paths are not read — use a local split file".into(),
+                        ))
+                    } else {
+                        std::fs::metadata(trimmed)
+                            .map_err(|err| CaptureError::Backend(format!("split file: {err}")))
+                            .and_then(|meta| {
+                                if meta.len() > fcap_sources::splits::MAX_LSS_BYTES {
+                                    Err(CaptureError::Backend("split file is too large".into()))
+                                } else {
+                                    std::fs::read_to_string(trimmed).map_err(|err| {
+                                        CaptureError::Backend(format!("split file: {err}"))
+                                    })
+                                }
+                            })
+                            .and_then(|content| {
+                                fcap_sources::splits::parse_lss(&content).map_err(|err| {
+                                    CaptureError::Backend(format!("split file: {err}"))
+                                })
+                            })
+                            .and_then(|file| {
+                                fcap_sources::splits::start_split_timer(
+                                    &id.0.to_string(),
+                                    fcap_sources::splits::SplitTimerConfig {
+                                        file,
+                                        comparison: match comparison {
+                                            fcap_scene::SplitComparison::PersonalBest => {
+                                                fcap_sources::splits::Comparison::Pb
+                                            }
+                                            fcap_scene::SplitComparison::BestSegments => {
+                                                fcap_sources::splits::Comparison::BestSegments
+                                            }
+                                            fcap_scene::SplitComparison::Average => {
+                                                fcap_sources::splits::Comparison::Average
+                                            }
+                                        },
+                                        width: *width,
+                                        height: *height,
+                                        size_px: *size_px,
+                                        color: [color.r, color.g, color.b, color.a],
+                                        ahead: [ahead.r, ahead.g, ahead.b, ahead.a],
+                                        behind: [behind.r, behind.g, behind.b, behind.a],
+                                        gold: [gold.r, gold.g, gold.b, gold.a],
+                                    },
+                                )
+                            })
+                    }
+                }
+                SourceSettings::Playlist {
+                    items,
+                    looping,
+                    shuffle,
+                    hold_last,
+                    hw_decode,
+                    ..
+                } => {
+                    // The CAP-M16 rule for EVERY user path: refuse network
+                    // paths before any stat/probe (NTLM handshake leak).
+                    let hostile = items
+                        .iter()
+                        .find(|item| crate::commands::studio::is_remote(item.path.trim()));
+                    if items.is_empty() {
+                        Err(CaptureError::Backend("the playlist is empty".into()))
+                    } else if hostile.is_some() {
+                        Err(CaptureError::Backend(
+                            "network paths are not read — playlist items must be local files"
+                                .into(),
+                        ))
+                    } else {
+                        fcap_sources::playlist::start_playlist(
+                            &id.0.to_string(),
+                            fcap_sources::playlist::PlaylistConfig {
+                                items: items
+                                    .iter()
+                                    .map(|item| fcap_sources::playlist::PlaylistItemSpec {
+                                        path: item.path.trim().to_string(),
+                                        in_s: item.in_s.max(0.0),
+                                        out_s: item.out_s.max(0.0),
+                                    })
+                                    .collect(),
+                                looping: *looping,
+                                shuffle: *shuffle,
+                                hold_last: *hold_last,
+                                hw_decode: *hw_decode,
+                            },
+                        )
+                    }
+                }
+                SourceSettings::ReplayPlayback {
+                    speed, hw_decode, ..
+                } => fcap_sources::replaysrc::start_replay_source(
+                    &id.0.to_string(),
+                    fcap_sources::replaysrc::ReplaySourceConfig {
+                        speed: match speed {
+                            fcap_scene::ReplaySpeed::Full => fcap_sources::replaysrc::Speed::Full,
+                            fcap_scene::ReplaySpeed::Half => fcap_sources::replaysrc::Speed::Half,
+                            fcap_scene::ReplaySpeed::Quarter => {
+                                fcap_sources::replaysrc::Speed::Quarter
+                            }
+                        },
+                        hw_decode: *hw_decode,
+                    },
+                ),
+                // CAP-N13: input is polled inside this session's thread only
+                // — reading starts when the source goes live and stops with
+                // it; nothing is ever logged (the module doc pins the scope).
+                SourceSettings::InputOverlay {
+                    layout,
+                    color,
+                    accent,
+                } => fcap_sources::inputoverlay::start_input_overlay(
+                    fcap_sources::inputoverlay::InputOverlayConfig {
+                        layout: match layout {
+                            fcap_scene::InputLayout::Wasd => {
+                                fcap_sources::inputoverlay::Layout::Wasd
+                            }
+                            fcap_scene::InputLayout::Keyboard => {
+                                fcap_sources::inputoverlay::Layout::Keyboard
+                            }
+                            fcap_scene::InputLayout::Gamepad => {
+                                fcap_sources::inputoverlay::Layout::Gamepad
+                            }
+                            fcap_scene::InputLayout::Fightstick => {
+                                fcap_sources::inputoverlay::Layout::Fightstick
+                            }
+                        },
+                        color: [color.r, color.g, color.b, color.a],
+                        accent: [accent.r, accent.g, accent.b, accent.a],
+                    },
+                ),
+                SourceSettings::Title {
+                    width,
+                    height,
+                    layers,
+                    animation,
+                    duration_ms,
+                } => {
+                    // The CAP-M16 rule for EVERY user path: refuse network
+                    // paths before any stat/probe (NTLM handshake leak) —
+                    // image layers load at start, bound files and fonts are
+                    // read while the session runs.
+                    let hostile = layers.iter().any(|layer| match layer {
+                        fcap_scene::TitleLayer::Image { path, .. } => {
+                            crate::commands::studio::is_remote(path.trim())
+                        }
+                        fcap_scene::TitleLayer::Text {
+                            source_file,
+                            font_file,
+                            ..
+                        } => {
+                            crate::commands::studio::is_remote(source_file.trim())
+                                || font_file
+                                    .as_deref()
+                                    .is_some_and(|file| crate::commands::studio::is_remote(file.trim()))
+                        }
+                        fcap_scene::TitleLayer::Rect { .. } => false,
+                    });
+                    if hostile {
+                        Err(CaptureError::Backend(
+                            "network paths are not read — title images, fonts, and bound files must be local".into(),
+                        ))
+                    } else {
+                        fcap_sources::title::start_title(
+                            &id.0.to_string(),
+                            fcap_sources::title::TitleConfig {
+                                width: *width,
+                                height: *height,
+                                layers: layers.iter().map(title_layer_spec).collect(),
+                                animation: match animation {
+                                    fcap_scene::TitleAnimation::None => {
+                                        fcap_sources::title::Animation::None
+                                    }
+                                    fcap_scene::TitleAnimation::Fade => {
+                                        fcap_sources::title::Animation::Fade
+                                    }
+                                    fcap_scene::TitleAnimation::SlideLeft => {
+                                        fcap_sources::title::Animation::SlideLeft
+                                    }
+                                    fcap_scene::TitleAnimation::SlideUp => {
+                                        fcap_sources::title::Animation::SlideUp
+                                    }
+                                    fcap_scene::TitleAnimation::Wipe => {
+                                        fcap_sources::title::Animation::Wipe
+                                    }
+                                },
+                                duration_ms: *duration_ms,
+                            },
+                        )
+                    }
+                }
+                SourceSettings::LanIngest {
+                    protocol,
+                    port,
+                    passphrase,
+                } => {
+                    let proto = match protocol {
+                        fcap_scene::IngestProtocol::Srt => {
+                            fcap_sources::laningest::IngestProtocol::Srt
+                        }
+                        fcap_scene::IngestProtocol::Rtmp => {
+                            fcap_sources::laningest::IngestProtocol::Rtmp
+                        }
+                    };
+                    // The waiting face shows the reachable URL. The local-IP
+                    // probe only asks the OS which interface faces the LAN —
+                    // nothing is sent (webpanel's trick).
+                    let host = crate::commands::studio::lan_ip();
+                    fcap_sources::laningest::start_lan_ingest(
+                        &id.0.to_string(),
+                        fcap_sources::laningest::LanIngestConfig {
+                            protocol: proto,
+                            port: *port,
+                            passphrase: passphrase.clone(),
+                            connect_url: fcap_sources::laningest::connect_url(
+                                proto, &host, *port, passphrase,
+                            ),
+                        },
+                    )
+                }
+                // Freally Link (CAP-N12): a network address by design — it
+                // is never treated as a path, so there is nothing to guard
+                // with is_remote(); no filesystem probe happens anywhere.
+                // The session reconnects with backoff on its own.
+                SourceSettings::FreallyLink { host, port, key, .. } => {
+                    fcap_sources::link::start_link(&id.0.to_string(), host, *port, key)
+                }
                 other => Err(CaptureError::Unsupported(format!(
                     "{} is not capture-backed",
                     other.kind_name()
@@ -3902,15 +4472,91 @@ fn text_style(settings: &SourceSettings, content: String) -> Option<text::TextSt
         font_file: font_file.as_ref().map(PathBuf::from),
         size_px: *size_px,
         color: [color.r, color.g, color.b, color.a],
-        align: match align {
-            fcap_scene::TextAlign::Left => text::TextAlign::Left,
-            fcap_scene::TextAlign::Center => text::TextAlign::Center,
-            fcap_scene::TextAlign::Right => text::TextAlign::Right,
-        },
+        align: align_of(*align),
         line_spacing: *line_spacing,
         force_rtl: *force_rtl,
         wrap_width: *wrap_width,
+        ..text::TextStyle::default()
     })
+}
+
+/// Map the scene model's text alignment onto the renderer's.
+fn align_of(align: fcap_scene::TextAlign) -> text::TextAlign {
+    match align {
+        fcap_scene::TextAlign::Left => text::TextAlign::Left,
+        fcap_scene::TextAlign::Center => text::TextAlign::Center,
+        fcap_scene::TextAlign::Right => text::TextAlign::Right,
+    }
+}
+
+/// Map one scene-model title layer (CAP-N16) onto the generator's spec.
+fn title_layer_spec(layer: &fcap_scene::TitleLayer) -> fcap_sources::title::LayerSpec {
+    match layer {
+        fcap_scene::TitleLayer::Text {
+            x,
+            y,
+            text: content,
+            font_family,
+            font_file,
+            size_px,
+            color,
+            align,
+            outline_px,
+            outline_color,
+            shadow,
+            source_file,
+            binding,
+            csv_row,
+            csv_column,
+            json_pointer,
+        } => fcap_sources::title::LayerSpec::Text {
+            x: *x,
+            y: *y,
+            text: content.clone(),
+            font_family: font_family.clone(),
+            font_file: font_file.as_ref().map(PathBuf::from),
+            size_px: *size_px,
+            color: [color.r, color.g, color.b, color.a],
+            align: align_of(*align),
+            outline_px: *outline_px,
+            outline_color: [
+                outline_color.r,
+                outline_color.g,
+                outline_color.b,
+                outline_color.a,
+            ],
+            shadow: *shadow,
+            source_file: source_file.trim().to_string(),
+            binding: match binding {
+                fcap_scene::FileBinding::Whole => fcap_sources::title::Binding::Whole,
+                fcap_scene::FileBinding::CsvCell => fcap_sources::title::Binding::CsvCell {
+                    row: *csv_row,
+                    column: csv_column.clone(),
+                },
+                fcap_scene::FileBinding::JsonPointer => fcap_sources::title::Binding::JsonPointer {
+                    pointer: json_pointer.clone(),
+                },
+            },
+        },
+        fcap_scene::TitleLayer::Image { x, y, path } => fcap_sources::title::LayerSpec::Image {
+            x: *x,
+            y: *y,
+            path: path.trim().to_string(),
+        },
+        fcap_scene::TitleLayer::Rect {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => fcap_sources::title::LayerSpec::Rect {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+            color: [color.r, color.g, color.b, color.a],
+        },
+    }
 }
 
 /// Whether a Text source binds to a watched file (CAP-M16) — those render
@@ -4271,6 +4917,109 @@ mod tests {
         }));
         assert!(!is_capture_backed(&SourceSettings::TestTone {}));
         assert!(SourceSettings::TestTone {}.is_audio_only());
+        // The replay playback source (CAP-N10) is a session with a strip.
+        let replay = SourceSettings::ReplayPlayback {
+            seconds: 15,
+            speed: fcap_scene::ReplaySpeed::Half,
+            hw_decode: true,
+        };
+        assert!(is_capture_backed(&replay));
+        assert!(replay.has_audio());
+        // The playlist (CAP-N17) is a session generator with a mixer strip.
+        let playlist = SourceSettings::Playlist {
+            items: Vec::new(),
+            looping: true,
+            shuffle: false,
+            hold_last: true,
+            hw_decode: true,
+            now_playing_variable: String::new(),
+        };
+        assert!(is_capture_backed(&playlist));
+        assert!(playlist.has_audio());
+        assert!(!playlist.is_audio_only());
+        // Freally Link (CAP-N12) is a session with a mixer strip: video
+        // composites, the sender's master audio rides the source's strip.
+        let link = SourceSettings::FreallyLink {
+            host: "192.168.1.20".into(),
+            port: 9720,
+            label: "Gaming PC".into(),
+            key: "gaming-pc-key".into(),
+        };
+        assert!(is_capture_backed(&link));
+        assert!(link.has_audio());
+        assert!(!link.is_audio_only());
+        assert!(!link.is_screen_view());
+        // The split timer (CAP-N18) is a session generator like the sweep.
+        assert!(is_capture_backed(&SourceSettings::SplitTimer {
+            path: "C:/runs/game.lss".into(),
+            comparison: fcap_scene::SplitComparison::PersonalBest,
+            width: 8,
+            height: 8,
+            size_px: 18.0,
+            color: fcap_scene::Rgba::WHITE,
+            ahead: fcap_scene::Rgba::WHITE,
+            behind: fcap_scene::Rgba::WHITE,
+            gold: fcap_scene::Rgba::WHITE,
+        }));
+        // The title designer (CAP-N16) is a session generator (its in/out
+        // animation and bound cells repaint live); silent by design.
+        let title = SourceSettings::Title {
+            width: 8,
+            height: 8,
+            layers: Vec::new(),
+            animation: fcap_scene::TitleAnimation::Fade,
+            duration_ms: 400,
+        };
+        assert!(is_capture_backed(&title));
+        assert!(!title.has_audio());
+        assert!(!title.is_audio_only());
+        // The visualizer (CAP-N15) is a session generator like the sweep.
+        assert!(is_capture_backed(&SourceSettings::AudioVisualizer {
+            style: fcap_scene::VisStyle::Bars,
+            target: fcap_scene::VisTargetKind::Master,
+            track: 1,
+            source: None,
+            width: 8,
+            height: 8,
+            bands: 8,
+            color: fcap_scene::Rgba::WHITE,
+            peak_hold: true,
+            decay: 30.0,
+        }));
+        // The LAN listener (CAP-N11) is session-backed with a mixer strip;
+        // it composes video, so it is never audio-only.
+        let lan = SourceSettings::LanIngest {
+            protocol: fcap_scene::IngestProtocol::Srt,
+            port: 9710,
+            passphrase: String::new(),
+        };
+        assert!(is_capture_backed(&lan));
+        assert!(lan.has_audio());
+        assert!(!lan.is_audio_only());
+        // The input overlay (CAP-N13) is a session generator with no audio;
+        // its sampler lives and dies with the session (the privacy scope).
+        let overlay = SourceSettings::InputOverlay {
+            layout: fcap_scene::InputLayout::Wasd,
+            color: fcap_scene::Rgba::WHITE,
+            accent: fcap_scene::Rgba::WHITE,
+        };
+        assert!(is_capture_backed(&overlay));
+        assert!(!overlay.has_audio());
+        assert!(!overlay.is_audio_only());
+        // The stats HUD (CAP-N14) is a text face: no session, no static
+        // render — it paints from its own refresh step like the timers.
+        assert!(!is_capture_backed(&SourceSettings::SystemStats {
+            show_fps: true,
+            show_cpu: true,
+            show_memory: true,
+            show_render_ms: true,
+            show_dropped: true,
+            show_bitrate: true,
+            font_family: None,
+            font_file: None,
+            size_px: 28.0,
+            color: fcap_scene::Rgba::WHITE,
+        }));
         assert!(render_static(&SourceSettings::TestGrid {
             width: 8,
             height: 8,
