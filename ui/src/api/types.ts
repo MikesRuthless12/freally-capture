@@ -72,6 +72,20 @@ export type AlignmentSettings = {
   rulers: boolean;
 };
 
+/** Which palette the mixer's level meters use (mirrors `MeterPreset` in
+ * settings.rs). `colorblind` is an Okabe–Ito blue→orange→vermillion ramp. */
+export type MeterPreset = "default" | "colorblind" | "custom";
+
+/** Accessibility (mirrors `AccessibilitySettings` in settings.rs): the mixer
+ * VU meter's three zone colours. `#rrggbb` — Rust's `validate()` rejects
+ * anything else; the custom colours are only read for the `custom` preset. */
+export type AccessibilitySettings = {
+  meterPreset: MeterPreset;
+  meterLow: string;
+  meterMid: string;
+  meterHigh: string;
+};
+
 /** The persisted user settings (`settings.json` in the OS config dir). */
 /** Audio Mixer strip orientation. */
 export type MixerLayout = "horizontal" | "vertical";
@@ -87,6 +101,8 @@ export type Settings = {
   theme: ThemeSettings;
   /** Preview alignment aids: smart guides, safe areas, rulers (CAP-M04). */
   alignment: AlignmentSettings;
+  /** Accessibility: the mixer VU meter palette. */
+  accessibility?: AccessibilitySettings;
   /** Whether the first-run wizard has been seen (Phase 9). */
   completedOnboarding: boolean;
   /** CAP-M18: device id → control tag → value. Server-owned — written by

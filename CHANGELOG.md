@@ -15,6 +15,47 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.301.0] — 2026-07-14 (Menu bar & Settings modal)
+
+> Desktop-app chrome, OBS-shaped but Freally's own: a real **menu bar** across the top and a
+> **sidebar Settings modal** with OK / Cancel / Apply — so the Controls dock goes back to being
+> live controls instead of a wall of launcher buttons.
+
+### Added
+
+- **Application menu bar** — File · Edit · View · Docks · Profile · Scene Collection · Tools · Help,
+  across the top of the window. It is a pure dispatch layer over actions that already existed (the
+  command palette's), so nothing new happens under the hood — the launchers just have a home now.
+  File reaches Show Recordings / Remux / Settings / Show Settings Folder / Exit; Edit has
+  undo-redo and copy/paste transform & filters; Tools gathers automation, rundown, hotkey map,
+  A/V-sync, scripts, components, MIDI, PTZ, the remote API and the LAN panel; Profile and Scene
+  Collection switch between saved sets; Help opens the docs, the changelog, a bug report, and the
+  update check. Dropdowns are keyboard-navigable (arrow keys across and within menus) and
+  screen-reader-labelled; items for features that don't exist yet are present but disabled.
+- **OBS-style Settings modal** — a left sidebar of categories (**General · Appearance · Streaming ·
+  Output · Replay · Hotkeys · Network · Accessibility · About**) with a grouped, scrollable pane and
+  an **OK / Cancel / Apply** footer. **Nothing changes until you click Apply (or OK):** the modal
+  edits a private copy, Apply is greyed out until you actually change something, and Cancel/Escape
+  restores exactly what you had — theme and accent preview live while it's open but revert on cancel,
+  leaving no trace. A per-category error surfaces inline with a dot on its sidebar entry.
+- **Conflict-proof hotkey binding** — the Hotkeys category binds every action from a **dropdown of
+  curated shortcuts**, not a text box. Picking a shortcut for one action removes it from every other
+  action's menu, so two features can never hold the same key; **None** unbinds and returns it to the
+  pool. A filter box narrows the list. Free-text entry is gone entirely, and the backend now rejects
+  malformed accelerators structurally, so a nonsense binding can't be saved even by hand-editing.
+- **Accessibility: mixer meter colours** — the new Accessibility category sets the VU-meter band
+  colours, with a **colour-blind-safe preset** (Okabe-Ito) alongside Default and a Custom option.
+- **Desktop shortcut folders** — File → Show Recordings / Show Settings Folder open the app's own
+  folders in the file browser (an owned command, never a raw path from the webview).
+
+### Changed
+
+- **The Controls dock is now just controls.** All 18 dialog-launcher buttons (Settings, Output,
+  Stream, Docks, Profiles, Scripts, Automation, Report-a-bug, Check-for-updates, …) moved into the
+  menu bar; the dock keeps only what drives the broadcast — Start/Stop Recording, Go Live, Arm
+  Replay, the panic button, Studio Mode, transitions. The crash-report and update-available prompts
+  still surface on launch exactly as before.
+
 ## [0.300.1] — 2026-07-14 (The Phase 2 simplify pass)
 
 > No new features: a four-angle cleanup review (reuse / simplification / efficiency / altitude)

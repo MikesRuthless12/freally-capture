@@ -46,6 +46,20 @@
     showStatsDock: true,
     monitorDevice: null,
     mixerLayout: "horizontal",
+    // Required slices — Rust `settings_get` always returns these, so the
+    // Settings modal reads them without guarding. Keep in sync with the
+    // `Settings` type or the modal crashes on open.
+    alignment: { smartGuides: true, safeAreas: false, rulers: false },
+    accessibility: {
+      meterPreset: "default",
+      meterLow: "#26f26f",
+      meterMid: "#f7f726",
+      meterHigh: "#f72626",
+    },
+    panicSlate: { color: "#000000", image: "" },
+    webPanel: { enabled: false, port: 4457, lan: false, password: "" },
+    osc: { enabled: false, port: 9000, lan: false },
+    link: { enabled: false, port: 9720, name: "", key: "" },
     recording: { container: "frec", splitMinutes: 0 },
     remote: { turnUrl: "", turnUsername: "", turnCredential: "" },
     stream: { enabled: false, service: "youtube", targets: [] },
@@ -79,6 +93,13 @@
     settings_get: settings,
     settings_set: null,
     settings_complete_onboarding: null,
+    reveal_app_folder: null,
+    // The menu bar lazy-loads these when the Profile / Scene Collection
+    // menus open.
+    profiles_list: { active: "Default", names: ["Default", "Streaming"] },
+    collections_list: { active: "Main", names: ["Main", "Just Chatting"] },
+    profile_switch: settings,
+    collection_switch: { active: "Main", names: ["Main", "Just Chatting"] },
     studio_get: { revision: 1, collection },
     integrations_status: {
       ndiAvailable: false,

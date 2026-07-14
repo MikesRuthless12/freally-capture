@@ -53,28 +53,51 @@ test("04 — sources: game capture consent", async ({ page }) => {
   await page.screenshot({ path: `${DIR}/04-source-game-capture.png` });
 });
 
-// The Controls-dock dialogs, opened by their exact button label.
-const DIALOGS: Array<[string, RegExp]> = [
-  ["10-components-downloads", /Codecs/],
-  ["11-recordings", /Files…/],
-  ["12-output", /Output…/],
-  ["13-stream", /Stream…/],
-  ["14-replay", /Replay…/],
-  ["15-hotkeys", /Keys…/],
-  ["16-scripts", /Scripts…/],
-  ["17-docks", /Docks…/],
-  ["18-remote", /Remote…/],
-  ["19-profiles", /Profiles…/],
-  ["20-bug-report", /Report a bug/],
-  ["21-updates", /Check for updates/],
+// Dialogs are now launched from the menu bar (the Controls dock keeps only
+// live-operation controls). Each entry: [file, top-menu, menu-item].
+const MENU_DIALOGS: Array<[string, RegExp, RegExp]> = [
+  ["10-components-downloads", /^Tools$/, /Components…/],
+  ["11-recordings", /^File$/, /Remux to MP4…/],
+  ["16-scripts", /^Tools$/, /Lua Scripts…/],
+  ["17-docks", /^Docks$/, /Browser Docks…/],
+  ["18-remote", /^Tools$/, /Remote Control API…/],
+  ["19-profiles", /^Profile$/, /Manage Profiles…/],
+  ["20-bug-report", /^Help$/, /Report a Bug…/],
+  ["21-updates", /^Help$/, /Check for Updates…/],
 ];
 
-for (const [file, label] of DIALOGS) {
+for (const [file, menu, item] of MENU_DIALOGS) {
   test(`dialog — ${file}`, async ({ page }) => {
     await boot(page);
     await studioReady(page);
-    await page.getByRole("button", { name: label }).first().click();
+    await page.getByRole("menuitem", { name: menu }).click();
+    await page.getByRole("menuitem", { name: item }).first().click();
     await page.waitForTimeout(700);
+    await page.screenshot({ path: `${DIR}/${file}.png` });
+  });
+}
+
+// Output / Stream / Replay / Hotkeys are now Settings categories, not
+// standalone dialogs — photograph each category tab.
+const SETTINGS_CATEGORIES: Array<[string, RegExp]> = [
+  ["12-output", /Output/],
+  ["13-stream", /Streaming/],
+  ["14-replay", /Replay/],
+  ["15-hotkeys", /Hotkeys/],
+  ["15b-accessibility", /Accessibility/],
+];
+
+for (const [file, tab] of SETTINGS_CATEGORIES) {
+  test(`settings — ${file}`, async ({ page }) => {
+    await boot(page);
+    await studioReady(page);
+    await page.getByRole("menuitem", { name: /^File$/ }).click();
+    await page
+      .getByRole("menuitem", { name: /Settings/ })
+      .first()
+      .click();
+    await page.getByRole("tab", { name: tab }).click();
+    await page.waitForTimeout(500);
     await page.screenshot({ path: `${DIR}/${file}.png` });
   });
 }

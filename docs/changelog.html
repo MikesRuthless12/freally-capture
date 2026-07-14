@@ -20,8 +20,34 @@
     </header>
 
     <main>
-      <!-- 0.300.1 — the Phase 2 simplify pass -->
+      <!-- 0.301.0 — menu bar & Settings modal -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.301.0</span>
+            <span class="date">Jul 14, 2026 · Menu bar &amp; Settings modal</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.301.0">Download</a>
+        </div>
+
+        <h2>0.301.0 — Menu bar &amp; Settings modal</h2>
+        <p class="summary">
+          Desktop-app chrome, OBS-shaped but Freally's own: a real menu bar across the top (File ·
+          Edit · View · Docks · Profile · Scene Collection · Tools · Help) and a sidebar Settings
+          modal with OK / Cancel / Apply. The Controls dock goes back to being live controls —
+          every dialog launcher moved into the menus.
+        </p>
+        <ul class="features">
+          <li><strong>Application menu bar</strong> — eight menus across the top, a pure dispatch layer over actions that already existed; keyboard-navigable and screen-reader-labelled, with disabled items for features not built yet.</li>
+          <li><strong>OBS-style Settings modal</strong> — a sidebar of categories (General · Appearance · Streaming · Output · Replay · Hotkeys · Network · Accessibility · About) with OK / Cancel / Apply. Nothing changes until you click Apply; Cancel restores exactly what you had, live theme preview included.</li>
+          <li><strong>Conflict-proof hotkeys</strong> — bind every action from a curated dropdown, not a text box: a shortcut used by one action disappears from every other action's menu, so two features can never share a key. "None" frees it again. Free-text entry is gone, and malformed accelerators are rejected structurally.</li>
+          <li><strong>Accessibility: mixer meter colours</strong> — a new category sets the VU-meter band colours, with a colour-blind-safe preset (Okabe-Ito) alongside Default and Custom.</li>
+          <li><strong>The Controls dock is now just controls</strong> — all 18 dialog launchers moved to the menu bar; the dock keeps only Start/Stop Recording, Go Live, Arm Replay, the panic button, Studio Mode, and transitions. Crash-report and update prompts still surface on launch.</li>
+        </ul>
+      </article>
+
+      <!-- 0.300.1 — the Phase 2 simplify pass -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.300.1</span>

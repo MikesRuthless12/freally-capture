@@ -1,28 +1,109 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { settingsGet, settingsSet } from "../api/commands";
-import type { AlignmentSettings, Settings, ThemeMode } from "../api/types";
+import type {
+  AccessibilitySettings,
+  AlignmentSettings,
+  MeterPreset,
+  Settings,
+  ThemeMode,
+  WebPanelSettings,
+} from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { AUTO_LOCALE, LOCALES, isLocaleCode } from "../i18n/locales";
 import { initLocale, setLocale, useT } from "../i18n/t";
-import { applyTheme, isHexColor } from "../theme/theme";
+import { DEFAULT_METER_COLORS, meterGradient, resolveMeterColors } from "../lib/meters";
+import { DEFAULT_LINK, DEFAULT_OSC, normalizeHotkeys } from "../lib/settingsDraft";
+import { applyTheme } from "../theme/theme";
+import { HotkeySettingsBody } from "./SettingsHotkeys";
+import { OutputSettingsBody } from "./SettingsOutput";
+import { LanServicesSections } from "./SettingsPanel";
+import { RemoteApiSection } from "./SettingsRemote";
+import { ReplaySettingsBody } from "./SettingsReplay";
+import { StreamSettingsBody } from "./SettingsStream";
+
+/** The sidebar, top to bottom. Every entry is a pane of REAL settings —
+ * nothing decorative, nothing that doesn't persist. */
+const CATEGORIES = [
+  "general",
+  "appearance",
+  "streaming",
+  "output",
+  "replay",
+  "hotkeys",
+  "network",
+  "accessibility",
+  "about",
+] as const;
+type CategoryId = (typeof CATEGORIES)[number];
+
+const CATEGORY_LABELS: Record<CategoryId, string> = {
+  general: "settings-cat-general",
+  appearance: "settings-cat-appearance",
+  streaming: "settings-cat-streaming",
+  output: "settings-cat-output",
+  replay: "settings-cat-replay",
+  hotkeys: "settings-cat-hotkeys",
+  network: "settings-cat-network",
+  accessibility: "settings-cat-accessibility",
+  about: "settings-cat-about",
+};
+
+/** Mirrors `AccessibilitySettings::default()` in settings.rs. */
+const DEFAULT_ACCESSIBILITY: AccessibilitySettings = {
+  meterPreset: "default",
+  meterLow: DEFAULT_METER_COLORS.low,
+  meterMid: DEFAULT_METER_COLORS.mid,
+  meterHigh: DEFAULT_METER_COLORS.high,
+};
+
+/** Mirrors `WebPanelSettings::default()` (DEFAULT_PANEL_PORT) in webpanel.rs. */
+const DEFAULT_WEB_PANEL: WebPanelSettings = {
+  enabled: false,
+  port: 4457,
+  lan: false,
+  password: "",
+};
+
+/** A draft every pane can edit without null-checks: the optional slices a
+ * pre-existing settings file may lack get their Rust-side defaults. */
+function withDefaults(settings: Settings): Settings {
+  return {
+    ...settings,
+    accessibility: settings.accessibility ?? DEFAULT_ACCESSIBILITY,
+    webPanel: settings.webPanel ?? DEFAULT_WEB_PANEL,
+    osc: settings.osc ?? DEFAULT_OSC,
+    link: settings.link ?? DEFAULT_LINK,
+  };
+}
 
 type SettingsDialogProps = {
   settings: Settings;
   onSettingsSaved: (next: Settings) => void;
   onClose: () => void;
-  /** The unified modal is a hub: these open the panels that already exist. */
-  onOpen: (dialog: "output" | "stream" | "hotkeys" | "replay" | "remote" | "about") => void;
+  /** Escape hatches to dialogs that live outside this modal: the full About
+   * panel and the component (ffmpeg) installer. Opening one replaces this
+   * dialog, so the draft is discarded first (same as Cancel). */
+  onOpen: (dialog: "about" | "components") => void;
 };
 
 /**
- * The unified Settings modal (TASK-906): the app-wide preferences that were
- * scattered across seven dialogs or missing entirely — **Language**,
- * **Appearance**, and the general UI knobs — plus one place to reach the
- * per-feature panels that stay where they are.
+ * The Settings modal, OBS-style (obs-chrome): a category sidebar, a grouped
+ * scrollable pane, and an **OK / Cancel / Apply** footer.
  *
- * Language and theme apply **live**, before the save round-trips. If the save
- * fails we roll both back, so the UI never shows a state the disk doesn't have.
+ * Everything edits ONE draft `Settings`, seeded from a fresh `settingsGet()`
+ * at open (not the render prop — a stale snapshot would resurrect settings
+ * another dialog saved meanwhile; server-owned fields like camera profiles
+ * are re-applied by the store on save regardless). Nothing persists until
+ * Apply/OK calls `settingsSet` with the whole draft — the same validation the
+ * per-panel Save buttons hit, so an out-of-range value keeps the draft and
+ * shows the error instead of saving.
+ *
+ * Two deliberate exceptions to "nothing happens until Apply":
+ *   - Appearance previews live (a theme picker that doesn't show the theme is
+ *     useless); Cancel/Escape puts the last APPLIED theme back.
+ *   - Language applies only after a successful save — it re-renders the whole
+ *     app, which is not a reversible "preview".
  */
 export function SettingsDialog({
   settings,
@@ -31,82 +112,326 @@ export function SettingsDialog({
   onOpen,
 }: SettingsDialogProps) {
   const t = useT();
+  const [active, setActive] = useState<CategoryId>("general");
+  const [draft, setDraft] = useState<Settings | null>(null);
+  /** The last state known to be on disk — Apply's baseline, Cancel's target. */
+  const [applied, setApplied] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [categoryErrors, setCategoryErrors] = useState<Partial<Record<CategoryId, string>>>({});
+  const tabRefs = useRef<Partial<Record<CategoryId, HTMLButtonElement | null>>>({});
+  // The prop as it was at open — the seed fallback if the fresh read fails.
+  // A ref, NOT a dep: our own Apply updates the parent's `settings`, and
+  // re-seeding from it would clobber whatever the user edited since.
+  const fallback = useRef(settings);
+  // `applied`, but readable from the unmount cleanup below. Updated
+  // SYNCHRONOUSLY beside setApplied — an effect-mirrored ref can miss the
+  // final value when OK's state update and the parent's close batch into one
+  // commit, and the cleanup would then revert a theme the user just saved.
+  const appliedRef = useRef<Settings | null>(null);
 
-  const save = (next: Settings, rollback: () => void) => {
+  useEffect(() => {
+    let alive = true;
+    const seed = (base: Settings) => {
+      if (!alive) return;
+      const seeded = withDefaults(base);
+      setDraft(seeded);
+      setApplied(seeded);
+      appliedRef.current = seeded;
+    };
+    settingsGet()
+      .then(seed)
+      .catch(() => seed(fallback.current));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Appearance previews live. `applyTheme` ignores a malformed accent, so a
+  // half-typed value can never reach a CSS declaration.
+  useEffect(() => {
+    if (draft) applyTheme(draft.theme);
+  }, [draft?.theme.mode, draft?.theme.accent]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed to the two theme fields, not the whole draft
+
+  // Airtight revert: HOWEVER this modal leaves the tree — Cancel, Escape,
+  // the ×, or an ancestor swapping dialogs — a theme preview that was never
+  // applied must not survive it. (Re-applying the applied theme is a no-op.)
+  useEffect(() => () => applyTheme((appliedRef.current ?? fallback.current).theme), []);
+
+  const dirty = useMemo(
+    () => draft !== null && applied !== null && JSON.stringify(draft) !== JSON.stringify(applied),
+    [draft, applied],
+  );
+
+  /** Discard the draft: un-preview the theme, then leave. */
+  const cancel = () => {
+    applyTheme((appliedRef.current ?? fallback.current).theme);
+    onClose();
+  };
+
+  /** Leaving for a sibling dialog discards the draft, same as Cancel. */
+  const openSibling = (dialog: "about" | "components") => {
+    applyTheme((appliedRef.current ?? fallback.current).theme);
+    onOpen(dialog);
+  };
+
+  /** Save the whole draft. Returns whether it stuck (OK closes only then). */
+  const apply = async (): Promise<boolean> => {
+    if (!draft || !applied) return false;
+    // A clean draft writes nothing — Apply is disabled then, but the guard
+    // holds for any programmatic caller too.
+    if (!dirty) return true;
     setError(null);
-    onSettingsSaved(next);
-    settingsSet(next).catch((err) => {
-      rollback();
-      // Re-read rather than restoring the `settings` this closure captured on
-      // render: a *different* setting may have saved successfully while this
-      // one was in flight, and putting the old snapshot back would silently
-      // discard it. The store is the only thing that knows what actually stuck.
-      void settingsGet()
-        .then(onSettingsSaved)
-        .catch(() => onSettingsSaved(settings));
+    // The same normalization the per-panel Saves always did.
+    const next: Settings = {
+      ...draft,
+      hotkeys: normalizeHotkeys(draft.hotkeys),
+      panicSlate: { color: draft.panicSlate.color.trim(), image: draft.panicSlate.image.trim() },
+    };
+    // The same client-side gate the old Remote dialog enforced. Anything else
+    // is Rust's validate() — its rejection keeps the draft and shows below.
+    const problems: Partial<Record<CategoryId, string>> = {};
+    if (next.remoteControl.enabled && !next.remoteControl.password.trim()) {
+      problems.network = t("remote-password-required");
+    }
+    setCategoryErrors(problems);
+    const failing = CATEGORIES.find((category) => problems[category]);
+    if (failing) {
+      setActive(failing);
+      return false;
+    }
+    try {
+      await settingsSet(next);
+    } catch (err) {
       setError(String(err));
+      return false;
+    }
+    // Language lands only with a successful save (see the component docs).
+    if (next.language !== applied.language) {
+      if (next.language === AUTO_LOCALE) initLocale(AUTO_LOCALE);
+      else if (isLocaleCode(next.language)) setLocale(next.language);
+    }
+    onSettingsSaved(next);
+    // The baseline advances: Apply greys out again, and a LATER Cancel (or
+    // the unmount revert) targets this applied state, not the open-time one.
+    setApplied(next);
+    appliedRef.current = next;
+    setDraft(next);
+    return true;
+  };
+
+  const confirm = () => {
+    // A clean draft has nothing to save — OK is just a close.
+    if (!dirty) {
+      onClose();
+      return;
+    }
+    void apply().then((ok) => {
+      if (ok) onClose();
     });
   };
 
-  const changeLanguage = (value: string) => {
-    const previous = settings.language;
-    // Apply first: a language picker that lags its own click feels broken.
-    if (value === AUTO_LOCALE) initLocale(AUTO_LOCALE);
-    else if (isLocaleCode(value)) setLocale(value);
-    save({ ...settings, language: value }, () => initLocale(previous));
+  /** Roving-tabindex arrow navigation over the vertical tablist. */
+  const onTabKeyDown = (event: React.KeyboardEvent) => {
+    const at = CATEGORIES.indexOf(active);
+    let next: CategoryId | undefined;
+    if (event.key === "ArrowDown") next = CATEGORIES[(at + 1) % CATEGORIES.length];
+    else if (event.key === "ArrowUp")
+      next = CATEGORIES[(at + CATEGORIES.length - 1) % CATEGORIES.length];
+    else if (event.key === "Home") next = CATEGORIES[0];
+    else if (event.key === "End") next = CATEGORIES[CATEGORIES.length - 1];
+    if (!next) return;
+    event.preventDefault();
+    setActive(next);
+    tabRefs.current[next]?.focus();
   };
 
-  const changeTheme = (mode: ThemeMode) => {
-    const previous = settings.theme;
-    const theme = { ...settings.theme, mode };
-    applyTheme(theme);
-    save({ ...settings, theme }, () => applyTheme(previous));
-  };
-
-  const changeAccent = (accent: string) => {
-    if (!isHexColor(accent)) return;
-    const previous = settings.theme;
-    // The mode is left alone. Forcing `custom` here made the picker "work" from
-    // any mode, but a Light user who nudged the swatch was thrown into the dark
-    // custom palette with no warning and no way back but re-picking Light. The
-    // swatch is disabled outside Custom instead, so this only runs when the
-    // mode is already Custom.
-    const theme = { ...settings.theme, accent };
-    applyTheme(theme);
-    save({ ...settings, theme }, () => applyTheme(previous));
-  };
-
-  const changeStatsDock = (show: boolean) =>
-    save({ ...settings, showStatsDock: show }, () => undefined);
-
-  const changeAlignment = (patch: Partial<AlignmentSettings>) =>
-    save({ ...settings, alignment: { ...settings.alignment, ...patch } }, () => undefined);
+  const footerButton =
+    "rounded-md border px-4 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
-    <PickerShell title={t("settings-title")} onClose={onClose} wide>
-      <div className="flex flex-col gap-4 text-xs text-havoc-text">
-        <Section title={t("settings-language-section")}>
-          <label className="flex items-center justify-between gap-3">
-            <span className="text-havoc-muted">{t("settings-language")}</span>
-            <select
-              value={settings.language}
-              onChange={(event) => changeLanguage(event.target.value)}
-              className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
-            >
-              <option value={AUTO_LOCALE}>{t("settings-language-system")}</option>
-              {LOCALES.map((locale) => (
-                <option key={locale.code} value={locale.code}>
-                  {locale.native}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-            {t("settings-language-note")}
-          </p>
-        </Section>
+    <PickerShell title={t("settings-title")} onClose={cancel} sidebar>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col text-xs text-havoc-text">
+        <div className="flex min-h-0 flex-1">
+          <nav
+            role="tablist"
+            aria-orientation="vertical"
+            aria-label={t("settings-categories")}
+            className="flex w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/5 p-2"
+          >
+            {CATEGORIES.map((category) => (
+              <button
+                key={category}
+                ref={(el) => {
+                  tabRefs.current[category] = el;
+                }}
+                type="button"
+                role="tab"
+                id={`settings-tab-${category}`}
+                aria-selected={active === category}
+                aria-controls="settings-active-pane"
+                tabIndex={active === category ? 0 : -1}
+                onClick={() => setActive(category)}
+                onKeyDown={onTabKeyDown}
+                className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  active === category
+                    ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text"
+                    : "border-transparent text-havoc-muted hover:bg-white/5 hover:text-havoc-text"
+                }`}
+              >
+                {t(CATEGORY_LABELS[category])}
+                {categoryErrors[category] && (
+                  <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
+                )}
+              </button>
+            ))}
+          </nav>
 
+          <div
+            role="tabpanel"
+            id="settings-active-pane"
+            aria-labelledby={`settings-tab-${active}`}
+            tabIndex={0}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4"
+          >
+            {draft === null ? (
+              <p className="m-0 text-havoc-muted">{t("settings-loading")}</p>
+            ) : (
+              <>
+                {categoryErrors[active] && (
+                  <p role="alert" className="m-0 mb-3 text-[11px] text-red-300">
+                    {categoryErrors[active]}
+                  </p>
+                )}
+                <CategoryPane
+                  category={active}
+                  draft={draft}
+                  onChange={setDraft}
+                  onOpenSibling={openSibling}
+                />
+              </>
+            )}
+          </div>
+        </div>
+
+        <footer className="flex items-center gap-3 border-t border-white/5 px-4 py-2.5">
+          {error && (
+            <p
+              role="alert"
+              title={error}
+              className="m-0 min-w-0 flex-1 truncate text-[11px] text-red-300"
+            >
+              {error}
+            </p>
+          )}
+          <div className="ml-auto flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={confirm}
+              disabled={draft === null}
+              className={`${footerButton} border-havoc-accent/60 bg-havoc-accent/15 font-semibold text-havoc-text hover:bg-havoc-accent/25`}
+            >
+              {t("settings-ok")}
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              className={`${footerButton} border-white/10 text-havoc-muted hover:text-havoc-text`}
+            >
+              {t("settings-cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void apply()}
+              disabled={!dirty}
+              className={`${footerButton} border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text`}
+            >
+              {t("settings-apply")}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** The active category's pane — every field edits the shared draft. */
+function CategoryPane({
+  category,
+  draft,
+  onChange,
+  onOpenSibling,
+}: {
+  category: CategoryId;
+  draft: Settings;
+  onChange: (next: Settings) => void;
+  onOpenSibling: (dialog: "about" | "components") => void;
+}) {
+  const t = useT();
+
+  switch (category) {
+    case "general":
+      return (
+        <div className="flex flex-col gap-4">
+          <Section title={t("settings-language-section")}>
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-havoc-muted">{t("settings-language")}</span>
+              <select
+                value={draft.language}
+                onChange={(event) => onChange({ ...draft, language: event.target.value })}
+                className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+              >
+                <option value={AUTO_LOCALE}>{t("settings-language-system")}</option>
+                {LOCALES.map((locale) => (
+                  <option key={locale.code} value={locale.code}>
+                    {locale.native}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+              {t("settings-language-note")}
+            </p>
+          </Section>
+
+          <Section title={t("settings-general-section")}>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <input
+                type="checkbox"
+                checked={draft.showStatsDock}
+                onChange={(event) => onChange({ ...draft, showStatsDock: event.target.checked })}
+              />
+              {t("settings-show-stats-dock")}
+            </label>
+          </Section>
+
+          <Section title={t("settings-alignment-section")}>
+            {(
+              [
+                ["smartGuides", "settings-smart-guides"],
+                ["safeAreas", "settings-safe-areas"],
+                ["rulers", "settings-rulers"],
+              ] as Array<[keyof AlignmentSettings, string]>
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                <input
+                  type="checkbox"
+                  checked={draft.alignment[key]}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      alignment: { ...draft.alignment, [key]: event.target.checked },
+                    })
+                  }
+                />
+                {t(label)}
+              </label>
+            ))}
+          </Section>
+        </div>
+      );
+
+    case "appearance":
+      return (
         <Section title={t("settings-appearance-section")}>
           <div
             role="radiogroup"
@@ -118,10 +443,10 @@ export function SettingsDialog({
                 key={mode}
                 type="button"
                 role="radio"
-                aria-checked={settings.theme.mode === mode}
-                onClick={() => changeTheme(mode)}
+                aria-checked={draft.theme.mode === mode}
+                onClick={() => onChange({ ...draft, theme: { ...draft.theme, mode } })}
                 className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                  settings.theme.mode === mode
+                  draft.theme.mode === mode
                     ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text"
                     : "border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
                 }`}
@@ -134,72 +459,170 @@ export function SettingsDialog({
               {t("settings-accent")}
               <input
                 type="color"
-                value={settings.theme.accent}
-                onChange={(event) => changeAccent(event.target.value)}
-                disabled={settings.theme.mode !== "custom"}
+                value={draft.theme.accent}
+                onChange={(event) =>
+                  onChange({ ...draft, theme: { ...draft.theme, accent: event.target.value } })
+                }
+                disabled={draft.theme.mode !== "custom"}
                 aria-label={t("settings-accent")}
                 className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-40"
               />
             </label>
           </div>
         </Section>
+      );
 
-        <Section title={t("settings-general-section")}>
-          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <input
-              type="checkbox"
-              checked={settings.showStatsDock}
-              onChange={(event) => changeStatsDock(event.target.checked)}
-            />
-            {t("settings-show-stats-dock")}
-          </label>
-        </Section>
+    case "streaming":
+      return (
+        <StreamSettingsBody
+          stream={draft.stream}
+          onChange={(stream) => onChange({ ...draft, stream })}
+          onOpenComponents={() => onOpenSibling("components")}
+        />
+      );
 
-        <Section title={t("settings-alignment-section")}>
-          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <input
-              type="checkbox"
-              checked={settings.alignment.smartGuides}
-              onChange={(event) => changeAlignment({ smartGuides: event.target.checked })}
-            />
-            {t("settings-smart-guides")}
-          </label>
-          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <input
-              type="checkbox"
-              checked={settings.alignment.safeAreas}
-              onChange={(event) => changeAlignment({ safeAreas: event.target.checked })}
-            />
-            {t("settings-safe-areas")}
-          </label>
-          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
-            <input
-              type="checkbox"
-              checked={settings.alignment.rulers}
-              onChange={(event) => changeAlignment({ rulers: event.target.checked })}
-            />
-            {t("settings-rulers")}
-          </label>
-        </Section>
+    case "output":
+      return (
+        <OutputSettingsBody
+          recording={draft.recording}
+          onPatch={(patch) => onChange({ ...draft, recording: { ...draft.recording, ...patch } })}
+          onOpenComponents={() => onOpenSibling("components")}
+        />
+      );
 
-        <Section title={t("settings-more-section")}>
-          <div className="grid grid-cols-3 gap-2">
-            <HubButton onClick={() => onOpen("output")}>{t("settings-open-output")}</HubButton>
-            <HubButton onClick={() => onOpen("stream")}>{t("settings-open-stream")}</HubButton>
-            <HubButton onClick={() => onOpen("replay")}>{t("settings-open-replay")}</HubButton>
-            <HubButton onClick={() => onOpen("hotkeys")}>{t("settings-open-hotkeys")}</HubButton>
-            <HubButton onClick={() => onOpen("remote")}>{t("settings-open-remote")}</HubButton>
-            <HubButton onClick={() => onOpen("about")}>{t("settings-open-about")}</HubButton>
-          </div>
-        </Section>
+    case "replay":
+      return (
+        <ReplaySettingsBody
+          replay={draft.replay}
+          onChange={(replay) => onChange({ ...draft, replay })}
+        />
+      );
 
-        {error && (
-          <p role="alert" className="m-0 text-[11px] text-red-300">
-            {error}
-          </p>
-        )}
+    case "hotkeys":
+      return (
+        <HotkeySettingsBody
+          hotkeys={draft.hotkeys}
+          onChangeHotkeys={(hotkeys) => onChange({ ...draft, hotkeys })}
+          slate={draft.panicSlate}
+          onChangeSlate={(panicSlate) => onChange({ ...draft, panicSlate })}
+        />
+      );
+
+    case "network":
+      return (
+        <div className="flex flex-col gap-4">
+          <Section title={t("panel-title")}>
+            <LanServicesSections
+              webPanel={draft.webPanel ?? DEFAULT_WEB_PANEL}
+              onChangeWebPanel={(webPanel) => onChange({ ...draft, webPanel })}
+              osc={draft.osc ?? DEFAULT_OSC}
+              onChangeOsc={(osc) => onChange({ ...draft, osc })}
+              link={draft.link ?? DEFAULT_LINK}
+              onChangeLink={(link) => onChange({ ...draft, link })}
+            />
+          </Section>
+          <Section title={t("remote-title")}>
+            <RemoteApiSection
+              remoteControl={draft.remoteControl}
+              onChange={(remoteControl) => onChange({ ...draft, remoteControl })}
+            />
+          </Section>
+        </div>
+      );
+
+    case "accessibility":
+      return (
+        <AccessibilityPane
+          accessibility={draft.accessibility ?? DEFAULT_ACCESSIBILITY}
+          onChange={(accessibility) => onChange({ ...draft, accessibility })}
+        />
+      );
+
+    case "about":
+      return (
+        <div className="flex flex-col gap-3">
+          <p className="m-0 text-havoc-muted">{t("about-tagline")}</p>
+          <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("about-local-first")}</p>
+          <button
+            type="button"
+            onClick={() => onOpenSibling("about")}
+            className="self-start rounded-md border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          >
+            {t("settings-open-about")}
+          </button>
+        </div>
+      );
+  }
+}
+
+/** Settings → Accessibility: the mixer VU meter palette (real, wired to the
+ * mixer's meters through `resolveMeterColors` — see ChannelStrip.tsx). */
+function AccessibilityPane({
+  accessibility,
+  onChange,
+}: {
+  accessibility: AccessibilitySettings;
+  onChange: (next: AccessibilitySettings) => void;
+}) {
+  const t = useT();
+  const colors = resolveMeterColors(accessibility);
+
+  return (
+    <Section title={t("settings-meter-section")}>
+      <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("settings-meter-note")}</p>
+      <div
+        role="radiogroup"
+        aria-label={t("settings-meter-preset")}
+        className="flex flex-wrap items-center gap-2"
+      >
+        {(["default", "colorblind", "custom"] as MeterPreset[]).map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            role="radio"
+            aria-checked={accessibility.meterPreset === preset}
+            onClick={() => onChange({ ...accessibility, meterPreset: preset })}
+            className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+              accessibility.meterPreset === preset
+                ? "border-havoc-accent/60 bg-havoc-accent/15 text-havoc-text"
+                : "border-white/10 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+            }`}
+          >
+            {t(`settings-meter-preset-${preset}`)}
+          </button>
+        ))}
       </div>
-    </PickerShell>
+      {/* Only Custom reads these, so only Custom may set them (the accent-swatch rule). */}
+      <div className="flex flex-wrap items-center gap-4">
+        {(
+          [
+            ["meterLow", "settings-meter-low"],
+            ["meterMid", "settings-meter-mid"],
+            ["meterHigh", "settings-meter-high"],
+          ] as Array<["meterLow" | "meterMid" | "meterHigh", string]>
+        ).map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            {t(label)}
+            <input
+              type="color"
+              value={accessibility[key]}
+              onChange={(event) => onChange({ ...accessibility, [key]: event.target.value })}
+              disabled={accessibility.meterPreset !== "custom"}
+              aria-label={t(label)}
+              className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-40"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] text-havoc-muted">{t("settings-meter-preview")}</span>
+        <div
+          aria-hidden
+          className="h-2 w-full max-w-72 rounded-sm"
+          style={{ background: meterGradient("to right", colors) }}
+        />
+      </div>
+    </Section>
   );
 }
 
@@ -209,17 +632,5 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h3 className="m-0 text-[10px] tracking-wide text-havoc-muted uppercase">{title}</h3>
       {children}
     </section>
-  );
-}
-
-function HubButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
-    >
-      {children}
-    </button>
   );
 }

@@ -99,6 +99,60 @@ impl Default for AlignmentSettings {
     }
 }
 
+/// Which palette the Audio Mixer's level meters use (Settings → Accessibility).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MeterPreset {
+    /// The green→yellow→red sweep every build so far has drawn.
+    #[default]
+    Default,
+    /// An Okabe–Ito blue→orange→vermillion ramp — distinguishable under the
+    /// common red-green color-vision deficiencies, where green vs. red is not.
+    Colorblind,
+    /// The three zone colours below, user-picked.
+    Custom,
+}
+
+/// Accessibility (Settings → Accessibility): the mixer VU meter palette.
+/// The meter is one low→mid→high sweep; these recolor its three zones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AccessibilitySettings {
+    pub meter_preset: MeterPreset,
+    /// `#rrggbb` ×3. Only read when `meter_preset` is [`MeterPreset::Custom`],
+    /// but persisted always, so switching presets never loses the picks.
+    pub meter_low: String,
+    pub meter_mid: String,
+    pub meter_high: String,
+}
+
+impl Default for AccessibilitySettings {
+    fn default() -> Self {
+        Self {
+            meter_preset: MeterPreset::default(),
+            // The default sweep, so Custom starts where Default left off.
+            meter_low: "#22c55e".to_owned(),
+            meter_mid: "#eab308".to_owned(),
+            meter_high: "#ef4444".to_owned(),
+        }
+    }
+}
+
+impl AccessibilitySettings {
+    pub fn validate(&self) -> Result<(), String> {
+        // Same gate as `ThemeSettings`: these land in a CSS gradient in the
+        // webview, and anything but a plain hex triple could close the
+        // declaration and inject a rule.
+        for color in [&self.meter_low, &self.meter_mid, &self.meter_high] {
+            let hex = color.strip_prefix('#').unwrap_or("");
+            if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err("meter colours must be #rrggbb".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
 /// `Settings::language` sentinel: follow the operating system's preferred
 /// languages instead of a fixed choice. Fresh installs start here, so a Japanese
 /// user does not have to find a picker to stop reading English. Kept in step
@@ -125,6 +179,8 @@ pub struct Settings {
     pub theme: ThemeSettings,
     /// Preview alignment aids: smart guides, safe areas, rulers (CAP-M04).
     pub alignment: AlignmentSettings,
+    /// Accessibility: the mixer VU meter palette (Settings → Accessibility).
+    pub accessibility: AccessibilitySettings,
     /// Recording output configuration (Phase 4).
     pub recording: RecordingSettings,
     /// Remote Guests networking (Phase R).
@@ -278,6 +334,7 @@ impl Default for Settings {
             mixer_layout: MixerLayout::default(),
             theme: ThemeSettings::default(),
             alignment: AlignmentSettings::default(),
+            accessibility: AccessibilitySettings::default(),
             recording: RecordingSettings::default(),
             remote: RemoteSettings::default(),
             stream: StreamSettings::default(),
@@ -444,39 +501,110 @@ pub struct HotkeySettings {
 
 impl HotkeySettings {
     pub fn validate(&self) -> Result<(), String> {
-        for key in [
-            &self.record,
-            &self.go_live,
-            &self.transition,
-            &self.save_replay,
-            &self.add_marker,
-            &self.still,
-            &self.panic,
-            &self.timer_toggle,
-            &self.timer_reset,
-            &self.zoom_100,
-            &self.zoom_150,
-            &self.zoom_200,
-            &self.split_timer_split,
-            &self.split_timer_undo,
-            &self.split_timer_skip,
-            &self.split_timer_reset,
-            &self.playlist_next,
-            &self.playlist_previous,
-            &self.replay_roll,
-        ]
-        .into_iter()
-        .flatten()
-        {
+        // EVERY field must be in this array — one missing here is silently
+        // unvalidated. The UI's curated combobox is NOT the only writer:
+        // settings.json is hand-editable and profiles import whole structs.
+        for (name, key) in [
+            ("record", &self.record),
+            ("goLive", &self.go_live),
+            ("transition", &self.transition),
+            ("saveReplay", &self.save_replay),
+            ("addMarker", &self.add_marker),
+            ("still", &self.still),
+            ("panic", &self.panic),
+            ("timerToggle", &self.timer_toggle),
+            ("timerReset", &self.timer_reset),
+            ("zoom100", &self.zoom_100),
+            ("zoom150", &self.zoom_150),
+            ("zoom200", &self.zoom_200),
+            ("splitTimerSplit", &self.split_timer_split),
+            ("splitTimerUndo", &self.split_timer_undo),
+            ("splitTimerSkip", &self.split_timer_skip),
+            ("splitTimerReset", &self.split_timer_reset),
+            ("playlistNext", &self.playlist_next),
+            ("playlistPrevious", &self.playlist_previous),
+            ("replayRoll", &self.replay_roll),
+        ] {
+            let Some(key) = key else { continue };
             if key.trim().is_empty() {
+                // Legacy for unbound; the UI normalizes "" to null on save.
                 continue;
             }
-            if key.len() > 64 {
-                return Err("hotkey is too long".to_owned());
-            }
+            validate_accelerator(key).map_err(|err| format!("the {name} hotkey {err}"))?;
         }
         Ok(())
     }
+
+    /// Clear any binding that can't be a valid accelerator — called on LOAD so
+    /// a file written by an older build (whose Hotkeys field was free-text and
+    /// only length-capped) can't carry an unparseable value that would fail
+    /// `validate()` and block EVERY future settings save. An unparseable
+    /// binding never registered anyway, so dropping it to "unbound" loses
+    /// nothing and lets the user rebind from the combobox. Keep this field
+    /// list in sync with `validate()`'s (the same all-fields trap).
+    pub fn sanitize(&mut self) {
+        for field in [
+            &mut self.record,
+            &mut self.go_live,
+            &mut self.transition,
+            &mut self.save_replay,
+            &mut self.add_marker,
+            &mut self.still,
+            &mut self.panic,
+            &mut self.timer_toggle,
+            &mut self.timer_reset,
+            &mut self.zoom_100,
+            &mut self.zoom_150,
+            &mut self.zoom_200,
+            &mut self.split_timer_split,
+            &mut self.split_timer_undo,
+            &mut self.split_timer_skip,
+            &mut self.split_timer_reset,
+            &mut self.playlist_next,
+            &mut self.playlist_previous,
+            &mut self.replay_roll,
+        ] {
+            if let Some(key) = field {
+                if !key.trim().is_empty() && validate_accelerator(key).is_err() {
+                    *field = None;
+                }
+            }
+        }
+    }
+}
+
+/// Structural sanity for one accelerator: it must parse with the OS global-
+/// shortcut parser — the *exact* gate that decides whether the binding can be
+/// registered — or be a two-stroke chord (CAP-N05) of two such strokes. This
+/// accepts every real key the old free-text field allowed (Space, Enter,
+/// Delete, navigation and punctuation keys, …) and rejects only what can never
+/// register, including the garbage-string class ("Ctrl+asekfj…"). Delegating
+/// to the real parser means the shape gate can never drift from what actually
+/// works — a hand-maintained key allowlist rejected legitimate bindings.
+fn validate_accelerator(text: &str) -> Result<(), &'static str> {
+    // A generous ceiling before parsing — no legitimate accelerator (or chord
+    // of two) approaches this; it just bounds absurd input cheaply.
+    if text.len() > 128 {
+        return Err("is too long (128 characters max)");
+    }
+    if let Some(chord) = crate::chords::parse_chord(text) {
+        validate_stroke(&chord.leader)?;
+        validate_stroke(&chord.follower)?;
+        return Ok(());
+    }
+    if crate::chords::is_chord(text) {
+        return Err("is a malformed chord (expected \"Leader, Key\")");
+    }
+    validate_stroke(text)
+}
+
+/// One stroke must parse as an OS accelerator — the authoritative check
+/// (the same `parse::<Shortcut>()` the registrar uses in `hotkeys.rs`).
+fn validate_stroke(stroke: &str) -> Result<(), &'static str> {
+    stroke
+        .parse::<tauri_plugin_global_shortcut::Shortcut>()
+        .map(|_| ())
+        .map_err(|_| "is not a valid shortcut (modifiers + one key, e.g. Ctrl+Shift+R)")
 }
 
 /// The panic button's privacy slate (CAP-M22): a solid colour, optionally
@@ -1099,6 +1227,7 @@ impl Settings {
             }
         }
         self.theme.validate()?;
+        self.accessibility.validate()?;
         self.recording.validate()?;
         self.remote.validate()?;
         self.stream.validate()?;
@@ -1455,6 +1584,12 @@ fn migrate(settings: &mut Settings, raw: &serde_json::Value) {
     if predates_onboarding && settings.accepted_eula_version.is_some() {
         settings.completed_onboarding = true;
     }
+
+    // 0.301.0 tightened hotkey validation from "any string ≤64 chars" to a
+    // real accelerator parse. A pre-0.301.0 free-text binding that never
+    // parsed (so never registered) would now fail whole-struct validation and
+    // block every settings save — drop it to unbound instead.
+    settings.hotkeys.sanitize();
 }
 
 /// Write via a unique sibling temp file + fsync + rename so the file is
@@ -1534,6 +1669,12 @@ mod tests {
                 smart_guides: false,
                 safe_areas: true,
                 rulers: true,
+            },
+            accessibility: AccessibilitySettings {
+                meter_preset: MeterPreset::Custom,
+                meter_low: "#0072b2".to_owned(),
+                meter_mid: "#e69f00".to_owned(),
+                meter_high: "#d55e00".to_owned(),
             },
             recording: RecordingSettings {
                 container: Container::Mkv,
@@ -1987,6 +2128,99 @@ mod tests {
                 ..Settings::default()
             };
             assert!(settings.validate().is_err(), "should reject {bad_url:?}");
+        }
+    }
+
+    #[test]
+    fn validate_bounds_the_hotkey_accelerators() {
+        let with = |accelerator: &str| Settings {
+            hotkeys: HotkeySettings {
+                record: Some(accelerator.to_owned()),
+                ..HotkeySettings::default()
+            },
+            ..Settings::default()
+        };
+
+        // The curated pool's shapes, a structurally-valid value from OUTSIDE
+        // the pool (still honest), a chord (CAP-N05), legacy "" (unbound), AND
+        // the navigation/punctuation keys the old free-text field allowed and
+        // may have persisted — validation must not have regressed on them
+        // (they register fine, so they must save).
+        for good in [
+            "Ctrl+D",
+            "Ctrl+Shift+R",
+            "Ctrl+Alt+Right",
+            "Numpad1",
+            "F13",
+            "Super+F20",
+            "Ctrl+K, 3",
+            "Space",
+            "Enter",
+            "Delete",
+            "Home",
+            "PageDown",
+            "",
+        ] {
+            assert!(with(good).validate().is_ok(), "should accept {good:?}");
+        }
+
+        // The garbage-string class the combobox exists to prevent — an
+        // unparseable key and an unknown modifier. The UI is not the only
+        // writer, so the store must refuse these too.
+        for bad in ["Ctrl+asekfjkakjfsdaajklfksdjdjksfjkasdf", "Wibble+R"] {
+            assert!(with(bad).validate().is_err(), "should reject {bad:?}");
+        }
+
+        // The error names the offending field, so the dialog can say WHICH
+        // binding to fix rather than shrugging generically.
+        let err = with("Ctrl+asekfjkakjfsdaajklfksdjdjksfjkasdf")
+            .validate()
+            .expect_err("garbage must not validate");
+        assert!(err.contains("record"), "error should name the field: {err}");
+    }
+
+    #[test]
+    fn loading_clears_an_unparseable_legacy_hotkey_instead_of_blocking_saves() {
+        // A pre-0.301.0 file could store a free-text binding that never parsed
+        // (never registered). It must not fail validation forever — load-time
+        // sanitize drops it to unbound so settings stay saveable.
+        let mut hotkeys = HotkeySettings {
+            record: Some("totally not a shortcut".to_owned()),
+            go_live: Some("Ctrl+D".to_owned()),
+            ..HotkeySettings::default()
+        };
+        hotkeys.sanitize();
+        assert_eq!(hotkeys.record, None, "the garbage binding is dropped");
+        assert_eq!(
+            hotkeys.go_live.as_deref(),
+            Some("Ctrl+D"),
+            "a valid binding is untouched"
+        );
+        let settings = Settings {
+            hotkeys,
+            ..Settings::default()
+        };
+        assert!(
+            settings.validate().is_ok(),
+            "a sanitized struct validates and can be saved"
+        );
+    }
+
+    #[test]
+    fn validate_bounds_the_meter_colours() {
+        assert!(Settings::default().validate().is_ok());
+
+        // Anything but a plain hex triple could escape the CSS gradient the
+        // colours land in — the same injection gate as the theme accent.
+        for bad in ["", "#12345", "#gggggg", "red", "#22c55e;}"] {
+            let settings = Settings {
+                accessibility: AccessibilitySettings {
+                    meter_low: bad.to_owned(),
+                    ..AccessibilitySettings::default()
+                },
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "should reject {bad:?}");
         }
     }
 

@@ -1312,6 +1312,12 @@ export function settingsCompleteOnboarding(): Promise<void> {
   return invoke("settings_complete_onboarding");
 }
 
+/** Open one of the app's OWN folders in the OS file browser (the menu bar's
+ * "Show Recordings" / "Show Settings Folder"). An enum, never a path. */
+export function revealAppFolder(kind: "recordings" | "settings"): Promise<void> {
+  return invoke("reveal_app_folder", { kind });
+}
+
 /** What the About panel shows: version, authors, dates, links. Read-only. */
 export function buildInfo(): Promise<BuildInfo> {
   return invoke<BuildInfo>("build_info");

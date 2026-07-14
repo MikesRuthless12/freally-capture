@@ -31,6 +31,7 @@ import {
   recordingAddMarker,
   salvagePending,
   studioPanicSet,
+  studioPasteFilters,
 } from "./api/commands";
 import {
   onAlarm,
@@ -66,12 +67,16 @@ import { kindHasAudio } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { EditTransformDialog } from "./components/EditTransformDialog";
+import { MenuBar, type AppMenuDialog } from "./components/MenuBar";
 import { StatusAnnouncer } from "./components/StatusAnnouncer";
+import { clipboardSnapshot, copyFilters, copyTransform } from "./lib/clipboard";
 import type { Command } from "./lib/commands";
+import { constrainPaste } from "./lib/constrain";
+import { effectiveSourceSize } from "./lib/transform";
 import { FiltersDialog } from "./components/FiltersDialog";
 import { PropertiesDialog } from "./components/PropertiesDialog";
 import { spikeSetJoinPrefill } from "./remote/spike";
-import { ControlsDock } from "./panels/ControlsDock";
+import { ControlsDock, type ControlsDialogKind } from "./panels/ControlsDock";
 import { EulaGate } from "./panels/EulaGate";
 import { FirstRunWizard } from "./panels/FirstRunWizard";
 import { MixerDock } from "./panels/MixerDock";
@@ -367,6 +372,62 @@ export default function App() {
     () => selection.filter((id) => activeScene?.items.some((item) => item.id === id)),
     [selection, activeScene],
   );
+
+  // The selected item's live object — the Edit menu's copy/paste actions and
+  // their gating read from it.
+  const selectedSceneItem = useMemo(
+    () =>
+      effectiveSelection
+        ? (activeScene?.items.find((item) => item.id === effectiveSelection) ?? null)
+        : null,
+    [effectiveSelection, activeScene],
+  );
+
+  // Menu-bar seams: the Controls dock parks its dialog opener in this ref
+  // while mounted; App-owned dialogs open through `openAppDialog`.
+  const controlsOpener = useRef<((kind: ControlsDialogKind) => void) | null>(null);
+  const openControlsDialog = useCallback((kind: ControlsDialogKind) => {
+    controlsOpener.current?.(kind);
+  }, []);
+  const openAppDialog = useCallback((kind: AppMenuDialog) => {
+    setDialog({ kind });
+  }, []);
+
+  // Edit-menu actions (CAP-M05 parity): the same clipboard + apply paths the
+  // Edit Transform and Filters dialogs use, dispatched from the menu bar.
+  const menuCopyTransform = useCallback(() => {
+    if (selectedSceneItem) copyTransform(selectedSceneItem.transform);
+  }, [selectedSceneItem]);
+  const menuPasteTransform = useCallback(() => {
+    const clip = clipboardSnapshot().transform;
+    if (!clip || !activeScene || !selectedSceneItem) return;
+    const status = program?.sources[selectedSceneItem.source];
+    const source =
+      status?.width && status?.height
+        ? effectiveSourceSize(status.width, status.height, selectedSceneItem.filters)
+        : null;
+    const canvas = { w: collection?.canvasWidth ?? 1920, h: collection?.canvasHeight ?? 1080 };
+    // The dialog's Paste and this share `constrainPaste` so they can't diverge.
+    studioSetItemTransform(
+      activeScene.id,
+      selectedSceneItem.id,
+      constrainPaste(clip, source, canvas),
+    ).catch((err) => console.error("paste transform failed:", err));
+  }, [activeScene, selectedSceneItem, program, collection]);
+  const menuCopyFilters = useCallback(() => {
+    if (selectedSceneItem && selectedSceneItem.filters.length > 0)
+      copyFilters(selectedSceneItem.filters);
+  }, [selectedSceneItem]);
+  const menuPasteFilters = useCallback(() => {
+    const filters = clipboardSnapshot().filters;
+    if (!filters?.length || !activeScene || !selectedSceneItem) return;
+    studioPasteFilters(activeScene.id, selectedSceneItem.id, filters).catch((err) =>
+      console.error("paste filters failed:", err),
+    );
+  }, [activeScene, selectedSceneItem]);
+  const menuEditTransform = useCallback(() => {
+    if (effectiveSelection) setDialog({ kind: "editTransform", itemId: effectiveSelection });
+  }, [effectiveSelection]);
 
   /**
    * What the palette can reach (TASK-904). Scenes and sources come from the live
@@ -827,9 +888,24 @@ export default function App() {
         <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
       )}
       {/* No app title here — the OS titlebar already says "Freally Capture".
-          `justify-end` (not `justify-between`) keeps the controls on the right
-          now that nothing balances them on the left. */}
-      <header className="flex shrink-0 items-center justify-end rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
+          The menu bar sits on the left (the OBS position); the live-state
+          chips keep the right. */}
+      <header className="flex shrink-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
+        <MenuBar
+          onOpenControls={openControlsDialog}
+          onOpenApp={openAppDialog}
+          hasSelection={Boolean(selectedSceneItem)}
+          canCopyFilters={(selectedSceneItem?.filters.length ?? 0) > 0}
+          onCopyTransform={menuCopyTransform}
+          onPasteTransform={menuPasteTransform}
+          onCopyFilters={menuCopyFilters}
+          onPasteFilters={menuPasteFilters}
+          onEditTransform={menuEditTransform}
+          statsShown={showStats}
+          statsReady={Boolean(settings)}
+          onToggleStats={toggleStatsDock}
+          onSettingsSaved={setSettings}
+        />
         <div className="flex items-center gap-3">
           {saveError && (
             <span role="alert" className="text-xs text-amber-400">
@@ -956,6 +1032,7 @@ export default function App() {
             sceneNames={(collection?.scenes ?? []).map((scene) => scene.name)}
             onSettingsSaved={setSettings}
             onOpenSourceHealth={() => setDialog({ kind: "sourceHealth" })}
+            menuOpenRef={controlsOpener}
           />
           {showStats && <StatsDock />}
         </div>
