@@ -52,6 +52,17 @@ pub enum HotkeyAction {
     Zoom100,
     Zoom150,
     Zoom200,
+    /// Split-timer keys (CAP-N18) — a global key can't name a source, so
+    /// each drives EVERY live split timer (like the CAP-M15 timer keys).
+    SplitTimerSplit,
+    SplitTimerUndo,
+    SplitTimerSkip,
+    SplitTimerReset,
+    /// Playlist transport (CAP-N17) — drives every live playlist.
+    PlaylistNext,
+    PlaylistPrevious,
+    /// Roll every live Instant Replay source (CAP-N10).
+    ReplayRoll,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -306,6 +317,29 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
                 eprintln!("hotkey: zoom preset event failed: {err}");
             }
         }
+        HotkeyAction::SplitTimerSplit => {
+            fcap_sources::splits::control_all(fcap_sources::splits::SplitAction::Split);
+        }
+        HotkeyAction::SplitTimerUndo => {
+            fcap_sources::splits::control_all(fcap_sources::splits::SplitAction::Undo);
+        }
+        HotkeyAction::SplitTimerSkip => {
+            fcap_sources::splits::control_all(fcap_sources::splits::SplitAction::Skip);
+        }
+        HotkeyAction::SplitTimerReset => {
+            fcap_sources::splits::control_all(fcap_sources::splits::SplitAction::Reset);
+        }
+        HotkeyAction::PlaylistNext => {
+            fcap_sources::playlist::control_all(fcap_sources::playlist::PlaylistAction::Next);
+        }
+        HotkeyAction::PlaylistPrevious => {
+            fcap_sources::playlist::control_all(fcap_sources::playlist::PlaylistAction::Previous);
+        }
+        HotkeyAction::ReplayRoll => {
+            if let Err(err) = crate::replay::roll_sources(app) {
+                eprintln!("hotkey: replay roll failed: {err}");
+            }
+        }
         HotkeyAction::RunMacro(name) => {
             crate::automation::run_macro_by_name(app, &name);
         }
@@ -342,6 +376,13 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings, macros: 
         (&settings.zoom_100, HotkeyAction::Zoom100),
         (&settings.zoom_150, HotkeyAction::Zoom150),
         (&settings.zoom_200, HotkeyAction::Zoom200),
+        (&settings.split_timer_split, HotkeyAction::SplitTimerSplit),
+        (&settings.split_timer_undo, HotkeyAction::SplitTimerUndo),
+        (&settings.split_timer_skip, HotkeyAction::SplitTimerSkip),
+        (&settings.split_timer_reset, HotkeyAction::SplitTimerReset),
+        (&settings.playlist_next, HotkeyAction::PlaylistNext),
+        (&settings.playlist_previous, HotkeyAction::PlaylistPrevious),
+        (&settings.replay_roll, HotkeyAction::ReplayRoll),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

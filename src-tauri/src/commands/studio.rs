@@ -138,6 +138,84 @@ pub fn studio_timer_control(
     Ok(())
 }
 
+/// Drive one split-timer source's run (CAP-N18): "split" | "undo" | "skip"
+/// | "reset". Runtime-only, like the timer control above; the session
+/// thread repaints the face on the next state change.
+#[tauri::command]
+pub fn studio_split_control(source_id: SourceId, action: String) -> Result<(), String> {
+    let action = match action.as_str() {
+        "split" => fcap_sources::splits::SplitAction::Split,
+        "undo" => fcap_sources::splits::SplitAction::Undo,
+        "skip" => fcap_sources::splits::SplitAction::Skip,
+        "reset" => fcap_sources::splits::SplitAction::Reset,
+        other => return Err(format!("unknown split action: {other}")),
+    };
+    if !fcap_sources::splits::control(&source_id.0.to_string(), action) {
+        return Err("that split timer is not running".into());
+    }
+    Ok(())
+}
+
+/// Jump one playlist (CAP-N17): "next" | "previous". Runtime-only.
+#[tauri::command]
+pub fn studio_playlist_control(source_id: SourceId, action: String) -> Result<(), String> {
+    let action = match action.as_str() {
+        "next" => fcap_sources::playlist::PlaylistAction::Next,
+        "previous" => fcap_sources::playlist::PlaylistAction::Previous,
+        other => return Err(format!("unknown playlist action: {other}")),
+    };
+    if !fcap_sources::playlist::control(&source_id.0.to_string(), action) {
+        return Err("that playlist is not running".into());
+    }
+    Ok(())
+}
+
+/// Fire a title's animate-in/out (CAP-N16): "in" | "out". Runtime-only,
+/// like the timer control above — the session thread animates from the
+/// next tick.
+#[tauri::command]
+pub fn studio_title_fire(source_id: SourceId, action: String) -> Result<(), String> {
+    let action = match action.as_str() {
+        "in" => fcap_sources::title::TitleAction::FireIn,
+        "out" => fcap_sources::title::TitleAction::FireOut,
+        other => return Err(format!("unknown title action: {other}")),
+    };
+    if !fcap_sources::title::control(&source_id.0.to_string(), action) {
+        return Err("that title is not running".into());
+    }
+    Ok(())
+}
+
+/// Push live text into one title layer (CAP-N16) WITHOUT restarting the
+/// session — the scoreboard operator's edit. Runtime-only: Apply rebuilds
+/// the session from the model and clears these overrides.
+#[tauri::command]
+pub fn studio_title_set_text(
+    source_id: SourceId,
+    layer: usize,
+    value: String,
+) -> Result<(), String> {
+    if !fcap_sources::title::control(
+        &source_id.0.to_string(),
+        fcap_sources::title::TitleAction::SetLayerText(layer, value),
+    ) {
+        return Err("that title is not running".into());
+    }
+    Ok(())
+}
+
+/// Jump one playlist to a cue: `seconds` into ORIGINAL item `item`'s file.
+#[tauri::command]
+pub fn studio_playlist_cue(source_id: SourceId, item: usize, seconds: f32) -> Result<(), String> {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return Err("cue seconds must be a non-negative number".into());
+    }
+    if !fcap_sources::playlist::cue(&source_id.0.to_string(), item, seconds) {
+        return Err("that playlist is not running".into());
+    }
+    Ok(())
+}
+
 /// Place an existing pool source on top of a scene (source sharing).
 #[tauri::command]
 pub fn studio_add_existing_source(
@@ -914,6 +992,24 @@ pub struct MissingFile {
 /// collection must never make the render loop reach out to an attacker's host.
 pub(crate) fn is_remote(path: &str) -> bool {
     path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
+}
+
+/// A best-effort LAN address for the CAP-N11 ingest URL/QR (the web panel's
+/// probe): a UDP "connect" to a private address sends **nothing** — it just
+/// makes the OS pick the outgoing interface, whose address we read.
+pub(crate) fn lan_ip() -> String {
+    fn probe() -> Option<String> {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+        socket.connect("192.168.1.1:9").ok()?;
+        Some(socket.local_addr().ok()?.ip().to_string())
+    }
+    probe().unwrap_or_else(|| "127.0.0.1".to_owned())
+}
+
+/// CAP-N11: the address the ingest pickers show behind the URL + QR.
+#[tauri::command]
+pub fn local_lan_ip() -> String {
+    lan_ip()
 }
 
 /// Collapse the collection's file references down to the ones that don't

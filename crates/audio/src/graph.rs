@@ -302,6 +302,18 @@ impl MixerCore {
         &self.monitor
     }
 
+    /// One strip's post-fader block from the last [`MixerCore::process`] —
+    /// the CAP-N15 visualizer tap. Post-fader is "what actually mixes": a
+    /// muted or pulled-down strip reads flat, exactly like it sounds.
+    /// Keyed by the source id's string form (the vis registry's vocabulary).
+    pub fn strip_block(&self, key: &str) -> Option<&[f32]> {
+        // This runs inside the 10 ms mix loop: parse the key on the stack
+        // and hit the map — a per-strip `to_string()` scan allocated per
+        // block per subscription, which is real-time-audio poison.
+        let id = SourceId(key.parse().ok()?);
+        self.strips.get(&id).map(|strip| strip.scratch.as_slice())
+    }
+
     /// A source's accumulated levels since last asked (resets).
     pub fn take_source_levels(&mut self, id: SourceId) -> Option<Levels> {
         self.strips.get_mut(&id).map(|strip| strip.meter.take())

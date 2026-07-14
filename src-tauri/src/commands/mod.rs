@@ -579,6 +579,26 @@ pub fn hdr_tone_map_set(
     Ok(())
 }
 
+/// Set one capture's cursor effects (CAP-N19): persisted like a tone-map AND
+/// pushed into the live registry, so the very next frame redraws — no
+/// session restart. All-off configs clear the registry entry, so the capture
+/// thread goes back to sampling no input at all.
+#[tauri::command]
+pub fn cursor_fx_set(
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+    capture_id: String,
+    fx: crate::settings::CursorFxSetting,
+) -> Result<(), String> {
+    if capture_id.is_empty() || capture_id.len() > 512 || capture_id.chars().any(char::is_control) {
+        return Err("invalid capture id".to_owned());
+    }
+    fx.validate()?;
+    let config = fx.to_config();
+    settings.set_cursor_fx(&capture_id, fx);
+    fcap_capture::cursorfx::set_cursor_fx(&capture_id, config);
+    Ok(())
+}
+
 /// Set one control on the running device AND save it into the per-device
 /// profile, so it reapplies on hotplug/restart (CAP-M18). The capture thread
 /// clamps the value to the device's reported range.

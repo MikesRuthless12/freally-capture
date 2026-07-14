@@ -33,7 +33,8 @@ use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemIntero
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 
-use super::pointer::{CursorKey, CursorTracker};
+use super::pointer::{self, CursorKey, CursorTracker, KeyGhost};
+use crate::cursorfx::{self, FxState};
 use crate::{CaptureError, Frame, FrameSender, PixelFormat};
 
 /// Keep-alive tick: cursor pump cadence + how often the HWND is re-validated.
@@ -50,6 +51,12 @@ struct CursorShared {
     tracker: CursorTracker,
     /// What the last emitted frame drew — unchanged ⇒ nothing to synthesize.
     last_drawn: CursorKey,
+    /// This session's capture id — the cursor-effects registry key (CAP-N19).
+    capture_id: String,
+    /// Cursor-effects ripple/badge state (CAP-N19).
+    fx: FxState,
+    /// Keystroke-badge label cache (CAP-N19).
+    ghost: KeyGhost,
 }
 
 /// Everything the FrameArrived handler needs, serialized behind one lock
@@ -69,14 +76,19 @@ struct CopyContext {
 // touched behind the enclosing `Mutex`, one thread at a time.
 unsafe impl Send for CopyContext {}
 
-pub(crate) fn run(hwnd_raw: isize, sender: FrameSender, stop: Arc<AtomicBool>) {
-    match run_inner(hwnd_raw, &sender, &stop) {
+pub(crate) fn run(hwnd_raw: isize, capture_id: String, sender: FrameSender, stop: Arc<AtomicBool>) {
+    match run_inner(hwnd_raw, capture_id, &sender, &stop) {
         Ok(()) => sender.close(None),
         Err(err) => sender.close(Some(err)),
     }
 }
 
-fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result<(), CaptureError> {
+fn run_inner(
+    hwnd_raw: isize,
+    capture_id: String,
+    sender: &FrameSender,
+    stop: &AtomicBool,
+) -> Result<(), CaptureError> {
     // SAFETY: WinRT init for this thread; S_FALSE/RPC_E_CHANGED_MODE just
     // mean "already initialized", which is fine.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
@@ -135,6 +147,9 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
         base: None,
         tracker: CursorTracker::new(),
         last_drawn: CursorKey::AWAY,
+        capture_id,
+        fx: FxState::new(),
+        ghost: KeyGhost::new(),
     }));
     let handler_ctx = Arc::clone(&copy_ctx);
     let handler_cursor = Arc::clone(&cursor_shared);
@@ -198,25 +213,41 @@ fn run_inner(hwnd_raw: isize, sender: &FrameSender, stop: &AtomicBool) -> Result
 }
 
 /// Emit a synthesized frame when the drawn-cursor state changed but no new
-/// WGC frame arrived (the cursor moving over a static, unfocused window).
+/// WGC frame arrived (the cursor moving over a static, unfocused window) —
+/// or while any cursor effect animates (CAP-N19): a click ripple must keep
+/// growing over a window whose content never repaints.
 fn pump_cursor(cursor: &Mutex<CursorShared>, hwnd_raw: isize, sender: &FrameSender) {
-    let mut state = cursor.lock().expect("wgc cursor state poisoned");
-    let (key, mut frame) = {
-        let Some(base) = state.base.as_ref() else {
-            return; // no frame yet to draw onto
-        };
-        let key = CursorTracker::sample(hwnd_raw, base.width, base.height);
-        if key == state.last_drawn {
-            return;
-        }
-        (key, base.clone())
+    let mut guard = cursor.lock().expect("wgc cursor state poisoned");
+    let state = &mut *guard;
+    let Some(base) = state.base.as_ref() else {
+        return; // no frame yet to draw onto
     };
-    frame.captured_at = Instant::now();
+    let key = CursorTracker::sample(hwnd_raw, base.width, base.height);
+    let config = cursorfx::cursor_fx_for(&state.capture_id);
+    let now = Instant::now();
+    let fx_dirty = pointer::fx_tick(&mut state.fx, config.as_ref(), key.x, key.y, key.over, now);
+    if key == state.last_drawn && !fx_dirty {
+        return;
+    }
+    let mut frame = base.clone();
+    frame.captured_at = now;
     if key.over {
         state.tracker.blend(&mut frame, key);
     }
+    if let Some(config) = config.as_ref() {
+        pointer::fx_draw(
+            &mut frame,
+            &state.fx,
+            &mut state.ghost,
+            config,
+            key.x,
+            key.y,
+            key.over,
+            now,
+        );
+    }
     state.last_drawn = key;
-    drop(state);
+    drop(guard);
     sender.send(frame);
 }
 
@@ -295,14 +326,30 @@ fn on_frame(
     };
     {
         // Keep the pristine image for cursor-only synthesis, then draw the
-        // cursor into the outgoing copy.
-        let mut cursor = cursor.lock().expect("wgc cursor state poisoned");
+        // cursor (and any cursor effects, CAP-N19) into the outgoing copy.
+        let mut guard = cursor.lock().expect("wgc cursor state poisoned");
+        let state = &mut *guard;
         let key = CursorTracker::sample(hwnd_raw, width, height);
-        cursor.base = Some(frame.clone());
+        state.base = Some(frame.clone());
         if key.over {
-            cursor.tracker.blend(&mut frame, key);
+            state.tracker.blend(&mut frame, key);
         }
-        cursor.last_drawn = key;
+        let config = cursorfx::cursor_fx_for(&state.capture_id);
+        let now = Instant::now();
+        let _ = pointer::fx_tick(&mut state.fx, config.as_ref(), key.x, key.y, key.over, now);
+        if let Some(config) = config.as_ref() {
+            pointer::fx_draw(
+                &mut frame,
+                &state.fx,
+                &mut state.ghost,
+                config,
+                key.x,
+                key.y,
+                key.over,
+                now,
+            );
+        }
+        state.last_drawn = key;
     }
     sender.send(frame);
 

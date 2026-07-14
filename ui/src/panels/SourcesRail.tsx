@@ -9,6 +9,8 @@ import {
   captureListSources,
   captureWindowThumbnail,
   gameCaptureStatus,
+  linkDiscover,
+  localLanIp,
   openPrivacySettings,
   settingsGet,
   settingsSet,
@@ -38,7 +40,10 @@ import type {
   Corner,
   CornerSlot,
   GameCaptureStatus,
+  IngestProtocol,
+  InputLayout,
   ItemId,
+  LinkPeer,
   ProgramStatus,
   Scene,
   SceneId,
@@ -46,15 +51,21 @@ import type {
   SourceId,
   SourceSettings,
   TimerMode,
+  ReplaySpeed,
+  SplitComparison,
+  TitleAnimation,
+  TitleLayer,
   VideoDevice,
   VideoFormat,
+  VisStyle,
 } from "../api/types";
-import { CORNERS } from "../api/types";
+import { CORNERS, kindHasAudio } from "../api/types";
 import { useT } from "../i18n/t";
 import { EmptyHint, Panel } from "../components/Panel";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { hexToRgba } from "../lib/color";
+import { LAN_DEFAULT_PORTS, lanIngestUrl, lanPassphraseUsable } from "../lib/lanIngest";
 import { useDismiss } from "../lib/useDismiss";
 import {
   spikeGetState,
@@ -110,6 +121,15 @@ type PickerMode =
   | "gameCapture"
   | "testSignal"
   | "timer"
+  | "systemStats"
+  | "audioVisualizer"
+  | "splitTimer"
+  | "inputOverlay"
+  | "playlist"
+  | "replayPlayback"
+  | "lanIngest"
+  | "title"
+  | "freallyLink"
   | "existing";
 
 // Values are i18n keys, resolved with `t(...)` at each render site so a
@@ -136,6 +156,15 @@ const KIND_BADGE: Record<string, string> = {
   testTone: "sources-badge-test-tone",
   testFlashBeep: "sources-badge-test-sync",
   timer: "sources-badge-timer",
+  systemStats: "sources-badge-stats",
+  audioVisualizer: "sources-badge-visualizer",
+  splitTimer: "sources-badge-splits",
+  inputOverlay: "sources-badge-input",
+  playlist: "sources-badge-playlist",
+  replayPlayback: "sources-badge-replay",
+  lanIngest: "sources-badge-lan-ingest",
+  title: "sources-badge-title",
+  freallyLink: "sources-badge-link",
 };
 
 // Values are i18n keys (see KIND_BADGE).
@@ -146,10 +175,19 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["webcam", "sources-add-webcam"],
   ["image", "sources-add-image"],
   ["media", "sources-add-media"],
+  ["playlist", "sources-add-playlist"],
+  ["replayPlayback", "sources-add-replay"],
   ["remoteGuest", "sources-add-remote-guest"],
+  ["lanIngest", "sources-add-lan-ingest"],
+  ["freallyLink", "sources-add-freally-link"],
   ["color", "sources-add-color"],
   ["text", "sources-add-text"],
+  ["title", "sources-add-title"],
   ["timer", "sources-add-timer"],
+  ["systemStats", "sources-add-system-stats"],
+  ["audioVisualizer", "sources-add-visualizer"],
+  ["splitTimer", "sources-add-split-timer"],
+  ["inputOverlay", "sources-add-input-overlay"],
   ["nestedScene", "sources-add-nested-scene"],
   ["slideshow", "sources-add-slideshow"],
   ["chatOverlay", "sources-add-chat-overlay"],
@@ -800,6 +838,30 @@ export function SourcesRail({
         <TestSignalForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "timer" ? (
         <TimerForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "systemStats" ? (
+        <SystemStatsForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "audioVisualizer" ? (
+        <VisualizerForm
+          sources={(collection?.sources ?? [])
+            .filter((source) => kindHasAudio(source.kind))
+            .map((source) => ({ id: source.id, name: source.name }))}
+          onClose={() => setPicker(null)}
+          onPick={pick}
+        />
+      ) : picker === "splitTimer" ? (
+        <SplitTimerForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "title" ? (
+        <TitleForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "inputOverlay" ? (
+        <InputOverlayForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "playlist" ? (
+        <PlaylistForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "replayPlayback" ? (
+        <ReplayPlaybackForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "lanIngest" ? (
+        <LanIngestForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "freallyLink" ? (
+        <FreallyLinkForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "nestedScene" ? (
         <NestedSceneForm
           collection={collection}
@@ -2037,6 +2099,602 @@ function MediaForm({
   );
 }
 
+/** The three CAP-N10 roll speeds, in menu order. Values are i18n keys. */
+const REPLAY_SPEEDS: Array<[ReplaySpeed, string]> = [
+  ["full", "sources-replay-speed-full"],
+  ["half", "sources-replay-speed-half"],
+  ["quarter", "sources-replay-speed-quarter"],
+];
+
+function ReplayPlaybackForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [seconds, setSeconds] = useState(15);
+  const [speed, setSpeed] = useState<ReplaySpeed>("half");
+  return (
+    <PickerShell title={t("sources-replay-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <NumberField
+          label={t("sources-replay-seconds-label")}
+          value={seconds}
+          min={2}
+          max={300}
+          onCommit={setSeconds}
+        />
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-replay-speed-label")}
+          <select
+            value={speed}
+            onChange={(event) => setSpeed(event.target.value as ReplaySpeed)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            {REPLAY_SPEEDS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-replay-note")}</p>
+        <button
+          type="button"
+          onClick={() => onPick({ kind: "replayPlayback", seconds, speed, hwDecode: true })}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-replay-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/**
+ * Freally Link receiver (CAP-N12): pick a discovered sender or type its
+ * address. The scan is user-initiated only — nothing probes the network
+ * until the button is pressed, and manual entry always works without it.
+ */
+function FreallyLinkForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(9720);
+  const [key, setKey] = useState("");
+  const [peers, setPeers] = useState<LinkPeer[] | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const scan = () => {
+    setScanning(true);
+    setError(null);
+    linkDiscover()
+      .then((found) => setPeers(found))
+      .catch((err) => setError(String(err)))
+      .finally(() => setScanning(false));
+  };
+
+  const keyReady = key.trim().length > 0;
+  const add = (pickedHost: string, pickedPort: number, label: string) =>
+    onPick(
+      { kind: "freallyLink", host: pickedHost, port: pickedPort, label, key: key.trim() },
+      label || undefined,
+    );
+
+  return (
+    <PickerShell title={t("sources-link-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("sources-link-about")}</p>
+        <button
+          type="button"
+          disabled={scanning}
+          onClick={scan}
+          className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-60"
+        >
+          {scanning ? t("sources-link-scanning") : t("sources-link-scan")}
+        </button>
+        {error && <p className="m-0 text-xs text-red-400">{error}</p>}
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-link-key")}
+          <input
+            value={key}
+            onChange={(event) => setKey(event.target.value)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 font-mono text-xs text-havoc-text"
+          />
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-link-key-hint")}
+        </p>
+        {peers !== null &&
+          (peers.length > 0 ? (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {peers.map((peer) => (
+                <li key={`${peer.host}:${peer.port}`}>
+                  <button
+                    type="button"
+                    disabled={!keyReady}
+                    onClick={() => add(peer.host, peer.port, peer.name)}
+                    className="flex w-full items-center justify-between gap-2 truncate rounded-md border border-white/10 px-2 py-1.5 text-left text-xs text-havoc-text enabled:hover:border-havoc-accent/50 disabled:opacity-50"
+                  >
+                    <span className="truncate">{peer.name}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-havoc-muted">
+                      {peer.host}:{peer.port}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
+              {t("sources-link-none")}
+            </p>
+          ))}
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-link-host")}
+          <input
+            value={host}
+            onChange={(event) => setHost(event.target.value)}
+            placeholder="192.168.1.20"
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 font-mono text-xs text-havoc-text"
+          />
+        </label>
+        <NumberField
+          label={t("sources-link-port")}
+          value={port}
+          min={1}
+          max={65535}
+          onCommit={setPort}
+        />
+        <button
+          type="button"
+          disabled={!host.trim() || !keyReady}
+          onClick={() => add(host.trim(), port, `${host.trim()}:${port}`)}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-link-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+function PlaylistForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [paths, setPaths] = useState("");
+  const [loop, setLoop] = useState(true);
+  const [shuffle, setShuffle] = useState(false);
+  const [holdLast, setHoldLast] = useState(true);
+  const items = paths
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const browse = () =>
+    pickFile([
+      { name: "Media", extensions: ["mp4", "mkv", "webm", "mov", "mp3", "wav", "flac", "m4a"] },
+    ]).then((picked) => {
+      if (picked) setPaths((current) => (current.trim() ? `${current.trim()}\n${picked}` : picked));
+    });
+  return (
+    <PickerShell title={t("sources-playlist-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-playlist-files-label")}
+          <textarea
+            value={paths}
+            onChange={(event) => setPaths(event.target.value)}
+            rows={5}
+            placeholder={"C:\\vt\\intro.mp4\nC:\\vt\\loop.mp4"}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 font-mono text-xs text-havoc-text"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={browse}
+          className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+        >
+          {t("sources-playlist-browse")}
+        </button>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={loop}
+            onChange={(event) => setLoop(event.target.checked)}
+          />
+          {t("sources-playlist-loop")}
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={shuffle}
+            onChange={(event) => setShuffle(event.target.checked)}
+          />
+          {t("sources-playlist-shuffle")}
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={holdLast}
+            onChange={(event) => setHoldLast(event.target.checked)}
+          />
+          {t("sources-playlist-hold-last")}
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-playlist-note")}
+        </p>
+        <button
+          type="button"
+          disabled={items.length === 0}
+          onClick={() =>
+            onPick({
+              kind: "playlist",
+              items: items.map((path) => ({ path, in: 0, out: 0, cues: [] })),
+              loop,
+              shuffle,
+              holdLast,
+              hwDecode: true,
+              nowPlayingVariable: "",
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-playlist-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+function SplitTimerForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [path, setPath] = useState("");
+  const [comparison, setComparison] = useState<SplitComparison>("personalBest");
+  const browse = () =>
+    pickFile([{ name: "LiveSplit splits", extensions: ["lss"] }]).then((picked) => {
+      if (picked) setPath(picked);
+    });
+  return (
+    <PickerShell title={t("sources-splits-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-splits-file-label")}
+          <PathField
+            value={path}
+            onChange={setPath}
+            onBrowse={browse}
+            placeholder="C:\runs\any-percent.lss"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-splits-comparison-label")}
+          <select
+            value={comparison}
+            onChange={(event) => setComparison(event.target.value as SplitComparison)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            <option value="personalBest">{t("sources-splits-comparison-pb")}</option>
+            <option value="bestSegments">{t("sources-splits-comparison-best")}</option>
+            <option value="average">{t("sources-splits-comparison-average")}</option>
+          </select>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-splits-note")}</p>
+        <button
+          type="button"
+          disabled={!path.trim()}
+          onClick={() =>
+            onPick({
+              kind: "splitTimer",
+              path: path.trim(),
+              comparison,
+              width: 420,
+              height: 380,
+              sizePx: 18,
+              color: { r: 255, g: 255, b: 255, a: 255 },
+              ahead: { r: 34, g: 197, b: 94, a: 255 },
+              behind: { r: 239, g: 68, b: 68, a: 255 },
+              gold: { r: 251, g: 191, b: 36, a: 255 },
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-splits-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** A fully-populated text layer for the title starter templates (CAP-N16). */
+function titleTextLayer(overrides: Partial<Extract<TitleLayer, { kind: "text" }>>): TitleLayer {
+  return {
+    kind: "text",
+    x: 0,
+    y: 0,
+    text: "",
+    fontFamily: null,
+    fontFile: null,
+    sizePx: 48,
+    color: { r: 255, g: 255, b: 255, a: 255 },
+    align: "left",
+    outlinePx: 0,
+    outlineColor: { r: 0, g: 0, b: 0, a: 255 },
+    shadow: false,
+    sourceFile: "",
+    binding: "whole",
+    csvRow: 1,
+    csvColumn: "",
+    jsonPointer: "",
+    ...overrides,
+  };
+}
+
+/** Lower-third starter: an accent bar + name + subtitle, scaled to the canvas. */
+function lowerThirdLayers(w: number, h: number, t: (key: string) => string): TitleLayer[] {
+  return [
+    {
+      kind: "rect",
+      x: Math.round(w * 0.03),
+      y: Math.round(h * 0.78),
+      width: Math.round(w * 0.42),
+      height: Math.round(h * 0.13),
+      color: { r: 74, g: 158, b: 255, a: 230 },
+    },
+    titleTextLayer({
+      x: Math.round(w * 0.046),
+      y: Math.round(h * 0.792),
+      text: t("sources-title-template-name"),
+      sizePx: Math.round(h * 0.052),
+      shadow: true,
+    }),
+    titleTextLayer({
+      x: Math.round(w * 0.046),
+      y: Math.round(h * 0.856),
+      text: t("sources-title-template-subtitle"),
+      sizePx: Math.round(h * 0.032),
+      color: { r: 255, g: 255, b: 255, a: 220 },
+    }),
+  ];
+}
+
+/** Scoreboard starter: a top plate + 4 cells (two names, two scores). */
+function scoreboardLayers(w: number, h: number, t: (key: string) => string): TitleLayer[] {
+  const y = Math.round(h * 0.055);
+  return [
+    {
+      kind: "rect",
+      x: Math.round(w * 0.29),
+      y: Math.round(h * 0.037),
+      width: Math.round(w * 0.42),
+      height: Math.round(h * 0.085),
+      color: { r: 12, g: 16, b: 28, a: 230 },
+    },
+    titleTextLayer({
+      x: Math.round(w * 0.305),
+      y,
+      text: t("sources-title-template-home"),
+      sizePx: Math.round(h * 0.042),
+    }),
+    titleTextLayer({
+      x: Math.round(w * 0.46),
+      y,
+      text: "0",
+      sizePx: Math.round(h * 0.048),
+      outlinePx: 2,
+    }),
+    titleTextLayer({
+      x: Math.round(w * 0.525),
+      y,
+      text: "0",
+      sizePx: Math.round(h * 0.048),
+      outlinePx: 2,
+    }),
+    titleTextLayer({
+      x: Math.round(w * 0.6),
+      y,
+      text: t("sources-title-template-away"),
+      sizePx: Math.round(h * 0.042),
+    }),
+  ];
+}
+
+function TitleForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [width, setWidth] = useState(1920);
+  const [height, setHeight] = useState(1080);
+  const [template, setTemplate] = useState<"lowerThird" | "scoreboard" | "blank">("lowerThird");
+  const add = () => {
+    const layers: TitleLayer[] =
+      template === "lowerThird"
+        ? lowerThirdLayers(width, height, t)
+        : template === "scoreboard"
+          ? scoreboardLayers(width, height, t)
+          : [];
+    const animation: TitleAnimation =
+      template === "lowerThird" ? "slideLeft" : template === "scoreboard" ? "fade" : "none";
+    onPick({ kind: "title", width, height, layers, animation, durationMs: 400 });
+  };
+  return (
+    <PickerShell title={t("sources-title-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-title-template-label")}
+          <select
+            value={template}
+            onChange={(event) =>
+              setTemplate(event.target.value as "lowerThird" | "scoreboard" | "blank")
+            }
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            <option value="lowerThird">{t("sources-title-template-lower-third")}</option>
+            <option value="scoreboard">{t("sources-title-template-scoreboard")}</option>
+            <option value="blank">{t("sources-title-template-blank")}</option>
+          </select>
+        </label>
+        <div className="flex items-end gap-2">
+          <NumberField
+            label={t("sources-title-width-label")}
+            value={width}
+            min={16}
+            max={16384}
+            onCommit={setWidth}
+            className="flex-1"
+          />
+          <NumberField
+            label={t("sources-title-height-label")}
+            value={height}
+            min={16}
+            max={16384}
+            onCommit={setHeight}
+            className="flex-1"
+          />
+        </div>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-title-note")}</p>
+        <button
+          type="button"
+          onClick={add}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-title-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/**
+ * LAN ingest listener setup (CAP-N11): a phone or second PC on the same
+ * network feeds the scene over SRT (encryptable — preferred) or RTMP
+ * (unauthenticated by protocol). Nothing listens until the source is added;
+ * the listener never dials out. The URL + QR point the sender here.
+ */
+function LanIngestForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [protocol, setProtocol] = useState<IngestProtocol>("srt");
+  const [port, setPort] = useState(LAN_DEFAULT_PORTS.srt);
+  const [passphrase, setPassphrase] = useState("");
+  const [host, setHost] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    localLanIp()
+      .then((ip) => {
+        if (!cancelled) setHost(ip);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const switchProtocol = (next: IngestProtocol) => {
+    // Follow the protocol's default port unless the user picked their own.
+    if (port === LAN_DEFAULT_PORTS[protocol]) setPort(LAN_DEFAULT_PORTS[next]);
+    setProtocol(next);
+  };
+  const passUsable = lanPassphraseUsable(protocol, passphrase);
+  const url = lanIngestUrl(protocol, host ?? "…", port, protocol === "srt" ? passphrase : "");
+  return (
+    <PickerShell title={t("sources-lan-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-lan-protocol-label")}
+          <select
+            value={protocol}
+            onChange={(event) => switchProtocol(event.target.value as IngestProtocol)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            <option value="srt">{t("sources-lan-protocol-srt")}</option>
+            <option value="rtmp">{t("sources-lan-protocol-rtmp")}</option>
+          </select>
+        </label>
+        <NumberField
+          label={t("sources-lan-port-label")}
+          value={port}
+          min={1024}
+          max={65535}
+          onCommit={setPort}
+        />
+        {protocol === "srt" && (
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("sources-lan-passphrase-label")}
+            <input
+              value={passphrase}
+              onChange={(event) => setPassphrase(event.target.value)}
+              className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 font-mono text-xs text-havoc-text"
+            />
+            <span className={passUsable ? "" : "text-amber-300"}>
+              {t("sources-lan-passphrase-hint")}
+            </span>
+          </label>
+        )}
+        {protocol === "rtmp" ? (
+          <p className="m-0 text-[10px] leading-snug text-amber-300">
+            {t("sources-lan-rtmp-warning")}
+          </p>
+        ) : (
+          passphrase === "" && (
+            <p className="m-0 text-[10px] leading-snug text-amber-300">
+              {t("sources-lan-open-warning")}
+            </p>
+          )
+        )}
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="m-0 text-[11px] text-havoc-muted">{t("sources-lan-url-label")}</p>
+            <p className="m-0 break-all font-mono text-xs text-havoc-text">{url}</p>
+          </div>
+          {host && <InviteQr link={url} ariaKey="sources-lan-qr-aria" />}
+        </div>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-lan-note")}</p>
+        <button
+          type="button"
+          disabled={!passUsable}
+          onClick={() =>
+            onPick({
+              kind: "lanIngest",
+              protocol,
+              port,
+              passphrase: protocol === "srt" ? passphrase : "",
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-lan-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
 /** `[minutes, i18n key]` — the call site renders `t(key)`. */
 const INVITE_TTLS: Array<[number, string]> = [
   [15, "sources-ttl-15min"],
@@ -2218,8 +2876,15 @@ function RemoteGuestForm({ sceneId, onClose }: { sceneId: SceneId; onClose: () =
 }
 
 /** The invite link as a QR code (TASK-R3) — vendored zero-dep encoder, drawn
- * as a plain SVG path (no innerHTML, CSP-safe). */
-function InviteQr({ link }: { link: string }) {
+ * as a plain SVG path (no innerHTML, CSP-safe). `ariaKey` names the payload
+ * for screen readers (the LAN ingest form shares this component). */
+function InviteQr({
+  link,
+  ariaKey = "sources-invite-qr-aria",
+}: {
+  link: string;
+  ariaKey?: string;
+}) {
   const t = useT();
   const rendered = useMemo(() => {
     try {
@@ -2243,7 +2908,7 @@ function InviteQr({ link }: { link: string }) {
     <svg
       viewBox={`0 0 ${rendered.count} ${rendered.count}`}
       role="img"
-      aria-label={t("sources-invite-qr-aria")}
+      aria-label={t(ariaKey)}
       className="h-28 w-28 shrink-0 rounded bg-white p-1.5"
     >
       <path d={rendered.path} fill="#000" />
@@ -2581,6 +3246,213 @@ function TimerForm({
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
           {t("sources-timer-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+function SystemStatsForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  return (
+    <PickerShell title={t("sources-stats-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("sources-stats-note")}</p>
+        <button
+          type="button"
+          onClick={() =>
+            onPick({
+              kind: "systemStats",
+              showFps: true,
+              showCpu: true,
+              showMemory: true,
+              showRenderMs: true,
+              showDropped: true,
+              showBitrate: true,
+              fontFamily: null,
+              fontFile: null,
+              sizePx: 28,
+              color: { r: 255, g: 255, b: 255, a: 255 },
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-stats-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** The three CAP-N15 visualizer faces, in menu order. Values are i18n keys. */
+const VIS_STYLES: Array<[VisStyle, string]> = [
+  ["bars", "sources-visualizer-style-bars"],
+  ["scope", "sources-visualizer-style-scope"],
+  ["vu", "sources-visualizer-style-vu"],
+];
+
+function VisualizerForm({
+  sources,
+  onClose,
+  onPick,
+}: {
+  sources: Array<{ id: string; name: string }>;
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [style, setStyle] = useState<VisStyle>("bars");
+  const [target, setTarget] = useState("master");
+  return (
+    <PickerShell title={t("sources-visualizer-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-visualizer-style-label")}
+          <select
+            value={style}
+            onChange={(event) => setStyle(event.target.value as VisStyle)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            {VIS_STYLES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-visualizer-target-label")}
+          <select
+            value={target}
+            onChange={(event) => setTarget(event.target.value)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            <option value="master">{t("sources-visualizer-target-master")}</option>
+            {[1, 2, 3, 4, 5, 6].map((n) => (
+              <option key={n} value={`track:${n}`}>
+                {t("sources-visualizer-target-track", { n })}
+              </option>
+            ))}
+            {sources.map((source) => (
+              <option key={source.id} value={`source:${source.id}`}>
+                {source.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-visualizer-note")}
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            onPick({
+              kind: "audioVisualizer",
+              style,
+              target:
+                target === "master" ? "master" : target.startsWith("track:") ? "track" : "source",
+              track: target.startsWith("track:") ? Number(target.slice(6)) : 1,
+              source: target.startsWith("source:") ? target.slice(7) : null,
+              width: 800,
+              height: 240,
+              bands: 48,
+              color: { r: 74, g: 158, b: 255, a: 255 },
+              peakHold: true,
+              decay: 30,
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-visualizer-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** The four CAP-N13 layout presets, in menu order. Values are i18n keys. */
+const INPUT_LAYOUTS: Array<[InputLayout, string]> = [
+  ["wasd", "sources-input-layout-wasd"],
+  ["keyboard", "sources-input-layout-keyboard"],
+  ["gamepad", "sources-input-layout-gamepad"],
+  ["fightstick", "sources-input-layout-fightstick"],
+];
+
+function InputOverlayForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [layout, setLayout] = useState<InputLayout>("wasd");
+  const [colorHex, setColorHex] = useState("#ffffff");
+  const [accentHex, setAccentHex] = useState("#4a9eff");
+  return (
+    <PickerShell title={t("sources-input-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-input-layout-label")}
+          <select
+            value={layout}
+            onChange={(event) => setLayout(event.target.value as InputLayout)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            {INPUT_LAYOUTS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-end gap-3">
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            {t("sources-input-color-label")}
+            <input
+              type="color"
+              value={colorHex}
+              onChange={(event) => setColorHex(event.target.value)}
+              aria-label={t("sources-input-color-label")}
+              className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            {t("sources-input-accent-label")}
+            <input
+              type="color"
+              value={accentHex}
+              onChange={(event) => setAccentHex(event.target.value)}
+              aria-label={t("sources-input-accent-label")}
+              className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+            />
+          </label>
+        </div>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-input-privacy-note")}
+        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-input-os-note")}
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            onPick({
+              kind: "inputOverlay",
+              layout,
+              color: hexToRgba(colorHex),
+              accent: hexToRgba(accentHex),
+            })
+          }
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-input-add")}
         </button>
       </div>
     </PickerShell>

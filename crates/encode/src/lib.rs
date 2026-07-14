@@ -24,6 +24,7 @@ pub mod ffmpeg;
 pub mod flz;
 pub mod freally_video;
 pub mod hardware;
+pub mod link;
 pub mod mux;
 pub mod recorder;
 pub mod remux;

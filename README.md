@@ -146,9 +146,11 @@ plugins, and **remote-control automation**.
     pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev \
     libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
     libpipewire-0.3-dev libwayland-dev libegl-dev \
-    libasound2-dev libpulse-dev libv4l-dev libdbus-1-dev libclang-dev
+    libasound2-dev libpulse-dev libv4l-dev libdbus-1-dev libclang-dev \
+    libudev-dev
   ```
-  (`libv4l-dev` is for the webcam; `v4l2loopback` is needed for the **virtual camera** on Linux.)
+  (`libv4l-dev` is for the webcam; `libudev-dev` is for gamepad detection (the input overlay);
+  `v4l2loopback` is needed for the **virtual camera** on Linux.)
 
 ## Build & run
 

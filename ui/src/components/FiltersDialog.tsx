@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useDismiss } from "../lib/useDismiss";
 
 import {
+  cursorFxSet,
+  settingsGet,
   studioAddFilter,
   studioPasteFilters,
   studioRemoveFilter,
@@ -19,6 +21,7 @@ import { copyFilters, useClipboard } from "../lib/clipboard";
 import { WorkbenchDialog } from "./WorkbenchDialog";
 import type {
   BlendMode,
+  CursorFxSetting,
   Filter,
   FilterKind,
   FilterTypeName,
@@ -26,6 +29,7 @@ import type {
   ScaleMode,
   SceneId,
   SceneItem,
+  Source,
 } from "../api/types";
 import { BLEND_MODES } from "../api/types";
 
@@ -99,13 +103,16 @@ type FiltersDialogProps = {
   sceneId: SceneId;
   item: SceneItem;
   sourceName: string;
+  /** The item's source — display/window captures get the cursor-effects
+   * section (CAP-N19). */
+  source?: Source;
   onClose: () => void;
 };
 
 const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
 
 /** Per-item blend mode + the ordered filter chain with live parameters. */
-export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDialogProps) {
+export function FiltersDialog({ sceneId, item, sourceName, source, onClose }: FiltersDialogProps) {
   const t = useT();
   const clipboard = useClipboard();
   const [addOpen, setAddOpen] = useState(false);
@@ -119,6 +126,13 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
   const update = (filter: Filter, kind: FilterKind) => {
     studioUpdateFilter(sceneId, item.id, filter.id, kind).catch(fail("filter update"));
   };
+
+  // Cursor effects (CAP-N19) ride the CAPTURE, not the item — two items
+  // sharing one display share them, like the HDR tone-map.
+  const captureId =
+    source && (source.kind === "display" || source.kind === "window") && source.captureId
+      ? source.captureId
+      : null;
 
   // Auto black-bar crop (CAP-N72): follow-mode state, hydrated from the
   // engine so a reopened dialog shows the truth.
@@ -349,6 +363,8 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
               ))}
             </ul>
           )}
+
+          {captureId && <CursorFxSection captureId={captureId} />}
         </div>
       </PickerShell>
       {tuningFilter && (
@@ -361,6 +377,144 @@ export function FiltersDialog({ sceneId, item, sourceName, onClose }: FiltersDia
         />
       )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cursor effects (CAP-N19)
+// ---------------------------------------------------------------------------
+
+const CURSOR_FX_DEFAULTS: CursorFxSetting = {
+  halo: false,
+  haloColor: "#ffd54a",
+  haloRadius: 24,
+  ripples: false,
+  leftColor: "#4ac1ff",
+  rightColor: "#ff5a5a",
+  keystrokes: false,
+};
+
+/** Halo, click ripples & keystroke ghosting for a display/window capture —
+ * drawn into the frames on the owned (Windows) cursor path, applied live. */
+function CursorFxSection({ captureId }: { captureId: string }) {
+  const t = useT();
+  const [fx, setFx] = useState<CursorFxSetting>(CURSOR_FX_DEFAULTS);
+  useEffect(() => {
+    let alive = true;
+    settingsGet()
+      .then((settings) => {
+        const saved = settings.cursorFx?.[captureId];
+        if (alive && saved) setFx(saved);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [captureId]);
+
+  const apply = (next: CursorFxSetting) => {
+    setFx(next);
+    cursorFxSet(captureId, next).catch(fail("cursor effects"));
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.02] p-2">
+      <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+        {t("filters-cursorfx-header")}
+      </span>
+      <p className="m-0 text-[11px] text-havoc-muted">{t("filters-cursorfx-hint")}</p>
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={fx.halo}
+            onChange={(event) => apply({ ...fx, halo: event.target.checked })}
+          />
+          {t("filters-cursorfx-halo")}
+        </label>
+        {fx.halo && (
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-cursorfx-halo-color")}
+              <input
+                type="color"
+                value={fx.haloColor}
+                onChange={(event) => apply({ ...fx, haloColor: event.target.value })}
+                aria-label={t("filters-cursorfx-halo-color")}
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-cursorfx-halo-radius")}
+              <input
+                type="number"
+                min={8}
+                max={128}
+                step={4}
+                value={fx.haloRadius}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (Number.isFinite(next) && next >= 8 && next <= 128) {
+                    apply({ ...fx, haloRadius: Math.round(next) });
+                  }
+                }}
+                aria-label={t("filters-cursorfx-halo-radius")}
+                className="w-16 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+              />
+            </label>
+          </>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={fx.ripples}
+            onChange={(event) => apply({ ...fx, ripples: event.target.checked })}
+          />
+          {t("filters-cursorfx-ripples")}
+        </label>
+        {fx.ripples && (
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-cursorfx-left-color")}
+              <input
+                type="color"
+                value={fx.leftColor}
+                onChange={(event) => apply({ ...fx, leftColor: event.target.value })}
+                aria-label={t("filters-cursorfx-left-color")}
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              {t("filters-cursorfx-right-color")}
+              <input
+                type="color"
+                value={fx.rightColor}
+                onChange={(event) => apply({ ...fx, rightColor: event.target.value })}
+                aria-label={t("filters-cursorfx-right-color")}
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+          </>
+        )}
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-1 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={fx.keystrokes}
+            onChange={(event) => apply({ ...fx, keystrokes: event.target.checked })}
+          />
+          {t("filters-cursorfx-keystrokes")}
+        </label>
+        {fx.keystrokes && (
+          <p className="m-0 text-[11px] text-havoc-muted">
+            {t("filters-cursorfx-keystrokes-hint")}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

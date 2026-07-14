@@ -56,6 +56,14 @@ pub struct TextStyle {
     pub force_rtl: bool,
     /// Word-wrap width in px; `None` = never wrap.
     pub wrap_width: Option<u32>,
+    /// CAP-N16: outline stroke width visible OUTSIDE the fill, px (0 = none).
+    pub outline_px: f32,
+    /// Straight RGBA of the outline stroke.
+    pub outline_color: [u8; 4],
+    /// CAP-N16: drop-shadow offset, px down-right (0 = none).
+    pub shadow_px: f32,
+    /// Straight RGBA of the shadow.
+    pub shadow_color: [u8; 4],
 }
 
 impl Default for TextStyle {
@@ -70,6 +78,10 @@ impl Default for TextStyle {
             line_spacing: 1.0,
             force_rtl: false,
             wrap_width: None,
+            outline_px: 0.0,
+            outline_color: [0, 0, 0, 255],
+            shadow_px: 0.0,
+            shadow_color: [0, 0, 0, 200],
         }
     }
 }
@@ -363,6 +375,11 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
     let line_gap = faces[0].line_gap() as f32 * scale;
     let natural = (ascent - descent + line_gap).max(size * 0.5);
     let line_height = natural * style.line_spacing.clamp(0.25, 4.0);
+    // CAP-N16: the outline extends the ink on every side; the shadow only
+    // down-right. Pad the canvas so neither clips.
+    let outline_px = style.outline_px.clamp(0.0, 32.0);
+    let shadow_px = style.shadow_px.clamp(0.0, 64.0);
+    let pad = PAD + outline_px;
 
     // Shape every paragraph into visually-ordered lines.
     let mut lines: Vec<Line> = Vec::new();
@@ -384,7 +401,7 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
                 paragraph,
                 para_rtl,
                 scale,
-                (max as f32 - 2.0 * PAD).max(size),
+                (max as f32 - 2.0 * pad).max(size),
             ),
             _ => std::iter::once(0..paragraph.len()).collect(),
         };
@@ -404,13 +421,15 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
     }
 
     let content_width = lines.iter().map(|line| line.width).fold(0.0f32, f32::max);
-    let width = (content_width + 2.0 * PAD).ceil() as u32;
+    let width = (content_width + 2.0 * pad + shadow_px).ceil() as u32;
     // Height = the baseline span plus one full ink extent (ascent+|descent|):
     // the LAST line always needs its descenders, however tight the line
     // spacing — `n * line_height` clips them for any spacing < 1.
-    let height =
-        ((lines.len().saturating_sub(1)) as f32 * line_height + (ascent - descent) + 2.0 * PAD)
-            .ceil() as u32;
+    let height = ((lines.len().saturating_sub(1)) as f32 * line_height
+        + (ascent - descent)
+        + 2.0 * pad
+        + shadow_px)
+        .ceil() as u32;
     if content_width <= 0.0 || style.text.trim().is_empty() {
         return Ok(rgba_frame(1, 1, vec![0, 0, 0, 0]));
     }
@@ -430,9 +449,12 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
     );
     paint.anti_alias = true;
 
+    // Build every glyph path first — the shadow / outline / fill passes
+    // each walk the same set.
+    let mut paths: Vec<tiny_skia::Path> = Vec::new();
     for (line_index, line) in lines.iter().enumerate() {
-        let baseline = PAD + ascent + line_index as f32 * line_height;
-        let left = PAD
+        let baseline = pad + ascent + line_index as f32 * line_height;
+        let left = pad
             + match style.align {
                 TextAlign::Left => 0.0,
                 TextAlign::Center => (content_width - line.width) / 2.0,
@@ -447,15 +469,71 @@ pub fn render_text(style: &TextStyle) -> Result<Frame, StaticSourceError> {
             };
             faces[glyph.face].outline_glyph(GlyphId(glyph.id), &mut outline);
             if let Some(path) = outline.builder.finish() {
-                pixmap.fill_path(
-                    &path,
-                    &paint,
-                    tiny_skia::FillRule::Winding,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
+                paths.push(path);
             }
         }
+    }
+
+    // CAP-N16 draw order: shadow under everything, then the outline stroke,
+    // then the fill on top — the classic broadcast-title stack.
+    if shadow_px > 0.0 {
+        let mut shadow_paint = tiny_skia::Paint::default();
+        shadow_paint.set_color_rgba8(
+            style.shadow_color[0],
+            style.shadow_color[1],
+            style.shadow_color[2],
+            style.shadow_color[3],
+        );
+        shadow_paint.anti_alias = true;
+        let offset = tiny_skia::Transform::from_translate(shadow_px, shadow_px);
+        for path in &paths {
+            pixmap.fill_path(
+                path,
+                &shadow_paint,
+                tiny_skia::FillRule::Winding,
+                offset,
+                None,
+            );
+        }
+    }
+    if outline_px > 0.0 {
+        let mut stroke_paint = tiny_skia::Paint::default();
+        stroke_paint.set_color_rgba8(
+            style.outline_color[0],
+            style.outline_color[1],
+            style.outline_color[2],
+            style.outline_color[3],
+        );
+        stroke_paint.anti_alias = true;
+        // A stroke straddles the path edge, so 2 × outline_px leaves exactly
+        // outline_px visible OUTSIDE once the fill covers the inner half.
+        // Round joins: the default miter spikes up to 4 × outline_px at an
+        // acute glyph apex ('A', 'V'), blowing past the canvas pad and
+        // shearing the corner flat — a round join never exceeds outline_px.
+        let stroke = tiny_skia::Stroke {
+            width: outline_px * 2.0,
+            line_join: tiny_skia::LineJoin::Round,
+            line_cap: tiny_skia::LineCap::Round,
+            ..tiny_skia::Stroke::default()
+        };
+        for path in &paths {
+            pixmap.stroke_path(
+                path,
+                &stroke_paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+    for path in &paths {
+        pixmap.fill_path(
+            path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
     }
 
     // tiny-skia stores premultiplied alpha; the compositor blends straight.
@@ -651,6 +729,92 @@ mod tests {
         assert!(
             rustybuzz::Face::from_slice(NOTO_SANS_ITALIC, 0).is_some(),
             "the bundled italic face is valid"
+        );
+    }
+
+    /// The inked x-range of pixels matching a predicate, or `None`.
+    fn ink_span(frame: &Frame, hit: impl Fn(&[u8]) -> bool) -> Option<(u32, u32)> {
+        let mut span: Option<(u32, u32)> = None;
+        for y in 0..frame.height {
+            for x in 0..frame.width {
+                let px = &frame.data[((y * frame.width + x) * 4) as usize..][..4];
+                if px[3] > 128 && hit(px) {
+                    span = Some(match span {
+                        Some((lo, hi)) => (lo.min(x), hi.max(x)),
+                        None => (x, x),
+                    });
+                }
+            }
+        }
+        span
+    }
+
+    #[test]
+    fn outline_strokes_outside_the_fill() {
+        // CAP-N16: the stroke is drawn UNDER the fill at 2 × outline_px, so
+        // exactly outline_px of it stays visible outside the letter shape.
+        let mut outlined = style("H");
+        outlined.outline_px = 3.0;
+        outlined.outline_color = [255, 0, 0, 255];
+        let (Some(with), Some(without)) = (render(&outlined), render(&style("H"))) else {
+            return;
+        };
+        assert!(with.width > without.width, "the outline widens the ink");
+        let red = ink_span(&with, |px| px[0] > 200 && px[1] < 80 && px[2] < 80)
+            .expect("the outline leaves red ink");
+        let fill = ink_span(&with, |px| px[0] > 200 && px[1] > 200 && px[2] > 200)
+            .expect("the fill leaves white ink");
+        assert!(
+            red.0 < fill.0 && red.1 > fill.1,
+            "outline ink sits outside the fill on both sides ({red:?} vs {fill:?})"
+        );
+    }
+
+    #[test]
+    fn outline_corners_stay_inside_the_canvas() {
+        // A pointed apex ('A') under a MITER join spikes up to 4 × outline_px
+        // past the path — beyond the reserved pad, shearing the corner flat
+        // at the canvas edge. The round join never exceeds outline_px, so no
+        // outline ink may touch the outermost pixel ring. ('H' has only right
+        // angles and never caught this.)
+        let mut outlined = style("A");
+        outlined.outline_px = 4.0;
+        outlined.outline_color = [255, 0, 0, 255];
+        let Some(frame) = render(&outlined) else {
+            return;
+        };
+        let (w, h) = (frame.width as usize, frame.height as usize);
+        let outline_ink = |x: usize, y: usize| {
+            let px = &frame.data[(y * w + x) * 4..(y * w + x) * 4 + 4];
+            px[3] > 0 && px[0] > 150 && px[1] < 100
+        };
+        let horizontal = (0..w).any(|x| outline_ink(x, 0) || outline_ink(x, h - 1));
+        let vertical = (0..h).any(|y| outline_ink(0, y) || outline_ink(w - 1, y));
+        assert!(
+            !horizontal && !vertical,
+            "outline ink reached the canvas edge — the stroke outgrew the pad"
+        );
+    }
+
+    #[test]
+    fn shadow_offsets_down_right() {
+        let mut shadowed = style("H");
+        shadowed.shadow_px = 5.0;
+        shadowed.shadow_color = [0, 0, 0, 255];
+        let (Some(with), Some(without)) = (render(&shadowed), render(&style("H"))) else {
+            return;
+        };
+        assert!(
+            with.width > without.width && with.height > without.height,
+            "the shadow grows the canvas down-right"
+        );
+        let dark = ink_span(&with, |px| px[0] < 60 && px[1] < 60 && px[2] < 60)
+            .expect("the shadow leaves dark ink");
+        let fill = ink_span(&with, |px| px[0] > 200 && px[1] > 200 && px[2] > 200)
+            .expect("the fill leaves white ink");
+        assert!(
+            dark.1 > fill.1,
+            "shadow ink extends past the fill's right edge ({dark:?} vs {fill:?})"
         );
     }
 }

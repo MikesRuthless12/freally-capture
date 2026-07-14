@@ -54,9 +54,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         if sampling == 1u {
             uv = (floor(texel) + 0.5) / dims;
         } else {
+            // Sharp-bilinear measures CENTER-to-center (the -0.5 shift):
+            // samples hold at a texel's center across its interior and
+            // cross to the neighbor inside a 1/scale-wide band at the
+            // seam. (The first shipped form measured edge-to-edge, which
+            // saturated most of each texel onto the 50/50 border blend —
+            // blurrier than plain bilinear; the scaler goldens pin this.)
             let sharp = max(item.misc.z, 1.0);
-            let edge = clamp((fract(texel) - 0.5) * sharp, vec2<f32>(-0.5), vec2<f32>(0.5));
-            uv = (floor(texel) + 0.5 + edge) / dims;
+            let p = texel - 0.5;
+            let f = clamp((fract(p) - 0.5) * sharp + 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
+            uv = (floor(p) + 0.5 + f) / dims;
         }
     }
     var color = textureSample(t_source, s_source, uv);

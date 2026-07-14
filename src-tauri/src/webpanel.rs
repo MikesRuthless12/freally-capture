@@ -121,8 +121,9 @@ impl WebPanelState {
 }
 
 /// A best-effort LAN address for the QR code (never leaves the machine —
-/// this only asks the OS which interface would reach a LAN peer).
-fn local_ip() -> Option<String> {
+/// this only asks the OS which interface would reach a LAN peer). Shared
+/// with the Freally Link output (CAP-N12) for its announcer + address line.
+pub(crate) fn local_ip() -> Option<String> {
     // A UDP "connect" to a private address performs no traffic; it just makes
     // the OS pick the outgoing interface, whose address we then read.
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;

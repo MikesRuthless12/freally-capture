@@ -310,9 +310,29 @@ fn specs_to_configs(
                 SourceSettings::Media { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
+                // Playlist audio (CAP-N17): the concat decode thread feeds
+                // the same hub ring.
+                SourceSettings::Playlist { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
+                // Replay playback (CAP-N10): full-speed rolls feed the ring
+                // (slow-mo is silent by design).
+                SourceSettings::ReplayPlayback { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
                 // Remote-guest mic: the webview pushes the guest's WebRTC
                 // audio into the same hub ring (keyed by the source id).
                 SourceSettings::RemoteGuest { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
+                // LAN ingest (CAP-N11): the listener's demux thread feeds
+                // the same hub ring — the sender's audio gets its own strip.
+                SourceSettings::LanIngest { .. } => InputSpec::Media {
+                    id: spec.id.0.to_string(),
+                },
+                // Freally Link (CAP-N12): the receiver session pushes the
+                // sender's master audio into the same hub ring.
+                SourceSettings::FreallyLink { .. } => InputSpec::Media {
                     id: spec.id.0.to_string(),
                 },
                 // Per-app audio: the WASAPI process-loopback capture feeds the
@@ -557,6 +577,30 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn lan_ingest_maps_to_its_media_ring() {
+        // CAP-N11: the listener's demux thread feeds the hub ring keyed by
+        // the source id — exactly like Media — so the sender's audio gets
+        // its own strip.
+        let spec = AudioSourceSpec {
+            id: SourceId::new(),
+            settings: SourceSettings::LanIngest {
+                protocol: fcap_scene::IngestProtocol::Srt,
+                port: 9710,
+                passphrase: String::new(),
+            },
+            audio: AudioSettings::default(),
+            nonce: 0,
+        };
+        let configs = specs_to_configs(std::slice::from_ref(&spec), &HashSet::new());
+        assert_eq!(
+            configs[0].input,
+            InputSpec::Media {
+                id: spec.id.0.to_string()
+            }
+        );
     }
 
     #[test]

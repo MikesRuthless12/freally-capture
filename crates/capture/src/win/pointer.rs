@@ -9,22 +9,31 @@
 //! see the module note in `win/mod.rs`.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Dxgi::{
     DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR, DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR,
     DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME,
 };
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GdiFlush, GetBitmapBits,
-    GetObjectW, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, GdiFlush,
+    GetBitmapBits, GetObjectW, GetTextExtentPoint32W, SelectObject, SetBkMode, SetTextColor,
+    TextOutW, ANTIALIASED_QUALITY, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DIB_RGB_COLORS, OUT_DEFAULT_PRECIS, TRANSPARENT,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_LBUTTON,
+    VK_LEFT, VK_LWIN, VK_MENU, VK_RBUTTON, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DrawIconEx, GetAncestor, GetCursorInfo, GetIconInfo, GetWindowRect, WindowFromPoint,
     CURSORINFO, CURSOR_SHOWING, DI_NORMAL, GA_ROOT, HICON, ICONINFO,
 };
 
+use crate::cursorfx::{self, CursorFxConfig, FxState, KeyBadge};
 use crate::Frame;
 
 pub(crate) const SHAPE_COLOR: u32 = DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR.0 as u32;
@@ -460,11 +469,264 @@ fn draw_cursor_on(hicon: HICON, width: u32, height: u32, bg: u8) -> Option<Vec<u
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cursor-effects input sampling + keystroke badges (CAP-N19)
+// ---------------------------------------------------------------------------
+
+/// The mouse buttons as a `cursorfx::BUTTON_*` bitmask. Sampled only when a
+/// capture has a cursor-effects config with ripples on — otherwise nothing
+/// ever reads the buttons.
+pub(crate) fn sample_buttons() -> u8 {
+    let mut mask = 0u8;
+    // SAFETY: plain global key-state reads; no memory contract.
+    unsafe {
+        if GetAsyncKeyState(i32::from(VK_LBUTTON.0)) as u16 & 0x8000 != 0 {
+            mask |= cursorfx::BUTTON_LEFT;
+        }
+        if GetAsyncKeyState(i32::from(VK_RBUTTON.0)) as u16 & 0x8000 != 0 {
+            mask |= cursorfx::BUTTON_RIGHT;
+        }
+    }
+    mask
+}
+
+/// The FIXED key set keystroke ghosting may show: modifiers, letters, digits,
+/// and a few navigation keys — nothing outside this list is ever sampled.
+/// What is held gets drawn into the frame and immediately forgotten; nothing
+/// is stored or logged (the roadmap's explicit line).
+const GHOST_MODIFIERS: [VIRTUAL_KEY; 4] = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN];
+const GHOST_SPECIALS: [VIRTUAL_KEY; 10] = [
+    VK_ESCAPE, VK_TAB, VK_RETURN, VK_SPACE, VK_BACK, VK_DELETE, VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
+];
+
+/// Sample the fixed ghost-key set → held VKs in display order (modifiers
+/// first, so a chord reads "Ctrl Shift C"; capped so a mashed keyboard cannot
+/// flood the frame with badges).
+pub(crate) fn sample_ghost_keys() -> Vec<i32> {
+    const MAX_BADGES: usize = 6;
+    let mut held: Vec<i32> = Vec::new();
+    let modifiers = GHOST_MODIFIERS.iter().map(|vk| i32::from(vk.0));
+    let letters = 0x41..=0x5A; // A–Z (VK == ASCII)
+    let digits = 0x30..=0x39; // 0–9
+    let specials = GHOST_SPECIALS.iter().map(|vk| i32::from(vk.0));
+    for vk in modifiers.chain(letters).chain(digits).chain(specials) {
+        if held.len() >= MAX_BADGES {
+            break;
+        }
+        // SAFETY: plain global key-state read.
+        if unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0 {
+            held.push(vk);
+        }
+    }
+    held
+}
+
+/// A fixed-set VK's badge label. `None` for anything outside the set (never
+/// sampled anyway — belt and braces).
+fn ghost_label(vk: i32) -> Option<&'static str> {
+    const LETTERS: [&str; 26] = [
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R",
+        "S", "T", "U", "V", "W", "X", "Y", "Z",
+    ];
+    const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    match vk {
+        0x41..=0x5A => Some(LETTERS[(vk - 0x41) as usize]),
+        0x30..=0x39 => Some(DIGITS[(vk - 0x30) as usize]),
+        vk if vk == i32::from(VK_CONTROL.0) => Some("Ctrl"),
+        vk if vk == i32::from(VK_SHIFT.0) => Some("Shift"),
+        vk if vk == i32::from(VK_MENU.0) => Some("Alt"),
+        vk if vk == i32::from(VK_LWIN.0) => Some("Win"),
+        vk if vk == i32::from(VK_ESCAPE.0) => Some("Esc"),
+        vk if vk == i32::from(VK_TAB.0) => Some("Tab"),
+        vk if vk == i32::from(VK_RETURN.0) => Some("Enter"),
+        vk if vk == i32::from(VK_SPACE.0) => Some("Space"),
+        vk if vk == i32::from(VK_BACK.0) => Some("Bksp"),
+        vk if vk == i32::from(VK_DELETE.0) => Some("Del"),
+        vk if vk == i32::from(VK_LEFT.0) => Some("←"),
+        vk if vk == i32::from(VK_UP.0) => Some("↑"),
+        vk if vk == i32::from(VK_RIGHT.0) => Some("→"),
+        vk if vk == i32::from(VK_DOWN.0) => Some("↓"),
+        _ => None,
+    }
+}
+
+/// Renders and caches key-badge labels (GDI white-on-black → luminance-as-
+/// alpha, the `draw_cursor_on` trick) and draws them near the cursor. One per
+/// capture session; the fixed key set bounds the cache.
+pub(crate) struct KeyGhost {
+    cache: HashMap<i32, Option<KeyBadge>>,
+}
+
+impl KeyGhost {
+    pub(crate) fn new() -> Self {
+        KeyGhost {
+            cache: HashMap::new(),
+        }
+    }
+
+    /// One badge per held key, left-to-right just under the cursor hotspot
+    /// (the draw fns clip at the frame edges).
+    pub(crate) fn draw(&mut self, frame: &mut Frame, keys: &[i32], x: i32, y: i32) {
+        let mut at_x = x + 18;
+        let at_y = y + 26;
+        for &vk in keys {
+            let badge = self
+                .cache
+                .entry(vk)
+                .or_insert_with(|| ghost_label(vk).and_then(render_label));
+            if let Some(badge) = badge {
+                at_x += cursorfx::draw_badge(frame, at_x, at_y, badge);
+            }
+        }
+    }
+}
+
+/// Render one badge label to coverage bytes: GDI draws white text on a black
+/// 32-bpp DIB, and the green channel IS the anti-aliased coverage.
+fn render_label(label: &str) -> Option<KeyBadge> {
+    let text: Vec<u16> = label.encode_utf16().collect();
+    let face: Vec<u16> = "Segoe UI"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: a private memory DC + font + DIB section, all released before
+    // return; GDI only touches that DC.
+    unsafe {
+        let hdc = CreateCompatibleDC(None);
+        if hdc.is_invalid() {
+            return None;
+        }
+        // Pitch-and-family 0 = DEFAULT_PITCH | FF_DONTCARE.
+        let font = CreateFontW(
+            -14,
+            0,
+            0,
+            0,
+            600, // semibold — readable at badge size
+            0,
+            0,
+            0,
+            u32::from(DEFAULT_CHARSET.0),
+            u32::from(OUT_DEFAULT_PRECIS.0),
+            u32::from(CLIP_DEFAULT_PRECIS.0),
+            u32::from(ANTIALIASED_QUALITY.0), // grayscale AA — ClearType would color-fringe the alpha
+            0,
+            PCWSTR(face.as_ptr()),
+        );
+        let old_font = (!font.is_invalid()).then(|| SelectObject(hdc, font));
+        let release_font_dc = |old_font: Option<_>| {
+            if let Some(old) = old_font {
+                SelectObject(hdc, old);
+            }
+            if !font.is_invalid() {
+                let _ = DeleteObject(font);
+            }
+            let _ = DeleteDC(hdc);
+        };
+
+        let mut size = SIZE::default();
+        if !GetTextExtentPoint32W(hdc, &text, &mut size).as_bool() || size.cx <= 0 || size.cy <= 0 {
+            release_font_dc(old_font);
+            return None;
+        }
+        let (width, height) = (size.cx as u32, size.cy as u32);
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32), // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(dib) = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            release_font_dc(old_font);
+            return None;
+        };
+        if bits.is_null() {
+            let _ = DeleteObject(dib);
+            release_font_dc(old_font);
+            return None;
+        }
+        let old_bmp = SelectObject(hdc, dib);
+        let len = (width * height * 4) as usize;
+        let px = std::slice::from_raw_parts_mut(bits as *mut u8, len);
+        px.fill(0);
+        let _ = SetBkMode(hdc, TRANSPARENT);
+        let _ = SetTextColor(hdc, COLORREF(0x00FF_FFFF));
+        let drawn = TextOutW(hdc, 0, 0, &text).as_bool();
+        let _ = GdiFlush();
+        let out = drawn.then(|| {
+            let mut alpha = vec![0u8; (width * height) as usize];
+            for (i, slot) in alpha.iter_mut().enumerate() {
+                *slot = px[i * 4 + 1]; // green channel of white-on-black
+            }
+            KeyBadge {
+                width,
+                height,
+                alpha,
+            }
+        });
+        SelectObject(hdc, old_bmp);
+        let _ = DeleteObject(dib);
+        release_font_dc(old_font);
+        out
+    }
+}
+
+/// One capture tick's cursor-effects input pass: sample ONLY what the config
+/// enables (no config = no input reads at all), then advance the ripple /
+/// badge state. Returns true when the effects need a repaint even though the
+/// capture produced no frame.
+pub(crate) fn fx_tick(
+    fx: &mut FxState,
+    config: Option<&CursorFxConfig>,
+    x: i32,
+    y: i32,
+    over: bool,
+    now: Instant,
+) -> bool {
+    let buttons = if config.is_some_and(|c| c.ripples) {
+        sample_buttons()
+    } else {
+        0
+    };
+    let keys = if config.is_some_and(|c| c.keystrokes) {
+        sample_ghost_keys()
+    } else {
+        Vec::new()
+    };
+    fx.tick(config, buttons, &keys, x, y, over, now)
+}
+
+/// Draw the enabled effects into a frame the cursor was just blended into
+/// (halo + ripples from the shared draw fns, key badges from the GDI cache).
+#[allow(clippy::too_many_arguments)] // one call site per capture path; a struct would just rename them
+pub(crate) fn fx_draw(
+    frame: &mut Frame,
+    fx: &FxState,
+    ghost: &mut KeyGhost,
+    config: &CursorFxConfig,
+    x: i32,
+    y: i32,
+    over: bool,
+    now: Instant,
+) {
+    fx.draw(frame, config, x, y, over, now);
+    if config.keystrokes && over {
+        ghost.draw(frame, fx.held_keys(), x, y);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::PixelFormat;
-    use std::time::Instant;
 
     fn frame(w: u32, h: u32, fill: u8) -> Frame {
         Frame {

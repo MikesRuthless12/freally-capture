@@ -20,8 +20,44 @@
     </header>
 
     <main>
-      <!-- 0.200.0 — automation + capture & device depth (CAP-N Phases 1 & 9) -->
+      <!-- 0.300.0 — new sources & overlays (CAP-N Phase 2) -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.300.0</span>
+            <span class="date">Jul 14, 2026 · New Sources &amp; Overlays — CAP-N Phase 2</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.300.0">Download</a>
+        </div>
+
+        <h2>0.300.0 — New Sources &amp; Overlays (CAP-N Phase 2)</h2>
+        <p class="summary">
+          Ten new things to put on the canvas — all local. Instant replay rolls the buffer
+          <em>into</em> the show, a gapless media playlist replaces "one file at a time", titles
+          and scoreboards get a real layered designer with live control, and two LAN sources land:
+          an SRT/RTMP listener and <em>Freally Link</em>, an owned instance-to-instance share that
+          needs no ffmpeg on either end. The network invariant holds: both LAN features are off
+          until you add them, bind only the local machine, and never touch the internet — and the
+          input overlay and cursor effects read input only while enabled and never log or store a
+          keystroke.
+        </p>
+        <ul class="features">
+          <li><strong>Instant-replay playback source</strong> (CAP-N10) — a hotkey snapshots the armed replay buffer (stream copy, no re-encode) and plays it into the program at 100 / 50 / 25 % — retimed, never frame-interpolated — with scrub and pause; at the end the source clears back to transparent so the show returns to live by itself. Slow motion is silent by design: retimed audio would smear, and we don't fake it.</li>
+          <li><strong>LAN ingest source</strong> (CAP-N11) — a built-in SRT/RTMP listener: point any phone camera app, encoder, or second PC at the URL (shown with a QR code) and it lands in a scene with its own mixer strip. SRT carries an optional AES passphrase; RTMP has no authentication of its own — the form says so and prefers SRT.</li>
+          <li><strong>Freally Link</strong> (CAP-N12) — two Freally instances on one LAN: enable the Link output on one machine with a pairing key, hit "Scan the LAN" on the other, type the key, and the program appears as a source. A receiver without the key never sees a frame. An owned wire protocol + mDNS discovery — no ffmpeg, no broker, no server.</li>
+          <li><strong>Input overlay source</strong> (CAP-N13) — live keyboard, mouse, and gamepad visualization with four layouts (WASD, compact keyboard, dual-stick pad, 8-way fight stick). Reads input only while the source is enabled; never logs or stores anything. Keyboard/mouse are Windows-first — said honestly in-product; gamepads work on all three OSes.</li>
+          <li><strong>System-stats overlay source</strong> (CAP-N14) — the stats dock's real measured numbers (fps, CPU, memory, GPU compose time, dropped frames, live bitrate) composited for your viewers, with per-line toggles. GPU utilization is deliberately absent: we don't measure it, so we don't guess.</li>
+          <li><strong>Audio visualizer source</strong> (CAP-N15) — FFT spectrum bars, an oscilloscope, or stereo VU meters bound to any mixer strip, track bus, or the master mix — tapped post-fader, so a muted source visualizes flat, exactly as it sounds. Owned radix-2 FFT; no ML anywhere.</li>
+          <li><strong>Title &amp; scoreboard designer</strong> (CAP-N16) — layered templates (text, image, shape) with outline and drop-shadow text, animate-in/out (fade, slide, wipe), fields bound to a watched file (CSV cell, JSON pointer) or a studio variable, and live control — swap a name, edit the score, fire the animation — without touching the scene.</li>
+          <li><strong>Media playlist source</strong> (CAP-N17) — an ordered playlist that plays truly gaplessly (the whole trimmed list runs through one decode, so item boundaries are frame-exact), with per-item in/out trims and cue points, loop / shuffle / hold-last, next/previous hotkeys, and a "now playing" variable any Text source can show.</li>
+          <li><strong>Speedrun split timer source</strong> (CAP-N18) — import a LiveSplit .lss file and run it: personal-best / best-segments / average comparisons, gold-segment highlights, and global split / undo / skip / reset hotkeys. The file is read only — a run is never written back, and process-memory auto-splitters are deliberately not supported.</li>
+          <li><strong>Cursor highlight &amp; click effects</strong> (CAP-N19) — a cursor halo, colour-coded left/right click ripples, and optional keystroke ghosting drawn onto display and window captures, on the owned cursor path. Windows-only, honestly; keystrokes are drawn, never logged.</li>
+          <li><strong>Fixed: sharp-bilinear scaling</strong> — a 0.200.0 regression made it blurrier than plain bilinear (the shader measured texel edges, not centres); it now holds each texel's centre and crosses in a narrow seam, pinned by the per-scaler golden-frame tests owed since 0.200.0.</li>
+        </ul>
+      </article>
+
+      <!-- 0.200.0 — automation + capture & device depth (CAP-N Phases 1 & 9) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.200.0</span>

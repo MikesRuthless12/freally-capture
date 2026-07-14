@@ -36,6 +36,7 @@ mod win;
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 mod window_match;
 
+pub mod cursorfx;
 pub mod game;
 pub mod signals;
 pub mod tonemap;
@@ -385,6 +386,25 @@ pub fn window_process(id: &str) -> Option<(u32, String)> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = id;
+        None
+    }
+}
+
+/// Point-in-time "is this key down?" for a FIXED set of virtual keys —
+/// CAP-N13's input overlay (mouse buttons are VKs too: 0x01/0x02/0x04).
+/// A poll of `GetAsyncKeyState`, deliberately NOT a keyboard hook: no event
+/// queue, no buffer, nothing logged or stored — and the overlay calls it
+/// only while its source session is live. Windows-only today; other
+/// platforms return `None` and the overlay draws its keys unpressed (the
+/// picker says so honestly).
+pub fn keys_down(vks: &[u16]) -> Option<Vec<bool>> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(win::keys::keys_down(vks))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = vks;
         None
     }
 }

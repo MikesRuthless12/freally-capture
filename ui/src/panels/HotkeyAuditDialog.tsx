@@ -19,6 +19,13 @@ const ACTION_LABELS: Record<string, string> = {
   panic: "hotkey-audit-action-panic",
   timerToggle: "hotkey-audit-action-timer-toggle",
   timerReset: "hotkey-audit-action-timer-reset",
+  splitTimerSplit: "hotkey-audit-action-split-split",
+  splitTimerUndo: "hotkey-audit-action-split-undo",
+  splitTimerSkip: "hotkey-audit-action-split-skip",
+  splitTimerReset: "hotkey-audit-action-split-reset",
+  playlistNext: "hotkey-audit-action-playlist-next",
+  playlistPrevious: "hotkey-audit-action-playlist-previous",
+  replayRoll: "hotkey-audit-action-replay-roll",
   pushToTalk: "hotkey-audit-action-ptt",
   pushToMute: "hotkey-audit-action-ptm",
 };
@@ -33,6 +40,8 @@ const FEATURE_LABELS: Record<string, string> = {
   stills: "hotkey-audit-feature-stills",
   panic: "hotkey-audit-feature-panic",
   timers: "hotkey-audit-feature-timers",
+  splitTimer: "hotkey-audit-feature-split-timer",
+  playlist: "hotkey-audit-feature-playlist",
   audio: "hotkey-audit-feature-audio",
 };
 

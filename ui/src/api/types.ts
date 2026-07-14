@@ -95,6 +95,9 @@ export type Settings = {
   /** CAP-N74: capture id → HDR tone-map. Server-owned — written by
    * hdrToneMapSet and PRESERVED across settingsSet (never edit here). */
   hdrToneMap?: Record<string, HdrToneMapSetting>;
+  /** CAP-N19: capture id → cursor effects. Server-owned — written by
+   * cursorFxSet and PRESERVED across settingsSet (never edit here). */
+  cursorFx?: Record<string, CursorFxSetting>;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */
@@ -127,6 +130,28 @@ export type Settings = {
   ptz?: PtzSettings;
   /** MIDI control surfaces (CAP-N03). No port opens until one is picked. */
   midi?: MidiSettings;
+  /** The Freally Link output (CAP-N12). Off by default. */
+  link?: LinkSettings;
+};
+
+/** The Freally Link output (CAP-N12): share the program with one other
+ * Freally instance on the LAN. Off by default; one receiver at a time;
+ * v1 ships motion-JPEG + uncompressed audio over TCP — said in the UI. */
+export type LinkSettings = {
+  enabled: boolean;
+  port: number;
+  /** The name discovery advertises ("" = "Freally Capture"). */
+  name: string;
+  /** The pairing key receivers must present before a frame is served —
+   * required (8+ characters) to enable the output. */
+  key: string;
+};
+
+/** One Freally Link output found by the LAN scan (CAP-N12). */
+export type LinkPeer = {
+  name: string;
+  host: string;
+  port: number;
 };
 
 /** The fixed studio-command allowlist automation actions draw from
@@ -302,6 +327,19 @@ export type HdrToneMapSetting = {
   paperWhiteNits: number;
 };
 
+/** One capture's cursor effects (CAP-N19) — drawn into the frames on the
+ * owned (Windows) cursor path. Colors are `#rrggbb`. */
+export type CursorFxSetting = {
+  halo: boolean;
+  haloColor: string;
+  /** 8–128 px. */
+  haloRadius: number;
+  ripples: boolean;
+  leftColor: string;
+  rightColor: string;
+  keystrokes: boolean;
+};
+
 /** One browser dock: a named URL opened as its own dock window. */
 export type BrowserDockSettings = {
   name: string;
@@ -375,6 +413,16 @@ export type HotkeySettings = {
   zoom100: string | null;
   zoom150: string | null;
   zoom200: string | null;
+  /** Split-timer keys (CAP-N18) — each drives every live split timer. */
+  splitTimerSplit: string | null;
+  splitTimerUndo: string | null;
+  splitTimerSkip: string | null;
+  splitTimerReset: string | null;
+  /** Playlist transport (CAP-N17) — drives every live playlist. */
+  playlistNext: string | null;
+  playlistPrevious: string | null;
+  /** Roll every live Instant Replay source (CAP-N10). */
+  replayRoll: string | null;
 };
 
 /** The panic button's privacy slate (CAP-M22). */
@@ -784,6 +832,69 @@ export type VideoDeviceFormat = {
   fourcc: string;
 };
 
+/** CAP-N18: which reference the split timer compares against. */
+export type SplitComparison = "personalBest" | "bestSegments" | "average";
+
+/** CAP-N17: one playlist entry (trims in seconds; 0 = the edge). */
+export type PlaylistEntry = {
+  path: string;
+  /** In-trim, seconds (0 = the top). */
+  in: number;
+  /** Out-trim, seconds (0 = the end). */
+  out: number;
+  /** Cue points, seconds into the FILE (independent of the trims). */
+  cues: number[];
+};
+
+/** CAP-N10: a replay roll's speed — retimed, never interpolated. */
+export type ReplaySpeed = "full" | "half" | "quarter";
+
+/** CAP-N11: which protocol the LAN ingest listener speaks. */
+export type IngestProtocol = "srt" | "rtmp";
+
+/** CAP-N16: how a Title animates in and out. */
+export type TitleAnimation = "none" | "fade" | "slideLeft" | "slideUp" | "wipe";
+
+/** CAP-N16: one title layer (serde tag = `kind`), drawn in list order —
+ * later layers on top. */
+export type TitleLayer =
+  | {
+      kind: "text";
+      x: number;
+      y: number;
+      text: string;
+      fontFamily?: string | null;
+      fontFile?: string | null;
+      sizePx: number;
+      color: Rgba;
+      align: TextAlign;
+      /** Outline stroke width visible OUTSIDE the fill, px (0 = none). */
+      outlinePx: number;
+      outlineColor: Rgba;
+      /** A soft drop shadow, scaled with the type size. */
+      shadow: boolean;
+      /** CAP-M16: a watched local file this cell binds to ("" = the text field). */
+      sourceFile: string;
+      binding: FileBinding;
+      /** CSV: 1-based data row. */
+      csvRow: number;
+      /** CSV: column by header name or 1-based index. */
+      csvColumn: string;
+      /** JSON: an RFC 6901 pointer, e.g. /teams/0/score. */
+      jsonPointer: string;
+    }
+  | { kind: "image"; x: number; y: number; path: string }
+  | { kind: "rect"; x: number; y: number; width: number; height: number; color: Rgba };
+
+/** CAP-N15: which face the audio visualizer draws. */
+export type VisStyle = "bars" | "scope" | "vu";
+
+/** CAP-N13: which fixed layout the input overlay draws. */
+export type InputLayout = "wasd" | "keyboard" | "gamepad" | "fightstick";
+
+/** CAP-N15: what the audio visualizer listens to. */
+export type VisTargetKind = "master" | "track" | "source";
+
 /** Per-kind source settings (serde tag = `kind`). */
 export type SourceSettings =
   | { kind: "display"; captureId: string; label: string }
@@ -872,6 +983,108 @@ export type SourceSettings =
       fontFile?: string | null;
       sizePx: number;
       color: Rgba;
+    }
+  | {
+      kind: "systemStats";
+      showFps: boolean;
+      showCpu: boolean;
+      showMemory: boolean;
+      showRenderMs: boolean;
+      showDropped: boolean;
+      showBitrate: boolean;
+      fontFamily?: string | null;
+      fontFile?: string | null;
+      sizePx: number;
+      color: Rgba;
+    }
+  | {
+      kind: "audioVisualizer";
+      style: VisStyle;
+      target: VisTargetKind;
+      /** 1-based track bus (target = "track"). */
+      track: number;
+      /** The bound strip (target = "source"). */
+      source?: SourceId | null;
+      width: number;
+      height: number;
+      /** Spectrum bar count (bars style; the renderer clamps to 8–128). */
+      bands: number;
+      color: Rgba;
+      peakHold: boolean;
+      /** Bar fall rate, dB/s (the renderer clamps to 6–120). */
+      decay: number;
+    }
+  | {
+      kind: "splitTimer";
+      /** The `.lss` file (local only — network paths are refused). */
+      path: string;
+      comparison: SplitComparison;
+      width: number;
+      height: number;
+      sizePx: number;
+      color: Rgba;
+      /** Ahead-of-comparison delta color. */
+      ahead: Rgba;
+      /** Behind-comparison delta color. */
+      behind: Rgba;
+      /** Gold-segment highlight color. */
+      gold: Rgba;
+    }
+  | {
+      kind: "playlist";
+      items: PlaylistEntry[];
+      loop: boolean;
+      /** One shuffle draw per start (a looping shuffle repeats its order). */
+      shuffle: boolean;
+      /** Hold the last frame at the end (else clear to transparent). */
+      holdLast: boolean;
+      hwDecode: boolean;
+      /** The studio variable fed the playing item's name ("" = off). */
+      nowPlayingVariable: string;
+    }
+  | {
+      kind: "replayPlayback";
+      /** How much history a roll grabs, seconds (clamped to the buffer). */
+      seconds: number;
+      speed: ReplaySpeed;
+      hwDecode: boolean;
+    }
+  | {
+      kind: "lanIngest";
+      protocol: IngestProtocol;
+      /** The listen port (1024–65535; SRT defaults 9710, RTMP 1935). */
+      port: number;
+      /** SRT only. Empty = an open, unencrypted listener (the form warns). */
+      passphrase: string;
+    }
+  | {
+      kind: "inputOverlay";
+      /** CAP-N13: read only while live, only the layout's fixed keys — never logged. */
+      layout: InputLayout;
+      /** The idle key-cap / outline color. */
+      color: Rgba;
+      /** The pressed-state fill. */
+      accent: Rgba;
+    }
+  | {
+      kind: "title";
+      width: number;
+      height: number;
+      /** Drawn in list order — later layers on top. */
+      layers: TitleLayer[];
+      animation: TitleAnimation;
+      /** The in/out animation length, ms. */
+      durationMs: number;
+    }
+  | {
+      kind: "freallyLink";
+      /** The sending instance's address — an IPv4/hostname, no scheme. */
+      host: string;
+      port: number;
+      /** The label discovery showed (or the typed host:port). */
+      label: string;
+      /** The sender's pairing key, presented on connect. */
+      key: string;
     };
 
 export type SourceKindName = SourceSettings["kind"];
@@ -884,6 +1097,8 @@ export function kindHasAudio(kind: SourceKindName): boolean {
     kind === "appAudio" ||
     kind === "media" ||
     kind === "remoteGuest" ||
+    kind === "lanIngest" ||
+    kind === "freallyLink" ||
     kind === "testTone" ||
     kind === "testFlashBeep"
   );

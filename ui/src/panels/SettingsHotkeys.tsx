@@ -21,6 +21,13 @@ const FIELDS: Array<[keyof HotkeySettings, string, string]> = [
   ["zoom100", "hotkeys-zoom-100", "hotkeys-zoom-placeholder"],
   ["zoom150", "hotkeys-zoom-150", "hotkeys-zoom-placeholder"],
   ["zoom200", "hotkeys-zoom-200", "hotkeys-zoom-placeholder"],
+  ["splitTimerSplit", "hotkeys-split-split", "hotkeys-split-placeholder"],
+  ["splitTimerUndo", "hotkeys-split-undo", "hotkeys-split-placeholder"],
+  ["splitTimerSkip", "hotkeys-split-skip", "hotkeys-split-placeholder"],
+  ["splitTimerReset", "hotkeys-split-reset", "hotkeys-split-placeholder"],
+  ["playlistNext", "hotkeys-playlist-next", "hotkeys-playlist-placeholder"],
+  ["playlistPrevious", "hotkeys-playlist-previous", "hotkeys-playlist-placeholder"],
+  ["replayRoll", "hotkeys-replay-roll", "hotkeys-replay-roll-placeholder"],
 ];
 
 /**
@@ -60,6 +67,13 @@ export function SettingsHotkeys({
       zoom100: draft.zoom100?.trim() || null,
       zoom150: draft.zoom150?.trim() || null,
       zoom200: draft.zoom200?.trim() || null,
+      splitTimerSplit: draft.splitTimerSplit?.trim() || null,
+      splitTimerUndo: draft.splitTimerUndo?.trim() || null,
+      splitTimerSkip: draft.splitTimerSkip?.trim() || null,
+      splitTimerReset: draft.splitTimerReset?.trim() || null,
+      playlistNext: draft.playlistNext?.trim() || null,
+      playlistPrevious: draft.playlistPrevious?.trim() || null,
+      replayRoll: draft.replayRoll?.trim() || null,
     };
     const next = {
       ...settings,

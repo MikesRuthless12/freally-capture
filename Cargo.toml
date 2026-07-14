@@ -31,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.200.0"
+version = "0.300.0"
 edition = "2021"
 rust-version = "1.80"
 authors = ["Mike Weaver <mythodikalone@gmail.com>"]
@@ -97,6 +97,10 @@ image = "0.25"
 # MIDI control surfaces (CAP-N03). MIT — permissive, recorded in
 # THIRD-PARTY-NOTICES.
 midir = "0.11"
+# Gamepad state for the input overlay source (CAP-N13). Apache-2.0/MIT —
+# verified on crates.io, recorded in THIRD-PARTY-NOTICES. Polled only while
+# an overlay source is live; never logged. (Linux builds need libudev-dev.)
+gilrs = "0.11"
 rustybuzz = "0.18"     # shaping (incl. Arabic joining); ttf-parser re-export for outlines
 tiny-skia = "0.11"     # anti-aliased path rasterization for glyphs
 fontdb = "0.18"        # system font discovery (no fonts bundled yet)
