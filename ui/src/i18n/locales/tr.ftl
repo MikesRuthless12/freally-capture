@@ -1473,6 +1473,7 @@ distribute-v = Dikey dağıt
 guides-group = Kılavuzlar
 guides-add-v = Dikey kılavuz ekle
 guides-add-h = Yatay kılavuz ekle
+guides-clear = Tüm kılavuzları temizle
 history-arrangeItems = Öğeleri düzenle
 history-editGuides = Kılavuzları düzenle
 

@@ -1450,6 +1450,7 @@ distribute-v = Phân bố theo chiều dọc
 guides-group = Đường gióng
 guides-add-v = Thêm đường gióng dọc
 guides-add-h = Thêm đường gióng ngang
+guides-clear = Xóa tất cả đường gióng
 history-arrangeItems = Sắp xếp mục
 history-editGuides = Sửa đường gióng
 

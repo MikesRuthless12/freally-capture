@@ -1456,6 +1456,7 @@ distribute-v = 垂直分布
 guides-group = 参考线
 guides-add-v = 添加垂直参考线
 guides-add-h = 添加水平参考线
+guides-clear = 清除所有参考线
 history-arrangeItems = 排列项目
 history-editGuides = 编辑参考线
 

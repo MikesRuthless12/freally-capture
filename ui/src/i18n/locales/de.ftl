@@ -1450,6 +1450,7 @@ distribute-v = Vertikal verteilen
 guides-group = Hilfslinien
 guides-add-v = Vertikale Hilfslinie hinzufügen
 guides-add-h = Horizontale Hilfslinie hinzufügen
+guides-clear = Alle Hilfslinien entfernen
 history-arrangeItems = Elemente anordnen
 history-editGuides = Hilfslinien bearbeiten
 

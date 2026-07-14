@@ -1437,6 +1437,7 @@ distribute-v = توزيع رأسيًا
 guides-group = الأدلة
 guides-add-v = إضافة دليل رأسي
 guides-add-h = إضافة دليل أفقي
+guides-clear = إزالة كل الأدلة
 history-arrangeItems = ترتيب العناصر
 history-editGuides = تحرير الأدلة
 

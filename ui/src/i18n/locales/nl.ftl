@@ -1473,6 +1473,7 @@ distribute-v = Verticaal verdelen
 guides-group = Hulplijnen
 guides-add-v = Verticale hulplijn toevoegen
 guides-add-h = Horizontale hulplijn toevoegen
+guides-clear = Alle hulplijnen wissen
 history-arrangeItems = Items schikken
 history-editGuides = Hulplijnen bewerken
 

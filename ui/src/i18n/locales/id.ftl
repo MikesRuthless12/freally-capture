@@ -1472,6 +1472,7 @@ distribute-v = Distribusikan vertikal
 guides-group = Panduan
 guides-add-v = Tambah panduan vertikal
 guides-add-h = Tambah panduan horizontal
+guides-clear = Hapus semua panduan
 history-arrangeItems = Susun item
 history-editGuides = Edit panduan
 

@@ -1450,6 +1450,7 @@ distribute-v = 세로로 분포
 guides-group = 안내선
 guides-add-v = 세로 안내선 추가
 guides-add-h = 가로 안내선 추가
+guides-clear = 모든 안내선 지우기
 history-arrangeItems = 항목 정렬
 history-editGuides = 안내선 편집
 
