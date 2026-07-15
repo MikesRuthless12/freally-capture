@@ -7,6 +7,7 @@ import {
   captureStill,
   collectionSwitch,
   collectionsList,
+  openExternal,
   profileSwitch,
   profilesList,
   revealAppFolder,
@@ -31,6 +32,7 @@ export type AppMenuDialog =
   | "multiview"
   | "projector"
   | "downstream"
+  | "transitionRules"
   | "sourceHealth"
   | "avSync"
   | "hotkeyAudit"
@@ -453,6 +455,12 @@ export function MenuBar({
             label: t("menu-tools-downstream"),
             onSelect: () => onOpenApp("downstream"),
           },
+          {
+            kind: "item",
+            id: "transition-rules",
+            label: t("menu-tools-transition-rules"),
+            onSelect: () => onOpenApp("transitionRules"),
+          },
           sep,
           {
             kind: "item",
@@ -649,10 +657,16 @@ export function MenuBar({
     if (entry.kind === "separator") return;
     if (entry.kind !== "link" && entry.kind !== "radio" && entry.disabled) return;
     // Close first (the palette's rule): a dialog the action opens must not
-    // fight the menu for focus or the modal stack. Links let the anchor's own
-    // target=_blank default do the opening.
+    // fight the menu for focus or the modal stack.
     close(true);
-    if (entry.kind !== "link") entry.onSelect();
+    // This Tauri webview never follows an `<a target="_blank">` out to the OS
+    // browser (no opener plugin, external nav is blocked), so link rows go dead
+    // unless we hand the URL to the OS opener command explicitly.
+    if (entry.kind === "link") {
+      void openExternal(entry.href);
+      return;
+    }
+    entry.onSelect();
   };
 
   const onTriggerKeyDown = (event: React.KeyboardEvent, index: number) => {
@@ -826,10 +840,14 @@ export function MenuBar({
                     ref={setRef}
                     role="menuitem"
                     href={entry.href}
-                    target="_blank"
                     rel="noreferrer"
                     tabIndex={-1}
-                    onClick={() => activate(entry)}
+                    onClick={(event) => {
+                      // The webview won't navigate here anyway; keep the href
+                      // for context but route opening through the OS opener.
+                      event.preventDefault();
+                      activate(entry);
+                    }}
                     onPointerEnter={onPointerEnter}
                     className={itemClass(false)}
                   >

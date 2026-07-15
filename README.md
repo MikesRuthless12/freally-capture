@@ -12,9 +12,11 @@ leaves your machine is the stream you chose to send.
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
 > **Status: in development — 0.99.0 closed all 26 must-haves; the post-stable phases are landing
-> toward 1.0.0. 0.310.0 brings the first half of Phase 3 (Compositor & FX Depth): a blur family
-> (directional/radial/zoom/pixelate), a 3D perspective transform, a freeze-frame filter, one-click
-> source clones, and broadcast-style downstream keyers.** The engine is
+> toward 1.0.0. 0.400.0 completes Phase 3 (Compositor & FX Depth) with the five deferred features: a
+> move (morph) transition, transition rules (per-pair matrix + per-item show/hide), a shader studio
+> for user WGSL effects, a freehand bezier mask with luma-wipe export, and track-matte stingers with
+> an optional program-audio duck — on top of 0.310.0's blur family, 3D transform, freeze-frame,
+> source clones, and downstream keyers.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU

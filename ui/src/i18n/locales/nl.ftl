@@ -860,6 +860,25 @@ filters-opacity = Dekking
 filters-cube-file = .cube-bestand
 filters-amount = Hoeveelheid
 filters-radius = Straal
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galerij
+filters-shader-gallery-pick = Voorinstelling laden…
+filters-shader-gallery-grayscale = Grijstinten
+filters-shader-gallery-invert = Inverteren
+filters-shader-gallery-scanlines = Scanlijnen
+filters-shader-gallery-vignette = Vignet
+filters-shader-source = Shaderbroncode (WGSL)
+filters-shader-hint = Schrijf een WGSL-effect(uv, color, p, texel, time) dat een vec4 teruggeeft. Annoteer parameters met // @param name min max default voor schuifregelaars. Een ongeldige shader wordt genegeerd — de bron wordt ongefilterd weergegeven totdat hij compileert.
+filters-name-bezier-mask = Bézier-masker
+filters-mask-editor-hint = Sleep een punt om het te verplaatsen, dubbelklik om er een toe te voegen, rechtsklik op een punt om het te verwijderen.
+filters-mask-shape = Vorm
+filters-mask-shape-pick = Voorinstelling…
+filters-mask-shape-rectangle = Rechthoek
+filters-mask-shape-diamond = Ruit
+filters-mask-shape-hexagon = Zeshoek
+filters-mask-shape-circle = Cirkel
+filters-mask-feather = Zachte rand
+filters-mask-export-wipe = Exporteren als veeg…
 filters-mask-image = Maskerafbeelding
 filters-mask-mode = Modus
 filters-mask-alpha = alfa
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = stingervideo (ProRes 4444 .mov behoudt zijn
 studio-preview-stinger-label = Stingervideobestand
 studio-preview-stinger-cut-label = Stinger-snijpunt (ms)
 studio-preview-stinger-cut-title = Wanneer de scènewissel plaatsvindt onder de stinger (ms in de overgang)
+studio-preview-stinger-matte-label = Track matte
+studio-preview-stinger-matte-title = Hoe een track-matte-stinger transparantie inpakt: de vulling en zijn matte naast elkaar (horizontaal) of gestapeld (verticaal)
+studio-preview-stinger-duck-label = Programma ducken
+studio-preview-stinger-duck-title = Duck het programma-audio onder de eigen audio van de stinger terwijl deze speelt (0 = uit)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Snijden
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = Luma-wipe (ruit)
 transition-kind-luma-clock = Luma-wipe (klok)
 transition-kind-image = Afbeeldingswipe (aangepast)
 transition-kind-stinger = Stinger (video)
+transition-kind-move = Verplaatsen (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Geen
+stinger-matte-horizontal = Naast elkaar
+stinger-matte-vertical = Gestapeld
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2181,9 +2211,12 @@ transform-3d = 3D-kanteling
 transform-rotation-x = Kanteling X (°)
 transform-rotation-y = Kanteling Y (°)
 transform-perspective = Perspectief
+transform-reveal = Tonen/verbergen
+transform-reveal-ms = Infaden (ms)
 sources-clone-title = Klonen (zelfde feed, eigen filters)
 sources-clone-item = { $name } klonen
 menu-tools-downstream = Downstream-keyers…
+menu-tools-transition-rules = Overgangsregels…
 dsk-title = Downstream-keyers
 dsk-hint = Overlays die op de programma-uitvoer worden samengesteld — boven elke scène, en ze blijven staan wanneer je van scène wisselt (een logo, een LIVE-badge, een naambalk). Bovenaan de lijst wordt vooraan getekend.
 dsk-empty = Nog geen keyers — voeg een bron toe om die over elke scène te leggen.
@@ -2196,3 +2229,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Schaal
 dsk-add = + Keyer toevoegen
+transition-rules-title = Overgangsregels
+transition-rules-hint = Geef een scènepaar een eigen overgang. Wanneer je van de eerste scène naar de tweede overgaat, worden dit type en deze duur gebruikt in plaats van de standaard (een Stinger-/Afbeeldingsregel gebruikt nog steeds het bestand dat in de overgangsbediening is ingesteld).
+transition-rules-empty = Nog geen regels — elk scènepaar gebruikt de standaardovergang.
+transition-rules-from = Van
+transition-rules-to = Naar
+transition-rules-kind = Overgang
+transition-rules-duration = Duur (ms)
+transition-rules-add = Regel toevoegen
+transition-rules-remove = Regel verwijderen

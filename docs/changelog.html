@@ -8,20 +8,51 @@
       name="description"
       content="The Freally Capture changelog and roadmap to 1.0.0. Early development builds are downloadable per release; the studio MVP lands at 0.70.0."
     />
-    <link rel="icon" type="image/png" href="freally-icon.png" />
-    <link rel="apple-touch-icon" href="freally-icon.png" />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="favicon-96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="hero">
-      <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="96" height="96" />
+      <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="288" height="288" />
       <h1>Changelog</h1>
       <p class="sub">Every Freally Capture release lands here. Early development builds are downloadable per release; the studio MVP arrives at 0.70.0.</p>
     </header>
 
     <main>
-      <!-- 0.310.0 — compositor & FX depth -->
+      <!-- 0.400.0 — compositor & FX depth, Phase 3 complete -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.400.0</span>
+            <span class="date">Jul 15, 2026 · Compositor &amp; FX depth</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.400.0">Download</a>
+        </div>
+
+        <h2>0.400.0 — Compositor &amp; FX depth (Phase 3 complete)</h2>
+        <p class="summary">
+          The second half of Phase 3 lands the five deferred motion-and-effects features and
+          completes the phase: a move (morph) transition, transition rules, a shader studio for
+          user WGSL effects, a freehand bezier mask, and track-matte stingers with an optional
+          program-audio duck. Plus a fix to two Help-menu links that did nothing.
+        </p>
+        <ul class="features">
+          <li><strong>Move (morph) transition</strong> — items in both scenes animate from their old layout to the new one instead of cutting; items in only one scene fade in/out. Eased in and out.</li>
+          <li><strong>Transition rules</strong> — a per-scene-pair transition matrix (Tools → Transition Rules) plus per-item show/hide fade-in when an item is made visible.</li>
+          <li><strong>Shader studio</strong> — write a user WGSL effect as a filter: compiled and validated at runtime (an invalid shader is ignored, never a crash), with sliders auto-generated from <code>// @param</code> annotations and a built-in gallery.</li>
+          <li><strong>Bezier mask</strong> — draw a freehand closed path as a soft-edged mask (feather, invert, preset shapes) and export any path as a luma-wipe transition pattern.</li>
+          <li><strong>Track-matte stingers</strong> — carry a stinger's transparency as a track matte (fill and matte packed side-by-side or stacked) so alpha survives H.264/HEVC, with an optional program-audio duck under the stinger.</li>
+          <li><strong>Fixes</strong> — the Help menu's Visit Website and Help Portal links now open the browser (previously they did nothing).</li>
+        </ul>
+      </article>
+
+      <!-- 0.310.0 — compositor & FX depth -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.310.0</span>

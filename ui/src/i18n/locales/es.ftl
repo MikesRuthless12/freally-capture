@@ -844,6 +844,25 @@ filters-opacity = Opacidad
 filters-cube-file = archivo .cube
 filters-amount = Cantidad
 filters-radius = Radio
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galería
+filters-shader-gallery-pick = Cargar un preajuste…
+filters-shader-gallery-grayscale = Escala de grises
+filters-shader-gallery-invert = Invertir
+filters-shader-gallery-scanlines = Líneas de escaneo
+filters-shader-gallery-vignette = Viñeta
+filters-shader-source = Código del shader (WGSL)
+filters-shader-hint = Escribe un effect(uv, color, p, texel, time) en WGSL que devuelva un vec4. Anota los parámetros con // @param name min max default para crear deslizadores. Un shader no válido se ignora: la fuente se muestra sin filtrar hasta que compila.
+filters-name-bezier-mask = Máscara Bézier
+filters-mask-editor-hint = Arrastra un punto para moverlo, doble clic para añadir uno, clic derecho en un punto para eliminarlo.
+filters-mask-shape = Forma
+filters-mask-shape-pick = Preajuste…
+filters-mask-shape-rectangle = Rectángulo
+filters-mask-shape-diamond = Rombo
+filters-mask-shape-hexagon = Hexágono
+filters-mask-shape-circle = Círculo
+filters-mask-feather = Difuminado
+filters-mask-export-wipe = Exportar como cortinilla…
 filters-mask-image = Imagen de máscara
 filters-mask-mode = Modo
 filters-mask-alpha = alfa
@@ -1235,6 +1254,11 @@ studio-preview-stinger-placeholder = vídeo de stinger (ProRes 4444 .mov conserv
 studio-preview-stinger-label = Archivo de vídeo de stinger
 studio-preview-stinger-cut-label = Punto de corte del stinger (ms)
 studio-preview-stinger-cut-title = Cuándo se produce el cambio de escena bajo el stinger (ms dentro de la transición)
+studio-preview-stinger-matte-label = Mate de pista
+studio-preview-stinger-matte-title = Cómo un stinger con mate de pista integra la transparencia: el relleno y su mate uno al lado del otro (horizontal) o apilados (vertical)
+studio-preview-stinger-duck-label = Atenuar el programa
+studio-preview-stinger-duck-title = Atenúa el audio del programa por debajo del propio audio del stinger mientras se reproduce (0 = desactivado)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Corte
@@ -1252,6 +1276,12 @@ transition-kind-luma-diamond = Barrido Luma (rombo)
 transition-kind-luma-clock = Barrido Luma (reloj)
 transition-kind-image = Barrido de imagen (personalizado)
 transition-kind-stinger = Stinger (vídeo)
+transition-kind-move = Mover (morphing)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Ninguno
+stinger-matte-horizontal = Lado a lado
+stinger-matte-vertical = Apilado
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2158,9 +2188,12 @@ transform-3d = Inclinación 3D
 transform-rotation-x = Inclinación X (°)
 transform-rotation-y = Inclinación Y (°)
 transform-perspective = Perspectiva
+transform-reveal = Mostrar/ocultar
+transform-reveal-ms = Fundido de aparición (ms)
 sources-clone-title = Clonar (misma fuente, filtros propios)
 sources-clone-item = Clonar { $name }
 menu-tools-downstream = Keyers de salida…
+menu-tools-transition-rules = Reglas de transición…
 dsk-title = Keyers de salida
 dsk-hint = Superposiciones compuestas sobre la salida del programa — por encima de cada escena, y permanecen al cambiar de escena (un logotipo, una insignia EN VIVO, un rótulo inferior). El primero de la lista se dibuja encima.
 dsk-empty = Aún no hay keyers — añade una fuente para superponerla en todas las escenas.
@@ -2173,3 +2206,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Escala
 dsk-add = + Añadir keyer
+transition-rules-title = Reglas de transición
+transition-rules-hint = Da a un par de escenas su propia transición. Cuando pasas de la primera escena a la segunda, se usan este tipo y esta duración en lugar de los predeterminados (una regla Stinger/Imagen sigue usando el archivo definido en los controles de transición).
+transition-rules-empty = Aún no hay reglas: cada par de escenas usa la transición predeterminada.
+transition-rules-from = De
+transition-rules-to = A
+transition-rules-kind = Transición
+transition-rules-duration = Duración (ms)
+transition-rules-add = Añadir regla
+transition-rules-remove = Quitar regla

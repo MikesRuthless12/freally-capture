@@ -14,6 +14,7 @@ mod alarms;
 mod audio;
 mod autoconfig;
 mod automation;
+mod bezier_mask;
 mod bugreport;
 mod buildinfo;
 mod calibration;
@@ -252,6 +253,7 @@ fn main() {
             bugreport::bug_report_context,
             bugreport::bug_report_submit,
             bugreport::bug_report_clear_crash,
+            bugreport::open_external,
             diagnostics::diagnostics_preview,
             diagnostics::diagnostics_export,
             alarms::preflight_disk,
@@ -285,6 +287,7 @@ fn main() {
             commands::studio::studio_set_item_locked,
             commands::studio::studio_set_item_blend,
             commands::studio::studio_set_item_scaling,
+            commands::studio::studio_set_item_reveal,
             commands::studio::studio_apply_layout,
             commands::studio::studio_set_item_slot,
             commands::studio::studio_set_center_view,
@@ -297,6 +300,9 @@ fn main() {
             commands::studio::studio_set_studio_mode,
             commands::studio::studio_set_preview_scene,
             commands::studio::studio_transition,
+            commands::studio::studio_transition_override_set,
+            commands::studio::studio_transition_override_remove,
+            commands::studio::bezier_export_wipe,
             commands::studio::studio_rename_source,
             commands::studio::studio_update_source_settings,
             commands::studio::studio_retry_source,

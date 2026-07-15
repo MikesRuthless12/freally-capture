@@ -860,6 +860,25 @@ filters-opacity = 不透明度
 filters-cube-file = .cube ファイル
 filters-amount = 量
 filters-radius = 半径
+filters-name-shader = シェーダー (WGSL)
+filters-shader-gallery = ギャラリー
+filters-shader-gallery-pick = プリセットを読み込む…
+filters-shader-gallery-grayscale = グレースケール
+filters-shader-gallery-invert = 反転
+filters-shader-gallery-scanlines = 走査線
+filters-shader-gallery-vignette = ビネット
+filters-shader-source = シェーダーソース (WGSL)
+filters-shader-hint = vec4 を返す WGSL の effect(uv, color, p, texel, time) を記述します。スライダー用に // @param name min max default でパラメーターを注釈します。無効なシェーダーは無視され、コンパイルが通るまでソースはフィルターなしで表示されます。
+filters-name-bezier-mask = ベジェマスク
+filters-mask-editor-hint = 点をドラッグして移動、ダブルクリックで追加、点を右クリックで削除します。
+filters-mask-shape = 形状
+filters-mask-shape-pick = プリセット…
+filters-mask-shape-rectangle = 長方形
+filters-mask-shape-diamond = ひし形
+filters-mask-shape-hexagon = 六角形
+filters-mask-shape-circle = 円
+filters-mask-feather = ぼかし
+filters-mask-export-wipe = ワイプとして書き出す…
 filters-mask-image = マスク画像
 filters-mask-mode = モード
 filters-mask-alpha = アルファ
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = スティンガー動画 (ProRes 4444 .mov 
 studio-preview-stinger-label = スティンガー動画ファイル
 studio-preview-stinger-cut-label = スティンガーのカットポイント (ms)
 studio-preview-stinger-cut-title = スティンガーの下でシーンが切り替わるタイミング（トランジション開始からのms）
+studio-preview-stinger-matte-label = トラックマット
+studio-preview-stinger-matte-title = トラックマットのスティンガーが透明度をどうまとめるか：塗り（フィル）とそのマットを横並び（水平）または縦並び（垂直）に配置
+studio-preview-stinger-duck-label = プログラムをダッキング
+studio-preview-stinger-duck-title = 再生中、スティンガー自身の音声の下にプログラム音声をダッキングする（0 = オフ）
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = カット
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = ルマワイプ（ダイヤモンド）
 transition-kind-luma-clock = ルマワイプ（時計）
 transition-kind-image = 画像ワイプ（カスタム）
 transition-kind-stinger = スティンガー（動画）
+transition-kind-move = 移動（モーフ）
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = なし
+stinger-matte-horizontal = 横並び
+stinger-matte-vertical = 縦並び
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2181,9 +2211,12 @@ transform-3d = 3D チルト
 transform-rotation-x = チルト X (°)
 transform-rotation-y = チルト Y (°)
 transform-perspective = 遠近感
+transform-reveal = 表示/非表示
+transform-reveal-ms = 表示フェードイン (ms)
 sources-clone-title = クローン（同じ映像、独自のフィルター）
 sources-clone-item = { $name } をクローン
 menu-tools-downstream = ダウンストリームキーヤー…
+menu-tools-transition-rules = トランジションルール…
 dsk-title = ダウンストリームキーヤー
 dsk-hint = プログラム出力に合成されるオーバーレイ — すべてのシーンの上に表示され、シーンを切り替えても残ります（ロゴ、LIVE バッジ、下部テロップなど）。リストの一番上が最前面に描画されます。
 dsk-empty = キーヤーはまだありません — ソースを追加して、すべてのシーンに重ねて表示します。
@@ -2196,3 +2229,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = 拡大縮小
 dsk-add = + キーヤーを追加
+transition-rules-title = トランジションルール
+transition-rules-hint = シーンの組み合わせに専用のトランジションを設定します。最初のシーンから2つ目へ切り替えると、既定の代わりにこの種類と長さが使われます（スティンガー/画像のルールはトランジションコントロールで設定したファイルを引き続き使用します）。
+transition-rules-empty = まだルールがありません — すべてのシーンの組み合わせは既定のトランジションを使用します。
+transition-rules-from = 移行元
+transition-rules-to = 移行先
+transition-rules-kind = トランジション
+transition-rules-duration = 長さ (ms)
+transition-rules-add = ルールを追加
+transition-rules-remove = ルールを削除

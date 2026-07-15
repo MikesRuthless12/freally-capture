@@ -110,6 +110,10 @@ pub struct StudioModeDto {
     pub transitioning: bool,
 }
 
+/// The media-hub id the stinger's decoded audio is keyed under (CAP-N29): the
+/// producer (`start_media`) and the transition-duck consumer must agree on it.
+const STINGER_HUB_ID: &str = "stinger-transition";
+
 /// A running Preview→Program commit blend.
 struct ActiveTransition {
     from: SceneId,
@@ -123,6 +127,8 @@ struct ActiveTransition {
     cut: f32,
     /// The custom luma-wipe image (tight RGBA), when the kind is `LumaImage`.
     luma: Option<Arc<(u32, u32, Vec<u8>)>>,
+    /// Track-matte mode for a stinger (CAP-N29) — `None` for plain stingers.
+    matte: fcap_scene::StingerMatte,
 }
 
 /// What the render loop pulls per tick while a transition runs.
@@ -135,6 +141,17 @@ pub(crate) struct TransitionFramePack {
     /// uploaded one keeps covering).
     pub stinger_frame: Option<fcap_capture::Frame>,
     pub luma: Option<Arc<(u32, u32, Vec<u8>)>>,
+    /// Track-matte mode for a stinger (CAP-N29).
+    pub matte: fcap_scene::StingerMatte,
+}
+
+/// Smootherstep easing (CAP-N21): a linear 0..1 progress eased to a smooth
+/// accelerate-in / settle-out curve (zero first and second derivatives at both
+/// ends) — the blend/move transitions read this so nothing starts or stops with
+/// a jolt. Endpoints are exact (0→0, 1→1), so transition completion is unaffected.
+fn ease_in_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 /// Keying-workbench render mode (CAP-M26). The workbench shows one source.
@@ -828,10 +845,11 @@ impl StudioState {
                         .to_string(),
                 );
             }
-            // The stinger's own audio is not mixed (v1) — video only,
-            // always forward.
+            // The stinger's audio is decoded into the media hub (CAP-N29 reads
+            // its envelope to duck the program) but never mixed into the
+            // program itself — video only, always forward.
             Some(
-                fcap_sources::media::start_media("stinger-transition", path, false, true, false)
+                fcap_sources::media::start_media(STINGER_HUB_ID, path, false, true, false)
                     .map_err(|err| format!("stinger: {err}"))?,
             )
         } else {
@@ -875,6 +893,7 @@ impl StudioState {
                     stinger,
                     cut,
                     luma,
+                    matte: settings.stinger_matte,
                 });
             }
             core.revision += 1;
@@ -882,7 +901,63 @@ impl StudioState {
             dto_of(&core)
         };
         let _ = app.emit("studio", &dto);
+        // CAP-N29: a stinger with a configured duck depth ducks the program
+        // under its own audio envelope. Reaching here means a real transition
+        // started (the panes-equal / studio-off / empty-path cases returned
+        // above). Off when the depth is 0 (the default).
+        if kind == fcap_scene::TransitionKind::Stinger && settings.stinger_duck_db > 0.0 {
+            app.state::<crate::audio::AudioRuntime>()
+                .engine
+                .set_transition_duck(Some(fcap_audio::TransitionDuckSpec {
+                    hub_id: STINGER_HUB_ID.to_string(),
+                    depth_db: settings.stinger_duck_db,
+                    attack_ms: 40.0,
+                    release_ms: 250.0,
+                    threshold_db: -45.0,
+                }));
+        }
         Ok(())
+    }
+
+    /// A bezier mask's path/feather/invert (CAP-N28), for the wipe export.
+    pub fn bezier_mask_params(
+        &self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        filter_id: FilterId,
+    ) -> Result<(Vec<[f32; 2]>, f32, bool), String> {
+        let core = self.lock();
+        let scene = core.collection.scene(scene_id).ok_or("scene not found")?;
+        let item = scene
+            .items
+            .iter()
+            .find(|item| item.id == item_id)
+            .ok_or("item not found")?;
+        let filter = item
+            .filters
+            .iter()
+            .find(|filter| filter.id == filter_id)
+            .ok_or("filter not found")?;
+        match &filter.kind {
+            fcap_scene::FilterKind::BezierMask {
+                points,
+                feather,
+                invert,
+            } => Ok((points.clone(), *feather, *invert)),
+            _ => Err("not a bezier mask".into()),
+        }
+    }
+
+    /// The per-scene-pair transition rule (CAP-N21) for the pending
+    /// Preview→Program commit — `(kind, duration_ms)` — or `None` if studio
+    /// mode is off or no rule matches the active→preview pair.
+    pub fn transition_override(&self) -> Option<(fcap_scene::TransitionKind, u32)> {
+        let core = self.lock();
+        let to = core.preview_scene?;
+        let from = core.collection.active_scene;
+        core.collection
+            .transition_override(from, to)
+            .map(|rule| (rule.kind, rule.duration_ms))
     }
 
     /// The current model revision — a cheap read the audio bridge polls to
@@ -1458,6 +1533,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut capture_specs: HashMap<SourceId, String> = HashMap::new();
     let mut static_specs: HashMap<SourceId, String> = HashMap::new();
     let mut filter_files: HashMap<FilterId, String> = HashMap::new();
+    // Bezier masks (CAP-N28): the signature of each mask filter last rasterized
+    // — re-raster only when the path/feather/invert actually change.
+    let mut bezier_sigs: HashMap<FilterId, u64> = HashMap::new();
     let mut statuses: HashMap<SourceId, SourceRuntime> = HashMap::new();
 
     let mut composed_this_second = 0u32;
@@ -1537,6 +1615,12 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // Punch-in zoom lenses (CAP-N71): the loop-side animated state, keyed by
     // item. Entries whose target vanished spring back to flat, then drop.
     let mut lens_anim: HashMap<ItemId, LensAnim> = HashMap::new();
+    // Show/hide fade-in (CAP-N21): the active scene last seen (a scene switch
+    // resets tracking so a transition never double-animates), each item's last
+    // visibility (to catch the make-visible edge), and when a reveal began.
+    let mut reveal_scene: Option<SceneId> = None;
+    let mut reveal_prev_visible: HashMap<ItemId, bool> = HashMap::new();
+    let mut reveal_started: HashMap<ItemId, Instant> = HashMap::new();
     // Auto black-bar crop (CAP-N72): the source resolution each armed item
     // last saw — follow-mode re-detects only when it changes.
     let mut autocrop_dims: HashMap<ItemId, (u32, u32)> = HashMap::new();
@@ -1666,6 +1750,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 cut: tr.cut,
                                 stinger_frame,
                                 luma: tr.luma.clone(),
+                                matte: tr.matte,
                             }
                         })
                     }
@@ -2005,6 +2090,45 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     .map(|(id, anim)| (*id, (anim.zoom, anim.anchor)))
                     .collect(),
             );
+        }
+
+        // -- 1c. Show/hide fade-in (CAP-N21): when an item with reveal_ms > 0
+        // is made visible WITHIN the live scene, ramp its opacity 0→1. A scene
+        // switch resets tracking (no edge), so the transition owns that motion
+        // and items never double-animate. Fully-revealed items leave the map
+        // (absent = opaque), so a scene with no reveal is pixel-identical.
+        {
+            let scene_changed = reveal_scene != Some(scene.id);
+            if scene_changed {
+                reveal_scene = Some(scene.id);
+                reveal_prev_visible.clear();
+                reveal_started.clear();
+                for item in &scene.items {
+                    reveal_prev_visible.insert(item.id, item.visible);
+                }
+            } else {
+                for item in &scene.items {
+                    let was = reveal_prev_visible.get(&item.id).copied().unwrap_or(true);
+                    if item.reveal_ms > 0 && item.visible && !was {
+                        reveal_started.insert(item.id, Instant::now());
+                    }
+                    reveal_prev_visible.insert(item.id, item.visible);
+                }
+            }
+            let mut opacities: HashMap<ItemId, f32> = HashMap::new();
+            reveal_started.retain(|id, started| {
+                let Some(item) = scene.items.iter().find(|it| it.id == *id) else {
+                    return false; // the item left the scene — drop it
+                };
+                let progress =
+                    started.elapsed().as_secs_f32() / (item.reveal_ms as f32 / 1000.0).max(1e-3);
+                if progress >= 1.0 {
+                    return false; // fully revealed — opaque, no override needed
+                }
+                opacities.insert(*id, progress.clamp(0.0, 1.0));
+                true
+            });
+            compositor.set_item_opacity(opacities);
         }
 
         // Hand the compositor a fresh nested-scene pool only when the model
@@ -2441,6 +2565,39 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let mut live_filters: Vec<FilterId> = Vec::new();
             for item in scene.items.iter().chain(extra_items.iter()) {
                 for filter in &item.filters {
+                    // Bezier masks (CAP-N28): rasterize the path app-side into
+                    // the same alpha-mask resource an image mask uses, only when
+                    // its signature changes.
+                    if let fcap_scene::FilterKind::BezierMask {
+                        points,
+                        feather,
+                        invert,
+                    } = &filter.kind
+                    {
+                        live_filters.push(filter.id);
+                        let sig = bezier_signature(points, *feather, *invert);
+                        if bezier_sigs.get(&filter.id) != Some(&sig) {
+                            bezier_sigs.insert(filter.id, sig);
+                            match crate::bezier_mask::mask_rgba(points, *feather, *invert) {
+                                Some(rgba) => {
+                                    let data = FilterResourceData::Image {
+                                        width: crate::bezier_mask::MASK_SIZE,
+                                        height: crate::bezier_mask::MASK_SIZE,
+                                        rgba,
+                                    };
+                                    if let Err(err) =
+                                        compositor.set_filter_resource(filter.id, &data)
+                                    {
+                                        eprintln!("studio: bezier mask: {err}");
+                                    }
+                                }
+                                // <3 points: no shape — drop the resource so the
+                                // item renders unmasked.
+                                None => compositor.remove_filter_resource(filter.id),
+                            }
+                        }
+                        continue;
+                    }
                     if let Some(path) = filter_file_path(&filter.kind) {
                         live_filters.push(filter.id);
                         if filter_files.get(&filter.id) != Some(&path) {
@@ -2463,6 +2620,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
             }
             filter_files.retain(|id, _| live_filters.contains(id));
+            bezier_sigs.retain(|id, _| live_filters.contains(id));
             compositor.retain_filter_resources(&live_filters);
         }
 
@@ -3226,6 +3384,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 compositor.set_transition_luma(pack.luma.as_ref().map(|luma| (**luma).clone()));
             }
         } else {
+            if transition_was_active {
+                // CAP-N29: the transition just ended — whether it completed
+                // above or was cleared externally (collection load / save-as,
+                // studio-mode off) — so release the audio duck exactly once
+                // (a no-op if one was never armed).
+                app.state::<crate::audio::AudioRuntime>()
+                    .engine
+                    .set_transition_duck(None);
+            }
             transition_was_active = false;
         }
         // CAP-N25: snapshot newly-frozen items (their source is uploaded above)
@@ -3242,13 +3409,25 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 } else {
                     &scene
                 };
-                compositor.render_scene_with_stinger(shown, time, pack.stinger_frame.as_ref())
+                compositor.render_scene_with_stinger(
+                    shown,
+                    time,
+                    pack.stinger_frame.as_ref(),
+                    pack.matte,
+                )
+            }
+            Some(pack) if pack.kind == fcap_scene::TransitionKind::Move => {
+                // CAP-N20: matched items morph between the two layouts.
+                // CAP-N21: eased so the motion accelerates in and settles out.
+                compositor.render_move(&pack.from_scene, &scene, ease_in_out(pack.progress), time)
             }
             Some(pack) => compositor.render_transition(
                 &pack.from_scene,
                 &scene,
                 pack.kind,
-                pack.progress,
+                // CAP-N21: ease the blend (linear progress still drives cut /
+                // completion timing; only the visible curve is eased).
+                ease_in_out(pack.progress),
                 time,
             ),
             None => compositor.render(&scene, time),
@@ -4808,6 +4987,20 @@ fn filter_file_path(kind: &FilterKind) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// A stable hash of a bezier mask's inputs (CAP-N28) so the render loop only
+/// re-rasterizes when the path, feather, or invert actually change.
+fn bezier_signature(points: &[[f32; 2]], feather: f32, invert: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for point in points {
+        point[0].to_bits().hash(&mut hasher);
+        point[1].to_bits().hash(&mut hasher);
+    }
+    feather.to_bits().hash(&mut hasher);
+    invert.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Load + decode a filter's file into compositor-ready data.

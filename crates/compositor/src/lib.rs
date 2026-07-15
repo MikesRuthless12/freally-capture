@@ -50,7 +50,9 @@ pub enum CompositorError {
 mod tests {
     use super::*;
     use fcap_capture::{Frame, PixelFormat};
-    use fcap_scene::{BlendMode, Collection, Rgba, Source, SourceId, SourceSettings, Transform};
+    use fcap_scene::{
+        BlendMode, Collection, Rgba, Source, SourceId, SourceSettings, StingerMatte, Transform,
+    };
     use std::time::Instant;
 
     #[test]
@@ -1122,6 +1124,221 @@ mod tests {
             pixel(&comp.read_program().unwrap(), 2, 4),
             [0, 255, 0, 255],
             "thaw resumes the live source"
+        );
+    }
+
+    /// CAP-N29: a track-matte stinger derives per-pixel alpha from the matte
+    /// half — fill shows where the matte is white, the program shows through
+    /// where it is black — for both the horizontal and vertical splits.
+    #[test]
+    fn track_matte_stinger_keys_fill_by_the_matte_half() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        // A solid blue program to show through the transparent parts.
+        let bg = SourceId::new();
+        comp.upload_frame(bg, &solid_frame(8, 8, PixelFormat::Rgba8, [0, 0, 255, 255]))
+            .expect("upload background");
+        let collection = scene_with_item((8, 8), bg, centered((8, 8)), BlendMode::Normal);
+
+        // Horizontal: red fill in the LEFT half; matte in the RIGHT half —
+        // white (opaque) on top, black (transparent) on the bottom.
+        let mut h = Vec::with_capacity(8 * 8 * 4);
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let px = if x < 4 {
+                    [255, 0, 0, 255]
+                } else if y < 4 {
+                    [255, 255, 255, 255]
+                } else {
+                    [0, 0, 0, 255]
+                };
+                h.extend_from_slice(&px);
+            }
+        }
+        let frame = Frame {
+            width: 8,
+            height: 8,
+            stride: 32,
+            format: PixelFormat::Rgba8,
+            data: h,
+            captured_at: Instant::now(),
+        };
+        comp.render_scene_with_stinger(
+            collection.active_scene(),
+            0.0,
+            Some(&frame),
+            StingerMatte::Horizontal,
+        )
+        .expect("horizontal matte");
+        let out = comp.read_program().expect("readback");
+        let top = pixel(&out, 2, 1);
+        assert!(
+            top[0] > 250 && top[1] < 5 && top[2] < 5,
+            "white matte → the red fill is opaque: {top:?}"
+        );
+        let bottom = pixel(&out, 2, 6);
+        assert!(
+            bottom[2] > 250 && bottom[0] < 5 && bottom[1] < 5,
+            "black matte → the blue program shows through: {bottom:?}"
+        );
+
+        // Vertical: red fill in the TOP half; matte in the BOTTOM half — white
+        // (opaque) on the left, black (transparent) on the right.
+        let mut v = Vec::with_capacity(8 * 8 * 4);
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let px = if y < 4 {
+                    [255, 0, 0, 255]
+                } else if x < 4 {
+                    [255, 255, 255, 255]
+                } else {
+                    [0, 0, 0, 255]
+                };
+                v.extend_from_slice(&px);
+            }
+        }
+        let frame = Frame {
+            width: 8,
+            height: 8,
+            stride: 32,
+            format: PixelFormat::Rgba8,
+            data: v,
+            captured_at: Instant::now(),
+        };
+        comp.render_scene_with_stinger(
+            collection.active_scene(),
+            0.0,
+            Some(&frame),
+            StingerMatte::Vertical,
+        )
+        .expect("vertical matte");
+        let out = comp.read_program().expect("readback");
+        let left = pixel(&out, 1, 2);
+        assert!(
+            left[0] > 250 && left[1] < 5 && left[2] < 5,
+            "white matte → the red fill is opaque: {left:?}"
+        );
+        let right = pixel(&out, 6, 2);
+        assert!(
+            right[2] > 250 && right[0] < 5 && right[1] < 5,
+            "black matte → the blue program shows through: {right:?}"
+        );
+    }
+
+    /// CAP-N20: a move transition interpolates a matched item's transform —
+    /// a source in both scenes travels from its outgoing position to its
+    /// incoming one, reaching the midpoint at progress 0.5.
+    #[test]
+    fn move_transition_interpolates_a_matched_item() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+
+        // A 2px-wide vertical strip of the source, at x=2 in the outgoing scene
+        // and x=6 in the incoming one — so its center travels 2 → 4 → 6.
+        let strip = |x: f32| Transform {
+            x,
+            y: 4.0,
+            scale_x: 0.25,
+            scale_y: 1.0,
+            ..Transform::default()
+        };
+        let mut collection = scene_with_item((8, 8), source, strip(2.0), BlendMode::Normal);
+        let from_scene = collection.active_scene().clone();
+        let scene_id = collection.active_scene;
+        let item = collection.active_scene().items[0].id;
+        collection
+            .set_item_transform(scene_id, item, strip(6.0))
+            .expect("to transform");
+        let to_scene = collection.active_scene().clone();
+
+        let is_red = |px: [u8; 4]| px[0] > 200 && px[1] < 50 && px[2] < 50;
+        let is_black = |px: [u8; 4]| px[0] < 50 && px[1] < 50 && px[2] < 50;
+
+        // progress 0 → the outgoing position (x=2).
+        comp.render_move(&from_scene, &to_scene, 0.0, 0.0)
+            .expect("p=0");
+        let out = comp.read_program().expect("readback");
+        assert!(is_red(pixel(&out, 2, 4)), "start: strip at x=2");
+        assert!(is_black(pixel(&out, 6, 4)), "start: nothing at x=6");
+
+        // progress 0.5 → the midpoint (x=4), nowhere near either end.
+        comp.render_move(&from_scene, &to_scene, 0.5, 0.0)
+            .expect("p=0.5");
+        let out = comp.read_program().expect("readback");
+        assert!(is_red(pixel(&out, 4, 4)), "mid: strip reached x=4");
+        assert!(is_black(pixel(&out, 2, 4)), "mid: it left x=2");
+        assert!(is_black(pixel(&out, 6, 4)), "mid: not yet at x=6");
+
+        // progress 1 → the incoming position (x=6).
+        comp.render_move(&from_scene, &to_scene, 1.0, 0.0)
+            .expect("p=1");
+        let out = comp.read_program().expect("readback");
+        assert!(is_red(pixel(&out, 6, 4)), "end: strip at x=6");
+        assert!(is_black(pixel(&out, 2, 4)), "end: nothing at x=2");
+    }
+
+    /// CAP-N22: a valid user WGSL effect runs (invert turns red → cyan); an
+    /// invalid one is skipped so the item renders unfiltered — never a crash.
+    #[test]
+    fn user_shader_runs_and_a_bad_one_is_skipped() {
+        use fcap_scene::FilterKind;
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+        let mut collection = scene_with_item((8, 8), source, centered((8, 8)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = collection.active_scene().items[0].id;
+
+        // A valid invert effect: cyan out of red.
+        let invert = "fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32> { return vec4<f32>(vec3<f32>(1.0) - color.rgb, color.a); }";
+        let fid = collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::UserShader {
+                    source: invert.into(),
+                    params: Vec::new(),
+                },
+            )
+            .expect("add shader");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        assert_eq!(
+            pixel(&comp.read_program().unwrap(), 4, 4),
+            [0, 255, 255, 255],
+            "the invert shader ran"
+        );
+
+        // Replace it with invalid WGSL: the pass is skipped, the item renders raw.
+        collection
+            .update_filter(
+                scene,
+                item,
+                fid,
+                FilterKind::UserShader {
+                    source: "definitely not wgsl".into(),
+                    params: Vec::new(),
+                },
+            )
+            .expect("update shader");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        assert_eq!(
+            pixel(&comp.read_program().unwrap(), 4, 4),
+            [255, 0, 0, 255],
+            "an invalid shader is skipped → the item renders unfiltered"
         );
     }
 

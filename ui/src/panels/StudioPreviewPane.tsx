@@ -3,8 +3,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { settingsSet, studioTransition } from "../api/commands";
-import type { Settings, TransitionKind } from "../api/types";
-import { TRANSITION_KINDS } from "../api/types";
+import type { Settings, StingerMatte, TransitionKind } from "../api/types";
+import { STINGER_MATTES, TRANSITION_KINDS } from "../api/types";
 import { useT } from "../i18n/t";
 
 /** How often the pane refetches its JPEG (~10 fps is plenty for a preview). */
@@ -226,6 +226,45 @@ export function StudioPreviewPane({
             title={t("studio-preview-stinger-cut-title")}
             className="w-20 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
           />
+        </div>
+      )}
+      {transition?.kind === "stinger" && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <label className="text-[11px] text-havoc-muted">
+            {t("studio-preview-stinger-matte-label")}
+          </label>
+          <select
+            value={transition.stingerMatte ?? "none"}
+            onChange={(event) =>
+              saveTransition({ stingerMatte: event.target.value as StingerMatte })
+            }
+            aria-label={t("studio-preview-stinger-matte-label")}
+            title={t("studio-preview-stinger-matte-title")}
+            className="rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
+          >
+            {STINGER_MATTES.map(([value, key]) => (
+              <option key={value} value={value}>
+                {t(key)}
+              </option>
+            ))}
+          </select>
+          <label className="ml-2 text-[11px] text-havoc-muted">
+            {t("studio-preview-stinger-duck-label")}
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={60}
+            step={1}
+            value={transition.stingerDuckDb ?? 0}
+            onChange={(event) => saveTransition({ stingerDuckDb: Number(event.target.value) })}
+            aria-label={t("studio-preview-stinger-duck-label")}
+            title={t("studio-preview-stinger-duck-title")}
+            className="w-16 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
+          />
+          <span className="text-[11px] text-havoc-muted">
+            {t("studio-preview-stinger-duck-unit")}
+          </span>
         </div>
       )}
       {error && (

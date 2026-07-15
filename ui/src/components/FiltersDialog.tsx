@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { useDismiss } from "../lib/useDismiss";
 
+import { save } from "@tauri-apps/plugin-dialog";
+
 import {
+  bezierExportWipe,
   cursorFxSet,
   settingsGet,
   studioAddFilter,
@@ -25,6 +28,7 @@ import type {
   Filter,
   FilterKind,
   FilterTypeName,
+  ItemId,
   Rgba,
   ScaleMode,
   SceneId,
@@ -69,7 +73,49 @@ const FILTER_NAME_KEYS: Record<FilterTypeName, string> = {
   zoomBlur: "filters-name-zoom-blur",
   pixelate: "filters-name-pixelate",
   freeze: "filters-name-freeze",
+  userShader: "filters-name-shader",
+  bezierMask: "filters-name-bezier-mask",
 };
+
+/** A curated built-in gallery of user WGSL effects (CAP-N22): `[i18n key,
+ * source]`. Selecting one fills the editor; the user can then tweak it. Each
+ * defines `effect(uv, color, p, texel, time)` and annotates its params with
+ * `// @param <label> <min> <max> <default>`, which the editor turns into
+ * sliders. */
+const SHADER_GALLERY: Array<[string, string]> = [
+  [
+    "filters-shader-gallery-grayscale",
+    `// @param Amount 0 1 1
+fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32> {
+  let gray = vec3<f32>(luma(color.rgb));
+  return vec4<f32>(mix(color.rgb, gray, p.x), color.a);
+}`,
+  ],
+  [
+    "filters-shader-gallery-invert",
+    `fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32> {
+  return vec4<f32>(vec3<f32>(1.0) - color.rgb, color.a);
+}`,
+  ],
+  [
+    "filters-shader-gallery-scanlines",
+    `// @param Darkness 0 1 0.4
+// @param Lines 100 1080 480
+fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32> {
+  let s = 0.5 + 0.5 * sin(uv.y * p.y * 3.14159);
+  return vec4<f32>(color.rgb * (1.0 - p.x * (1.0 - s)), color.a);
+}`,
+  ],
+  [
+    "filters-shader-gallery-vignette",
+    `// @param Strength 0 2 1
+fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32> {
+  let d = distance(uv, vec2<f32>(0.5));
+  let v = clamp(1.0 - d * d * p.x * 2.0, 0.0, 1.0);
+  return vec4<f32>(color.rgb * v, color.a);
+}`,
+  ],
+];
 
 const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
   chromaKey: {
@@ -108,7 +154,77 @@ const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
   zoomBlur: { type: "zoomBlur", amount: 0.5, centerX: 0.5, centerY: 0.5 },
   pixelate: { type: "pixelate", size: 8 },
   freeze: { type: "freeze" },
+  userShader: { type: "userShader", source: SHADER_GALLERY[0][1], params: [1] },
+  bezierMask: {
+    type: "bezierMask",
+    points: [
+      [0.25, 0.25],
+      [0.75, 0.25],
+      [0.75, 0.75],
+      [0.25, 0.75],
+    ],
+    feather: 0.03,
+    invert: false,
+  },
 };
+
+/** Preset shapes for the bezier mask editor (CAP-N28): `[i18n key, points]`. */
+const MASK_SHAPES: Array<[string, [number, number][]]> = [
+  [
+    "filters-mask-shape-rectangle",
+    [
+      [0.2, 0.2],
+      [0.8, 0.2],
+      [0.8, 0.8],
+      [0.2, 0.8],
+    ],
+  ],
+  [
+    "filters-mask-shape-diamond",
+    [
+      [0.5, 0.15],
+      [0.85, 0.5],
+      [0.5, 0.85],
+      [0.15, 0.5],
+    ],
+  ],
+  [
+    "filters-mask-shape-hexagon",
+    [
+      [0.5, 0.12],
+      [0.83, 0.31],
+      [0.83, 0.69],
+      [0.5, 0.88],
+      [0.17, 0.69],
+      [0.17, 0.31],
+    ],
+  ],
+  [
+    "filters-mask-shape-circle",
+    Array.from({ length: 12 }, (_, i) => {
+      const a = (i / 12) * Math.PI * 2;
+      return [0.5 + 0.36 * Math.cos(a), 0.5 + 0.36 * Math.sin(a)] as [number, number];
+    }),
+  ],
+];
+
+/** Parse `// @param <label> <min> <max> <default>` lines out of a shader
+ * (CAP-N22) into slider metadata, in source order, capped at four (the shader
+ * uniform carries exactly four params). */
+function parseShaderParams(
+  source: string,
+): Array<{ label: string; min: number; max: number; def: number }> {
+  const out: Array<{ label: string; min: number; max: number; def: number }> = [];
+  for (const line of source.split("\n")) {
+    const m = line.match(
+      /^\s*\/\/\s*@param\s+(\S+)\s+(-?\d*\.?\d+)\s+(-?\d*\.?\d+)\s+(-?\d*\.?\d+)/,
+    );
+    if (m && out.length < 4) {
+      out.push({ label: m[1], min: Number(m[2]), max: Number(m[3]), def: Number(m[4]) });
+    }
+  }
+  return out;
+}
 
 type FiltersDialogProps = {
   sceneId: SceneId;
@@ -369,7 +485,12 @@ export function FiltersDialog({ sceneId, item, sourceName, source, onClose }: Fi
                       ×
                     </button>
                   </div>
-                  <FilterParams filter={filter} onChange={(kind) => update(filter, kind)} />
+                  <FilterParams
+                    filter={filter}
+                    sceneId={sceneId}
+                    itemId={item.id}
+                    onChange={(kind) => update(filter, kind)}
+                  />
                 </li>
               ))}
             </ul>
@@ -644,9 +765,13 @@ function CropRow({
 
 function FilterParams({
   filter,
+  sceneId,
+  itemId,
   onChange,
 }: {
   filter: Filter;
+  sceneId: SceneId;
+  itemId: ItemId;
   onChange: (kind: FilterKind) => void;
 }) {
   const t = useT();
@@ -999,5 +1124,197 @@ function FilterParams({
       return (
         <p className="mt-2 text-[11px] leading-snug text-havoc-muted">{t("filters-freeze-hint")}</p>
       );
+    case "userShader": {
+      const params = parseShaderParams(filter.source);
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <span className="shrink-0">{t("filters-shader-gallery")}</span>
+            <select
+              value=""
+              onChange={(event) => {
+                const preset = SHADER_GALLERY.find(([key]) => key === event.target.value);
+                if (preset) {
+                  onChange({
+                    ...filter,
+                    source: preset[1],
+                    params: parseShaderParams(preset[1]).map((p) => p.def),
+                  });
+                }
+              }}
+              className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
+            >
+              <option value="">{t("filters-shader-gallery-pick")}</option>
+              {SHADER_GALLERY.map(([key]) => (
+                <option key={key} value={key}>
+                  {t(key)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <textarea
+            value={filter.source}
+            spellCheck={false}
+            rows={8}
+            onChange={(event) => onChange({ ...filter, source: event.target.value })}
+            aria-label={t("filters-shader-source")}
+            className="w-full rounded border border-white/10 bg-havoc-panel px-1.5 py-1 font-mono text-[10px] leading-snug text-havoc-text"
+          />
+          {params.map((p, index) => (
+            <Slider
+              key={`${p.label}-${index}`}
+              label={p.label}
+              value={filter.params[index] ?? p.def}
+              min={p.min}
+              max={p.max}
+              step={Math.max((p.max - p.min) / 100, 0.001)}
+              onChange={(value) =>
+                onChange({
+                  ...filter,
+                  params: params.map((pp, j) =>
+                    j === index ? value : (filter.params[j] ?? pp.def),
+                  ),
+                })
+              }
+            />
+          ))}
+          <p className="text-[11px] leading-snug text-havoc-muted">{t("filters-shader-hint")}</p>
+        </div>
+      );
+    }
+    case "bezierMask":
+      return (
+        <BezierMaskEditor filter={filter} sceneId={sceneId} itemId={itemId} onChange={onChange} />
+      );
   }
+}
+
+/** The interactive bezier-mask editor (CAP-N28): drag the handles, double-click
+ * to add a point, right-click a handle to remove it; plus preset shapes,
+ * feather, invert, and export-as-wipe. Coordinates are normalized 0..1 in item
+ * space, exactly what the rasterizer expects. */
+function BezierMaskEditor({
+  filter,
+  sceneId,
+  itemId,
+  onChange,
+}: {
+  filter: Extract<Filter, { type: "bezierMask" }>;
+  sceneId: SceneId;
+  itemId: ItemId;
+  onChange: (kind: FilterKind) => void;
+}) {
+  const t = useT();
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const points = filter.points;
+
+  const toNorm = (event: { clientX: number; clientY: number }): [number, number] => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return [0, 0];
+    return [
+      Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    ];
+  };
+  const setPoints = (next: [number, number][]) => onChange({ ...filter, points: next });
+
+  const exportWipe = async () => {
+    const path = await save({
+      defaultPath: "wipe.png",
+      filters: [{ name: t("studio-preview-filter-images"), extensions: ["png"] }],
+    });
+    if (typeof path === "string") {
+      bezierExportWipe(sceneId, itemId, filter.id, path).catch((err) =>
+        console.error("export wipe failed:", err),
+      );
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <svg
+        ref={svgRef}
+        viewBox="0 0 1 1"
+        preserveAspectRatio="none"
+        className="aspect-video w-full touch-none rounded border border-white/10 bg-black/40"
+        onPointerMove={(event) => {
+          if (drag === null) return;
+          const p = toNorm(event);
+          setPoints(points.map((point, index) => (index === drag ? p : point)));
+        }}
+        onPointerUp={() => setDrag(null)}
+        onDoubleClick={(event) => setPoints([...points, toNorm(event)])}
+      >
+        <polygon
+          points={points.map(([x, y]) => `${x},${y}`).join(" ")}
+          fill="rgba(80,180,255,0.18)"
+          stroke="rgba(125,211,252,0.9)"
+          strokeWidth={0.006}
+        />
+        {points.map(([x, y], index) => (
+          <circle
+            key={index}
+            cx={x}
+            cy={y}
+            r={0.022}
+            fill={drag === index ? "#7dd3fc" : "#e5e7eb"}
+            style={{ cursor: "pointer" }}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDrag(index);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              if (points.length > 3) setPoints(points.filter((_, j) => j !== index));
+            }}
+          />
+        ))}
+      </svg>
+      <p className="text-[10px] leading-snug text-havoc-muted">{t("filters-mask-editor-hint")}</p>
+
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <span className="shrink-0">{t("filters-mask-shape")}</span>
+        <select
+          value=""
+          onChange={(event) => {
+            const shape = MASK_SHAPES.find(([key]) => key === event.target.value);
+            if (shape) setPoints(shape[1].map((p) => [...p] as [number, number]));
+          }}
+          className="min-w-0 flex-1 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
+        >
+          <option value="">{t("filters-mask-shape-pick")}</option>
+          {MASK_SHAPES.map(([key]) => (
+            <option key={key} value={key}>
+              {t(key)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <Slider
+        label={t("filters-mask-feather")}
+        value={filter.feather}
+        min={0}
+        max={0.3}
+        step={0.005}
+        onChange={(feather) => onChange({ ...filter, feather })}
+      />
+      <label className="flex items-center gap-2 text-[11px] text-havoc-text">
+        <input
+          type="checkbox"
+          checked={filter.invert}
+          onChange={(event) => onChange({ ...filter, invert: event.target.checked })}
+        />
+        {t("filters-mask-invert")}
+      </label>
+      <button
+        type="button"
+        onClick={exportWipe}
+        className="self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-text hover:border-havoc-accent/50"
+      >
+        {t("filters-mask-export-wipe")}
+      </button>
+    </div>
+  );
 }

@@ -860,6 +860,25 @@ filters-opacity = Opacità
 filters-cube-file = File .cube
 filters-amount = Quantità
 filters-radius = Raggio
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galleria
+filters-shader-gallery-pick = Carica un preset…
+filters-shader-gallery-grayscale = Scala di grigi
+filters-shader-gallery-invert = Inverti
+filters-shader-gallery-scanlines = Scanline
+filters-shader-gallery-vignette = Vignettatura
+filters-shader-source = Codice shader (WGSL)
+filters-shader-hint = Scrivi un effect(uv, color, p, texel, time) in WGSL che restituisce un vec4. Annota i parametri con // @param name min max default per i cursori. Uno shader non valido viene ignorato — la sorgente viene mostrata senza filtro finché non compila.
+filters-name-bezier-mask = Maschera Bézier
+filters-mask-editor-hint = Trascina un punto per spostarlo, doppio clic per aggiungerne uno, clic destro su un punto per rimuoverlo.
+filters-mask-shape = Forma
+filters-mask-shape-pick = Preset…
+filters-mask-shape-rectangle = Rettangolo
+filters-mask-shape-diamond = Rombo
+filters-mask-shape-hexagon = Esagono
+filters-mask-shape-circle = Cerchio
+filters-mask-feather = Sfumatura
+filters-mask-export-wipe = Esporta come tendina…
 filters-mask-image = Immagine maschera
 filters-mask-mode = Modalità
 filters-mask-alpha = alpha
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = video stinger (ProRes 4444 .mov mantiene l'
 studio-preview-stinger-label = File video dello stinger
 studio-preview-stinger-cut-label = Punto di taglio dello stinger (ms)
 studio-preview-stinger-cut-title = Quando il cambio scena avviene sotto lo stinger (ms dall'inizio della transizione)
+studio-preview-stinger-matte-label = Traccia matte
+studio-preview-stinger-matte-title = Come uno stinger con traccia matte racchiude la trasparenza: il riempimento e la sua matte affiancati (orizzontale) o impilati (verticale)
+studio-preview-stinger-duck-label = Abbassa il programma
+studio-preview-stinger-duck-title = Abbassa l'audio del programma sotto l'audio dello stinger mentre viene riprodotto (0 = disattivato)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Taglio
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = Luma wipe (rombo)
 transition-kind-luma-clock = Luma wipe (orologio)
 transition-kind-image = Wipe immagine (personalizzato)
 transition-kind-stinger = Stinger (video)
+transition-kind-move = Spostamento (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Nessuna
+stinger-matte-horizontal = Affiancati
+stinger-matte-vertical = Impilati
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2181,9 +2211,12 @@ transform-3d = Inclinazione 3D
 transform-rotation-x = Inclinazione X (°)
 transform-rotation-y = Inclinazione Y (°)
 transform-perspective = Prospettiva
+transform-reveal = Mostra/nascondi
+transform-reveal-ms = Dissolvenza in ingresso (ms)
 sources-clone-title = Clona (stessa sorgente, filtri propri)
 sources-clone-item = Clona { $name }
 menu-tools-downstream = Keyer di uscita…
+menu-tools-transition-rules = Regole di transizione…
 dsk-title = Keyer di uscita
 dsk-hint = Sovrapposizioni composte sull'uscita del programma — sopra ogni scena, e restano fisse quando cambi scena (un logo, un badge IN DIRETTA, una sottopancia). Il primo della lista è in primo piano.
 dsk-empty = Ancora nessun keyer — aggiungi una sorgente per sovrapporla a ogni scena.
@@ -2196,3 +2229,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Scala
 dsk-add = + Aggiungi keyer
+transition-rules-title = Regole di transizione
+transition-rules-hint = Assegna a una coppia di scene la propria transizione. Quando passi dalla prima scena alla seconda, vengono usati questo tipo e questa durata al posto di quelli predefiniti (una regola Stinger/Immagine usa comunque il file impostato nei controlli di transizione).
+transition-rules-empty = Ancora nessuna regola — ogni coppia di scene usa la transizione predefinita.
+transition-rules-from = Da
+transition-rules-to = A
+transition-rules-kind = Transizione
+transition-rules-duration = Durata (ms)
+transition-rules-add = Aggiungi regola
+transition-rules-remove = Rimuovi regola

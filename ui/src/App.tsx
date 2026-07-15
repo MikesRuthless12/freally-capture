@@ -94,6 +94,7 @@ import { MultiviewDialog } from "./panels/MultiviewDialog";
 import { PanicBanner } from "./panels/PanicBanner";
 import { ProjectorDialog } from "./panels/ProjectorDialog";
 import { DownstreamKeyersDialog } from "./panels/DownstreamKeyers";
+import { TransitionRulesDialog } from "./panels/TransitionRules";
 import { QuitGuardDialog } from "./panels/QuitGuardDialog";
 import { SalvageDialog } from "./panels/SalvageDialog";
 import { SourceHealthDialog } from "./panels/SourceHealthDialog";
@@ -109,6 +110,7 @@ type OpenDialog =
   | { kind: "multiview" }
   | { kind: "projector" }
   | { kind: "downstream" }
+  | { kind: "transitionRules" }
   | { kind: "sourceHealth" }
   | { kind: "avSync" }
   | { kind: "hotkeyAudit" }
@@ -1054,6 +1056,9 @@ export default function App() {
       )}
       {dialog?.kind === "downstream" && (
         <DownstreamKeyersDialog collection={collection} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "transitionRules" && (
+        <TransitionRulesDialog collection={collection} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === "avSync" && (
         <AvSyncDialog

@@ -13,7 +13,7 @@ use tauri::{AppHandle, Runtime, State};
 use fcap_scene::{
     BackdropSplit, BlendMode, Corner, DskId, FileRef, FileRefKind, Filter, FilterId, FilterKind,
     GuideLine, ItemId, NormRect, ScaleMode, SceneError, SceneId, Source, SourceId, SourceSettings,
-    Transform,
+    Transform, TransitionKind,
 };
 
 use crate::studio::{coalesce_key, StillTarget, StudioDto, StudioState, WorkbenchMode};
@@ -437,6 +437,20 @@ pub fn studio_set_item_scaling(
     })
 }
 
+/// Show/hide fade-in duration for an item (CAP-N21); 0 = appear instantly.
+#[tauri::command]
+pub fn studio_set_item_reveal(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    reveal_ms: u32,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "setReveal", None, |collection| {
+        collection.set_item_reveal(scene_id, item_id, reveal_ms)
+    })
+}
+
 /// One corner assignment in a layout request (JS sends `{ itemId, corner }`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -613,9 +627,73 @@ pub fn studio_transition(
     state: State<'_, StudioState>,
     settings: State<'_, crate::settings::SettingsStore>,
 ) -> Result<(), String> {
-    let transition = settings.get().transition;
+    let mut transition = settings.get().transition;
+    // CAP-N21: a per-scene-pair rule overrides the default kind + duration for
+    // this pair (the stinger/luma file still comes from the global settings).
+    if let Some((kind, duration_ms)) = state.transition_override() {
+        // A rule that needs a file the global settings don't provide (a Stinger
+        // with no video, an Image wipe with no luma) would hard-fail the take —
+        // fall back to the default transition rather than not switching scenes.
+        let file_ready = match kind {
+            TransitionKind::Stinger => !transition.stinger_path.trim().is_empty(),
+            TransitionKind::LumaImage => !transition.luma_image.trim().is_empty(),
+            _ => true,
+        };
+        if file_ready {
+            transition.kind = kind;
+            transition.duration_ms = duration_ms;
+        }
+    }
     transition.validate()?;
     state.begin_transition(&app, &transition)
+}
+
+/// Set (or replace) the per-scene-pair transition rule (CAP-N21) for `from`→`to`.
+#[tauri::command]
+pub fn studio_transition_override_set(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    from: SceneId,
+    to: SceneId,
+    kind: TransitionKind,
+    duration_ms: u32,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "transitionRule", None, |collection| {
+        collection.set_transition_override(from, to, kind, duration_ms)
+    })
+}
+
+/// Remove the per-scene-pair transition rule (CAP-N21) for `from`→`to`.
+#[tauri::command]
+pub fn studio_transition_override_remove(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    from: SceneId,
+    to: SceneId,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "removeTransitionRule", None, |collection| {
+        collection.remove_transition_override(from, to);
+        Ok(())
+    })
+}
+
+/// Export a bezier mask's path (CAP-N28) as a grayscale luma-wipe PNG at `path`,
+/// usable as an Image Wipe transition pattern.
+#[tauri::command]
+pub fn bezier_export_wipe(
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    filter_id: FilterId,
+    path: String,
+) -> Result<(), String> {
+    let (points, feather, invert) = state.bezier_mask_params(scene_id, item_id, filter_id)?;
+    let rgba = crate::bezier_mask::wipe_rgba(&points, feather, invert)
+        .ok_or("the mask needs at least three points to export")?;
+    let size = crate::bezier_mask::MASK_SIZE;
+    let buffer: ::image::RgbaImage =
+        ::image::ImageBuffer::from_raw(size, size, rgba).ok_or("could not build the wipe image")?;
+    buffer.save(&path).map_err(|err| err.to_string())
 }
 
 /// Highlight Speaker (Focus/Spotlight): `Some(item)` promotes that item to

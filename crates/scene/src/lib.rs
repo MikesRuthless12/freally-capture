@@ -39,7 +39,7 @@ pub use obs_import::{
 pub use scene::{
     BackdropSplit, BlendMode, Corner, Crop, FocusRestore, FocusState, GroupId, GuideLine,
     GuideOrientation, ItemId, NormRect, ScaleMode, Scene, SceneAudioOverride, SceneId, SceneItem,
-    SourceGroup, Transform, TransitionKind,
+    SourceGroup, StingerMatte, Transform, TransitionKind,
 };
 pub use source::{
     CountdownEnd, DeinterlaceMode, FieldOrder, FileBinding, IngestProtocol, InputLayout,
@@ -151,6 +151,29 @@ pub struct Collection {
     /// badge, a persistent lower-third). Drawn bottom-to-top in list order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub downstream: Vec<DownstreamKeyer>,
+    /// Per-scene-pair transition rules (CAP-N21): scene `from`→`to` uses this
+    /// kind and duration instead of the default transition. The stinger/luma
+    /// FILE still comes from the global transition settings — only the kind and
+    /// duration are overridden per pair.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transition_overrides: Vec<TransitionOverride>,
+}
+
+/// One per-scene-pair transition rule (CAP-N21). A rule with a `Stinger`/luma
+/// kind reuses the global transition's file — only the kind and duration are
+/// per-pair.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionOverride {
+    pub from: SceneId,
+    pub to: SceneId,
+    pub kind: TransitionKind,
+    #[serde(default = "default_transition_ms")]
+    pub duration_ms: u32,
+}
+
+fn default_transition_ms() -> u32 {
+    300
 }
 
 /// One downstream-keyer layer (CAP-N24): a source composited over the program
@@ -252,6 +275,7 @@ impl Collection {
             hidden_muted: std::collections::HashSet::new(),
             vertical: None,
             downstream: Vec::new(),
+            transition_overrides: Vec::new(),
         }
     }
 
@@ -429,6 +453,9 @@ impl Collection {
             return Err(SceneError::LastScene);
         }
         self.scenes.remove(index);
+        // CAP-N21: drop any transition rule that referenced the removed scene.
+        self.transition_overrides
+            .retain(|rule| rule.from != id && rule.to != id);
         if self.active_scene == id {
             self.active_scene = self.scenes[index.min(self.scenes.len() - 1)].id;
         }
@@ -452,6 +479,53 @@ impl Collection {
         }
         self.gc_sources();
         Ok(())
+    }
+
+    /// Set (or replace) the transition rule for a scene pair (CAP-N21). Both
+    /// scenes must exist; the duration clamps to the transition range.
+    pub fn set_transition_override(
+        &mut self,
+        from: SceneId,
+        to: SceneId,
+        kind: TransitionKind,
+        duration_ms: u32,
+    ) -> Result<(), SceneError> {
+        if !self.scenes.iter().any(|scene| scene.id == from)
+            || !self.scenes.iter().any(|scene| scene.id == to)
+        {
+            return Err(SceneError::SceneNotFound);
+        }
+        let duration_ms = duration_ms.clamp(50, 5_000);
+        match self
+            .transition_overrides
+            .iter_mut()
+            .find(|rule| rule.from == from && rule.to == to)
+        {
+            Some(rule) => {
+                rule.kind = kind;
+                rule.duration_ms = duration_ms;
+            }
+            None => self.transition_overrides.push(TransitionOverride {
+                from,
+                to,
+                kind,
+                duration_ms,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Remove a transition rule for a scene pair (CAP-N21). A no-op if none.
+    pub fn remove_transition_override(&mut self, from: SceneId, to: SceneId) {
+        self.transition_overrides
+            .retain(|rule| !(rule.from == from && rule.to == to));
+    }
+
+    /// The transition rule for a scene pair, if one is set (CAP-N21).
+    pub fn transition_override(&self, from: SceneId, to: SceneId) -> Option<&TransitionOverride> {
+        self.transition_overrides
+            .iter()
+            .find(|rule| rule.from == from && rule.to == to)
     }
 
     /// Configure (or clear, with `None`) the second output canvas
@@ -1688,6 +1762,18 @@ impl Collection {
         scaling: ScaleMode,
     ) -> Result<(), SceneError> {
         self.item_mut(scene_id, item_id)?.scaling = scaling;
+        Ok(())
+    }
+
+    /// Show/hide fade-in duration in ms (CAP-N21); clamped to 5 s. `0` appears
+    /// instantly.
+    pub fn set_item_reveal(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        reveal_ms: u32,
+    ) -> Result<(), SceneError> {
+        self.item_mut(scene_id, item_id)?.reveal_ms = reveal_ms.min(5_000);
         Ok(())
     }
 
@@ -3520,6 +3606,41 @@ mod tests {
         let before = c.downstream.len();
         c.sanitize();
         assert_eq!(c.downstream.len(), before - 1, "orphan keyer pruned");
+    }
+
+    #[test]
+    fn transition_rules_set_replace_and_gc_with_scenes() {
+        let mut c = Collection::new();
+        let a = c.active_scene;
+        let b = c.add_scene("B");
+
+        // Unknown scene rejected; a valid pair is stored.
+        assert_eq!(
+            c.set_transition_override(a, SceneId::new(), TransitionKind::Fade, 500),
+            Err(SceneError::SceneNotFound)
+        );
+        c.set_transition_override(a, b, TransitionKind::Stinger, 800)
+            .expect("valid pair");
+        let rule = c.transition_override(a, b).expect("stored");
+        assert_eq!(rule.kind, TransitionKind::Stinger);
+        assert_eq!(rule.duration_ms, 800);
+        assert!(c.transition_override(b, a).is_none(), "direction matters");
+
+        // Setting the same pair replaces (never duplicates); duration clamps.
+        c.set_transition_override(a, b, TransitionKind::Move, 99_999)
+            .expect("replace");
+        assert_eq!(c.transition_overrides.len(), 1, "replaced, not appended");
+        let rule = c.transition_override(a, b).expect("stored");
+        assert_eq!(rule.kind, TransitionKind::Move);
+        assert_eq!(rule.duration_ms, 5_000, "duration clamped to the max");
+
+        // Removing that scene garbage-collects the rule referencing it.
+        c.remove_scene(b).expect("removable");
+        assert!(
+            c.transition_override(a, b).is_none(),
+            "rule dropped with its scene"
+        );
+        assert!(c.transition_overrides.is_empty());
     }
 
     #[test]

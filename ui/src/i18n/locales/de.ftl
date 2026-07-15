@@ -844,6 +844,25 @@ filters-opacity = Deckkraft
 filters-cube-file = .cube-Datei
 filters-amount = Menge
 filters-radius = Radius
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galerie
+filters-shader-gallery-pick = Voreinstellung laden…
+filters-shader-gallery-grayscale = Graustufen
+filters-shader-gallery-invert = Invertieren
+filters-shader-gallery-scanlines = Scanlinien
+filters-shader-gallery-vignette = Vignette
+filters-shader-source = Shader-Quelltext (WGSL)
+filters-shader-hint = Schreiben Sie ein WGSL-effect(uv, color, p, texel, time), das ein vec4 zurückgibt. Kennzeichnen Sie Parameter mit // @param name min max default für Schieberegler. Ein ungültiger Shader wird ignoriert — die Quelle wird ungefiltert dargestellt, bis er kompiliert.
+filters-name-bezier-mask = Bézier-Maske
+filters-mask-editor-hint = Ziehen Sie einen Punkt, um ihn zu verschieben, doppelklicken Sie, um einen hinzuzufügen, Rechtsklick auf einen Punkt entfernt ihn.
+filters-mask-shape = Form
+filters-mask-shape-pick = Voreinstellung…
+filters-mask-shape-rectangle = Rechteck
+filters-mask-shape-diamond = Raute
+filters-mask-shape-hexagon = Sechseck
+filters-mask-shape-circle = Kreis
+filters-mask-feather = Weiche Kante
+filters-mask-export-wipe = Als Wischblende exportieren…
 filters-mask-image = Maskenbild
 filters-mask-mode = Modus
 filters-mask-alpha = Alpha
@@ -1235,6 +1254,11 @@ studio-preview-stinger-placeholder = Stinger-Video (ProRes 4444 .mov behält den
 studio-preview-stinger-label = Stinger-Videodatei
 studio-preview-stinger-cut-label = Stinger-Schnittpunkt (ms)
 studio-preview-stinger-cut-title = Wann der Szenenwechsel unter dem Stinger stattfindet (ms nach Übergangsbeginn)
+studio-preview-stinger-matte-label = Track-Matte
+studio-preview-stinger-matte-title = Wie ein Track-Matte-Stinger die Transparenz packt: die Füllung und ihre Matte nebeneinander (horizontal) oder übereinander (vertikal)
+studio-preview-stinger-duck-label = Programm ducken
+studio-preview-stinger-duck-title = Das Programm-Audio unter dem eigenen Audio des Stingers ducken, während er läuft (0 = aus)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Schnitt
@@ -1252,6 +1276,12 @@ transition-kind-luma-diamond = Luma-Wischen (Raute)
 transition-kind-luma-clock = Luma-Wischen (Uhr)
 transition-kind-image = Bild-Wischen (benutzerdefiniert)
 transition-kind-stinger = Stinger (Video)
+transition-kind-move = Bewegen (Morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Keine
+stinger-matte-horizontal = Nebeneinander
+stinger-matte-vertical = Übereinander
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2158,9 +2188,12 @@ transform-3d = 3D-Neigung
 transform-rotation-x = Neigung X (°)
 transform-rotation-y = Neigung Y (°)
 transform-perspective = Perspektive
+transform-reveal = Ein-/ausblenden
+transform-reveal-ms = Einblenden (ms)
 sources-clone-title = Klonen (gleiche Quelle, eigene Filter)
 sources-clone-item = { $name } klonen
 menu-tools-downstream = Downstream-Keyer…
+menu-tools-transition-rules = Übergangsregeln…
 dsk-title = Downstream-Keyer
 dsk-hint = Overlays, die auf die Programmausgabe komponiert werden — über jeder Szene, und sie bleiben erhalten, wenn du Szenen umschaltest (ein Logo, ein LIVE-Badge, eine Bauchbinde). Der oberste Eintrag liegt vorne.
 dsk-empty = Noch keine Keyer — füge eine Quelle hinzu, um sie über jeder Szene einzublenden.
@@ -2173,3 +2206,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Skalierung
 dsk-add = + Keyer hinzufügen
+transition-rules-title = Übergangsregeln
+transition-rules-hint = Geben Sie einem Szenenpaar einen eigenen Übergang. Wenn Sie von der ersten zur zweiten Szene wechseln, werden diese Art und Dauer anstelle der Standardwerte verwendet (eine Stinger-/Bild-Regel nutzt weiterhin die in den Übergangssteuerungen festgelegte Datei).
+transition-rules-empty = Noch keine Regeln — jedes Szenenpaar verwendet den Standardübergang.
+transition-rules-from = Von
+transition-rules-to = Nach
+transition-rules-kind = Übergang
+transition-rules-duration = Dauer (ms)
+transition-rules-add = Regel hinzufügen
+transition-rules-remove = Regel entfernen
