@@ -1034,6 +1034,7 @@ filters-name-radial-blur = Radial Blur
 filters-name-zoom-blur = Zoom Blur
 filters-name-pixelate = Pixelate
 filters-name-freeze = Freeze
+filters-name-shader = Shader (WGSL)
 filters-title = Filters — { $name }
 filters-blend-mode = Blend mode
 filters-chain-header = Filter chain (top runs first)
@@ -1069,6 +1070,24 @@ filters-center-x = Center X
 filters-center-y = Center Y
 filters-block-size = Block size (px)
 filters-freeze-hint = While enabled, this item holds its last frame across program, preview, recording, and stream. Other items — including clones of the same source — keep updating. Toggle this filter to freeze or unfreeze.
+filters-shader-gallery = Gallery
+filters-shader-gallery-pick = Load a preset…
+filters-shader-gallery-grayscale = Grayscale
+filters-shader-gallery-invert = Invert
+filters-shader-gallery-scanlines = Scanlines
+filters-shader-gallery-vignette = Vignette
+filters-shader-source = Shader source (WGSL)
+filters-shader-hint = Write a WGSL effect(uv, color, p, texel, time) that returns a vec4. Annotate params with // @param name min max default for sliders. An invalid shader is ignored — the source renders unfiltered until it compiles.
+filters-name-bezier-mask = Bezier Mask
+filters-mask-editor-hint = Drag a point to move it, double-click to add one, right-click a point to remove it.
+filters-mask-shape = Shape
+filters-mask-shape-pick = Preset…
+filters-mask-shape-rectangle = Rectangle
+filters-mask-shape-diamond = Diamond
+filters-mask-shape-hexagon = Hexagon
+filters-mask-shape-circle = Circle
+filters-mask-feather = Feather
+filters-mask-export-wipe = Export as wipe…
 filters-mask-image = Mask image
 filters-mask-mode = Mode
 filters-mask-alpha = alpha
@@ -1483,6 +1502,11 @@ studio-preview-stinger-placeholder = stinger video (ProRes 4444 .mov keeps its a
 studio-preview-stinger-label = Stinger video file
 studio-preview-stinger-cut-label = Stinger cut point (ms)
 studio-preview-stinger-cut-title = When the scene swap lands under the stinger (ms into the transition)
+studio-preview-stinger-matte-label = Track matte
+studio-preview-stinger-matte-title = How a track-matte stinger packs transparency: the fill and its matte side by side (horizontal) or stacked (vertical)
+studio-preview-stinger-duck-label = Duck program
+studio-preview-stinger-duck-title = Duck the program audio under the stinger's own audio while it plays (0 = off)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Cut
@@ -1500,6 +1524,12 @@ transition-kind-luma-diamond = Luma wipe (diamond)
 transition-kind-luma-clock = Luma wipe (clock)
 transition-kind-image = Image wipe (custom)
 transition-kind-stinger = Stinger (video)
+transition-kind-move = Move (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = None
+stinger-matte-horizontal = Side-by-side
+stinger-matte-vertical = Stacked
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -1681,6 +1711,8 @@ transform-3d = 3D tilt
 transform-rotation-x = Tilt X (°)
 transform-rotation-y = Tilt Y (°)
 transform-perspective = Perspective
+transform-reveal = Show/hide
+transform-reveal-ms = Reveal fade-in (ms)
 transform-crop = Crop
 transform-crop-left = Left
 transform-crop-top = Top
@@ -2136,6 +2168,7 @@ menu-tools-components = Components…
 menu-tools-midi = MIDI Control…
 menu-tools-ptz = PTZ Cameras…
 menu-tools-downstream = Downstream Keyers…
+menu-tools-transition-rules = Transition Rules…
 menu-tools-remote = Remote Control API…
 menu-tools-panel = LAN Panel & Tally…
 
@@ -2152,6 +2185,17 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Scale
 dsk-add = + Add keyer
+
+# --- TransitionRules.tsx (CAP-N21) ---
+transition-rules-title = Transition Rules
+transition-rules-hint = Give a scene pair its own transition. When you commit from the first scene to the second, this kind and duration are used instead of the default (a Stinger/Image rule still uses the file set in the transition controls).
+transition-rules-empty = No rules yet — every scene pair uses the default transition.
+transition-rules-from = From
+transition-rules-to = To
+transition-rules-kind = Transition
+transition-rules-duration = Duration (ms)
+transition-rules-add = Add rule
+transition-rules-remove = Remove rule
 menu-help-portal = Help Portal
 menu-help-website = Visit Website
 menu-help-discord = Join Discord Server

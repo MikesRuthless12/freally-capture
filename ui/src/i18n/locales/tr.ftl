@@ -860,6 +860,25 @@ filters-opacity = Opaklık
 filters-cube-file = .cube dosyası
 filters-amount = Miktar
 filters-radius = Yarıçap
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galeri
+filters-shader-gallery-pick = Bir ön ayar yükle…
+filters-shader-gallery-grayscale = Gri tonlama
+filters-shader-gallery-invert = Tersine çevir
+filters-shader-gallery-scanlines = Tarama çizgileri
+filters-shader-gallery-vignette = Vinyet
+filters-shader-source = Shader kaynağı (WGSL)
+filters-shader-hint = vec4 döndüren bir WGSL effect(uv, color, p, texel, time) yazın. Kaydırıcılar için parametreleri // @param name min max default ile işaretleyin. Geçersiz bir shader yok sayılır — kaynak, derlenene kadar filtresiz görüntülenir.
+filters-name-bezier-mask = Bézier maskesi
+filters-mask-editor-hint = Taşımak için bir noktayı sürükleyin, eklemek için çift tıklayın, kaldırmak için bir noktaya sağ tıklayın.
+filters-mask-shape = Şekil
+filters-mask-shape-pick = Ön ayar…
+filters-mask-shape-rectangle = Dikdörtgen
+filters-mask-shape-diamond = Elmas
+filters-mask-shape-hexagon = Altıgen
+filters-mask-shape-circle = Daire
+filters-mask-feather = Yumuşatma
+filters-mask-export-wipe = Silme olarak dışa aktar…
 filters-mask-image = Maske görüntüsü
 filters-mask-mode = Mod
 filters-mask-alpha = alfa
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = stinger videosu (ProRes 4444 .mov alfa kana
 studio-preview-stinger-label = Stinger video dosyası
 studio-preview-stinger-cut-label = Stinger kesme noktası (ms)
 studio-preview-stinger-cut-title = Sahne değişiminin stinger altında gerçekleştiği an (geçişin başından itibaren ms)
+studio-preview-stinger-matte-label = Track matte
+studio-preview-stinger-matte-title = Track matte'li bir stinger şeffaflığı nasıl paketler: dolgu ve matte'i yan yana (yatay) veya üst üste (dikey)
+studio-preview-stinger-duck-label = Programı duck et
+studio-preview-stinger-duck-title = Çalarken program sesini stinger'ın kendi sesinin altına duck et (0 = kapalı)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Kesme
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = Luma silme (elmas)
 transition-kind-luma-clock = Luma silme (saat)
 transition-kind-image = Görüntü silme (özel)
 transition-kind-stinger = Stinger (video)
+transition-kind-move = Taşı (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Yok
+stinger-matte-horizontal = Yan yana
+stinger-matte-vertical = Üst üste
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2181,9 +2211,12 @@ transform-3d = 3B eğim
 transform-rotation-x = Eğim X (°)
 transform-rotation-y = Eğim Y (°)
 transform-perspective = Perspektif
+transform-reveal = Göster/gizle
+transform-reveal-ms = Belirme (ms)
 sources-clone-title = Kopyala (aynı kaynak, kendi filtreleri)
 sources-clone-item = { $name } kopyala
 menu-tools-downstream = Çıkış Keyer'ları…
+menu-tools-transition-rules = Geçiş Kuralları…
 dsk-title = Çıkış Keyer'ları
 dsk-hint = Program çıkışına bindirilen katmanlar — her sahnenin üzerinde ve sahne değiştirdiğinizde yerinde kalırlar (logo, CANLI rozeti, alt bant). Listenin en üstü en önde çizilir.
 dsk-empty = Henüz keyer yok — her sahneye bindirmek için bir kaynak ekleyin.
@@ -2196,3 +2229,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Ölçek
 dsk-add = + Keyer ekle
+transition-rules-title = Geçiş kuralları
+transition-rules-hint = Bir sahne çiftine kendi geçişini verin. İlk sahneden ikincisine geçtiğinizde, varsayılan yerine bu tür ve süre kullanılır (bir Stinger/Görüntü kuralı yine de geçiş denetimlerinde ayarlanan dosyayı kullanır).
+transition-rules-empty = Henüz kural yok — her sahne çifti varsayılan geçişi kullanır.
+transition-rules-from = Nereden
+transition-rules-to = Nereye
+transition-rules-kind = Geçiş
+transition-rules-duration = Süre (ms)
+transition-rules-add = Kural ekle
+transition-rules-remove = Kuralı kaldır

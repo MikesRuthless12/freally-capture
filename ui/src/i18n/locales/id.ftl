@@ -860,6 +860,25 @@ filters-opacity = Opasitas
 filters-cube-file = Berkas .cube
 filters-amount = Jumlah
 filters-radius = Radius
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galeri
+filters-shader-gallery-pick = Muat preset…
+filters-shader-gallery-grayscale = Skala abu-abu
+filters-shader-gallery-invert = Balikkan
+filters-shader-gallery-scanlines = Garis pindai
+filters-shader-gallery-vignette = Vinyet
+filters-shader-source = Kode sumber shader (WGSL)
+filters-shader-hint = Tulis effect(uv, color, p, texel, time) WGSL yang mengembalikan vec4. Anotasi parameter dengan // @param name min max default untuk slider. Shader yang tidak valid diabaikan — sumber ditampilkan tanpa filter sampai berhasil dikompilasi.
+filters-name-bezier-mask = Masker Bézier
+filters-mask-editor-hint = Seret titik untuk memindahkannya, klik dua kali untuk menambah, klik kanan titik untuk menghapusnya.
+filters-mask-shape = Bentuk
+filters-mask-shape-pick = Preset…
+filters-mask-shape-rectangle = Persegi panjang
+filters-mask-shape-diamond = Belah ketupat
+filters-mask-shape-hexagon = Segi enam
+filters-mask-shape-circle = Lingkaran
+filters-mask-feather = Pelembutan tepi
+filters-mask-export-wipe = Ekspor sebagai wipe…
 filters-mask-image = Gambar masker
 filters-mask-mode = Mode
 filters-mask-alpha = alpha
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = video stinger (ProRes 4444 .mov mempertahan
 studio-preview-stinger-label = Berkas video Stinger
 studio-preview-stinger-cut-label = Titik potong Stinger (ms)
 studio-preview-stinger-cut-title = Saat pergantian scene terjadi di balik stinger (ms ke dalam transisi)
+studio-preview-stinger-matte-label = Track matte
+studio-preview-stinger-matte-title = Cara stinger track-matte mengemas transparansi: fill dan matte-nya berdampingan (horizontal) atau bertumpuk (vertikal)
+studio-preview-stinger-duck-label = Duck program
+studio-preview-stinger-duck-title = Duck audio program di bawah audio milik stinger saat diputar (0 = nonaktif)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Potong
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = Sapuan Luma (belah ketupat)
 transition-kind-luma-clock = Sapuan Luma (jam)
 transition-kind-image = Sapuan Gambar (kustom)
 transition-kind-stinger = Stinger (video)
+transition-kind-move = Pindah (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Tidak ada
+stinger-matte-horizontal = Berdampingan
+stinger-matte-vertical = Bertumpuk
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2180,9 +2210,12 @@ transform-3d = Kemiringan 3D
 transform-rotation-x = Kemiringan X (°)
 transform-rotation-y = Kemiringan Y (°)
 transform-perspective = Perspektif
+transform-reveal = Tampilkan/sembunyikan
+transform-reveal-ms = Fade-in (ms)
 sources-clone-title = Klon (umpan sama, filter sendiri)
 sources-clone-item = Klon { $name }
 menu-tools-downstream = Downstream Keyer…
+menu-tools-transition-rules = Aturan Transisi…
 dsk-title = Downstream Keyer
 dsk-hint = Overlay yang dikomposit pada keluaran program — di atas setiap adegan, dan tetap ada saat kamu berganti adegan (logo, lencana LANGSUNG, lower-third). Bagian atas daftar tampil paling depan.
 dsk-empty = Belum ada keyer — tambahkan sumber untuk menampilkannya di setiap adegan.
@@ -2195,3 +2228,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Skala
 dsk-add = + Tambah keyer
+transition-rules-title = Aturan transisi
+transition-rules-hint = Beri sepasang scene transisinya sendiri. Saat Anda beralih dari scene pertama ke kedua, jenis dan durasi ini dipakai alih-alih default (aturan Stinger/Gambar tetap memakai berkas yang diatur di kontrol transisi).
+transition-rules-empty = Belum ada aturan — setiap pasangan scene memakai transisi default.
+transition-rules-from = Dari
+transition-rules-to = Ke
+transition-rules-kind = Transisi
+transition-rules-duration = Durasi (ms)
+transition-rules-add = Tambah aturan
+transition-rules-remove = Hapus aturan

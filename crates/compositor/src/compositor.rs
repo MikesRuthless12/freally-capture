@@ -17,7 +17,8 @@ use std::time::Instant;
 
 use fcap_capture::{Frame, PixelFormat};
 use fcap_scene::{
-    BlendMode, FilterId, ItemId, Scene, SceneId, SourceId, Transform, TransitionKind,
+    BlendMode, FilterId, ItemId, Scene, SceneId, SceneItem, SourceId, StingerMatte, Transform,
+    TransitionKind,
 };
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
@@ -211,6 +212,10 @@ pub struct Compositor {
     /// studio animates each tick — applied to the *drawn* transform only,
     /// so the model (and undo) never see them.
     lenses: HashMap<ItemId, (f32, (f32, f32))>,
+    /// Show/hide fade-in opacities (CAP-N21): per-item 0..1 the studio ramps
+    /// each tick while an item reveals. Absent = fully opaque (the default), so
+    /// scenes with no reveal render pixel-identically.
+    item_opacity: HashMap<ItemId, f32>,
 
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
@@ -257,6 +262,11 @@ struct StingerRig {
     pipeline: wgpu::RenderPipeline,
     /// The uploaded stinger frame, recreated on size/format change.
     texture: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32, PixelFormat)>,
+    /// The track-matte mode uniform (CAP-N29): `[mode, 0, 0, 0]` where mode is
+    /// 0 none / 1 horizontal / 2 vertical. Written each frame, read by the
+    /// stinger shader to derive per-pixel alpha from the matte half.
+    matte_buffer: wgpu::Buffer,
+    matte_bind: wgpu::BindGroup,
 }
 
 /// One reaction particle to draw this frame (canvas pixels; alpha 0..1).
@@ -324,6 +334,35 @@ fn transition_params(kind: TransitionKind, progress: f32) -> [f32; 4] {
         // scene and overlays the video (`render_scene_with_stinger`); a
         // stray call falls back to a fade.
         TransitionKind::Stinger => [progress, 0.0, 0.0, 0.0],
+        // The move transition never blends here either — the app composites
+        // the interpolated items (`render_move`); a stray call fades.
+        TransitionKind::Move => [progress, 0.0, 0.0, 0.0],
+    }
+}
+
+/// Interpolate every transform field between `a` and `b` at `t` in 0..=1
+/// (CAP-N20 move transition). Crop lerps in float then rounds back to source
+/// pixels. Rotation is linear (a matched item rarely spins a half-turn mid-
+/// move; the shortest-path nicety isn't worth the surprise of a lerp that
+/// changes direction).
+fn lerp_transform(a: &Transform, b: &Transform, t: f32) -> Transform {
+    let l = |x: f32, y: f32| x + (y - x) * t;
+    let lc = |x: u32, y: u32| (l(x as f32, y as f32)).round().max(0.0) as u32;
+    Transform {
+        x: l(a.x, b.x),
+        y: l(a.y, b.y),
+        scale_x: l(a.scale_x, b.scale_x),
+        scale_y: l(a.scale_y, b.scale_y),
+        rotation: l(a.rotation, b.rotation),
+        crop: fcap_scene::Crop {
+            left: lc(a.crop.left, b.crop.left),
+            top: lc(a.crop.top, b.crop.top),
+            right: lc(a.crop.right, b.crop.right),
+            bottom: lc(a.crop.bottom, b.crop.bottom),
+        },
+        rotation_x: l(a.rotation_x, b.rotation_x),
+        rotation_y: l(a.rotation_y, b.rotation_y),
+        perspective: l(a.perspective, b.perspective),
     }
 }
 
@@ -496,6 +535,7 @@ impl Compositor {
             frozen: HashMap::new(),
             scene_pool: Vec::new(),
             lenses: HashMap::new(),
+            item_opacity: HashMap::new(),
             scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
@@ -984,6 +1024,168 @@ impl Compositor {
         Ok(())
     }
 
+    /// Composite a **move (morph) transition** (CAP-N20): items whose source
+    /// is present in BOTH scenes animate from their outgoing transform to their
+    /// incoming one; items in only one scene fade out / in. Unlike the
+    /// two-texture [`Self::render_transition`], this composites item-by-item so
+    /// shapes actually travel across the canvas.
+    ///
+    /// Interpolated items sample their **raw source** (no per-item filter chain
+    /// for the sub-second move) at each item's own blend mode — the common case
+    /// (cameras, images, text sliding between layouts) looks right; a keyed
+    /// source shows unkeyed only for the brief morph.
+    pub fn render_move(
+        &mut self,
+        from: &Scene,
+        to: &Scene,
+        progress: f32,
+        _time_seconds: f32,
+    ) -> Result<(), CompositorError> {
+        let p = progress.clamp(0.0, 1.0);
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+
+        // Topmost visible item per source in each scene (last wins = on top).
+        let mut from_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
+        for item in &from.items {
+            if item.visible {
+                from_by_source.insert(item.source, item);
+            }
+        }
+        let mut to_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
+        for item in &to.items {
+            if item.visible {
+                to_by_source.insert(item.source, item);
+            }
+        }
+
+        // Draw order (bottom → top): outgoing-only items fading out, then the
+        // incoming scene in its z-order — matched items interpolated, incoming-
+        // only items fading in.
+        let mut jobs: Vec<(SourceId, BlendMode, ItemUniform)> = Vec::new();
+        for item in &from.items {
+            if !item.visible || to_by_source.contains_key(&item.source) {
+                continue;
+            }
+            if let Some(job) = self.move_job(item, &item.transform, 1.0 - p, canvas) {
+                jobs.push(job);
+            }
+        }
+        for item in &to.items {
+            if !item.visible {
+                continue;
+            }
+            let (transform, opacity) = match from_by_source.get(&item.source) {
+                Some(from_item) => (
+                    lerp_transform(&from_item.transform, &item.transform, p),
+                    1.0,
+                ),
+                None => (item.transform, p),
+            };
+            if let Some(job) = self.move_job(item, &transform, opacity, canvas) {
+                jobs.push(job);
+            }
+        }
+
+        self.ensure_uniform_capacity(jobs.len().max(1) as u64);
+        let mut staging: Vec<u8> = Vec::new();
+        for (index, (_, _, uniform)) in jobs.iter().enumerate() {
+            let offset = index as u64 * self.uniform_stride;
+            staging.resize(offset as usize, 0);
+            staging.extend_from_slice(bytemuck::bytes_of(uniform));
+        }
+        if !staging.is_empty() {
+            self.gpu
+                .queue
+                .write_buffer(&self.uniform_buffer, 0, &staging);
+        }
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap move"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap move pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // The move IS the whole frame — start from opaque black,
+                        // exactly like a normal scene compose.
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            let mut bound_blend = None;
+            for (index, (source, blend, _)) in jobs.iter().enumerate() {
+                if bound_blend != Some(*blend) {
+                    let pipeline = self
+                        .pipelines
+                        .iter()
+                        .find(|(mode, _)| mode == blend)
+                        .map(|(_, pipeline)| pipeline)
+                        .expect("every blend mode has a pipeline");
+                    pass.set_pipeline(pipeline);
+                    bound_blend = Some(*blend);
+                }
+                let offset = (index as u64 * self.uniform_stride) as u32;
+                let bind = &self
+                    .sources
+                    .get(source)
+                    .expect("resolved in move_job")
+                    .bind_group;
+                pass.set_bind_group(0, &self.uniform_bind, &[offset]);
+                pass.set_bind_group(1, bind, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// One move-transition draw for `item` at an (interpolated) `transform` and
+    /// `opacity`, sampling its raw source. `None` if the source has no live
+    /// slot yet or the item is cropped away.
+    fn move_job(
+        &self,
+        item: &SceneItem,
+        transform: &Transform,
+        opacity: f32,
+        canvas: (f32, f32),
+    ) -> Option<(SourceId, BlendMode, ItemUniform)> {
+        let slot = self.sources.get(&item.source)?;
+        let (sw, sh) = (slot.width, slot.height);
+        let content = transform::content_size(sw, sh, &transform.crop)?;
+        let mvp = if transform.has_3d() {
+            transform::perspective_clip_matrix(transform, content, canvas)
+        } else {
+            transform::clip_matrix(transform, content, canvas)
+        };
+        let (_, prep) = blend_config(item.blend);
+        Some((
+            item.source,
+            item.blend,
+            ItemUniform {
+                mvp,
+                uv_rect: transform::uv_rect(sw, sh, &transform.crop),
+                size: [content.0, content.1, 0.0, 0.0],
+                misc: [prep, 0.0, transform.scale_x.abs(), opacity.clamp(0.0, 1.0)],
+            },
+        ))
+    }
+
     /// One stinger-transition frame (Phase 6): render `scene` (the side of
     /// the cut the audience should see), then draw the newest stinger video
     /// frame straight-alpha-over it. `frame` is `None` while the stinger
@@ -993,15 +1195,28 @@ impl Compositor {
         scene: &Scene,
         time_seconds: f32,
         frame: Option<&Frame>,
+        matte: StingerMatte,
     ) -> Result<(), CompositorError> {
         self.render(scene, time_seconds)?;
         self.ensure_stinger_rig();
         if let Some(frame) = frame {
             self.upload_stinger_frame(frame)?;
         }
+        // The track-matte mode this frame (CAP-N29): the shader reads the fill
+        // from one half and the matte's luma from the other for per-pixel alpha.
+        let matte_mode: f32 = match matte {
+            StingerMatte::None => 0.0,
+            StingerMatte::Horizontal => 1.0,
+            StingerMatte::Vertical => 2.0,
+        };
         // Between video frames the last uploaded one keeps covering the swap
         // (the render loop outpaces the stinger's fps).
         let rig = self.stinger.as_ref().expect("ensured above");
+        self.gpu.queue.write_buffer(
+            &rig.matte_buffer,
+            0,
+            bytemuck::bytes_of(&[matte_mode, 0.0f32, 0.0, 0.0]),
+        );
         let Some((_, bind, _, _, _)) = rig.texture.as_ref() else {
             return Ok(());
         };
@@ -1029,6 +1244,7 @@ impl Compositor {
             });
             pass.set_pipeline(&rig.pipeline);
             pass.set_bind_group(0, bind, &[]);
+            pass.set_bind_group(1, &rig.matte_bind, &[]);
             pass.draw(0..3, 0..1);
         }
         self.gpu.queue.submit(Some(encoder.finish()));
@@ -1391,9 +1607,36 @@ impl Compositor {
             label: Some("fcap stinger shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/stinger.wgsl").into()),
         });
+        let matte_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fcap stinger matte"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(16),
+                },
+                count: None,
+            }],
+        });
+        let matte_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap stinger matte params"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let matte_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fcap stinger matte params"),
+            layout: &matte_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: matte_buffer.as_entire_binding(),
+            }],
+        });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fcap stinger layout"),
-            bind_group_layouts: &[&self.texture_layout],
+            bind_group_layouts: &[&self.texture_layout, &matte_layout],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1427,6 +1670,8 @@ impl Compositor {
         self.stinger = Some(StingerRig {
             pipeline,
             texture: None,
+            matte_buffer,
+            matte_bind,
         });
     }
 
@@ -1856,6 +2101,13 @@ impl Compositor {
         self.lenses = lenses;
     }
 
+    /// Replace the per-item show/hide fade-in opacities (CAP-N21) for this
+    /// tick — the studio hands over only items mid-reveal; everything else
+    /// draws fully opaque.
+    pub fn set_item_opacity(&mut self, opacities: HashMap<ItemId, f32>) {
+        self.item_opacity = opacities;
+    }
+
     pub fn set_scene_pool(&mut self, scenes: Vec<Scene>, refs: HashMap<SourceId, SceneId>) {
         self.scene_pool = scenes;
         self.scene_refs = refs;
@@ -1992,6 +2244,23 @@ impl Compositor {
             let mut plans: Vec<PassPlan> = Vec::new();
             let mut chain_size = source_size;
             for filter in item.filters.iter().filter(|filter| filter.enabled) {
+                // CAP-N22: a user WGSL effect is compiled + validated on demand
+                // here (this scope has the device); an invalid or empty shader
+                // yields no pass, so the item renders unfiltered, never a crash.
+                if let fcap_scene::FilterKind::UserShader { source, params } = &filter.kind {
+                    if let Some(hash) = self.filters.ensure_user_pipeline(&self.gpu.device, source)
+                    {
+                        let plan = crate::filters::user_shader_plan(
+                            hash,
+                            params,
+                            chain_size,
+                            time_seconds,
+                        );
+                        chain_size = plan.out;
+                        plans.push(plan);
+                    }
+                    continue;
+                }
                 if let Some(passes) = crate::filters::plan_filter(
                     &filter.kind,
                     filter.id,
@@ -2074,13 +2343,14 @@ impl Compositor {
             } else {
                 transform::clip_matrix(&transform, content, canvas)
             };
+            // misc.w = opacity: 1.0 unless the item is mid show/hide fade-in
+            // (CAP-N21), where the studio hands over a 0..1 ramp for this tick.
+            let opacity = self.item_opacity.get(&item.id).copied().unwrap_or(1.0);
             let uniform = ItemUniform {
                 mvp,
                 uv_rect: transform::uv_rect(chain_size.0, chain_size.1, &transform.crop),
                 size: [content.0, content.1, 0.0, 0.0],
-                // misc.w = 1.0: scene items are fully opaque (the downstream
-                // keyer is the only thing that sets a partial opacity).
-                misc: [prep, sampling, transform.scale_x.abs(), 1.0],
+                misc: [prep, sampling, transform.scale_x.abs(), opacity],
             };
             let offset = draws.len() as u64 * self.uniform_stride;
             item_staging.resize(offset as usize, 0);

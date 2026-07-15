@@ -463,6 +463,15 @@ fn open_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a vetted external link (menu-bar Help links, the About dialog) in the
+/// OS default browser. This Tauri webview never follows an `<a target="_blank">`
+/// to the system browser, so UI link items hand the URL here instead. Reuses
+/// `open_url`'s https/mailto allowlist — a `file:`/`javascript:` URL is refused.
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), String> {
+    open_url(&url)
+}
+
 /// A short one-line summary of the error for the subject: the crash's panic
 /// message if there was one, else the first line of the user's description,
 /// else a generic label. Kept to one line, bounded length.

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { STREAM_SERVICES, TRANSITION_KINDS } from "../api/types";
+import { STINGER_MATTES, STREAM_SERVICES, TRANSITION_KINDS } from "../api/types";
 import { bundleFor, catalogSource, loadedLocales } from "../i18n/bundle";
 import {
   AUTO_LOCALE,
@@ -146,6 +146,7 @@ describe("label tables", () => {
   const TABLES: Array<[string, ReadonlyArray<readonly [unknown, string]>]> = [
     ["TRANSITION_KINDS", TRANSITION_KINDS],
     ["STREAM_SERVICES", STREAM_SERVICES],
+    ["STINGER_MATTES", STINGER_MATTES],
   ];
 
   it.each(TABLES)("every %s key exists in en.ftl", (name, table) => {

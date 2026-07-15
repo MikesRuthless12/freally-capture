@@ -12,7 +12,7 @@ use fcap_scene::{AudioSettings, MonitorMode, SourceId};
 use parking_lot::Mutex;
 
 use crate::capture::{open_capture, CaptureStream};
-use crate::graph::{MixerCore, StripControl};
+use crate::graph::{MixerCore, StripControl, TransitionDuck};
 use crate::meter::Levels;
 use crate::monitor::{open_monitor, MonitorStream};
 use crate::{AudioError, InputSpec, BLOCK_FRAMES};
@@ -116,6 +116,22 @@ enum Cmd {
     /// source's raw pre-gain block peaks, timestamped against the shared
     /// arm instant so the video probe's clock matches.
     Calibrate(Option<(SourceId, Instant)>),
+    /// Arm (or release) the transition audio duck (CAP-N29): while a stinger
+    /// plays, its decoded audio (drained from the named media-hub ring) ducks
+    /// the program mix. `None` releases it.
+    TransitionDuck(Option<TransitionDuckSpec>),
+}
+
+/// What arms the transition duck (CAP-N29): the media-hub id whose decoded
+/// audio drives the duck (the stinger's), plus the duck shape.
+#[derive(Debug, Clone)]
+pub struct TransitionDuckSpec {
+    /// The `media_hub` ring id the stinger's audio is decoded into.
+    pub hub_id: String,
+    pub depth_db: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+    pub threshold_db: f32,
 }
 
 /// Cloneable handle to the engine thread.
@@ -200,6 +216,11 @@ impl AudioEngine {
     pub fn calibration_series(&self) -> Vec<(f64, f32)> {
         self.calibration.lock().clone()
     }
+
+    /// Arm (or release with `None`) the transition audio duck (CAP-N29).
+    pub fn set_transition_duck(&self, duck: Option<TransitionDuckSpec>) {
+        let _ = self.tx.send(Cmd::TransitionDuck(duck));
+    }
 }
 
 /// Everything the engine tracks per source.
@@ -261,6 +282,12 @@ fn run(
     // the published total is **monotonic** — a device that recovers with a
     // fresh ring never makes the count jump backwards.
     let mut retired_dropped = 0u64;
+    // The media-hub id whose audio drives the transition duck (CAP-N29), while
+    // armed. `None` between transitions — the duck is released and idle.
+    let mut duck_hub: Option<String> = None;
+    // Reused each block to drain the stinger's audio (peak only) without a
+    // per-block allocation on this real-time thread.
+    let mut duck_trigger: Vec<f32> = Vec::new();
     let mut next_tick = Instant::now() + TICK;
 
     loop {
@@ -329,6 +356,21 @@ fn run(
                     // late block from the previous target can't leak in.
                     calibration.lock().clear();
                 }
+                Ok(Cmd::TransitionDuck(spec)) => match spec {
+                    Some(spec) => {
+                        core.set_transition_duck(Some(TransitionDuck::new(
+                            spec.depth_db,
+                            spec.attack_ms,
+                            spec.release_ms,
+                            spec.threshold_db,
+                        )));
+                        duck_hub = Some(spec.hub_id);
+                    }
+                    None => {
+                        core.set_transition_duck(None); // ramps out, then clears
+                        duck_hub = None;
+                    }
+                },
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return, // app gone
             }
@@ -390,6 +432,17 @@ fn run(
                     series.push((armed_at.elapsed().as_secs_f64() * 1_000.0, peak));
                 }
             }
+        }
+
+        // -- the transition duck's trigger (CAP-N29): drain the stinger's
+        //    decoded audio and feed its peak envelope to the duck. The samples
+        //    are used for their loudness only — never mixed into the program —
+        //    and the ring is emptied each tick so unplayed audio can't lag ----
+        if let Some(hub) = &duck_hub {
+            let ring = crate::media_hub::ring(hub);
+            duck_trigger.clear();
+            ring.pop_into(&mut duck_trigger, ring.len());
+            core.feed_duck_trigger(&duck_trigger);
         }
 
         // -- mix one block -----------------------------------------------------

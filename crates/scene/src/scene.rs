@@ -357,6 +357,29 @@ pub enum TransitionKind {
     /// cut point). Files with straight alpha (e.g. ProRes 4444) composite
     /// transparently; others draw opaque while they play.
     Stinger,
+    /// Morph (CAP-N20): items present in BOTH scenes animate their transform
+    /// from the outgoing to the incoming layout instead of cutting; items in
+    /// only one scene fade in/out. Composited item-by-item (`render_move`),
+    /// not a two-texture blend.
+    Move,
+}
+
+/// How a stinger video carries its transparency (CAP-N29 track matte). Most
+/// stinger files are opaque or straight-alpha; a **track matte** packs the fill
+/// (color) and its matte (a grayscale alpha channel) into one frame — the fill
+/// in the first half, the matte's luminance in the second — so per-pixel
+/// transparency survives codecs that drop alpha (H.264/HEVC). The fill/matte
+/// split is the After-Effects convention: fill first, matte second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StingerMatte {
+    /// The frame is used as-is (opaque, or its own straight alpha).
+    #[default]
+    None,
+    /// Fill in the LEFT half, matte (luma → alpha) in the RIGHT half.
+    Horizontal,
+    /// Fill in the TOP half, matte (luma → alpha) in the BOTTOM half.
+    Vertical,
 }
 
 /// One item's pre-focus placement, restored exactly when focus toggles off.
@@ -490,6 +513,11 @@ pub struct SceneItem {
     /// never sit above (or otherwise interfere with) a capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backdrop: Option<BackdropSplit>,
+    /// Show/hide fade-in (CAP-N21): when this item is made visible (an eye
+    /// toggle or a rule), its opacity ramps 0→1 over this many ms. `0` (the
+    /// default) appears instantly, exactly as before.
+    #[serde(default)]
+    pub reveal_ms: u32,
 }
 
 impl SceneItem {
@@ -507,6 +535,7 @@ impl SceneItem {
             filters: Vec::new(),
             scaling: ScaleMode::default(),
             backdrop: None,
+            reveal_ms: 0,
         }
     }
 }

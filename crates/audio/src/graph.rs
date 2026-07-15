@@ -133,6 +133,43 @@ fn sync_frames(ms: u32) -> usize {
     (ms as usize * SAMPLE_RATE as usize) / 1_000
 }
 
+/// A program-audio duck driven by a transition's own audio envelope
+/// (CAP-N29). While a stinger plays, its decoded audio's peak envelope opens
+/// the duck and the program mix — the master **and every track bus** (what
+/// records and streams) — dips by up to `depth_db`. Off unless armed; the
+/// program mix is bit-identical when no duck is set.
+#[derive(Debug, Clone, Copy)]
+pub struct TransitionDuck {
+    /// Full attenuation applied while the trigger sits above threshold, dB.
+    depth_db: f32,
+    /// Per-sample one-pole coefficients for the dive / recover ramps.
+    attack_coef: f32,
+    release_coef: f32,
+    /// Linear trigger level above which the duck engages.
+    threshold_lin: f32,
+}
+
+impl TransitionDuck {
+    /// `depth_db` how far to duck; `threshold_db` the trigger gate; the ramps
+    /// in ms. Same ballistics shape as the per-strip [`crate::filters`] ducker.
+    pub fn new(depth_db: f32, attack_ms: f32, release_ms: f32, threshold_db: f32) -> Self {
+        Self {
+            depth_db: depth_db.max(0.0),
+            attack_coef: one_pole_coef(attack_ms.max(1.0), SAMPLE_RATE as f32),
+            release_coef: one_pole_coef(release_ms.max(1.0), SAMPLE_RATE as f32),
+            threshold_lin: db_to_lin(threshold_db),
+        }
+    }
+}
+
+/// Multiply a stereo bus by a per-frame gain (one gain value per L/R pair).
+fn apply_frame_gain(bus: &mut [f32], gain: &[f32]) {
+    for (frame, g) in bus.chunks_exact_mut(2).zip(gain) {
+        frame[0] *= *g;
+        frame[1] *= *g;
+    }
+}
+
 /// The block outputs, borrowed from the core after [`MixerCore::process`].
 pub struct MixerCore {
     strips: HashMap<SourceId, Strip>,
@@ -143,6 +180,16 @@ pub struct MixerCore {
     lufs: LufsMeter,
     master_meter: LevelAccumulator,
     gain_coef: f32,
+    /// Transition duck (CAP-N29): `None` when idle. `duck_releasing` ramps the
+    /// reduction back to unity after the transition ends, then clears it.
+    duck: Option<TransitionDuck>,
+    duck_releasing: bool,
+    /// The trigger (stinger) peak envelope, fed each block while armed.
+    duck_env: f32,
+    /// Current smoothed gain reduction, dB (≥ 0).
+    duck_reduction_db: f32,
+    /// Reused per-frame duck gain, so the same curve hits master + every track.
+    duck_gain: Vec<f32>,
 }
 
 impl Default for MixerCore {
@@ -163,6 +210,11 @@ impl MixerCore {
             master_meter: LevelAccumulator::default(),
             // ~8 ms fade on mute/PTT/fader moves — click-free, still snappy.
             gain_coef: one_pole_coef(8.0, SAMPLE_RATE as f32),
+            duck: None,
+            duck_releasing: false,
+            duck_env: 0.0,
+            duck_reduction_db: 0.0,
+            duck_gain: vec![1.0; BLOCK_FRAMES],
         }
     }
 
@@ -282,9 +334,70 @@ impl MixerCore {
             }
         }
 
+        // Transition duck (CAP-N29): after the buses are summed, dip the
+        // program (master + every track) by the stinger-driven reduction, so
+        // metering, recording, and streaming all see the same duck.
+        self.apply_transition_duck();
+
         self.envelopes = next_envelopes;
         self.lufs.push(&self.master);
         self.master_meter.push_block(&self.master);
+    }
+
+    /// Arm/refresh (`Some`) or release (`None`) the transition duck (CAP-N29).
+    /// Release keeps the last config so the reduction ramps out on its release
+    /// curve, then clears itself once back at unity.
+    pub fn set_transition_duck(&mut self, duck: Option<TransitionDuck>) {
+        match duck {
+            Some(cfg) => {
+                self.duck = Some(cfg);
+                self.duck_releasing = false;
+            }
+            None => self.duck_releasing = true,
+        }
+    }
+
+    /// Feed the trigger's samples (the stinger's decoded audio) each block so
+    /// its peak envelope can open the duck. No-op effect until the duck arms.
+    pub fn feed_duck_trigger(&mut self, samples: &[f32]) {
+        let peak = samples.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+        self.duck_env = peak.max(self.duck_env * ENVELOPE_FALL);
+    }
+
+    /// Advance the duck one block and multiply it into the program buses.
+    fn apply_transition_duck(&mut self) {
+        let Some(duck) = self.duck else {
+            return;
+        };
+        // Trigger over threshold opens the duck — unless we're releasing.
+        let target_db = if !self.duck_releasing && self.duck_env >= duck.threshold_lin {
+            duck.depth_db
+        } else {
+            0.0
+        };
+        // Build one per-frame gain curve, advancing the ballistics once, so the
+        // identical curve applies to master and every track (no double-ramp).
+        for g in self.duck_gain.iter_mut() {
+            let coef = if target_db > self.duck_reduction_db {
+                duck.attack_coef
+            } else {
+                duck.release_coef
+            };
+            self.duck_reduction_db += (target_db - self.duck_reduction_db) * (1.0 - coef);
+            *g = db_to_lin(-self.duck_reduction_db);
+        }
+        apply_frame_gain(&mut self.master, &self.duck_gain);
+        for track in &mut self.tracks {
+            apply_frame_gain(track, &self.duck_gain);
+        }
+        // Fully released → stop touching the mix (the common idle path costs
+        // nothing once cleared).
+        if self.duck_releasing && self.duck_reduction_db < 5e-4 {
+            self.duck = None;
+            self.duck_reduction_db = 0.0;
+            self.duck_env = 0.0;
+            self.duck_releasing = false;
+        }
     }
 
     /// One track bus's last block (0-based; recording consumes these in P4).
@@ -717,6 +830,79 @@ mod tests {
         assert!(
             peak(core.track(1)) > 0.35,
             "music recovers once the mic is quiet"
+        );
+    }
+
+    /// CAP-N29: while a stinger plays, its (loud) audio ducks the program —
+    /// master AND the track buses (what records/streams) — and it recovers
+    /// once the stinger ends.
+    #[test]
+    fn transition_duck_dips_the_program_under_the_stinger() {
+        let mut core = MixerCore::new();
+        let music = SourceId::new();
+        let mut controls = HashMap::new();
+        controls.insert(music, StripControl::new(AudioSettings::default()));
+
+        // Baseline: music alone at 0.4 reaches the program near full.
+        for block in 0..30 {
+            let mut inputs = HashMap::new();
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        assert!(peak(core.master()) > 0.35, "music alone ~0.4");
+
+        // Arm the duck, feed a loud stinger envelope: program dips ~12 dB on
+        // both the master and the track bus.
+        core.set_transition_duck(Some(TransitionDuck::new(12.0, 10.0, 50.0, -30.0)));
+        for block in 0..60 {
+            core.feed_duck_trigger(&[0.8f32; BLOCK_SAMPLES]);
+            let mut inputs = HashMap::new();
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let expected = 0.4 * db_to_lin(-12.0);
+        let master = peak(core.master());
+        let track = peak(core.track(0));
+        assert!(
+            (master - expected).abs() < 0.03,
+            "master ducked near {expected}, got {master}"
+        );
+        assert!(
+            (track - expected).abs() < 0.03,
+            "track ducked near {expected}, got {track}"
+        );
+
+        // Release (the stinger ended): the program recovers.
+        core.set_transition_duck(None);
+        for block in 0..60 {
+            let mut inputs = HashMap::new();
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        assert!(
+            peak(core.master()) > 0.35,
+            "the program recovers after the stinger"
+        );
+    }
+
+    /// A silent stinger never ducks — the duck is driven by the trigger's own
+    /// envelope, so no envelope means the program mix is untouched.
+    #[test]
+    fn transition_duck_is_inert_without_a_trigger() {
+        let mut core = MixerCore::new();
+        let music = SourceId::new();
+        let mut controls = HashMap::new();
+        controls.insert(music, StripControl::new(AudioSettings::default()));
+        core.set_transition_duck(Some(TransitionDuck::new(12.0, 10.0, 50.0, -30.0)));
+        for block in 0..40 {
+            core.feed_duck_trigger(&[0.0f32; BLOCK_SAMPLES]);
+            let mut inputs = HashMap::new();
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        assert!(
+            peak(core.master()) > 0.35,
+            "a silent stinger does not duck the program"
         );
     }
 

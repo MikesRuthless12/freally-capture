@@ -35,6 +35,7 @@ pub use devices::{
 };
 pub use engine::{
     AudioEngine, EngineSnapshot, RecordTap, SourceConfig, SourceSnapshot, SourceState,
+    TransitionDuckSpec,
 };
 pub use graph::{MixerCore, StripControl};
 pub use meter::Levels;

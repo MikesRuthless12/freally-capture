@@ -860,6 +860,25 @@ filters-opacity = Opacité
 filters-cube-file = Fichier .cube
 filters-amount = Quantité
 filters-radius = Rayon
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galerie
+filters-shader-gallery-pick = Charger un préréglage…
+filters-shader-gallery-grayscale = Niveaux de gris
+filters-shader-gallery-invert = Inverser
+filters-shader-gallery-scanlines = Lignes de balayage
+filters-shader-gallery-vignette = Vignettage
+filters-shader-source = Source du shader (WGSL)
+filters-shader-hint = Écrivez un effect(uv, color, p, texel, time) en WGSL qui renvoie un vec4. Annotez les paramètres avec // @param name min max default pour créer des curseurs. Un shader invalide est ignoré — la source s'affiche sans filtre jusqu'à ce qu'il compile.
+filters-name-bezier-mask = Masque Bézier
+filters-mask-editor-hint = Faites glisser un point pour le déplacer, double-cliquez pour en ajouter un, clic droit sur un point pour le supprimer.
+filters-mask-shape = Forme
+filters-mask-shape-pick = Préréglage…
+filters-mask-shape-rectangle = Rectangle
+filters-mask-shape-diamond = Losange
+filters-mask-shape-hexagon = Hexagone
+filters-mask-shape-circle = Cercle
+filters-mask-feather = Contour progressif
+filters-mask-export-wipe = Exporter comme volet…
 filters-mask-image = Image de masque
 filters-mask-mode = Mode
 filters-mask-alpha = alpha
@@ -1258,6 +1277,11 @@ studio-preview-stinger-placeholder = vidéo Stinger (le ProRes 4444 .mov conserv
 studio-preview-stinger-label = Fichier vidéo Stinger
 studio-preview-stinger-cut-label = Point de coupe du Stinger (ms)
 studio-preview-stinger-cut-title = Moment où le changement de scène se produit sous le Stinger (ms dans la transition)
+studio-preview-stinger-matte-label = Cache de piste
+studio-preview-stinger-matte-title = Comment un Stinger à cache de piste intègre la transparence : le remplissage et son cache côte à côte (horizontal) ou empilés (vertical)
+studio-preview-stinger-duck-label = Atténuer le programme
+studio-preview-stinger-duck-title = Atténuer l'audio du programme sous l'audio propre du Stinger pendant sa lecture (0 = désactivé)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Coupe
@@ -1275,6 +1299,12 @@ transition-kind-luma-diamond = Balayage Luma (losange)
 transition-kind-luma-clock = Balayage Luma (horloge)
 transition-kind-image = Balayage image (personnalisé)
 transition-kind-stinger = Stinger (vidéo)
+transition-kind-move = Déplacement (morphing)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Aucun
+stinger-matte-horizontal = Côte à côte
+stinger-matte-vertical = Empilé
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2181,9 +2211,12 @@ transform-3d = Inclinaison 3D
 transform-rotation-x = Inclinaison X (°)
 transform-rotation-y = Inclinaison Y (°)
 transform-perspective = Perspective
+transform-reveal = Afficher/masquer
+transform-reveal-ms = Fondu d'apparition (ms)
 sources-clone-title = Cloner (même flux, filtres propres)
 sources-clone-item = Cloner { $name }
 menu-tools-downstream = Incrustations de sortie…
+menu-tools-transition-rules = Règles de transition…
 dsk-title = Incrustations de sortie
 dsk-hint = Superpositions composées sur la sortie programme — au-dessus de chaque scène, elles restent en place quand vous changez de scène (un logo, un badge EN DIRECT, un bandeau). Le haut de la liste s'affiche au premier plan.
 dsk-empty = Aucune incrustation pour l'instant — ajoutez une source pour l'incruster sur chaque scène.
@@ -2196,3 +2229,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Échelle
 dsk-add = + Ajouter une incrustation
+transition-rules-title = Règles de transition
+transition-rules-hint = Donnez à une paire de scènes sa propre transition. Quand vous passez de la première scène à la seconde, ce type et cette durée sont utilisés au lieu de ceux par défaut (une règle Stinger/Image utilise toujours le fichier défini dans les contrôles de transition).
+transition-rules-empty = Aucune règle pour l'instant — chaque paire de scènes utilise la transition par défaut.
+transition-rules-from = De
+transition-rules-to = À
+transition-rules-kind = Transition
+transition-rules-duration = Durée (ms)
+transition-rules-add = Ajouter une règle
+transition-rules-remove = Supprimer la règle

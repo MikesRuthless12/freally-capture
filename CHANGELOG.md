@@ -15,6 +15,42 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.400.0] — 2026-07-15 (Compositor & FX depth — Phase 3 complete)
+
+> The second half of Phase 3 lands the five deferred motion-and-effects features, completing the
+> phase: a **move (morph) transition**, **transition rules**, a **shader studio** for user WGSL
+> effects, a **bezier mask** editor, and **track-matte stingers** with an optional program-audio
+> duck. Plus a fix to two Help-menu links that did nothing.
+
+### Added
+
+- **Move (morph) transition (CAP-N20)** — a new transition kind: items that appear in *both* the
+  outgoing and incoming scene (same source) animate from their old position/scale/rotation/crop to
+  the new one instead of cutting; items in only one scene fade in or out. Eased with a
+  smootherstep so the motion accelerates in and settles out.
+- **Transition rules (CAP-N21)** — a per-scene-pair transition matrix (**Tools → Transition
+  Rules**): scene A→B can use its own kind and duration instead of the default. Plus per-item
+  **show/hide fade-in** (Edit Transform → Reveal): an item ramps in when it's made visible. All
+  blend and move transitions are now eased.
+- **Shader studio (CAP-N22)** — write a **user WGSL effect** as a filter: it's compiled and
+  validated at runtime (an invalid shader is ignored — the source renders unfiltered, never a
+  crash), with sliders auto-generated from `// @param` annotations, live editing, and a built-in
+  gallery (grayscale, invert, scanlines, vignette).
+- **Bezier mask (CAP-N28)** — a **freehand mask** filter: draw a closed path (drag the handles,
+  double-click to add, right-click to remove), with preset shapes, per-edge feather, and invert.
+  Export any path as a grayscale **luma-wipe** pattern for a shape-reveal transition.
+- **Track-matte stingers (CAP-N29)** — a stinger can carry its transparency as a **track matte**
+  (fill and matte packed **side-by-side** or **stacked**), so per-pixel alpha survives codecs that
+  drop it (H.264/HEVC). Optionally **duck the program audio** under the stinger's own audio while
+  it plays.
+
+### Fixed
+
+- **Help → Visit Website and Help Portal did nothing.** These menu links (and the same links in
+  the About dialog) relied on the webview opening `target="_blank"`, which this Tauri build never
+  does. They now open the OS browser through the app's vetted opener — **Visit Website** → the
+  homepage, **Help Portal** → the documentation page.
+
 ## [0.310.0] — 2026-07-14 (Compositor & FX depth — Phase 3, part 1)
 
 > The first half of Phase 3 (Compositor & FX Depth): motion-and-effects reach the canvas —

@@ -848,6 +848,25 @@ filters-opacity = 不透明度
 filters-cube-file = .cube 文件
 filters-amount = 数量
 filters-radius = 半径
+filters-name-shader = 着色器 (WGSL)
+filters-shader-gallery = 图库
+filters-shader-gallery-pick = 加载预设…
+filters-shader-gallery-grayscale = 灰度
+filters-shader-gallery-invert = 反相
+filters-shader-gallery-scanlines = 扫描线
+filters-shader-gallery-vignette = 暗角
+filters-shader-source = 着色器源码 (WGSL)
+filters-shader-hint = 编写一个返回 vec4 的 WGSL effect(uv, color, p, texel, time)。用 // @param name min max default 注释参数以生成滑块。无效的着色器会被忽略——在编译通过前，源将不经过滤地渲染。
+filters-name-bezier-mask = 贝塞尔遮罩
+filters-mask-editor-hint = 拖动控制点可移动，双击可添加，右键点击控制点可删除。
+filters-mask-shape = 形状
+filters-mask-shape-pick = 预设…
+filters-mask-shape-rectangle = 矩形
+filters-mask-shape-diamond = 菱形
+filters-mask-shape-hexagon = 六边形
+filters-mask-shape-circle = 圆形
+filters-mask-feather = 羽化
+filters-mask-export-wipe = 导出为擦除…
 filters-mask-image = 遮罩图像
 filters-mask-mode = 模式
 filters-mask-alpha = alpha
@@ -1241,6 +1260,11 @@ studio-preview-stinger-placeholder = 垫场视频（ProRes 4444 .mov 保留其 a
 studio-preview-stinger-label = 垫场视频文件
 studio-preview-stinger-cut-label = 垫场切换点（ms）
 studio-preview-stinger-cut-title = 场景切换在垫场下发生的时刻（转场开始后的毫秒数）
+studio-preview-stinger-matte-label = 轨道遮罩
+studio-preview-stinger-matte-title = 轨道遮罩垫场如何封装透明度：填充与其遮罩并排（水平）或上下堆叠（垂直）
+studio-preview-stinger-duck-label = 闪避节目
+studio-preview-stinger-duck-title = 播放时将节目音频闪避到垫场自身音频之下（0 = 关闭）
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = 切换
@@ -1258,6 +1282,12 @@ transition-kind-luma-diamond = 亮度擦除（菱形）
 transition-kind-luma-clock = 亮度擦除（时钟）
 transition-kind-image = 图像擦除（自定义）
 transition-kind-stinger = 垫场（视频）
+transition-kind-move = 移动（变形）
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = 无
+stinger-matte-horizontal = 并排
+stinger-matte-vertical = 上下堆叠
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2164,9 +2194,12 @@ transform-3d = 3D 倾斜
 transform-rotation-x = 倾斜 X (°)
 transform-rotation-y = 倾斜 Y (°)
 transform-perspective = 透视
+transform-reveal = 显示/隐藏
+transform-reveal-ms = 显示淡入 (ms)
 sources-clone-title = 克隆（相同画面，独立滤镜）
 sources-clone-item = 克隆 { $name }
 menu-tools-downstream = 下游键控…
+menu-tools-transition-rules = 转场规则…
 dsk-title = 下游键控
 dsk-hint = 合成在节目输出上的叠加层 — 位于每个场景之上，切换场景时保持不变（徽标、直播标记、下三分之一字幕）。列表顶部绘制在最上层。
 dsk-empty = 暂无键控 — 添加一个源以将其叠加到每个场景上。
@@ -2179,3 +2212,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = 缩放
 dsk-add = + 添加键控
+transition-rules-title = 转场规则
+transition-rules-hint = 为一对场景设置专属转场。当你从第一个场景切换到第二个场景时，将使用此类型和时长而非默认值（垫场/图像规则仍使用转场控件中设置的文件）。
+transition-rules-empty = 暂无规则——每一对场景都使用默认转场。
+transition-rules-from = 从
+transition-rules-to = 到
+transition-rules-kind = 转场
+transition-rules-duration = 时长 (ms)
+transition-rules-add = 添加规则
+transition-rules-remove = 移除规则

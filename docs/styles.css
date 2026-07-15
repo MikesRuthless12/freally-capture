@@ -368,3 +368,6 @@ footer a {
 footer a:hover {
   text-decoration: underline;
 }
+
+/* Enlarged hero logo so the app icon is visible and readable (>= 284px). */
+.hero .logo { width: 288px; max-width: 72vw; height: auto; }

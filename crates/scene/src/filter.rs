@@ -251,6 +251,32 @@ pub enum FilterKind {
     /// frames for the source, so program, preview, record, and stream all hold
     /// the same still. Toggle `enabled` to freeze / unfreeze.
     Freeze,
+    /// A user-written WGSL effect (CAP-N22): the shader `source` plus up to
+    /// four numeric `params` it exposes (annotated `// @param` in the source).
+    /// Compiled and validated at runtime — an invalid or empty shader renders
+    /// the item unfiltered rather than crashing the compositor.
+    UserShader {
+        #[serde(default)]
+        source: String,
+        #[serde(default)]
+        params: Vec<f32>,
+    },
+    /// A freehand mask (CAP-N28): a closed path in normalized 0..=1 item space
+    /// the app rasterizes to a soft-edged alpha mask (rendered through the same
+    /// GPU mask pass as an image mask). Fewer than three points masks nothing.
+    BezierMask {
+        #[serde(default)]
+        points: Vec<[f32; 2]>,
+        /// Edge softness, 0..=1 of the mask's size (0 = a hard edge).
+        #[serde(default = "default_feather")]
+        feather: f32,
+        #[serde(default)]
+        invert: bool,
+    },
+}
+
+fn default_feather() -> f32 {
+    0.03
 }
 
 impl Rgba {
@@ -281,6 +307,8 @@ impl FilterKind {
             FilterKind::ZoomBlur { .. } => "zoomBlur",
             FilterKind::Pixelate { .. } => "pixelate",
             FilterKind::Freeze => "freeze",
+            FilterKind::UserShader { .. } => "userShader",
+            FilterKind::BezierMask { .. } => "bezierMask",
         }
     }
 
@@ -304,6 +332,8 @@ impl FilterKind {
             FilterKind::ZoomBlur { .. } => "Zoom Blur",
             FilterKind::Pixelate { .. } => "Pixelate",
             FilterKind::Freeze => "Freeze",
+            FilterKind::UserShader { .. } => "Shader",
+            FilterKind::BezierMask { .. } => "Bezier Mask",
         }
     }
 }

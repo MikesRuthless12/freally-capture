@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { buildInfo } from "../api/commands";
+import { buildInfo, openExternal } from "../api/commands";
 import type { BuildInfo } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
@@ -105,19 +105,18 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * `target="_blank"` + `rel="noreferrer"`: in the webview these open the OS
- * browser. `noreferrer` also implies `noopener`, so the opened page can never
- * reach back through `window.opener`.
+ * A `<a target="_blank">` never reaches the OS browser from this Tauri webview
+ * (no opener plugin; external navigation is blocked), so hand the URL to the
+ * OS opener command instead — the same path the Help menu links use.
  */
 function Link({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
+    <button
+      type="button"
+      onClick={() => void openExternal(href)}
       className="rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
     >
       {children}
-    </a>
+    </button>
   );
 }

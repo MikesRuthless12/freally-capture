@@ -267,6 +267,7 @@ pub fn import_obs(json: &str) -> Result<ObsImport, ObsImportError> {
         hidden_muted: std::collections::HashSet::new(),
         vertical: None,
         downstream: Vec::new(),
+        transition_overrides: Vec::new(),
     };
     collection.sanitize();
 
@@ -369,6 +370,7 @@ impl PoolBuilder {
             filters,
             scaling: crate::scene::ScaleMode::Auto,
             backdrop: None,
+            reveal_ms: 0,
         })
     }
 }

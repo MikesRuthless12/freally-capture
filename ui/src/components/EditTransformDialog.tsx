@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { studioSetItemTransform } from "../api/commands";
+import { studioSetItemReveal, studioSetItemTransform } from "../api/commands";
 import type { ProgramStatus, SceneId, SceneItem, Transform } from "../api/types";
 import { useT } from "../i18n/t";
 import { clampScalesToCanvas, constrainPaste, slideIntoCanvas, type Size } from "../lib/constrain";
@@ -222,6 +222,22 @@ export function EditTransformDialog({
               onCommit={(value) => set3d("perspective", value)}
             />
           </div>
+        </section>
+
+        <section className="flex flex-col gap-1">
+          <span className="text-[10px] tracking-wide text-havoc-muted uppercase">
+            {t("transform-reveal")}
+          </span>
+          <NumberField
+            label={t("transform-reveal-ms")}
+            value={item.revealMs ?? 0}
+            min={0}
+            max={5000}
+            step={50}
+            onCommit={(value) =>
+              studioSetItemReveal(sceneId, item.id, value).catch(fail("set reveal"))
+            }
+          />
         </section>
 
         {source && (

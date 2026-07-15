@@ -60,6 +60,10 @@ pub(crate) enum PassKind {
     Pixelate,
     /// Preview-only alpha→grayscale, appended by the keying workbench (CAP-M26).
     Matte,
+    /// A user WGSL effect (CAP-N22), keyed by the hash of its (validated)
+    /// source — its pipeline is compiled on demand and cached, not in the
+    /// static table.
+    UserShader(u64),
 }
 
 /// Mirrors `shaders/filters.wgsl` (`FilterUniform`).
@@ -270,6 +274,9 @@ pub(crate) fn plan_filter(
         // passes — the studio's source-upload stage applies them (a bounded
         // buffer for delay; holding the last texture for freeze).
         FilterKind::RenderDelay { .. } | FilterKind::Freeze => None,
+        // User shaders (CAP-N22) are planned in `compose_scene`, which has the
+        // device needed to compile + validate them on demand.
+        FilterKind::UserShader { .. } => None,
         FilterKind::ColorCorrection {
             gamma,
             brightness,
@@ -337,6 +344,22 @@ pub(crate) fn plan_filter(
                 0.0,
                 0.0,
             ];
+            Some(vec![PassPlan {
+                kind: PassKind::Mask,
+                uniform,
+                resource: Some(filter_id),
+                out: in_size,
+            }])
+        }
+        FilterKind::BezierMask { invert, .. } => {
+            // CAP-N28: the app rasterizes the path into an alpha mask keyed by
+            // this filter's id — rendered through the same GPU mask pass. Until
+            // that resource arrives (or with <3 points) it renders unmasked.
+            if !resources.contains_key(&filter_id) {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [0.0, if *invert { 1.0 } else { 0.0 }, 0.0, 0.0];
             Some(vec![PassPlan {
                 kind: PassKind::Mask,
                 uniform,
@@ -552,6 +575,139 @@ pub(crate) struct FilterEngine {
     lut_layout: wgpu::BindGroupLayout,
     mask_layout: wgpu::BindGroupLayout,
     resources: HashMap<FilterId, FilterResource>,
+    /// User-WGSL effects (CAP-N22): the shared layout + target format so a
+    /// pipeline can be compiled on demand, and a cache keyed by source hash —
+    /// `None` marks a shader that failed validation (never retried per frame).
+    user_pipeline_layout: wgpu::PipelineLayout,
+    user_target_format: wgpu::TextureFormat,
+    user_pipelines: HashMap<u64, Option<wgpu::RenderPipeline>>,
+}
+
+/// The compile-time WGSL harness wrapped around a user effect (CAP-N22). It
+/// declares the exact bindings the filter pipeline provides — the user can only
+/// ADD functions/consts and must define `effect(...)`, so a shader can never
+/// reach a binding the layout does not carry (that fails validation and the
+/// effect is skipped, never rendered as a crash).
+const USER_SHADER_HEADER: &str = r#"
+struct FilterUniform {
+    m0: vec4<f32>, m1: vec4<f32>, m2: vec4<f32>,
+    p0: vec4<f32>, p1: vec4<f32>, texel: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> f: FilterUniform;
+@group(1) @binding(0) var t_in: texture_2d<f32>;
+@group(1) @binding(1) var s_clamp: sampler;
+@group(1) @binding(2) var s_repeat: sampler;
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, };
+@vertex
+fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
+    let uv = vec2<f32>(f32((vi << 1u) & 2u), f32(vi & 2u));
+    var out: VsOut;
+    out.pos = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+    out.uv = vec2<f32>(uv.x, 1.0 - uv.y);
+    return out;
+}
+fn luma(rgb: vec3<f32>) -> f32 { return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722)); }
+fn sample_at(uv: vec2<f32>) -> vec4<f32> { return textureSample(t_in, s_clamp, uv); }
+// ---- define: fn effect(uv: vec2<f32>, color: vec4<f32>, p: vec4<f32>, texel: vec4<f32>, time: f32) -> vec4<f32>
+//      uv = pixel 0..1; color = source at uv; p = the four params; texel.zw = size px; time = seconds ----
+"#;
+
+const USER_SHADER_FOOTER: &str = r#"
+@fragment
+fn fs_user(in: VsOut) -> @location(0) vec4<f32> {
+    let color = textureSample(t_in, s_clamp, in.uv);
+    return effect(in.uv, color, f.p0, f.texel, f.p1.x);
+}
+"#;
+
+/// Longest user source accepted (CAP-N22) — a defensive cap; real effects are
+/// well under this. Oversized submissions are rejected before compilation.
+const MAX_USER_SHADER_LEN: usize = 8192;
+/// Cap on cached user pipelines; live-editing churns hashes, so clear (and let
+/// the next use recompile) rather than grow without bound.
+const MAX_USER_PIPELINES: usize = 32;
+
+fn user_shader_hash(source: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Plan a user-shader pass (CAP-N22): its four params ride `p0`, playback time
+/// rides `p1.x`, and it never resizes the chain.
+pub(crate) fn user_shader_plan(
+    hash: u64,
+    params: &[f32],
+    in_size: (u32, u32),
+    time: f32,
+) -> PassPlan {
+    let mut uniform = FilterUniform::zero().with_texel(in_size);
+    let mut p = [0.0f32; 4];
+    for (slot, value) in p.iter_mut().zip(params.iter()) {
+        *slot = *value;
+    }
+    uniform.p0 = p;
+    uniform.p1 = [time, 0.0, 0.0, 0.0];
+    PassPlan {
+        kind: PassKind::UserShader(hash),
+        uniform,
+        resource: None,
+        out: in_size,
+    }
+}
+
+/// Compile a user effect into a pipeline, returning `None` if it fails naga
+/// validation (CAP-N22). The whole compile runs inside a validation error scope
+/// so an invalid shader is caught and skipped — it can never surface as a
+/// panic or a lost device.
+fn compile_user_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    source: &str,
+) -> Option<wgpu::RenderPipeline> {
+    let full = format!("{USER_SHADER_HEADER}{source}{USER_SHADER_FOOTER}");
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fcap user shader"),
+        source: wgpu::ShaderSource::Wgsl(full.into()),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("fcap user shader pipeline"),
+        cache: None,
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_fullscreen"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_user"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+    });
+    // Any validation error (bad WGSL, a binding the layout lacks, a missing
+    // `effect`) lands here — the shader is rejected, not run.
+    match pollster::block_on(device.pop_error_scope()) {
+        Some(_) => None,
+        None => Some(pipeline),
+    }
 }
 
 const INITIAL_PASS_CAPACITY: u64 = 32;
@@ -640,6 +796,13 @@ impl FilterEngine {
             bind_group_layouts: &[&uniform_layout, input_layout, &mask_layout],
             push_constant_ranges: &[],
         });
+        // User WGSL effects (CAP-N22) share the basic layout: the uniform (with
+        // their params) + the source texture/samplers — nothing else.
+        let user_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap user shader layout"),
+            bind_group_layouts: &[&uniform_layout, input_layout],
+            push_constant_ranges: &[],
+        });
 
         let entries: [(PassKind, &str, &wgpu::PipelineLayout); 16] = [
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
@@ -716,6 +879,9 @@ impl FilterEngine {
             lut_layout,
             mask_layout,
             resources: HashMap::new(),
+            user_pipeline_layout,
+            user_target_format: target_format,
+            user_pipelines: HashMap::new(),
         }
     }
 
@@ -760,11 +926,46 @@ impl FilterEngine {
     }
 
     pub fn pipeline(&self, kind: PassKind) -> &wgpu::RenderPipeline {
+        if let PassKind::UserShader(hash) = kind {
+            return self
+                .user_pipelines
+                .get(&hash)
+                .and_then(|entry| entry.as_ref())
+                .expect("a planned user-shader pass has a compiled pipeline");
+        }
         self.pipelines
             .iter()
             .find(|(candidate, _)| *candidate == kind)
             .map(|(_, pipeline)| pipeline)
             .expect("every pass kind has a pipeline")
+    }
+
+    /// Compile + cache a user WGSL effect (CAP-N22), returning its pass hash if
+    /// it validated. `None` = empty, oversized, or a shader that failed naga
+    /// validation (a bad shader is cached as a failure so it is never retried
+    /// every frame, and the item simply renders unfiltered).
+    pub fn ensure_user_pipeline(&mut self, device: &wgpu::Device, source: &str) -> Option<u64> {
+        if source.trim().is_empty() || source.len() > MAX_USER_SHADER_LEN {
+            return None;
+        }
+        let hash = user_shader_hash(source);
+        match self.user_pipelines.get(&hash) {
+            Some(Some(_)) => return Some(hash),
+            Some(None) => return None,
+            None => {}
+        }
+        if self.user_pipelines.len() >= MAX_USER_PIPELINES {
+            self.user_pipelines.clear(); // bound memory under heavy live-editing
+        }
+        let pipeline = compile_user_pipeline(
+            device,
+            &self.user_pipeline_layout,
+            self.user_target_format,
+            source,
+        );
+        let ok = pipeline.is_some();
+        self.user_pipelines.insert(hash, pipeline);
+        ok.then_some(hash)
     }
 
     pub fn resources(&self) -> &HashMap<FilterId, FilterResource> {
@@ -1180,6 +1381,20 @@ mod tests {
             (64, 64),
             0.0,
             &empty
+        )
+        .is_none());
+        // CAP-N28: a bezier mask whose rasterized resource has not arrived is
+        // skipped too — the item renders unmasked, never black.
+        assert!(plan_filter(
+            &FilterKind::BezierMask {
+                points: vec![[0.2, 0.2], [0.8, 0.2], [0.5, 0.8]],
+                feather: 0.03,
+                invert: false,
+            },
+            id,
+            (64, 64),
+            0.0,
+            &empty,
         )
         .is_none());
     }

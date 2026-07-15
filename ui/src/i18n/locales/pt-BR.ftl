@@ -838,6 +838,25 @@ filters-opacity = Opacidade
 filters-cube-file = arquivo .cube
 filters-amount = Quantidade
 filters-radius = Raio
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galeria
+filters-shader-gallery-pick = Carregar uma predefinição…
+filters-shader-gallery-grayscale = Escala de cinza
+filters-shader-gallery-invert = Inverter
+filters-shader-gallery-scanlines = Linhas de varredura
+filters-shader-gallery-vignette = Vinheta
+filters-shader-source = Código do shader (WGSL)
+filters-shader-hint = Escreva um effect(uv, color, p, texel, time) em WGSL que retorne um vec4. Anote os parâmetros com // @param name min max default para criar controles deslizantes. Um shader inválido é ignorado — a fonte é exibida sem filtro até compilar.
+filters-name-bezier-mask = Máscara Bézier
+filters-mask-editor-hint = Arraste um ponto para movê-lo, clique duas vezes para adicionar um, clique com o botão direito em um ponto para removê-lo.
+filters-mask-shape = Forma
+filters-mask-shape-pick = Predefinição…
+filters-mask-shape-rectangle = Retângulo
+filters-mask-shape-diamond = Losango
+filters-mask-shape-hexagon = Hexágono
+filters-mask-shape-circle = Círculo
+filters-mask-feather = Difusão
+filters-mask-export-wipe = Exportar como cortina…
 filters-mask-image = Imagem de máscara
 filters-mask-mode = Modo
 filters-mask-alpha = alfa
@@ -1222,6 +1241,11 @@ studio-preview-stinger-placeholder = vídeo de stinger (ProRes 4444 .mov mantém
 studio-preview-stinger-label = Arquivo de vídeo do stinger
 studio-preview-stinger-cut-label = Ponto de corte do stinger (ms)
 studio-preview-stinger-cut-title = Quando a troca de cena ocorre sob o stinger (ms dentro da transição)
+studio-preview-stinger-matte-label = Track matte
+studio-preview-stinger-matte-title = Como um stinger com track matte empacota a transparência: o preenchimento e seu matte lado a lado (horizontal) ou empilhados (vertical)
+studio-preview-stinger-duck-label = Abaixar o programa
+studio-preview-stinger-duck-title = Abaixa o áudio do programa sob o próprio áudio do stinger enquanto ele toca (0 = desligado)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Corte
@@ -1239,6 +1263,12 @@ transition-kind-luma-diamond = Luma wipe (diamante)
 transition-kind-luma-clock = Luma wipe (relógio)
 transition-kind-image = Wipe de imagem (personalizado)
 transition-kind-stinger = Stinger (vídeo)
+transition-kind-move = Mover (morph)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Nenhum
+stinger-matte-horizontal = Lado a lado
+stinger-matte-vertical = Empilhado
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2145,9 +2175,12 @@ transform-3d = Inclinação 3D
 transform-rotation-x = Inclinação X (°)
 transform-rotation-y = Inclinação Y (°)
 transform-perspective = Perspectiva
+transform-reveal = Mostrar/ocultar
+transform-reveal-ms = Fade de entrada (ms)
 sources-clone-title = Clonar (mesma fonte, filtros próprios)
 sources-clone-item = Clonar { $name }
 menu-tools-downstream = Keyers de saída…
+menu-tools-transition-rules = Regras de transição…
 dsk-title = Keyers de saída
 dsk-hint = Sobreposições compostas na saída do programa — acima de cada cena, e permanecem ao trocar de cena (um logotipo, um selo AO VIVO, um letreiro inferior). O topo da lista é desenhado por cima.
 dsk-empty = Ainda não há keyers — adicione uma fonte para sobrepô-la em todas as cenas.
@@ -2160,3 +2193,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Escala
 dsk-add = + Adicionar keyer
+transition-rules-title = Regras de transição
+transition-rules-hint = Dê a um par de cenas sua própria transição. Quando você passa da primeira cena para a segunda, este tipo e esta duração são usados no lugar do padrão (uma regra Stinger/Imagem continua usando o arquivo definido nos controles de transição).
+transition-rules-empty = Ainda sem regras — cada par de cenas usa a transição padrão.
+transition-rules-from = De
+transition-rules-to = Para
+transition-rules-kind = Transição
+transition-rules-duration = Duração (ms)
+transition-rules-add = Adicionar regra
+transition-rules-remove = Remover regra

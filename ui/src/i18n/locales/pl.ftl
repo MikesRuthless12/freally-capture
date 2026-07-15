@@ -844,6 +844,25 @@ filters-opacity = Krycie
 filters-cube-file = Plik .cube
 filters-amount = Ilość
 filters-radius = Promień
+filters-name-shader = Shader (WGSL)
+filters-shader-gallery = Galeria
+filters-shader-gallery-pick = Wczytaj ustawienie…
+filters-shader-gallery-grayscale = Skala szarości
+filters-shader-gallery-invert = Odwróć
+filters-shader-gallery-scanlines = Linie skanowania
+filters-shader-gallery-vignette = Winieta
+filters-shader-source = Kod shadera (WGSL)
+filters-shader-hint = Napisz w WGSL funkcję effect(uv, color, p, texel, time) zwracającą vec4. Oznacz parametry przez // @param name min max default, aby uzyskać suwaki. Nieprawidłowy shader jest ignorowany — źródło jest renderowane bez filtra, dopóki się nie skompiluje.
+filters-name-bezier-mask = Maska Béziera
+filters-mask-editor-hint = Przeciągnij punkt, aby go przesunąć, kliknij dwukrotnie, aby dodać, kliknij prawym przyciskiem, aby usunąć punkt.
+filters-mask-shape = Kształt
+filters-mask-shape-pick = Ustawienie…
+filters-mask-shape-rectangle = Prostokąt
+filters-mask-shape-diamond = Romb
+filters-mask-shape-hexagon = Sześciokąt
+filters-mask-shape-circle = Okrąg
+filters-mask-feather = Wtapianie
+filters-mask-export-wipe = Eksportuj jako wycieranie…
 filters-mask-image = Obraz maski
 filters-mask-mode = Tryb
 filters-mask-alpha = alfa
@@ -1235,6 +1254,11 @@ studio-preview-stinger-placeholder = wideo stinger (ProRes 4444 .mov zachowuje k
 studio-preview-stinger-label = Plik wideo stingera
 studio-preview-stinger-cut-label = Punkt cięcia stingera (ms)
 studio-preview-stinger-cut-title = Kiedy zamiana sceny następuje pod stingerem (ms od początku przejścia)
+studio-preview-stinger-matte-label = Matte ścieżki
+studio-preview-stinger-matte-title = Jak stinger z matte ścieżki pakuje przezroczystość: wypełnienie i jego matte obok siebie (poziomo) lub jeden na drugim (pionowo)
+studio-preview-stinger-duck-label = Wycisz program
+studio-preview-stinger-duck-title = Wyciszaj dźwięk programu pod własnym dźwiękiem stingera podczas jego odtwarzania (0 = wył.)
+studio-preview-stinger-duck-unit = dB
 
 # --- transition kinds (rendered from TRANSITION_KINDS in api/types.ts) ---
 transition-kind-cut = Cięcie
@@ -1252,6 +1276,12 @@ transition-kind-luma-diamond = Wymazywanie Luma (romb)
 transition-kind-luma-clock = Wymazywanie Luma (zegar)
 transition-kind-image = Wymazywanie obrazem (własne)
 transition-kind-stinger = Stinger (wideo)
+transition-kind-move = Przesunięcie (morfing)
+
+# --- stinger track-matte modes (rendered from STINGER_MATTES in api/types.ts) ---
+stinger-matte-none = Brak
+stinger-matte-horizontal = Obok siebie
+stinger-matte-vertical = Jeden na drugim
 
 # --- stream services (rendered from STREAM_SERVICES in api/types.ts) ---
 stream-service-twitch = Twitch
@@ -2158,9 +2188,12 @@ transform-3d = Pochylenie 3D
 transform-rotation-x = Pochylenie X (°)
 transform-rotation-y = Pochylenie Y (°)
 transform-perspective = Perspektywa
+transform-reveal = Pokaż/ukryj
+transform-reveal-ms = Płynne pojawianie (ms)
 sources-clone-title = Klonuj (ten sam sygnał, własne filtry)
 sources-clone-item = Klonuj { $name }
 menu-tools-downstream = Klucze wyjściowe…
+menu-tools-transition-rules = Reguły przejść…
 dsk-title = Klucze wyjściowe
 dsk-hint = Nakładki komponowane na wyjściu programowym — nad każdą sceną, pozostają na miejscu przy przełączaniu scen (logo, plakietka NA ŻYWO, belka dolna). Góra listy jest rysowana na wierzchu.
 dsk-empty = Brak kluczy — dodaj źródło, aby nałożyć je na każdą scenę.
@@ -2173,3 +2206,12 @@ dsk-x = X (px)
 dsk-y = Y (px)
 dsk-scale = Skala
 dsk-add = + Dodaj klucz
+transition-rules-title = Reguły przejść
+transition-rules-hint = Nadaj parze scen własne przejście. Gdy przechodzisz z pierwszej sceny do drugiej, używane są ten rodzaj i czas zamiast domyślnych (reguła Stinger/Obraz nadal używa pliku ustawionego w elementach sterujących przejściem).
+transition-rules-empty = Brak reguł — każda para scen używa domyślnego przejścia.
+transition-rules-from = Z
+transition-rules-to = Do
+transition-rules-kind = Przejście
+transition-rules-duration = Czas (ms)
+transition-rules-add = Dodaj regułę
+transition-rules-remove = Usuń regułę

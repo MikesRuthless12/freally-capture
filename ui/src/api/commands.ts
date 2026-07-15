@@ -57,6 +57,7 @@ import type {
   StreamStatus,
   StudioDto,
   Transform,
+  TransitionKind,
   VerticalCanvas,
   VideoDevice,
   VideoFormat,
@@ -132,6 +133,12 @@ export function studioSendReaction(emoji: string): Promise<void> {
 /** Drop a chapter marker at the current recording position (TASK-610). */
 export function recordingAddMarker(): Promise<number> {
   return invoke<number>("recording_add_marker");
+}
+
+/** Open a vetted external link in the OS browser. The webview never follows an
+ * `<a target="_blank">` to the system browser, so link items call this. */
+export function openExternal(url: string): Promise<void> {
+  return invoke("open_external", { url });
 }
 
 /** The current replay-buffer status (the `replay` event pushes the same). */
@@ -491,6 +498,38 @@ export function studioSetItemScaling(
   scaling: ScaleMode,
 ): Promise<void> {
   return invoke("studio_set_item_scaling", { sceneId, itemId, scaling });
+}
+
+/** Show/hide fade-in duration in ms (CAP-N21); 0 = appear instantly. */
+export function studioSetItemReveal(
+  sceneId: SceneId,
+  itemId: ItemId,
+  revealMs: number,
+): Promise<void> {
+  return invoke("studio_set_item_reveal", { sceneId, itemId, revealMs });
+}
+
+// Transition rules (CAP-N21): a per-scene-pair transition matrix.
+export function studioTransitionOverrideSet(
+  from: SceneId,
+  to: SceneId,
+  kind: TransitionKind,
+  durationMs: number,
+): Promise<void> {
+  return invoke("studio_transition_override_set", { from, to, kind, durationMs });
+}
+export function studioTransitionOverrideRemove(from: SceneId, to: SceneId): Promise<void> {
+  return invoke("studio_transition_override_remove", { from, to });
+}
+
+/** Export a bezier mask (CAP-N28) as a grayscale luma-wipe PNG at `path`. */
+export function bezierExportWipe(
+  sceneId: SceneId,
+  itemId: ItemId,
+  filterId: FilterId,
+  path: string,
+): Promise<void> {
+  return invoke("bezier_export_wipe", { sceneId, itemId, filterId, path });
 }
 
 export function studioSetItemBlend(

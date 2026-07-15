@@ -656,6 +656,13 @@ pub struct TransitionSettings {
     pub stinger_path: String,
     /// When the scene swap lands under the stinger, ms into the transition.
     pub stinger_cut_ms: u32,
+    /// How a track-matte stinger packs its transparency (CAP-N29). `None` (the
+    /// default) uses the file as-is (opaque / straight alpha).
+    pub stinger_matte: fcap_scene::StingerMatte,
+    /// Optional program-audio duck while a stinger plays (CAP-N29), in dB of
+    /// attenuation, driven by the stinger clip's own audio envelope. `0.0`
+    /// (the default) is off — the program mix is untouched.
+    pub stinger_duck_db: f32,
 }
 
 impl Default for TransitionSettings {
@@ -666,6 +673,8 @@ impl Default for TransitionSettings {
             luma_image: String::new(),
             stinger_path: String::new(),
             stinger_cut_ms: 500,
+            stinger_matte: fcap_scene::StingerMatte::None,
+            stinger_duck_db: 0.0,
         }
     }
 }
@@ -682,6 +691,9 @@ impl TransitionSettings {
         }
         if self.stinger_cut_ms > 5_000 {
             return Err("stinger cut point out of range (0–5000 ms)".to_owned());
+        }
+        if !(0.0..=60.0).contains(&self.stinger_duck_db) || !self.stinger_duck_db.is_finite() {
+            return Err("stinger audio duck out of range (0–60 dB)".to_owned());
         }
         Ok(())
     }

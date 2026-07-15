@@ -79,7 +79,15 @@ const settings = (mode: ThemeMode): Settings => ({
   remote: { turnUrl: "", turnUsername: "", turnCredential: "" },
   stream: { targets: [], autoRecord: false, preflightHold: false },
   replay: { seconds: 30, bitrateKbps: 6000, audioBitrateKbps: 160, fps: 60, track: 1 },
-  transition: { kind: "fade", durationMs: 300, lumaImage: "", stingerPath: "", stingerCutMs: 0 },
+  transition: {
+    kind: "fade",
+    durationMs: 300,
+    lumaImage: "",
+    stingerPath: "",
+    stingerCutMs: 0,
+    stingerMatte: "none",
+    stingerDuckDb: 0,
+  },
   hotkeys: {
     record: null,
     goLive: null,

@@ -478,7 +478,8 @@ export type TransitionKind =
   | "lumaDiamond"
   | "lumaClock"
   | "lumaImage"
-  | "stinger";
+  | "stinger"
+  | "move";
 
 /**
  * `[value, i18n key]` — the second element is a catalog key, not English. Call
@@ -505,6 +506,17 @@ export const TRANSITION_KINDS: Array<[TransitionKind, string]> = [
   ["lumaClock", "transition-kind-luma-clock"],
   ["lumaImage", "transition-kind-image"],
   ["stinger", "transition-kind-stinger"],
+  ["move", "transition-kind-move"],
+];
+
+/** How a track-matte stinger packs its transparency (CAP-N29). */
+export type StingerMatte = "none" | "horizontal" | "vertical";
+
+/** `[value, i18n key]` for the track-matte picker (see `TRANSITION_KINDS`). */
+export const STINGER_MATTES: Array<[StingerMatte, string]> = [
+  ["none", "stinger-matte-none"],
+  ["horizontal", "stinger-matte-horizontal"],
+  ["vertical", "stinger-matte-vertical"],
 ];
 
 export type TransitionSettings = {
@@ -516,6 +528,10 @@ export type TransitionSettings = {
   stingerPath: string;
   /** When the scene swap lands under the stinger, ms into the transition. */
   stingerCutMs: number;
+  /** How a track-matte stinger carries transparency (CAP-N29). */
+  stingerMatte: StingerMatte;
+  /** dB the program ducks under the stinger's own audio (CAP-N29); 0 = off. */
+  stingerDuckDb: number;
 };
 
 /** The services the stream target picker offers (`srt`/`whip` are the
@@ -1348,7 +1364,9 @@ export type FilterKind =
   | { type: "radialBlur"; amount: number; centerX: number; centerY: number }
   | { type: "zoomBlur"; amount: number; centerX: number; centerY: number }
   | { type: "pixelate"; size: number }
-  | { type: "freeze" };
+  | { type: "freeze" }
+  | { type: "userShader"; source: string; params: number[] }
+  | { type: "bezierMask"; points: [number, number][]; feather: number; invert: boolean };
 
 export type FilterTypeName = FilterKind["type"];
 
@@ -1401,6 +1419,8 @@ export type SceneItem = {
    * transform is only clamped zoom/pan within that region, and the canvas
    * skips it for clicks and drags. */
   backdrop?: BackdropSplit | null;
+  /** Show/hide fade-in duration in ms (CAP-N21); 0/absent = appear instantly. */
+  revealMs?: number;
 };
 
 /** One scene: ordered items, index = z-order, `items[0]` bottom-most. */
@@ -1471,6 +1491,15 @@ export type DownstreamKeyer = {
   transform: Transform;
 };
 
+/** One per-scene-pair transition rule (CAP-N21): `from`→`to` uses `kind` for
+ * `durationMs` instead of the default (the stinger/luma file stays global). */
+export type TransitionOverride = {
+  from: SceneId;
+  to: SceneId;
+  kind: TransitionKind;
+  durationMs: number;
+};
+
 /** The whole model (the on-disk scene-collection format). */
 export type Collection = {
   formatVersion: number;
@@ -1483,6 +1512,8 @@ export type Collection = {
   vertical?: VerticalCanvas | null;
   /** Downstream keyer layers (CAP-N24), bottom-to-top; omitted when empty. */
   downstream?: DownstreamKeyer[];
+  /** Per-scene-pair transition rules (CAP-N21); omitted when empty. */
+  transitionOverrides?: TransitionOverride[];
 };
 
 /** The `studio` event / `studio_get` payload. */
