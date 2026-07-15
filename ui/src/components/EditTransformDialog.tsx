@@ -88,6 +88,12 @@ export function EditTransformDialog({
     apply(next);
   };
 
+  // CAP-N23: the 3D tilt lives outside the 2D layout math, so it needs no
+  // canvas clamping — the item is projected in place about its own center.
+  const set3d = (field: "rotationX" | "rotationY" | "perspective", value: number) => {
+    apply({ ...tf, [field]: value });
+  };
+
   const setCrop = (edge: "left" | "top" | "right" | "bottom", value: number) => {
     if (!source) return;
     const crop = { ...tf.crop, [edge]: Math.max(0, Math.round(value)) };
@@ -185,6 +191,38 @@ export function EditTransformDialog({
           step={1}
           onCommit={setRotation}
         />
+
+        <section className="flex flex-col gap-1">
+          <span className="text-[10px] tracking-wide text-havoc-muted uppercase">
+            {t("transform-3d")}
+          </span>
+          <div className="grid grid-cols-3 gap-2">
+            <NumberField
+              label={t("transform-rotation-x")}
+              value={Math.round((tf.rotationX ?? 0) * 10) / 10}
+              min={-180}
+              max={180}
+              step={1}
+              onCommit={(value) => set3d("rotationX", value)}
+            />
+            <NumberField
+              label={t("transform-rotation-y")}
+              value={Math.round((tf.rotationY ?? 0) * 10) / 10}
+              min={-180}
+              max={180}
+              step={1}
+              onCommit={(value) => set3d("rotationY", value)}
+            />
+            <NumberField
+              label={t("transform-perspective")}
+              value={Math.round((tf.perspective ?? 0) * 100) / 100}
+              min={0}
+              max={1}
+              step={0.05}
+              onCommit={(value) => set3d("perspective", value)}
+            />
+          </div>
+        </section>
 
         {source && (
           <section className="flex flex-col gap-1">

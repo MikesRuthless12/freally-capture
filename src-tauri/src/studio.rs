@@ -1638,6 +1638,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             zoom_lenses,
             autocrop_snapshot,
             passthrough_targets,
+            downstream_draws,
         ) = {
             let mut guard = lock_core(&core);
             // A finished blend clears here, under the command lock.
@@ -1683,6 +1684,23 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 .items
                 .iter()
                 .map(|item| item.source)
+                .collect();
+            // Downstream keyers (CAP-N24): keep EVERY keyer's source live — even
+            // a disabled one — so toggling a keyer never tears down and re-opens
+            // its capture (no blank/blink on re-enable); render only the enabled
+            // ones. A persistent overlay renders even when its source is in no
+            // scene.
+            live_sources.extend(guard.collection.downstream.iter().map(|dsk| dsk.source));
+            let downstream_draws: Vec<fcap_compositor::DownstreamDraw> = guard
+                .collection
+                .downstream
+                .iter()
+                .filter(|dsk| dsk.enabled)
+                .map(|dsk| fcap_compositor::DownstreamDraw {
+                    source: dsk.source,
+                    transform: dsk.transform,
+                    opacity: dsk.opacity,
+                })
                 .collect();
             if let Some(preview) = &preview_scene {
                 live_sources.extend(preview.items.iter().map(|item| item.source));
@@ -1932,6 +1950,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 guard.zoom_lenses.clone(),
                 guard.autocrop.clone(),
                 passthrough_targets,
+                downstream_draws,
             )
         };
         if let Some(dto) = transition_ended {
@@ -2493,13 +2512,23 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // filter shows frames from `delay_ms` ago — held in a bounded queue
         // (the 500 ms cap is honest: raw frames are memory).
         let mut delay_by_source: HashMap<SourceId, u32> = HashMap::new();
+        // CAP-N25: (item, source) pairs with an enabled Freeze filter. The
+        // compositor snapshots each frozen ITEM and samples that held texture,
+        // so a clone of the same source (or another placement) stays live.
+        let mut frozen_items: Vec<(ItemId, SourceId)> = Vec::new();
         {
             let mut scan = |items: &[fcap_scene::SceneItem]| {
                 for item in items {
                     for filter in item.filters.iter().filter(|filter| filter.enabled) {
-                        if let fcap_scene::FilterKind::RenderDelay { delay_ms } = &filter.kind {
-                            let entry = delay_by_source.entry(item.source).or_insert(0);
-                            *entry = (*entry).max((*delay_ms).min(500));
+                        match &filter.kind {
+                            fcap_scene::FilterKind::RenderDelay { delay_ms } => {
+                                let entry = delay_by_source.entry(item.source).or_insert(0);
+                                *entry = (*entry).max((*delay_ms).min(500));
+                            }
+                            fcap_scene::FilterKind::Freeze => {
+                                frozen_items.push((item.id, item.source));
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -2547,6 +2576,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 .record_passthrough_latency(*id, latency_ms);
                         }
                     }
+                    // CAP-N25 freeze is now per-item in the compositor (it
+                    // snapshots the frozen item's texture), so every source keeps
+                    // uploading normally here — a live clone of a frozen source is
+                    // never held back, and Source Health / Render-Delay behave as
+                    // usual.
                     if delay_ms == 0 && slot.delayed.is_empty() {
                         let size = (frame.width, frame.height);
                         run_autocrop(&app, &frame, *id, &autocrop_snapshot, &mut autocrop_dims);
@@ -3194,6 +3228,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         } else {
             transition_was_active = false;
         }
+        // CAP-N25: snapshot newly-frozen items (their source is uploaded above)
+        // and drop snapshots for items no longer frozen, before composing.
+        compositor.freeze_items(&frozen_items);
+        let frozen_ids: Vec<ItemId> = frozen_items.iter().map(|(id, _)| *id).collect();
+        compositor.retain_frozen(&frozen_ids);
         let compose_result = match &transition_pack {
             Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
                 // The audience sees the outgoing scene until the cut point,
@@ -3255,6 +3294,14 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     eprintln!("studio: reactions pass failed: {err}");
                 }
             }
+        }
+
+        // -- 6c. Downstream keyers (CAP-N24) ------------------------------------
+        // Persistent overlays composited over the finished program — above every
+        // scene, surviving cuts — before the native present + readback, so
+        // preview, recording, stream, and multiview all carry them.
+        if let Err(err) = compositor.render_downstream(&downstream_draws) {
+            eprintln!("studio: downstream keyer pass failed: {err}");
         }
 
         // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
@@ -3369,7 +3416,14 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     // nor frozen worth alarming about.
                     if preview_due {
                         let engaged = (record_due || stream_due) && !panic_active;
+                        // A deliberate Freeze filter (CAP-N25) holds the program
+                        // static on purpose — don't raise the frozen-frame alarm
+                        // the operator caused (a genuine black frame still alarms).
+                        let freeze_active = !frozen_items.is_empty();
                         for (kind, active) in video_watch.evaluate(&data, engaged, Instant::now()) {
+                            if freeze_active && matches!(kind, crate::alarms::AlarmKind::Frozen) {
+                                continue;
+                            }
                             crate::alarms::emit_alarm(&app, kind, active, None);
                         }
                     }
@@ -3980,6 +4034,7 @@ fn workbench_scene(
         scale_y: scale,
         rotation: 0.0,
         crop: Crop::default(),
+        ..Default::default()
     };
     item.pending_fit = false;
     item.filters = filters;

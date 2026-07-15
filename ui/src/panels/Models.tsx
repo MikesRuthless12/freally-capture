@@ -15,14 +15,7 @@ import { onCef, onFfmpeg } from "../api/events";
 import type { CefStatus, FfmpegStatus, IntegrationsStatus } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
-
-function formatMb(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRate(bytesPerSec: number): string {
-  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
-}
+import { formatBytes, formatRate } from "../lib/format";
 
 /**
  * The clearly-labeled Components panel (mirrors Freally Snipper's Models
@@ -93,7 +86,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                   ? t("models-ffmpeg-not-installed", {
                       version: build.version,
                       source: build.source,
-                      size: formatMb(build.sizeBytes),
+                      size: formatBytes(build.sizeBytes),
                     })
                   : t("models-ffmpeg-none-pinned")}
               </p>
@@ -104,7 +97,7 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                   onClick={() => run(ffmpegInstall)}
                   className="self-start rounded-lg border border-havoc-accent/40 bg-gradient-to-r from-havoc-accent/20 to-havoc-accent-2/20 px-3 py-1.5 font-medium text-havoc-text transition-colors hover:border-havoc-accent/70 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {t("models-ffmpeg-download-verify", { size: formatMb(build.sizeBytes) })}
+                  {t("models-ffmpeg-download-verify", { size: formatBytes(build.sizeBytes) })}
                 </button>
               )}
             </div>
@@ -122,9 +115,9 @@ export function ModelsDialog({ onClose }: { onClose: () => void }) {
                       {pct !== null && (
                         <span className="font-mono text-havoc-text">{pct.toFixed(2)}%</span>
                       )}{" "}
-                      · {formatMb(status.receivedBytes)}
+                      · {formatBytes(status.receivedBytes)}
                       {status.totalBytes
-                        ? ` ${t("models-download-of")} ${formatMb(status.totalBytes)}`
+                        ? ` ${t("models-download-of")} ${formatBytes(status.totalBytes)}`
                         : ""}{" "}
                       · {formatRate(status.bytesPerSec)}
                     </span>
@@ -283,9 +276,9 @@ function CefSection() {
               <span>{t("models-downloading")}</span>
               <span className="text-havoc-muted">
                 {dl !== null && <span className="font-mono text-havoc-text">{dl.toFixed(2)}%</span>}{" "}
-                · {formatMb(status.receivedBytes)}
+                · {formatBytes(status.receivedBytes)}
                 {status.totalBytes
-                  ? ` ${t("models-download-of")} ${formatMb(status.totalBytes)}`
+                  ? ` ${t("models-download-of")} ${formatBytes(status.totalBytes)}`
                   : ""}{" "}
                 · {formatRate(status.bytesPerSec)}
               </span>

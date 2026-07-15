@@ -129,20 +129,35 @@ pub fn aux_window_open(
     } else {
         title
     };
+    let target_monitor = display.and_then(|index| monitors.get(index));
+    // A "fullscreen" projector is a *borderless window sized to the chosen
+    // monitor* — never OS exclusive fullscreen. Asking wry/tao to enter
+    // exclusive fullscreen *during window creation* on the primary display
+    // deadlocks the Windows event loop mid mode-switch: the whole desktop
+    // froze and the app had to be killed from Task Manager. A borderless
+    // monitor-filling window is what OBS's "fullscreen projector" actually is,
+    // triggers no DWM mode change, and stays escapable (Esc / Alt+F4 / the
+    // taskbar all keep working — it is not always-on-top).
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
         .title(title)
         .inner_size(960.0, 540.0)
+        .decorations(!fullscreen)
         .always_on_top(!fullscreen);
-    if let Some(monitor) = display.and_then(|index| monitors.get(index)) {
+    if let Some(monitor) = target_monitor {
         let position = monitor.position();
         builder = builder.position(position.x as f64, position.y as f64);
     }
-    if fullscreen {
-        builder = builder.fullscreen(true);
-    }
-    builder
+    let window = builder
         .build()
         .map_err(|err| format!("could not open the window: {err}"))?;
+    // Cover the monitor exactly. Physical units sidestep the logical/scale
+    // mismatch on HiDPI displays, so the projector fills the screen edge-to-edge.
+    if fullscreen {
+        if let Some(monitor) = target_monitor {
+            let _ = window.set_position(*monitor.position());
+            let _ = window.set_size(*monitor.size());
+        }
+    }
     register_target(&app, &label);
     Ok(())
 }
@@ -187,14 +202,20 @@ pub fn remember_open(app: &AppHandle) {
         .into_iter()
         .filter(|(label, _)| label == "multiview" || label.starts_with("projector-"))
         .map(|(label, window)| {
-            let display = window.current_monitor().ok().flatten().and_then(|current| {
-                monitors
-                    .iter()
-                    .position(|m| m.position() == current.position())
-            });
+            let display = window
+                .current_monitor()
+                .ok()
+                .flatten()
+                .and_then(|c| monitors.iter().position(|m| m.position() == c.position()));
+            // A "fullscreen" projector is a borderless window sized to its
+            // monitor (OS exclusive fullscreen froze the desktop). It is the
+            // ONLY aux window we open without decorations, so decorations are a
+            // reliable, resize-proof signal — a floating projector the user
+            // dragged to fill the screen still keeps its title bar.
+            let fullscreen = !window.is_decorated().unwrap_or(true);
             crate::profiles::ProjectorState {
                 title: window.title().unwrap_or_default(),
-                fullscreen: window.is_fullscreen().unwrap_or(false),
+                fullscreen,
                 display,
                 label,
             }

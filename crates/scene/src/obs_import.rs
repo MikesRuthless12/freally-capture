@@ -266,6 +266,7 @@ pub fn import_obs(json: &str) -> Result<ObsImport, ObsImportError> {
         active_scene,
         hidden_muted: std::collections::HashSet::new(),
         vertical: None,
+        downstream: Vec::new(),
     };
     collection.sanitize();
 
@@ -442,6 +443,32 @@ impl NotesBuilder {
 // Source-kind mapping
 // ---------------------------------------------------------------------------
 
+/// The OBS camera's friendly name, kept so the app layer can re-resolve it to
+/// this machine's device index. OBS's win-dshow encodes `video_device_id` as
+/// `"<name>:<device path>"` (the path starts with a backslash, byte 92); macOS
+/// av-capture carries a separate `device_name`. Returns the human name with any
+/// appended path stripped, or `None` when the source names no device.
+fn obs_video_device_name(s: &Value) -> Option<String> {
+    if let Some(name) = get_str(s, "device_name") {
+        let name = name.trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    let raw = get_str(s, "video_device_id").or_else(|| get_str(s, "last_video_device_id"))?;
+    // Split the name off before ":<path>" (the path begins with a backslash).
+    let name = match raw
+        .as_bytes()
+        .windows(2)
+        .position(|w| w[0] == b':' && w[1] == 92)
+    {
+        Some(colon) => &raw[..colon],
+        None => raw,
+    };
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// Map a non-scene, non-group OBS source to a native [`SourceSettings`] plus the
 /// kind-level caveats it implies.
 fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
@@ -476,10 +503,14 @@ fn map_source(kind: &str, name: &str, s: &Value) -> Mapped {
             },
             vec![ImportNote::GameCaptureAsWindow, ImportNote::NeedsReselect],
         ),
-        // Camera / video capture device.
+        // Camera / video capture device. The device is machine-specific, but
+        // OBS records its friendly name — carry it in `device_id` so the app
+        // layer can resolve it to this machine's device index (it clears the
+        // name if the camera is absent). Without this the import always landed
+        // on "(current device)" with nothing selected.
         "dshow_input" | "v4l2_input" | "av_capture_input" | "macos-avcapture" => Mapped::Source(
             SourceSettings::VideoDevice {
-                device_id: String::new(),
+                device_id: obs_video_device_name(s).unwrap_or_default(),
                 format: None,
                 deinterlace: crate::DeinterlaceMode::Off,
                 field_order: crate::FieldOrder::TopFirst,
@@ -1144,10 +1175,12 @@ mod tests {
             settings_by_name(c, "Desktop"),
             SourceSettings::Display { .. }
         ));
-        assert!(matches!(
-            settings_by_name(c, "Webcam"),
-            SourceSettings::VideoDevice { .. }
-        ));
+        // The camera keeps OBS's friendly name in device_id, for the app layer
+        // to resolve to this machine's device index (the fixture uses "cam-xyz").
+        match settings_by_name(c, "Webcam") {
+            SourceSettings::VideoDevice { device_id, .. } => assert_eq!(device_id, "cam-xyz"),
+            other => panic!("Webcam should be a video device, got {other:?}"),
+        }
         assert!(matches!(
             settings_by_name(c, "Mic"),
             SourceSettings::AudioInput { .. }
@@ -1159,6 +1192,31 @@ mod tests {
             SourceSettings::NestedScene { scene } => assert_eq!(*scene, intro_id),
             other => panic!("Intro should be a nested scene, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn video_device_name_strips_the_device_path() {
+        // Build the backslash without a source-literal backslash (byte 92).
+        let backslash = char::from(92u8);
+        let win = serde_json::json!({
+            "video_device_id": format!("HP True Vision FHD Camera:{backslash}{backslash}?{backslash}usb#vid_04f2")
+        });
+        assert_eq!(
+            obs_video_device_name(&win).as_deref(),
+            Some("HP True Vision FHD Camera")
+        );
+        // No appended path — the whole value is the name.
+        let plain = serde_json::json!({ "video_device_id": "cam-xyz" });
+        assert_eq!(obs_video_device_name(&plain).as_deref(), Some("cam-xyz"));
+        // macOS carries the friendly name separately.
+        let mac =
+            serde_json::json!({ "device": "0x14200000", "device_name": "FaceTime HD Camera" });
+        assert_eq!(
+            obs_video_device_name(&mac).as_deref(),
+            Some("FaceTime HD Camera")
+        );
+        // Nothing to go on → None.
+        assert_eq!(obs_video_device_name(&serde_json::json!({})), None);
     }
 
     #[test]

@@ -93,6 +93,7 @@ import { HotkeyAuditDialog } from "./panels/HotkeyAuditDialog";
 import { MultiviewDialog } from "./panels/MultiviewDialog";
 import { PanicBanner } from "./panels/PanicBanner";
 import { ProjectorDialog } from "./panels/ProjectorDialog";
+import { DownstreamKeyersDialog } from "./panels/DownstreamKeyers";
 import { QuitGuardDialog } from "./panels/QuitGuardDialog";
 import { SalvageDialog } from "./panels/SalvageDialog";
 import { SourceHealthDialog } from "./panels/SourceHealthDialog";
@@ -107,6 +108,7 @@ type OpenDialog =
   | { kind: "editTransform"; itemId: ItemId }
   | { kind: "multiview" }
   | { kind: "projector" }
+  | { kind: "downstream" }
   | { kind: "sourceHealth" }
   | { kind: "avSync" }
   | { kind: "hotkeyAudit" }
@@ -1049,6 +1051,9 @@ export default function App() {
       )}
       {dialog?.kind === "projector" && (
         <ProjectorDialog collection={collection} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "downstream" && (
+        <DownstreamKeyersDialog collection={collection} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === "avSync" && (
         <AvSyncDialog

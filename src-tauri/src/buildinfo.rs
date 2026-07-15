@@ -60,6 +60,45 @@ pub fn build_info() -> BuildInfo {
     }
 }
 
+/// The full changelog, embedded at build time so **What's New** can show the
+/// running version's notes offline — no network, and always exactly the notes
+/// that shipped in this binary.
+const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
+
+/// The running version and its changelog section, for the What's-New dialog.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseNotes {
+    pub version: String,
+    /// The `## [version]` section of `CHANGELOG.md`, as Markdown. `None` if the
+    /// running version has no section yet (a dev build ahead of the changelog).
+    pub notes: Option<String>,
+}
+
+/// What **Help → What's New** shows: this build's changelog, read in-app instead
+/// of opening the web changelog in a browser.
+#[tauri::command]
+pub fn release_notes() -> ReleaseNotes {
+    let version = env!("CARGO_PKG_VERSION");
+    ReleaseNotes {
+        version: version.to_string(),
+        notes: changelog_section(CHANGELOG, version).map(str::to_string),
+    }
+}
+
+/// Extract the `## [version] …` section from a Keep-a-Changelog document: from
+/// its heading through to just before the next `## [` heading (or the end).
+fn changelog_section<'a>(changelog: &'a str, version: &str) -> Option<&'a str> {
+    let heading = format!("## [{version}]");
+    let start = changelog.find(&heading)?;
+    let body = &changelog[start..];
+    let end = body[heading.len()..]
+        .find("\n## [")
+        .map(|offset| heading.len() + offset)
+        .unwrap_or(body.len());
+    Some(body[..end].trim_end())
+}
+
 /// `Mike Weaver <mail@…>` → `Mike Weaver`. Cargo joins multiple authors with
 /// `:`, so take the first; the copyright line names a person, not a list.
 fn author_name() -> &'static str {
@@ -92,6 +131,29 @@ mod tests {
         assert!(
             !info.copyright.contains('<'),
             "no email in the copyright line"
+        );
+    }
+
+    #[test]
+    fn changelog_section_extracts_one_version() {
+        let md = "# Changelog\n\n## [Unreleased]\n\n- wip\n\n## [0.301.0] — 2026-07-14 (X)\n\n### Added\n- a thing\n\n## [0.300.0] — 2026-07-13\n\n- older\n";
+        let section = changelog_section(md, "0.301.0").expect("section");
+        assert!(section.starts_with("## [0.301.0]"));
+        assert!(section.contains("a thing"));
+        assert!(!section.contains("older"), "stops at the next heading");
+        assert!(!section.contains("wip"), "does not bleed from Unreleased");
+        assert!(changelog_section(md, "9.9.9").is_none());
+    }
+
+    /// The running build must have a changelog section — a release with no notes
+    /// is one nobody can read. This also guards the version bump: it fails until
+    /// `CHANGELOG.md` gains the new version's section.
+    #[test]
+    fn running_version_has_release_notes() {
+        assert!(
+            release_notes().notes.is_some(),
+            "CHANGELOG.md is missing a section for {}",
+            env!("CARGO_PKG_VERSION")
         );
     }
 

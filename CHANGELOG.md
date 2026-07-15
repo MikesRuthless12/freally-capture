@@ -15,6 +15,48 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.310.0] — 2026-07-14 (Compositor & FX depth — Phase 3, part 1)
+
+> The first half of Phase 3 (Compositor & FX Depth): motion-and-effects reach the canvas —
+> new blur styles, a 3D tilt, a freeze-frame, one-click source clones, and broadcast-style
+> **downstream keyers** that ride on top of every scene. Plus the three fixes reported against
+> 0.301.0 — including a projector bug that could lock the whole desktop.
+
+### Added
+
+- **Blur family (CAP-N27)** — four new GPU filters beside the Gaussian blur: **directional**
+  (motion streak along an angle), **radial** (spin about a center), **zoom** (dolly-zoom streak),
+  and **pixelate** (mosaic). Each is a single planned pass with golden-frame tests.
+- **3D / perspective transform (CAP-N23)** — an item can tilt in 3D: **Tilt X**, **Tilt Y**, and a
+  **Perspective** strength in Edit Transform. A plain (untilted) transform renders pixel-identically
+  — the projective matrix is used only when a tilt is applied.
+- **Freeze-frame filter (CAP-N25)** — add a **Freeze** filter to a source and it holds its last
+  frame; the program, preview, recording, and stream all freeze together. Toggle it to unfreeze.
+- **Source clone (CAP-N26)** — a **Clone** button on every source row (⧉): one feed, many looks.
+  The same source can sit in multiple scenes/spots, each item with its own transform and filter
+  stack (the engine already keyed filters per item; this makes it one click).
+- **Downstream keyers (CAP-N24)** — persistent overlay layers composited on the **program output**,
+  above every scene, surviving scene cuts (a station logo, a LIVE badge, a lower-third). A new
+  **Tools → Downstream Keyers** panel manages them: add any source, reorder, opacity, position/size,
+  on/off per layer. They render into preview, recording, stream, and multiview alike.
+- **What's New** now opens the running build's changelog **in-app** (the same read-only notes view
+  the updater uses) instead of a browser tab — offline, always the notes that shipped.
+- **Disk-space readout in the Stats dock** — a live **Disk** tile shows free space on the recording
+  drive, and while recording a **Rec left** tile estimates the time until the drive is full at the
+  current write rate (the same honest, `.frec`-aware estimate the low-disk warning uses). So you can
+  see how much room is left as you record or stream.
+
+### Fixed
+
+- **Open Projector froze the whole desktop.** Opening a projector on a display asked the OS for
+  exclusive fullscreen *during window creation* on the primary display, deadlocking the Windows
+  event loop — the desktop locked up and the app had to be killed from Task Manager. Projectors are
+  now a **borderless window sized to the chosen monitor** (what OBS's "fullscreen projector"
+  actually is): no DWM mode switch, and Esc / Alt+F4 / the taskbar all keep working.
+- **OBS scene import didn't pick the camera.** A Video Capture Device imported from OBS landed on
+  "(current device)" with nothing selected — the importer dropped OBS's device entirely. It now
+  carries OBS's friendly device name and resolves it to this machine's camera on import.
+
 ## [0.301.0] — 2026-07-14 (Menu bar & Settings modal)
 
 > Desktop-app chrome, OBS-shaped but Freally's own: a real **menu bar** across the top and a

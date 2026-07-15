@@ -144,6 +144,75 @@ fn fs_blur(in: VsOut) -> @location(0) vec4<f32> {
     return sum / max(weight_sum, 1e-6);
 }
 
+// -- Directional (motion) blur ---------------------------------------------------
+// p0 = (radius_px, sigma, dir_x, dir_y) — a Gaussian streak along an arbitrary
+// direction (fs_blur is the axis-aligned separable special case).
+@fragment
+fn fs_directional_blur(in: VsOut) -> @location(0) vec4<f32> {
+    let radius = i32(f.p0.x);
+    let sigma = max(f.p0.y, 0.25);
+    let step = normalize(f.p0.zw) * f.texel.xy;
+    var sum = vec4<f32>(0.0);
+    var weight_sum = 0.0;
+    for (var i = -radius; i <= radius; i += 1) {
+        let t = f32(i) / sigma;
+        let w = exp(-0.5 * t * t);
+        sum += textureSampleLevel(t_in, s_clamp, in.uv + f32(i) * step, 0.0) * w;
+        weight_sum += w;
+    }
+    return sum / max(weight_sum, 1e-6);
+}
+
+// -- Radial (spin) blur ----------------------------------------------------------
+// p0 = (amount 0..1, 0, center_x, center_y) — samples smeared along circular
+// arcs about the center. Aspect-corrected so the arc is circular in pixels.
+@fragment
+fn fs_radial_blur(in: VsOut) -> @location(0) vec4<f32> {
+    let center = f.p0.zw;
+    let max_angle = f.p0.x * 0.25;               // up to ~14° each way
+    let aspect = f.texel.z / max(f.texel.w, 1.0); // width / height
+    let rel = (in.uv - center) * vec2<f32>(aspect, 1.0);
+    let samples = 24;
+    var sum = vec4<f32>(0.0);
+    for (var i = 0; i < samples; i += 1) {
+        let a = (f32(i) / f32(samples - 1) - 0.5) * max_angle;
+        let ca = cos(a);
+        let sa = sin(a);
+        let rot = vec2<f32>(rel.x * ca - rel.y * sa, rel.x * sa + rel.y * ca);
+        let uv = center + vec2<f32>(rot.x / aspect, rot.y);
+        sum += textureSampleLevel(t_in, s_clamp, uv, 0.0);
+    }
+    return sum / f32(samples);
+}
+
+// -- Zoom blur -------------------------------------------------------------------
+// p0 = (amount 0..1, 0, center_x, center_y) — samples smeared along rays from
+// the center, giving a dolly-zoom streak.
+@fragment
+fn fs_zoom_blur(in: VsOut) -> @location(0) vec4<f32> {
+    let center = f.p0.zw;
+    let dir = in.uv - center;
+    let samples = 24;
+    var sum = vec4<f32>(0.0);
+    for (var i = 0; i < samples; i += 1) {
+        let t = f32(i) / f32(samples - 1);       // 0..1
+        let scale = 1.0 - f.p0.x * 0.3 * t;      // shrink toward the center
+        sum += textureSampleLevel(t_in, s_clamp, center + dir * scale, 0.0);
+    }
+    return sum / f32(samples);
+}
+
+// -- Pixelate (mosaic) -----------------------------------------------------------
+// p0 = (block_px, 0, 0, 0) — snap each pixel to its block's center.
+@fragment
+fn fs_pixelate(in: VsOut) -> @location(0) vec4<f32> {
+    let block = max(f.p0.x, 1.0);
+    let size = f.texel.zw;                        // (width, height) in px
+    let px = in.uv * size;
+    let uv = (floor(px / block) + 0.5) * block / size;
+    return textureSampleLevel(t_in, s_clamp, uv, 0.0);
+}
+
 // -- Image mask ------------------------------------------------------------------
 // group(2): the mask image (2D). p0 = (mode 0=alpha/1=luma, invert 0/1, 0, 0)
 // (Bindings 2/3, distinct from the LUT's 0/1 — one module, no collisions.)

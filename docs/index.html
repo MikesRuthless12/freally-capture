@@ -22,6 +22,18 @@
         scene compositor, multi-track recording, and multistream to every platform at once — entirely on
         your machine. No accounts, no telemetry, no cloud.
       </p>
+      <!--
+        Real download counts, straight from GitHub's release API (each asset's
+        download_count increments server-side on every actual download). Per OS,
+        auto-updating, no server needed. Hidden if the API is unreachable or
+        rate-limited — we show real numbers or none, never a placeholder.
+      -->
+      <div class="dl-stats" id="dl-stats" hidden aria-live="polite">
+        <span class="dl-stats-total"><strong id="dl-total">—</strong>&nbsp;downloads</span>
+        <span class="dl-stats-os">Windows <b id="dl-win">—</b></span>
+        <span class="dl-stats-os">macOS <b id="dl-mac">—</b></span>
+        <span class="dl-stats-os">Linux <b id="dl-linux">—</b></span>
+      </div>
     </header>
 
     <main>
@@ -64,36 +76,36 @@
         <div class="release-head">
           <div class="meta">
             <span class="badge">Latest</span>
-            <span class="date">0.301.0 menu bar &amp; Settings modal · Jul 14, 2026</span>
+            <span class="date">0.310.0 compositor &amp; FX depth · Jul 14, 2026</span>
           </div>
           <details class="dl">
             <summary>Download <span class="chev" aria-hidden="true">▾</span></summary>
             <div class="dl-menu" role="menu">
-              <span class="dl-note">v0.301.0 is the latest published build — desktop-app chrome: an OBS-style menu bar (File · Edit · View · Docks · Profile · Scene Collection · Tools · Help) across the top, and a sidebar Settings modal with OK / Cancel / Apply where nothing changes until you click Apply. The Controls dock is now just live controls — every dialog launcher moved into the menus. Hotkeys bind from a conflict-proof dropdown (a shortcut used by one action leaves every other action's menu), and a new Accessibility category sets the mixer meter colours with a colour-blind-safe preset. Built on everything before it — CAP-N Phase 2 (plus its cleanup pass): ten new things to put on the canvas, all local. Instant replay rolls the armed buffer into the show at 100/50/25&nbsp;% speed, a gapless media playlist replaces "one file at a time", and a layered title &amp; scoreboard designer binds fields to watched files or studio variables with live control. The canvas gains an audio visualizer (FFT bars / oscilloscope / stereo VU), a system-stats overlay of real measured numbers, a LiveSplit-compatible split timer, a keyboard/mouse/gamepad input overlay, and cursor highlight + click effects. Two LAN sources round it out: an SRT/RTMP ingest listener (point a phone or second PC at a QR-coded URL) and Freally Link — instance-to-instance program sharing with mDNS discovery, gated by a pairing key, no ffmpeg on either end. Both are off until you add them, bind the local machine only, and never touch the internet; the input overlay reads input only while enabled and never logs a keystroke. Everything through 0.200.0 remains.</span>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.301.0/Freally.Capture_0.301.0_x64-setup.exe">
+              <span class="dl-note">v0.310.0 is the latest published build — the first half of Phase 3 (Compositor &amp; FX Depth): motion-and-effects reach the canvas. Four new GPU blur styles (directional, radial/spin, zoom, pixelate) join the Gaussian blur; a 3D perspective tilt (Tilt X / Tilt Y / Perspective) lets an item lean into space while a plain transform still renders pixel-identically; a freeze-frame filter holds a source's last frame across program, preview, recording, and stream at once; a one-click Clone button reuses one feed with its own transform and filters. New this build: broadcast-style downstream keyers — persistent overlay layers composited on the program output, above every scene and surviving scene cuts (a station logo, a LIVE badge, a lower-third), managed in Tools → Downstream Keyers with reorder, opacity, and position. Also fixed: opening a projector on a display no longer freezes the desktop (it is now a borderless monitor-fill, not OS exclusive fullscreen), OBS scene import now resolves the imported camera to your device, and Help → What's New shows the changelog in-app. Everything through 0.301.0 remains.</span>
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.310.0/Freally.Capture_0.310.0_x64-setup.exe">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.4 10.6 4.2v7.1H3zM11.6 4 21 2.7v8.6h-9.4zM3 12.7h7.6v7.1L3 18.6zM11.6 12.7H21v8.6l-9.4-1.3z"/></svg>
                 Windows (64-bit installer)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.301.0/Freally.Capture_0.301.0_aarch64.dmg">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.310.0/Freally.Capture_0.310.0_aarch64.dmg">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2 .8-1.2 1.1-2.3 1.1-2.3-.1 0-2.2-.8-2.2-3.3zM15.5 6.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2z"/></svg>
                 macOS (Apple Silicon .dmg)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.301.0/Freally.Capture_0.301.0_x64.dmg">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.310.0/Freally.Capture_0.310.0_x64.dmg">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2 .8-1.2 1.1-2.3 1.1-2.3-.1 0-2.2-.8-2.2-3.3zM15.5 6.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2z"/></svg>
                 macOS (Intel .dmg)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.301.0/Freally.Capture_0.301.0_amd64.AppImage">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v0.310.0/Freally.Capture_0.310.0_amd64.AppImage">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c-2 0-3.2 1.7-3.2 4 0 1.5.2 2.4-.6 3.5-.9 1.2-2.2 2.4-2.2 4.6 0 .8.3 1.4.8 1.8-.3.7-.8 1.3-.8 2 0 1.4 1.7 2 3.7 2.2 1 .1 1.7.6 2.5.6s1.5-.5 2.5-.6c2-.2 3.7-.8 3.7-2.2 0-.7-.5-1.3-.8-2 .5-.4.8-1 .8-1.8 0-2.2-1.3-3.4-2.2-4.6-.8-1.1-.6-2-.6-3.5 0-2.3-1.2-4-3.2-4zm-1.5 4.2c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zm3 0c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zM12 9.6c.8 0 1.6.4 1.6.8 0 .3-.8.7-1.6.7s-1.6-.4-1.6-.7c0-.4.8-.8 1.6-.8z"/></svg>
                 Linux (AppImage)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.301.0">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.310.0">
                 All installers &amp; formats (.msi, .deb, .rpm) — release page
               </a>
             </div>
           </details>
         </div>
 
-        <h2>Latest — menu bar &amp; Settings modal (0.301.0)</h2>
+        <h2>Latest — compositor &amp; FX depth (0.310.0)</h2>
         <p class="summary">
           Capture is in (0.25.0): screens, windows, and webcams stream live into the program preview on
           Windows (DXGI + Windows.Graphics.Capture), macOS (ScreenCaptureKit), and Linux (the ScreenCast
@@ -298,5 +310,47 @@
         <a href="changelog.html">Changelog</a>
       </p>
     </footer>
+    <script>
+      // Populate the per-OS download counters from GitHub's real release stats.
+      // GitHub counts each asset download server-side, so these are true,
+      // auto-incrementing numbers per platform — no backend, no seeding.
+      (function () {
+        var API =
+          "https://api.github.com/repos/MikesRuthless12/freally-capture/releases?per_page=100";
+        function osOf(name) {
+          name = (name || "").toLowerCase();
+          if (/\.(exe|msi)$/.test(name)) return "win";
+          if (/\.dmg$/.test(name)) return "mac";
+          if (/\.(appimage|deb|rpm)$/.test(name)) return "linux";
+          return null;
+        }
+        var fmt = function (n) {
+          return n.toLocaleString("en-US");
+        };
+        fetch(API, { headers: { Accept: "application/vnd.github+json" } })
+          .then(function (r) {
+            return r.ok ? r.json() : Promise.reject(r.status);
+          })
+          .then(function (releases) {
+            var counts = { win: 0, mac: 0, linux: 0 };
+            releases.forEach(function (rel) {
+              (rel.assets || []).forEach(function (asset) {
+                var os = osOf(asset.name);
+                if (os) counts[os] += asset.download_count || 0;
+              });
+            });
+            document.getElementById("dl-win").textContent = fmt(counts.win);
+            document.getElementById("dl-mac").textContent = fmt(counts.mac);
+            document.getElementById("dl-linux").textContent = fmt(counts.linux);
+            document.getElementById("dl-total").textContent = fmt(
+              counts.win + counts.mac + counts.linux,
+            );
+            document.getElementById("dl-stats").hidden = false;
+          })
+          .catch(function () {
+            // Rate-limited or offline: show nothing rather than a fake number.
+          });
+      })();
+    </script>
   </body>
 </html>

@@ -17,14 +17,7 @@ import {
 import type { Settings } from "../api/types";
 import { useT } from "../i18n/t";
 import { useClipboard } from "../lib/clipboard";
-import {
-  CHANGELOG_URL,
-  DISCORD_URL,
-  HELP_URL,
-  WEBSITE_URL,
-  type MenuDef,
-  type MenuEntry,
-} from "../lib/menuDefs";
+import { DISCORD_URL, HELP_URL, WEBSITE_URL, type MenuDef, type MenuEntry } from "../lib/menuDefs";
 import { pushModal } from "../lib/modal";
 import type { ControlsDialogKind } from "../panels/ControlsDock";
 
@@ -37,6 +30,7 @@ export type AppMenuDialog =
   | "history"
   | "multiview"
   | "projector"
+  | "downstream"
   | "sourceHealth"
   | "avSync"
   | "hotkeyAudit"
@@ -453,6 +447,12 @@ export function MenuBar({
             label: t("menu-tools-ptz"),
             onSelect: () => onOpenControls("ptz"),
           },
+          {
+            kind: "item",
+            id: "downstream",
+            label: t("menu-tools-downstream"),
+            onSelect: () => onOpenApp("downstream"),
+          },
           sep,
           {
             kind: "item",
@@ -497,7 +497,12 @@ export function MenuBar({
             onSelect: () => onOpenControls("updates"),
           },
           sep,
-          { kind: "link", id: "whats-new", label: t("menu-help-whats-new"), href: CHANGELOG_URL },
+          {
+            kind: "item",
+            id: "whats-new",
+            label: t("menu-help-whats-new"),
+            onSelect: () => onOpenControls("whatsnew"),
+          },
           {
             kind: "item",
             id: "about",

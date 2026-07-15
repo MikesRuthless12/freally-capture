@@ -92,6 +92,15 @@ pub struct StatsPayload {
     pub dropped: u64,
     /// Mean GPU compose time per frame, milliseconds.
     pub render_ms: f32,
+    /// Free space on the recording folder's drive, bytes. `None` if the drive
+    /// can't be resolved. Sampled every ~5 s (disk queries are heavy).
+    pub disk_free_bytes: Option<u64>,
+    /// Recording write rate, bytes/sec (the honest CBR-ish estimate the
+    /// low-disk forecast uses — `.frec`-aware). `None` when not recording.
+    pub burn_bytes_per_sec: Option<u64>,
+    /// Seconds until the recording drive fills at the current rate. `None` when
+    /// not recording, or when the rate is zero / free space is unknown.
+    pub secs_until_full: Option<u64>,
     /// Now false — the numbers are real (kept so the UI can still flag a
     /// pre-compose-loop startup window honestly).
     pub placeholder: bool,
@@ -111,6 +120,12 @@ pub fn spawn_stats_emitter(app: AppHandle) {
             ProcessRefreshKind::nothing().with_cpu().with_memory(),
         );
         let cpu_count = system.physical_core_count().unwrap_or(1).max(1) as f32;
+        // The recording-drive forecast for the Stats dock. Disk queries are
+        // heavy, so free space is refreshed every ~10th tick (5 s) like the
+        // low-disk watcher; the burn rate + time-left recompute each tick while
+        // recording, off the cached free-space figure.
+        let mut disk_free: Option<u64> = None;
+        let mut disk_ticks: u32 = 10; // sample on the first tick
 
         loop {
             thread::sleep(Duration::from_millis(500));
@@ -132,6 +147,48 @@ pub fn spawn_stats_emitter(app: AppHandle) {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = (cpu, memory_mb);
 
+            // Recording-drive forecast (CAP-N/M10 reuse). Free space refreshes
+            // every ~5 s; burn rate + time-left only while recording. The
+            // settings are cloned only on those ticks — not the idle 2 Hz churn.
+            disk_ticks += 1;
+            let sampling_disk = disk_ticks >= 10;
+            if sampling_disk {
+                disk_ticks = 0;
+            }
+            let is_recording = app
+                .state::<crate::recording::RecordingState>()
+                .wants_frames();
+            let (mut burn_bytes_per_sec, mut secs_until_full) = (None, None);
+            if sampling_disk || is_recording {
+                let rec_settings = app
+                    .state::<crate::settings::SettingsStore>()
+                    .get()
+                    .recording;
+                if sampling_disk {
+                    disk_free = crate::alarms::free_space_for(
+                        &crate::recording::recordings_folder(&rec_settings),
+                    );
+                }
+                if is_recording {
+                    let canvas =
+                        app.state::<crate::studio::StudioState>()
+                            .with_collection(|collection| {
+                                (collection.canvas_width, collection.canvas_height)
+                            });
+                    let rate = crate::alarms::recording_write_rate(
+                        rec_settings.container,
+                        canvas,
+                        rec_settings.fps,
+                        rec_settings.rate_control.bitrate_kbps,
+                        rec_settings.audio_bitrate_kbps,
+                        rec_settings.tracks_mask.count_ones(),
+                    );
+                    burn_bytes_per_sec = Some(rate);
+                    secs_until_full =
+                        disk_free.and_then(|free| crate::alarms::forecast_secs(free, rate));
+                }
+            }
+
             let stats = app.state::<RuntimeStats>();
             let running = stats.running.load(Ordering::Relaxed);
             let payload = StatsPayload {
@@ -141,6 +198,9 @@ pub fn spawn_stats_emitter(app: AppHandle) {
                 memory_mb,
                 dropped: stats.dropped.load(Ordering::Relaxed),
                 render_ms: stats.render_micros.load(Ordering::Relaxed) as f32 / 1000.0,
+                disk_free_bytes: disk_free,
+                burn_bytes_per_sec,
+                secs_until_full,
                 placeholder: !running,
             };
             if app.emit("stats", &payload).is_err() {

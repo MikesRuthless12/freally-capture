@@ -19,7 +19,7 @@ mod gpu;
 mod native_preview;
 pub mod transform;
 
-pub use compositor::{Compositor, ProgramFrame, ReactionDraw, REACTION_POOL};
+pub use compositor::{Compositor, DownstreamDraw, ProgramFrame, ReactionDraw, REACTION_POOL};
 pub use filters::{cube::parse_cube, effective_source_size, FilterResourceData};
 pub use native_preview::{NativePreview, PreviewOverlay};
 
@@ -888,6 +888,241 @@ mod tests {
         let crisp = comp.read_program().expect("readback");
         assert_eq!(pixel(&crisp, 4, 4), [255, 255, 255, 255]);
         assert_eq!(pixel(&crisp, 6, 4), [0, 0, 0, 255], "disabled = identity");
+    }
+
+    /// CAP-N27: a horizontal directional blur streaks only along its axis —
+    /// the impulse spreads left/right but never up/down.
+    #[test]
+    fn directional_blur_streaks_along_its_axis() {
+        let Some(mut comp) = compositor(9, 9) else {
+            return;
+        };
+        let mut data = vec![0u8; 9 * 9 * 4];
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let center = (4 * 9 + 4) * 4;
+        data[center..center + 4].copy_from_slice(&[255, 255, 255, 255]);
+        let frame = Frame {
+            width: 9,
+            height: 9,
+            stride: 36,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &frame).expect("upload");
+        let mut collection = scene_with_item((9, 9), source, centered((9, 9)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::DirectionalBlur {
+                    radius: 3.0,
+                    angle: 0.0,
+                },
+            )
+            .expect("add");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let out = comp.read_program().expect("readback");
+        assert!(pixel(&out, 4, 4)[0] < 255, "the impulse spread");
+        assert!(pixel(&out, 6, 4)[0] > 0, "…horizontally, along the angle");
+        assert_eq!(pixel(&out, 4, 6), [0, 0, 0, 255], "but not vertically");
+        assert_eq!(
+            pixel(&out, 2, 4),
+            pixel(&out, 6, 4),
+            "symmetric on the axis"
+        );
+    }
+
+    /// CAP-N27: pixelate collapses each block to one color — a 1px checkerboard
+    /// under a full-frame block becomes a single flat color.
+    #[test]
+    fn pixelate_flattens_a_block() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let mut data = vec![0u8; 8 * 8 * 4];
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let i = ((y * 8 + x) * 4) as usize;
+                let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+                data[i..i + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let frame = Frame {
+            width: 8,
+            height: 8,
+            stride: 32,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &frame).expect("upload");
+        let mut collection = scene_with_item((8, 8), source, centered((8, 8)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(scene, item, FilterKind::Pixelate { size: 8.0 })
+            .expect("add");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let out = comp.read_program().expect("readback");
+        // One 8×8 block → every pixel samples the same block center.
+        let corner = pixel(&out, 0, 0);
+        assert_eq!(pixel(&out, 7, 0), corner, "block is flat across x");
+        assert_eq!(pixel(&out, 0, 7), corner, "block is flat across y");
+        assert_eq!(pixel(&out, 7, 7), corner, "block is flat diagonally");
+    }
+
+    /// CAP-N27: zoom blur smears an off-center impulse along its ray from the
+    /// center, not across it.
+    #[test]
+    fn zoom_blur_smears_toward_the_center() {
+        let Some(mut comp) = compositor(9, 9) else {
+            return;
+        };
+        let mut data = vec![0u8; 9 * 9 * 4];
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        // Impulse two pixels right of center (a horizontal ray from center).
+        let impulse = (4 * 9 + 6) * 4;
+        data[impulse..impulse + 4].copy_from_slice(&[255, 255, 255, 255]);
+        let frame = Frame {
+            width: 9,
+            height: 9,
+            stride: 36,
+            format: PixelFormat::Rgba8,
+            data,
+            captured_at: Instant::now(),
+        };
+        let source = SourceId::new();
+        comp.upload_frame(source, &frame).expect("upload");
+        let mut collection = scene_with_item((9, 9), source, centered((9, 9)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item = only_item(&collection);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::ZoomBlur {
+                    amount: 1.0,
+                    center_x: 0.5,
+                    center_y: 0.5,
+                },
+            )
+            .expect("add");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let out = comp.read_program().expect("readback");
+        assert!(pixel(&out, 6, 4)[0] < 255, "the impulse spread");
+        assert!(pixel(&out, 6, 4)[0] > 0, "…but energy stays on its ray");
+        assert_eq!(
+            pixel(&out, 6, 6),
+            [0, 0, 0, 255],
+            "nothing appears off the ray"
+        );
+    }
+
+    /// CAP-N24: a downstream keyer composites its source over the finished
+    /// program at its opacity — here a green layer at 50% over a red program.
+    #[test]
+    fn downstream_keyer_composites_over_the_program() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let red = SourceId::new();
+        comp.upload_frame(
+            red,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+        let green = SourceId::new();
+        comp.upload_frame(
+            green,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [0, 255, 0, 255]),
+        )
+        .expect("upload green");
+        let collection = scene_with_item((8, 8), red, centered((8, 8)), BlendMode::Normal);
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        assert_eq!(pixel(&comp.read_program().unwrap(), 4, 4), [255, 0, 0, 255]);
+
+        comp.render_downstream(&[DownstreamDraw {
+            source: green,
+            transform: centered((8, 8)),
+            opacity: 0.5,
+        }])
+        .expect("downstream");
+        let out = comp.read_program().expect("readback");
+        let px = pixel(&out, 4, 4);
+        assert!((px[0] as i32 - 127).abs() <= 4, "red halved: {px:?}");
+        assert!((px[1] as i32 - 127).abs() <= 4, "green keyed in: {px:?}");
+
+        // A disabled/absent keyer leaves the program untouched.
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        comp.render_downstream(&[]).expect("no layers");
+        assert_eq!(pixel(&comp.read_program().unwrap(), 4, 4), [255, 0, 0, 255]);
+    }
+
+    /// CAP-N25: freeze is per-item — freezing one item holds its snapshot while
+    /// a clone of the same source (CAP-N26) keeps updating.
+    #[test]
+    fn freezing_one_item_holds_it_while_a_clone_stays_live() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let source = SourceId::new();
+        comp.upload_frame(
+            source,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+        // Two items sharing one source: left half and right half.
+        let left = Transform {
+            x: 2.0,
+            y: 4.0,
+            scale_x: 0.5,
+            scale_y: 1.0,
+            ..Transform::default()
+        };
+        let right = Transform { x: 6.0, ..left };
+        let mut collection = scene_with_item((8, 8), source, left, BlendMode::Normal);
+        let scene = collection.active_scene;
+        let item_left = only_item(&collection);
+        let item_right = collection
+            .add_item_with_existing_source(scene, source)
+            .expect("clone");
+        collection
+            .set_item_transform(scene, item_right, right)
+            .expect("transform");
+
+        // Freeze the left item (snapshots red), then push a new frame to the source.
+        comp.freeze_items(&[(item_left, source)]);
+        comp.upload_frame(
+            source,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [0, 255, 0, 255]),
+        )
+        .expect("upload green");
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let out = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&out, 2, 4),
+            [255, 0, 0, 255],
+            "frozen item holds the old frame"
+        );
+        assert_eq!(pixel(&out, 6, 4), [0, 255, 0, 255], "its clone stays live");
+
+        // Thaw: the left item resumes the live source.
+        comp.retain_frozen(&[]);
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        assert_eq!(
+            pixel(&comp.read_program().unwrap(), 2, 4),
+            [0, 255, 0, 255],
+            "thaw resumes the live source"
+        );
     }
 
     #[test]

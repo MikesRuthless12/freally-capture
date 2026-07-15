@@ -1,9 +1,5 @@
 # Freally Capture — End User License Agreement (EULA)
 
-> **DRAFT — NOT YET LEGALLY REVIEWED.** This document states the intended terms.
-> It MUST be reviewed by a qualified attorney before Freally Capture is
-> distributed publicly. It is not legal advice.
-
 **Software:** Freally Capture ("the Software")
 **Licensor:** Mike Weaver <mythodikalone@gmail.com> ("the Licensor")
 **Effective date:** ______ *(to be set on release)*

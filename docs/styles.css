@@ -70,6 +70,25 @@ body {
   font-size: 1.1rem;
 }
 
+/* Real per-OS download counts from GitHub (see index.html script). */
+.dl-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.25rem;
+  margin: 1.25rem auto 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.dl-stats-total strong {
+  color: var(--accent-2);
+  font-size: 1.15rem;
+}
+.dl-stats-os b {
+  color: var(--text, #e8eefc);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Layout ---- */
 main {
   max-width: 880px;

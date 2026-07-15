@@ -58,6 +58,18 @@ fn default_blur_radius() -> f32 {
     8.0
 }
 
+fn default_half() -> f32 {
+    0.5
+}
+
+fn default_blur_strength() -> f32 {
+    0.5
+}
+
+fn default_pixelate_size() -> f32 {
+    8.0
+}
+
 fn default_sharpen() -> f32 {
     0.25
 }
@@ -197,6 +209,48 @@ pub enum FilterKind {
         #[serde(default)]
         vertical: bool,
     },
+    /// Linear (motion-style) blur streaked along a direction.
+    DirectionalBlur {
+        /// Streak length in source pixels, 0..=64.
+        #[serde(default = "default_blur_radius")]
+        radius: f32,
+        /// Direction of the streak in degrees (0 = rightward).
+        #[serde(default)]
+        angle: f32,
+    },
+    /// Spin blur — pixels smeared along circular arcs around a center.
+    RadialBlur {
+        /// Strength, 0..=1 (0 = off; scales the arc span sampled).
+        #[serde(default = "default_blur_strength")]
+        amount: f32,
+        /// Center of rotation, normalized 0..=1 across the item.
+        #[serde(default = "default_half")]
+        center_x: f32,
+        #[serde(default = "default_half")]
+        center_y: f32,
+    },
+    /// Zoom blur — pixels smeared along rays from a center.
+    ZoomBlur {
+        /// Strength, 0..=1 (0 = off).
+        #[serde(default = "default_blur_strength")]
+        amount: f32,
+        /// Center the zoom radiates from, normalized 0..=1.
+        #[serde(default = "default_half")]
+        center_x: f32,
+        #[serde(default = "default_half")]
+        center_y: f32,
+    },
+    /// Mosaic — average the image into square blocks.
+    Pixelate {
+        /// Block size in source pixels, 1..=128.
+        #[serde(default = "default_pixelate_size")]
+        size: f32,
+    },
+    /// Freeze-frame (CAP-N25): while enabled, the source holds its last frame.
+    /// Applied at the source-frame stage — the engine simply stops uploading new
+    /// frames for the source, so program, preview, record, and stream all hold
+    /// the same still. Toggle `enabled` to freeze / unfreeze.
+    Freeze,
 }
 
 impl Rgba {
@@ -222,6 +276,11 @@ impl FilterKind {
             FilterKind::Scroll { .. } => "scroll",
             FilterKind::Crop { .. } => "crop",
             FilterKind::Flip { .. } => "flip",
+            FilterKind::DirectionalBlur { .. } => "directionalBlur",
+            FilterKind::RadialBlur { .. } => "radialBlur",
+            FilterKind::ZoomBlur { .. } => "zoomBlur",
+            FilterKind::Pixelate { .. } => "pixelate",
+            FilterKind::Freeze => "freeze",
         }
     }
 
@@ -240,6 +299,11 @@ impl FilterKind {
             FilterKind::Scroll { .. } => "Scroll",
             FilterKind::Crop { .. } => "Crop",
             FilterKind::Flip { .. } => "Flip",
+            FilterKind::DirectionalBlur { .. } => "Directional Blur",
+            FilterKind::RadialBlur { .. } => "Radial Blur",
+            FilterKind::ZoomBlur { .. } => "Zoom Blur",
+            FilterKind::Pixelate { .. } => "Pixelate",
+            FilterKind::Freeze => "Freeze",
         }
     }
 }

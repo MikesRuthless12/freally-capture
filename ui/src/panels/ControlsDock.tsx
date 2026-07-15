@@ -23,6 +23,7 @@ import { useT } from "../i18n/t";
 import { BrowserDockDialog } from "./BrowserDock";
 import { BugReportDialog } from "./BugReport";
 import { UpdatesDialog } from "./Updates";
+import { WhatsNewDialog } from "./WhatsNew";
 import { AboutDialog } from "./About";
 import { SettingsDialog } from "./Settings";
 import { ModelsDialog } from "./Models";
@@ -63,6 +64,7 @@ export type ControlsDialogKind =
   | "midi"
   | "bug"
   | "updates"
+  | "whatsnew"
   | "settings"
   | "about";
 
@@ -425,6 +427,7 @@ export function ControlsDock({
       )}
       {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
       {dialog === "updates" && <UpdatesDialog onClose={() => setDialog(null)} />}
+      {dialog === "whatsnew" && <WhatsNewDialog onClose={() => setDialog(null)} />}
       {dialog === "settings" && settings && (
         <SettingsDialog
           settings={settings}
