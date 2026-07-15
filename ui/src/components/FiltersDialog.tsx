@@ -1184,12 +1184,7 @@ function FilterParams({
     }
     case "bezierMask":
       return (
-        <BezierMaskEditor
-          filter={filter}
-          sceneId={sceneId}
-          itemId={itemId}
-          onChange={onChange}
-        />
+        <BezierMaskEditor filter={filter} sceneId={sceneId} itemId={itemId} onChange={onChange} />
       );
   }
 }

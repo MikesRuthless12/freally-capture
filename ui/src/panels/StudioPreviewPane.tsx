@@ -262,7 +262,9 @@ export function StudioPreviewPane({
             title={t("studio-preview-stinger-duck-title")}
             className="w-16 rounded border border-white/10 bg-havoc-panel px-1.5 py-1 text-[11px] text-havoc-text"
           />
-          <span className="text-[11px] text-havoc-muted">{t("studio-preview-stinger-duck-unit")}</span>
+          <span className="text-[11px] text-havoc-muted">
+            {t("studio-preview-stinger-duck-unit")}
+          </span>
         </div>
       )}
       {error && (

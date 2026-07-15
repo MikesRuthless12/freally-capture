@@ -39,7 +39,9 @@ export function TransitionRulesDialog({
   return (
     <PickerShell title={t("transition-rules-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-2 text-xs text-havoc-text">
-        <p className="m-0 text-[11px] leading-snug text-havoc-muted">{t("transition-rules-hint")}</p>
+        <p className="m-0 text-[11px] leading-snug text-havoc-muted">
+          {t("transition-rules-hint")}
+        </p>
 
         {rules.length === 0 ? (
           <p className="m-0 text-havoc-muted">{t("transition-rules-empty")}</p>
@@ -62,9 +64,7 @@ export function TransitionRulesDialog({
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    studioTransitionOverrideRemove(rule.from, rule.to).catch(warn)
-                  }
+                  onClick={() => studioTransitionOverrideRemove(rule.from, rule.to).catch(warn)}
                   title={t("transition-rules-remove")}
                   className="rounded px-1 text-havoc-muted hover:text-red-400"
                 >
