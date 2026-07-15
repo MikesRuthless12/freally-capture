@@ -772,6 +772,17 @@ export function SourcesRail({
                     </button>
                     <button
                       type="button"
+                      onClick={() => onAddExisting(item.source)}
+                      title={t("sources-clone-title")}
+                      aria-label={t("sources-clone-item", {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
+                      className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
+                    >
+                      ⧉
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => onRemove(item.id)}
                       title={t("sources-remove-title")}
                       aria-label={t("sources-remove-item", {

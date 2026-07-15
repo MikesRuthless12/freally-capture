@@ -10,11 +10,7 @@ import { onRecordingExport } from "../api/events";
 import type { ExportStatus, RecordingFile } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { formatBytes } from "../lib/format";
 
 function formatWhen(ms: number): string {
   return ms > 0 ? new Date(ms).toLocaleString() : "";
@@ -131,7 +127,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 {file.name}
               </p>
               <p className="m-0 text-[10px] text-havoc-muted">
-                {formatSize(file.sizeBytes)} · {formatWhen(file.modifiedMs)}
+                {formatBytes(file.sizeBytes)} · {formatWhen(file.modifiedMs)}
                 {file.ext === "frec" && ` · ${t("recordings-frec-label")}`}
               </p>
             </div>

@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime, State};
 
 use fcap_scene::{
-    BackdropSplit, BlendMode, Corner, FileRef, FileRefKind, Filter, FilterId, FilterKind,
-    GuideLine, ItemId, NormRect, ScaleMode, SceneId, Source, SourceId, SourceSettings, Transform,
+    BackdropSplit, BlendMode, Corner, DskId, FileRef, FileRefKind, Filter, FilterId, FilterKind,
+    GuideLine, ItemId, NormRect, ScaleMode, SceneError, SceneId, Source, SourceId, SourceSettings,
+    Transform,
 };
 
 use crate::studio::{coalesce_key, StillTarget, StudioDto, StudioState, WorkbenchMode};
@@ -227,6 +228,118 @@ pub fn studio_add_existing_source(
     state.mutate_tracked(&app, "addSource", None, |collection| {
         collection.add_item_with_existing_source(scene_id, source_id)
     })
+}
+
+// -- downstream keyers (CAP-N24) --------------------------------------------
+
+/// Add a downstream-keyer layer over the program for `source_id`.
+#[tauri::command]
+pub fn studio_downstream_add(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    source_id: SourceId,
+) -> Result<DskId, String> {
+    state.mutate_tracked(&app, "addDownstream", None, |collection| {
+        collection
+            .add_downstream(source_id)
+            .ok_or(SceneError::SourceNotFound)
+    })
+}
+
+/// Remove a downstream-keyer layer.
+#[tauri::command]
+pub fn studio_downstream_remove(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    id: DskId,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "removeDownstream", None, |collection| {
+        collection.remove_downstream(id);
+        Ok(())
+    })
+}
+
+/// Move a keyer one step in draw order (`up` = on top).
+#[tauri::command]
+pub fn studio_downstream_move(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    id: DskId,
+    up: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "moveDownstream", None, |collection| {
+        collection.move_downstream(id, up);
+        Ok(())
+    })
+}
+
+/// Toggle a keyer on/off (off = not composited, but kept in the list).
+#[tauri::command]
+pub fn studio_downstream_set_enabled(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    id: DskId,
+    enabled: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "downstreamEnabled", None, |collection| {
+        if let Some(dsk) = collection.downstream_mut(id) {
+            dsk.enabled = enabled;
+        }
+        Ok(())
+    })
+}
+
+/// Set a keyer's opacity (0..=1).
+#[tauri::command]
+pub fn studio_downstream_set_opacity(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    id: DskId,
+    opacity: f32,
+) -> Result<(), String> {
+    state.mutate_tracked(
+        &app,
+        "downstreamOpacity",
+        Some(coalesce_key("dskOpacity", id.0)),
+        |collection| {
+            if let Some(dsk) = collection.downstream_mut(id) {
+                dsk.opacity = opacity.clamp(0.0, 1.0);
+            }
+            Ok(())
+        },
+    )
+}
+
+/// Set a keyer's transform (position / size / 3D tilt).
+#[tauri::command]
+pub fn studio_downstream_set_transform(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    id: DskId,
+    mut transform: Transform,
+) -> Result<(), String> {
+    // Defense-in-depth: keep a keyer's geometry sane even if a value bypasses
+    // the (clamping) UI — a 0/negative/NaN scale would collapse or mirror it.
+    let sane = |v: f32, fallback: f32| if v.is_finite() { v } else { fallback };
+    transform.x = sane(transform.x, 0.0);
+    transform.y = sane(transform.y, 0.0);
+    transform.scale_x = sane(transform.scale_x, 1.0).clamp(0.01, 100.0);
+    transform.scale_y = sane(transform.scale_y, 1.0).clamp(0.01, 100.0);
+    transform.rotation = sane(transform.rotation, 0.0);
+    transform.rotation_x = sane(transform.rotation_x, 0.0);
+    transform.rotation_y = sane(transform.rotation_y, 0.0);
+    transform.perspective = sane(transform.perspective, 0.0).clamp(0.0, 1.0);
+    state.mutate_tracked(
+        &app,
+        "downstreamTransform",
+        Some(coalesce_key("dskTransform", id.0)),
+        |collection| {
+            if let Some(dsk) = collection.downstream_mut(id) {
+                dsk.transform = transform;
+            }
+            Ok(())
+        },
+    )
 }
 
 #[tauri::command]

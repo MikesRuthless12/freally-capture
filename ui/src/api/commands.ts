@@ -10,6 +10,7 @@ import type {
   AddedItem,
   AutoConfig,
   BuildInfo,
+  ReleaseNotes,
   AppAudioList,
   AudioDevice,
   AudioFilterId,
@@ -36,6 +37,7 @@ import type {
   Health,
   HotkeyAuditEntry,
   IntegrationsStatus,
+  DskId,
   ItemId,
   LinkPeer,
   LoopbackDevices,
@@ -409,6 +411,26 @@ export function localLanIp(): Promise<string> {
 /** Place an existing pool source on top of a scene (source sharing). */
 export function studioAddExistingSource(sceneId: SceneId, sourceId: SourceId): Promise<ItemId> {
   return invoke<ItemId>("studio_add_existing_source", { sceneId, sourceId });
+}
+
+// Downstream keyers (CAP-N24): persistent overlays over the program output.
+export function studioDownstreamAdd(sourceId: SourceId): Promise<DskId> {
+  return invoke<DskId>("studio_downstream_add", { sourceId });
+}
+export function studioDownstreamRemove(id: DskId): Promise<void> {
+  return invoke("studio_downstream_remove", { id });
+}
+export function studioDownstreamMove(id: DskId, up: boolean): Promise<void> {
+  return invoke("studio_downstream_move", { id, up });
+}
+export function studioDownstreamSetEnabled(id: DskId, enabled: boolean): Promise<void> {
+  return invoke("studio_downstream_set_enabled", { id, enabled });
+}
+export function studioDownstreamSetOpacity(id: DskId, opacity: number): Promise<void> {
+  return invoke("studio_downstream_set_opacity", { id, opacity });
+}
+export function studioDownstreamSetTransform(id: DskId, transform: Transform): Promise<void> {
+  return invoke("studio_downstream_set_transform", { id, transform });
 }
 
 export function studioRemoveItem(sceneId: SceneId, itemId: ItemId): Promise<void> {
@@ -1321,6 +1343,11 @@ export function revealAppFolder(kind: "recordings" | "settings"): Promise<void> 
 /** What the About panel shows: version, authors, dates, links. Read-only. */
 export function buildInfo(): Promise<BuildInfo> {
   return invoke<BuildInfo>("build_info");
+}
+
+/** The running version's changelog section, for Help → What's New. */
+export function releaseNotes(): Promise<ReleaseNotes> {
+  return invoke<ReleaseNotes>("release_notes");
 }
 
 /** Dismiss + delete the pending crash report. */

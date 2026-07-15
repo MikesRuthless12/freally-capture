@@ -136,9 +136,15 @@ pub struct Transform {
     pub y: f32,
     pub scale_x: f32,
     pub scale_y: f32,
-    /// Degrees, clockwise.
+    /// Degrees, clockwise (2D rotation in the screen plane).
     pub rotation: f32,
     pub crop: Crop,
+    /// 3D tilt about the horizontal axis, degrees (CAP-N23). 0 = flat.
+    pub rotation_x: f32,
+    /// 3D tilt about the vertical axis, degrees (CAP-N23). 0 = flat.
+    pub rotation_y: f32,
+    /// Perspective strength for the 3D tilt, 0..=1 (0 = orthographic).
+    pub perspective: f32,
 }
 
 impl Default for Transform {
@@ -150,7 +156,19 @@ impl Default for Transform {
             scale_y: default_scale(),
             rotation: 0.0,
             crop: Crop::default(),
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            perspective: 0.0,
         }
+    }
+}
+
+impl Transform {
+    /// True when a 3D tilt is applied. The compositor then uses the projective
+    /// matrix; a plain 2D transform keeps the exact affine path (so existing
+    /// scenes render pixel-identically).
+    pub fn has_3d(&self) -> bool {
+        self.rotation_x != 0.0 || self.rotation_y != 0.0
     }
 }
 

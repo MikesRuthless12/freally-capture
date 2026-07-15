@@ -53,6 +53,11 @@ pub(crate) enum PassKind {
     Scroll,
     Crop,
     Flip,
+    /// Blur family (CAP-N27): motion, spin, zoom, and mosaic.
+    DirectionalBlur,
+    RadialBlur,
+    ZoomBlur,
+    Pixelate,
     /// Preview-only alpha→grayscale, appended by the keying workbench (CAP-M26).
     Matte,
 }
@@ -261,9 +266,10 @@ pub(crate) fn plan_filter(
                 out: in_size,
             }])
         }
-        // Render delay is a frame-timing effect, not a GPU pass — the
-        // studio's source-upload stage applies it (bounded buffer).
-        FilterKind::RenderDelay { .. } => None,
+        // Render delay and freeze-frame are frame-timing effects, not GPU
+        // passes — the studio's source-upload stage applies them (a bounded
+        // buffer for delay; holding the last texture for freeze).
+        FilterKind::RenderDelay { .. } | FilterKind::Freeze => None,
         FilterKind::ColorCorrection {
             gamma,
             brightness,
@@ -404,6 +410,83 @@ pub(crate) fn plan_filter(
                 uniform,
                 resource: None,
                 out: (out_w, out_h),
+            }])
+        }
+        FilterKind::DirectionalBlur { radius, angle } => {
+            let radius = radius.clamp(0.0, 64.0);
+            if radius < 0.5 {
+                return None;
+            }
+            let sigma = (radius / 2.5).max(0.25);
+            // Direction vector from the angle (0° = rightward).
+            let (sin, cos) = angle.to_radians().sin_cos();
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [radius.round(), sigma, cos, sin];
+            Some(vec![PassPlan {
+                kind: PassKind::DirectionalBlur,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::RadialBlur {
+            amount,
+            center_x,
+            center_y,
+        } => {
+            let amount = amount.clamp(0.0, 1.0);
+            if amount < 1e-3 {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [
+                amount,
+                0.0,
+                center_x.clamp(0.0, 1.0),
+                center_y.clamp(0.0, 1.0),
+            ];
+            Some(vec![PassPlan {
+                kind: PassKind::RadialBlur,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::ZoomBlur {
+            amount,
+            center_x,
+            center_y,
+        } => {
+            let amount = amount.clamp(0.0, 1.0);
+            if amount < 1e-3 {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [
+                amount,
+                0.0,
+                center_x.clamp(0.0, 1.0),
+                center_y.clamp(0.0, 1.0),
+            ];
+            Some(vec![PassPlan {
+                kind: PassKind::ZoomBlur,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::Pixelate { size } => {
+            let size = size.clamp(1.0, 128.0);
+            if size < 1.5 {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [size.round(), 0.0, 0.0, 0.0];
+            Some(vec![PassPlan {
+                kind: PassKind::Pixelate,
+                uniform,
+                resource: None,
+                out: in_size,
             }])
         }
     }
@@ -558,7 +641,7 @@ impl FilterEngine {
             push_constant_ranges: &[],
         });
 
-        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 12] = [
+        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 16] = [
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
             (PassKind::ColorKey, "fs_color_key", &basic_layout),
             (PassKind::LumaKey, "fs_luma_key", &basic_layout),
@@ -574,6 +657,14 @@ impl FilterEngine {
             (PassKind::Scroll, "fs_scroll", &basic_layout),
             (PassKind::Crop, "fs_crop", &basic_layout),
             (PassKind::Flip, "fs_flip", &basic_layout),
+            (
+                PassKind::DirectionalBlur,
+                "fs_directional_blur",
+                &basic_layout,
+            ),
+            (PassKind::RadialBlur, "fs_radial_blur", &basic_layout),
+            (PassKind::ZoomBlur, "fs_zoom_blur", &basic_layout),
+            (PassKind::Pixelate, "fs_pixelate", &basic_layout),
             (PassKind::Matte, "fs_matte", &basic_layout),
         ];
         let pipelines = entries
@@ -893,6 +984,100 @@ mod tests {
             (64, 64),
             0.0,
             &empty
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn blur_family_plans_and_clamps() {
+        let id = FilterId::new();
+        let empty = no_resources();
+
+        // Directional: single pass; direction from the angle (90° ≈ (0, 1)).
+        let plan = plan_filter(
+            &FilterKind::DirectionalBlur {
+                radius: 10.0,
+                angle: 90.0,
+            },
+            id,
+            (64, 64),
+            0.0,
+            &empty,
+        )
+        .expect("planned");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].kind, PassKind::DirectionalBlur);
+        assert!(plan[0].uniform.p0[2].abs() < 1e-3, "cos 90° ≈ 0");
+        assert!((plan[0].uniform.p0[3] - 1.0).abs() < 1e-3, "sin 90° ≈ 1");
+
+        // Pixelate: block size clamped + rounded into p0.x.
+        let plan = plan_filter(
+            &FilterKind::Pixelate { size: 12.4 },
+            id,
+            (64, 64),
+            0.0,
+            &empty,
+        )
+        .unwrap();
+        assert_eq!(plan[0].kind, PassKind::Pixelate);
+        assert_eq!(plan[0].uniform.p0[0], 12.0);
+
+        // Zoom: an out-of-range center clamps into 0..1.
+        let plan = plan_filter(
+            &FilterKind::ZoomBlur {
+                amount: 0.5,
+                center_x: 2.0,
+                center_y: -1.0,
+            },
+            id,
+            (64, 64),
+            0.0,
+            &empty,
+        )
+        .unwrap();
+        assert_eq!(plan[0].kind, PassKind::ZoomBlur);
+        assert_eq!(plan[0].uniform.p0[2], 1.0, "center_x clamped to 1");
+        assert_eq!(plan[0].uniform.p0[3], 0.0, "center_y clamped to 0");
+
+        // Inert strength plans nothing (no wasted pass).
+        assert!(plan_filter(
+            &FilterKind::DirectionalBlur {
+                radius: 0.0,
+                angle: 0.0
+            },
+            id,
+            (64, 64),
+            0.0,
+            &empty
+        )
+        .is_none());
+        for inert in [
+            FilterKind::RadialBlur {
+                amount: 0.0,
+                center_x: 0.5,
+                center_y: 0.5,
+            },
+            FilterKind::ZoomBlur {
+                amount: 0.0,
+                center_x: 0.5,
+                center_y: 0.5,
+            },
+            FilterKind::Pixelate { size: 1.0 },
+        ] {
+            assert!(plan_filter(&inert, id, (64, 64), 0.0, &empty).is_none());
+        }
+    }
+
+    #[test]
+    fn freeze_is_not_a_gpu_pass() {
+        // Freeze is a source-frame effect (the studio stops uploading), so it
+        // must never plan a GPU pass.
+        assert!(plan_filter(
+            &FilterKind::Freeze,
+            FilterId::new(),
+            (64, 64),
+            0.0,
+            &no_resources()
         )
         .is_none());
     }

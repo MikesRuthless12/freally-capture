@@ -146,6 +146,53 @@ pub struct Collection {
     /// recordable/streamable independently of the program canvas.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vertical: Option<VerticalCanvas>,
+    /// Downstream keyer layers (CAP-N24): overlays composited on the PROGRAM
+    /// output, above every scene, surviving scene cuts (a station logo, a LIVE
+    /// badge, a persistent lower-third). Drawn bottom-to-top in list order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub downstream: Vec<DownstreamKeyer>,
+}
+
+/// One downstream-keyer layer (CAP-N24): a source composited over the program
+/// at its own transform and opacity, unaffected by scene switches.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownstreamKeyer {
+    pub id: DskId,
+    /// The overlay's source (from the shared pool).
+    pub source: SourceId,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Layer opacity, 0..=1.
+    #[serde(default = "default_one")]
+    pub opacity: f32,
+    #[serde(default)]
+    pub transform: Transform,
+}
+
+/// Stable id for a [`DownstreamKeyer`], so reorder/remove/edit target one layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DskId(pub uuid::Uuid);
+
+impl DskId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+impl Default for DskId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_one() -> f32 {
+    1.0
 }
 
 /// The second canvas: its own size + the scene it composes. Item transforms
@@ -204,6 +251,7 @@ impl Collection {
             active_scene: active,
             hidden_muted: std::collections::HashSet::new(),
             vertical: None,
+            downstream: Vec::new(),
         }
     }
 
@@ -284,6 +332,15 @@ impl Collection {
             for entry in &mut scene.audio_overrides {
                 entry.volume_db = entry.volume_db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB);
             }
+        }
+        // Downstream keyers (CAP-N24): drop layers whose source vanished and
+        // clamp opacity; a live layer keeps its source alive through the gc.
+        let live_sources: std::collections::HashSet<SourceId> =
+            self.sources.iter().map(|source| source.id).collect();
+        self.downstream
+            .retain(|dsk| live_sources.contains(&dsk.source));
+        for dsk in &mut self.downstream {
+            dsk.opacity = dsk.opacity.clamp(0.0, 1.0);
         }
         // …then sources nothing references.
         self.gc_sources();
@@ -472,6 +529,58 @@ impl Collection {
         self.scenes
             .iter()
             .any(|scene| scene.items.iter().any(|item| item.source == id))
+            || self.downstream.iter().any(|dsk| dsk.source == id)
+    }
+
+    // -- downstream keyers (CAP-N24) ---------------------------------------
+
+    /// Add a downstream-keyer layer for `source` (full-canvas, opaque, enabled),
+    /// on top of the existing layers. Returns its id, or `None` if the source
+    /// does not exist.
+    pub fn add_downstream(&mut self, source: SourceId) -> Option<DskId> {
+        self.source(source)?; // the source must exist in the pool
+        let id = DskId::new();
+        // Centered at native size — the operator then positions/sizes it (a
+        // logo bug, say, gets dragged to a corner and scaled down).
+        self.downstream.push(DownstreamKeyer {
+            id,
+            source,
+            enabled: true,
+            opacity: 1.0,
+            transform: Transform {
+                x: self.canvas_width as f32 * 0.5,
+                y: self.canvas_height as f32 * 0.5,
+                ..Transform::default()
+            },
+        });
+        Some(id)
+    }
+
+    /// Remove a keyer layer. The now-unreferenced source is GC'd by [`sanitize`].
+    pub fn remove_downstream(&mut self, id: DskId) -> bool {
+        let before = self.downstream.len();
+        self.downstream.retain(|dsk| dsk.id != id);
+        self.downstream.len() != before
+    }
+
+    /// Mutable access to one keyer layer, for the targeted setters/commands.
+    pub fn downstream_mut(&mut self, id: DskId) -> Option<&mut DownstreamKeyer> {
+        self.downstream.iter_mut().find(|dsk| dsk.id == id)
+    }
+
+    /// Move a keyer one step in the draw order (`up` = later/on top). No-op at
+    /// the end. Returns whether anything moved.
+    pub fn move_downstream(&mut self, id: DskId, up: bool) -> bool {
+        let Some(index) = self.downstream.iter().position(|dsk| dsk.id == id) else {
+            return false;
+        };
+        // List order is bottom-to-top, so "up" (on top) means a higher index.
+        let target = if up { index + 1 } else { index.wrapping_sub(1) };
+        if target >= self.downstream.len() {
+            return false;
+        }
+        self.downstream.swap(index, target);
+        true
     }
 
     /// Every file path the collection references — source media/images/fonts +
@@ -2130,6 +2239,7 @@ mod tests {
                         right: 10,
                         bottom: 4,
                     },
+                    ..Default::default()
                 },
             )
             .expect("set transform");
@@ -3353,6 +3463,63 @@ mod tests {
             collection.source(block).unwrap().audio.is_none(),
             "video kinds shed junk audio state"
         );
+    }
+
+    #[test]
+    fn downstream_keyers_add_reorder_and_prune() {
+        let mut c = Collection::new();
+        let scene = c.active_scene;
+        let color = |name: &str| {
+            Source::new(
+                name,
+                SourceSettings::Color {
+                    color: Rgba::WHITE,
+                    width: 100,
+                    height: 100,
+                },
+            )
+        };
+        let (src_a, _) = c.add_item_with_new_source(scene, color("Logo")).unwrap();
+        let (src_b, _) = c.add_item_with_new_source(scene, color("Bug")).unwrap();
+
+        let a = c.add_downstream(src_a).expect("added");
+        let b = c.add_downstream(src_b).expect("added");
+        assert_eq!(c.downstream.len(), 2);
+        assert!(
+            c.is_source_referenced(src_a),
+            "a keyer references its source"
+        );
+        assert!(
+            c.add_downstream(SourceId::new()).is_none(),
+            "unknown source rejected"
+        );
+
+        // List order is bottom-to-top: b is on top. Move a up past b.
+        assert_eq!(c.downstream[0].id, a);
+        assert!(c.move_downstream(a, true));
+        assert_eq!([c.downstream[0].id, c.downstream[1].id], [b, a]);
+        assert!(!c.move_downstream(a, true), "already on top");
+
+        // Opacity is clamped by sanitize.
+        c.downstream_mut(a).unwrap().opacity = 5.0;
+        c.sanitize();
+        assert_eq!(c.downstream_mut(a).unwrap().opacity, 1.0);
+
+        // Removing a keyer drops just that layer.
+        assert!(c.remove_downstream(b));
+        assert_eq!(c.downstream.len(), 1);
+
+        // A keyer whose source vanished out from under it is pruned by sanitize.
+        c.downstream.push(DownstreamKeyer {
+            id: DskId::new(),
+            source: SourceId::new(),
+            enabled: true,
+            opacity: 1.0,
+            transform: Transform::default(),
+        });
+        let before = c.downstream.len();
+        c.sanitize();
+        assert_eq!(c.downstream.len(), before - 1, "orphan keyer pruned");
     }
 
     #[test]

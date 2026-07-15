@@ -11,8 +11,10 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — 0.99.0 closed all 26 must-haves; 0.200.0 adds the Automation and
-> Capture-Depth phases; the remaining feature phases land before 1.0.0.** The engine is
+> **Status: in development — 0.99.0 closed all 26 must-haves; the post-stable phases are landing
+> toward 1.0.0. 0.310.0 brings the first half of Phase 3 (Compositor & FX Depth): a blur family
+> (directional/radial/zoom/pixelate), a 3D perspective transform, a freeze-frame filter, one-click
+> source clones, and broadcast-style downstream keyers.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
@@ -68,7 +70,7 @@ leaves your machine is the stream you chose to send.
 
 ## What it does
 
-1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, **text — including text bound to a watched `.txt`/CSV/JSON file**, **timers & clocks**, **test signals**, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur, mask, sharpen) and scene **transitions** (cut/fade/slide/stinger/luma-wipe).
+1. **Build a scene** — add sources (display, window, game, webcam, capture card, browser, media, image, **text — including text bound to a watched `.txt`/CSV/JSON file**, **timers & clocks**, **test signals**, color, audio) and arrange them on a GPU canvas (move/crop/scale/rotate), with per-source **filters** (chroma key, color correction, LUT, blur — Gaussian/directional/radial/zoom, pixelate, mask, sharpen, **freeze-frame**), a **3D perspective tilt**, scene **transitions** (cut/fade/slide/stinger/luma-wipe), and **downstream keyers** (persistent overlays on the program output).
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
 4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — including **multistream** to several platforms **at once**, **direct from your machine** (no restream server).

@@ -84,6 +84,31 @@ fn parse_index(device_id: &str) -> CameraIndex {
     }
 }
 
+/// Resolve a friendly camera name (e.g. `"HP True Vision FHD Camera"`) to this
+/// machine's device id. Used by the OBS importer: OBS stores a DirectShow
+/// name+path while we key cameras by backend index, so matching the human name
+/// against the enumerated devices is the only bridge. Exact (case-insensitive)
+/// match first, then a prefix match for the trailing-suffix differences OBS and
+/// the OS sometimes carry — never a fuzzy guess. `None` when nothing matches, so
+/// the caller can fall back to manual re-selection.
+pub fn device_id_by_name(name: &str, devices: &[VideoDeviceInfo]) -> Option<String> {
+    let target = name.trim().to_ascii_lowercase();
+    if target.is_empty() {
+        return None;
+    }
+    devices
+        .iter()
+        .find(|device| device.name.trim().to_ascii_lowercase() == target)
+        .or_else(|| {
+            devices.iter().find(|device| {
+                let candidate = device.name.trim().to_ascii_lowercase();
+                !candidate.is_empty()
+                    && (candidate.starts_with(&target) || target.starts_with(&candidate))
+            })
+        })
+        .map(|device| device.id.clone())
+}
+
 /// Enumerate cameras / capture cards.
 pub fn list_video_devices() -> Result<Vec<VideoDeviceInfo>, CaptureError> {
     ensure_camera_permission()?;
@@ -362,5 +387,32 @@ mod tests {
     fn unknown_ids_become_string_indices() {
         assert!(matches!(parse_index("2"), CameraIndex::Index(2)));
         assert!(matches!(parse_index("usb-cam"), CameraIndex::String(_)));
+    }
+
+    #[test]
+    fn device_id_resolves_by_name() {
+        let devices = vec![
+            VideoDeviceInfo {
+                id: "0".into(),
+                name: "HP True Vision FHD Camera".into(),
+            },
+            VideoDeviceInfo {
+                id: "1".into(),
+                name: "OBS Virtual Camera".into(),
+            },
+        ];
+        // Exact, case-insensitive.
+        assert_eq!(
+            device_id_by_name("hp true vision fhd camera", &devices).as_deref(),
+            Some("0")
+        );
+        // Prefix — OBS/OS can differ by a trailing suffix.
+        assert_eq!(
+            device_id_by_name("HP True Vision FHD Camera (USB2.0)", &devices).as_deref(),
+            Some("0")
+        );
+        // No match / empty → None (caller re-selects).
+        assert_eq!(device_id_by_name("Logitech Brio", &devices), None);
+        assert_eq!(device_id_by_name("   ", &devices), None);
     }
 }

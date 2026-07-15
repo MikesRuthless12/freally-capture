@@ -4,11 +4,12 @@ import { onEncoderFallback, onStats, onStream } from "../api/events";
 import type { EncoderFallback, StatsPayload, StreamStatus } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
 import { useT } from "../i18n/t";
+import { formatBytes, formatDuration } from "../lib/format";
 
-/** One stat readout tile. */
-function Stat({ label, value }: { label: string; value: string }) {
+/** One stat readout tile. `title` is an optional hover tooltip. */
+function Stat({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <div className="rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-1.5">
+    <div className="rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-1.5" title={title}>
       <div className="text-[10px] tracking-wider uppercase text-havoc-muted">{label}</div>
       <div className="text-sm font-semibold tabular-nums">{value}</div>
     </div>
@@ -83,6 +84,21 @@ export function StatsDock() {
           label={t("stats-gpu")}
           value={stats && (stats.fps ?? 0) > 0 ? t("stats-gpu-compositing") : t("stats-gpu-idle")}
         />
+        <Stat
+          label={t("stats-disk")}
+          value={
+            stats?.diskFreeBytes != null ? `${formatBytes(stats.diskFreeBytes)} ${t("stats-disk-free")}` : "—"
+          }
+        />
+        {stats?.secsUntilFull != null && stats.burnBytesPerSec != null && (
+          <Stat
+            label={t("stats-disk-left")}
+            value={formatDuration(stats.secsUntilFull)}
+            title={t("stats-disk-rate", {
+              rate: (stats.burnBytesPerSec / 1e6).toFixed(1),
+            })}
+          />
+        )}
         {(stats?.verticalFps ?? 0) > 0 && (
           <Stat label={t("stats-vertical-fps")} value={(stats?.verticalFps ?? 0).toFixed(0)} />
         )}

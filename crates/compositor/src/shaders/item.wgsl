@@ -17,7 +17,8 @@ struct ItemUniform {
     size: vec4<f32>,
     // x = blend prep mode (0/1/2);
     // y = sampling mode (0 smooth, 1 nearest, 2 sharp-bilinear — CAP-N70);
-    // z = the drawn scale (sharp-bilinear's sharpness); w reserved.
+    // z = the drawn scale (sharp-bilinear's sharpness);
+    // w = layer opacity 0..1 (1 for scene items; the downstream keyer sets it).
     misc: vec4<f32>,
 };
 
@@ -67,6 +68,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
     var color = textureSample(t_source, s_source, uv);
+    color.a = color.a * item.misc.w; // layer opacity (1.0 for scene items)
     let prep = u32(item.misc.x + 0.5);
     if prep == 1u {
         color = vec4<f32>(color.rgb * color.a, color.a);

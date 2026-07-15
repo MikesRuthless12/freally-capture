@@ -20,8 +20,37 @@
     </header>
 
     <main>
-      <!-- 0.301.0 — menu bar & Settings modal -->
+      <!-- 0.310.0 — compositor & FX depth -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.310.0</span>
+            <span class="date">Jul 14, 2026 · Compositor &amp; FX depth</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.310.0">Download</a>
+        </div>
+
+        <h2>0.310.0 — Compositor &amp; FX depth (Phase 3, part 1)</h2>
+        <p class="summary">
+          The first half of Phase 3 (Compositor &amp; FX Depth): motion-and-effects reach the canvas —
+          new blur styles, a 3D tilt, a freeze-frame, one-click source clones, and broadcast-style
+          downstream keyers that ride on top of every scene. Plus the three fixes reported against
+          0.301.0 — including a projector bug that could lock the whole desktop.
+        </p>
+        <ul class="features">
+          <li><strong>Blur family</strong> — four new GPU filters beside the Gaussian blur: directional (motion streak), radial (spin), zoom (dolly-zoom), and pixelate (mosaic).</li>
+          <li><strong>3D / perspective transform</strong> — tilt an item in 3D (Tilt X / Tilt Y / Perspective); a plain transform still renders pixel-identically.</li>
+          <li><strong>Freeze-frame filter</strong> — hold a source's last frame across program, preview, recording, and stream at once; toggle to unfreeze.</li>
+          <li><strong>Source clone</strong> — a Clone button on every source: one feed, many looks, each with its own transform and filters.</li>
+          <li><strong>Downstream keyers</strong> — persistent overlays composited on the program output, above every scene and surviving cuts (logo, LIVE badge, lower-third); a Tools panel manages reorder, opacity, and position.</li>
+          <li><strong>What's New in-app</strong> — Help → What's New shows the running build's changelog in the app, offline, instead of a browser tab.</li>
+          <li><strong>Disk-space readout</strong> — the Stats dock shows free space on the recording drive, and while recording, the estimated time until it's full at the current write rate.</li>
+          <li><strong>Fixes</strong> — opening a projector no longer freezes the desktop (borderless monitor-fill, not OS exclusive fullscreen); OBS scene import now selects the imported camera.</li>
+        </ul>
+      </article>
+
+      <!-- 0.301.0 — menu bar & Settings modal -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.301.0</span>

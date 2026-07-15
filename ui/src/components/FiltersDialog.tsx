@@ -64,6 +64,11 @@ const FILTER_NAME_KEYS: Record<FilterTypeName, string> = {
   scroll: "filters-name-scroll",
   crop: "filters-name-crop",
   flip: "filters-name-flip",
+  directionalBlur: "filters-name-directional-blur",
+  radialBlur: "filters-name-radial-blur",
+  zoomBlur: "filters-name-zoom-blur",
+  pixelate: "filters-name-pixelate",
+  freeze: "filters-name-freeze",
 };
 
 const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
@@ -98,6 +103,11 @@ const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
   scroll: { type: "scroll", speedX: 50, speedY: 0 },
   crop: { type: "crop", left: 0, top: 0, right: 0, bottom: 0 },
   flip: { type: "flip", horizontal: true, vertical: false },
+  directionalBlur: { type: "directionalBlur", radius: 8, angle: 0 },
+  radialBlur: { type: "radialBlur", amount: 0.5, centerX: 0.5, centerY: 0.5 },
+  zoomBlur: { type: "zoomBlur", amount: 0.5, centerX: 0.5, centerY: 0.5 },
+  pixelate: { type: "pixelate", size: 8 },
+  freeze: { type: "freeze" },
 };
 
 type FiltersDialogProps = {
@@ -920,6 +930,74 @@ function FilterParams({
             {t("filters-flip-vertical")}
           </label>
         </div>
+      );
+    case "directionalBlur":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label={t("filters-radius")}
+            value={filter.radius}
+            min={0}
+            max={64}
+            step={0.5}
+            onChange={(radius) => onChange({ ...filter, radius })}
+          />
+          <Slider
+            label={t("filters-angle")}
+            value={filter.angle}
+            min={0}
+            max={360}
+            step={1}
+            onChange={(angle) => onChange({ ...filter, angle })}
+          />
+        </div>
+      );
+    case "radialBlur":
+    case "zoomBlur":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label={t("filters-amount")}
+            value={filter.amount}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(amount) => onChange({ ...filter, amount })}
+          />
+          <Slider
+            label={t("filters-center-x")}
+            value={filter.centerX}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(centerX) => onChange({ ...filter, centerX })}
+          />
+          <Slider
+            label={t("filters-center-y")}
+            value={filter.centerY}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(centerY) => onChange({ ...filter, centerY })}
+          />
+        </div>
+      );
+    case "pixelate":
+      return (
+        <div className="mt-2">
+          <Slider
+            label={t("filters-block-size")}
+            value={filter.size}
+            min={1}
+            max={128}
+            step={1}
+            onChange={(size) => onChange({ ...filter, size })}
+          />
+        </div>
+      );
+    case "freeze":
+      return (
+        <p className="mt-2 text-[11px] leading-snug text-havoc-muted">{t("filters-freeze-hint")}</p>
       );
   }
 }

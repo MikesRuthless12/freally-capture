@@ -404,7 +404,11 @@ pub fn collection_import_obs<R: Runtime>(
     }
     let text =
         std::fs::read_to_string(&path).map_err(|err| format!("could not read {path:?}: {err}"))?;
-    let imported = fcap_scene::import_obs(&text).map_err(|err| err.to_string())?;
+    let mut imported = fcap_scene::import_obs(&text).map_err(|err| err.to_string())?;
+    // The importer leaves OBS's friendly camera name in `device_id`; resolve it
+    // to this machine's device index so the camera is actually selected (OBS
+    // keys cameras by a DirectShow name+path, we key them by backend index).
+    resolve_imported_video_devices(&mut imported.collection);
 
     let base = state.base()?.to_path_buf();
     state.subdir("collections"); // ensure the dir exists
@@ -424,6 +428,24 @@ pub fn collection_import_obs<R: Runtime>(
     state.save();
 
     Ok(imported.report)
+}
+
+/// Rewrite each imported Video Capture Device's `device_id` (which the OBS
+/// importer filled with OBS's friendly device name) to this machine's device
+/// index. Enumerated once; an unmatched name is cleared to `""`, so the source
+/// falls back to "(current device)" + the re-select note the importer set,
+/// rather than persisting a name the picker can't select.
+fn resolve_imported_video_devices(collection: &mut fcap_scene::Collection) {
+    let devices = fcap_sources::video_device::list_video_devices().unwrap_or_default();
+    for source in &mut collection.sources {
+        if let fcap_scene::SourceSettings::VideoDevice { device_id, .. } = &mut source.settings {
+            if device_id.is_empty() {
+                continue;
+            }
+            *device_id = fcap_sources::video_device::device_id_by_name(device_id, &devices)
+                .unwrap_or_default();
+        }
+    }
 }
 
 #[cfg(test)]

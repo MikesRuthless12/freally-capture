@@ -92,6 +92,148 @@ pub fn clip_matrix(
     ]
 }
 
+/// The clip-space matrix for a 3D-tilted item (CAP-N23): the item's quad is
+/// centered, scaled, rotated in 3D (`rotation_x`/`rotation_y` about the card's
+/// own axes, then the 2D `rotation`), given perspective foreshortening about its
+/// own center, positioned at `(x, y)` in screen space, and projected to NDC.
+///
+/// Reduces to [`clip_matrix`] when there is no tilt, so the compositor uses this
+/// path only when [`Transform::has_3d`] — plain transforms stay pixel-identical.
+/// The shader needs no change: it already does `mat4 * vec4` and the rasterizer
+/// does the perspective divide (and interpolates UVs perspective-correctly).
+pub fn perspective_clip_matrix(
+    transform: &Transform,
+    content: (f32, f32),
+    canvas: (f32, f32),
+) -> [[f32; 4]; 4] {
+    // Screen-pixel extent of the card, for a scale-invariant focal length.
+    let extent = (content.0 * transform.scale_x.abs())
+        .max(content.1 * transform.scale_y.abs())
+        .max(1.0);
+    let persp = transform.perspective.clamp(0.0, 1.0);
+    // perspective 0 → focal ∞ → orthographic (the projective row vanishes).
+    let inv_focal = if persp < 1e-4 { 0.0 } else { persp / extent };
+
+    // Compose right-to-left: NDC · Screen · Perspective · Rz · Ry · Rx · Scale · Center.
+    let m = mul(
+        &ndc(canvas),
+        &mul(
+            &translate(transform.x, transform.y),
+            &mul(
+                &perspective(inv_focal),
+                &mul(
+                    &rot_z(transform.rotation.to_radians()),
+                    &mul(
+                        &rot_y(transform.rotation_y.to_radians()),
+                        &mul(
+                            &rot_x(transform.rotation_x.to_radians()),
+                            &mul(
+                                &scale(transform.scale_x, transform.scale_y),
+                                &translate(-content.0 * 0.5, -content.1 * 0.5),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    );
+    transpose(&m) // row-major math → column-major for WGSL
+}
+
+// --- row-major 4×4 helpers (private to the projective path) -----------------
+
+type Row = [[f32; 4]; 4];
+
+fn mul(a: &Row, b: &Row) -> Row {
+    let mut out = [[0.0f32; 4]; 4];
+    for (i, row) in out.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            *cell = (0..4).map(|k| a[i][k] * b[k][j]).sum();
+        }
+    }
+    out
+}
+
+fn transpose(m: &Row) -> Row {
+    let mut out = [[0.0f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            out[j][i] = m[i][j];
+        }
+    }
+    out
+}
+
+fn translate(x: f32, y: f32) -> Row {
+    [
+        [1.0, 0.0, 0.0, x],
+        [0.0, 1.0, 0.0, y],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn scale(x: f32, y: f32) -> Row {
+    [
+        [x, 0.0, 0.0, 0.0],
+        [0.0, y, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn rot_x(rad: f32) -> Row {
+    let (s, c) = rad.sin_cos();
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, c, -s, 0.0],
+        [0.0, s, c, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn rot_y(rad: f32) -> Row {
+    let (s, c) = rad.sin_cos();
+    [
+        [c, 0.0, s, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [-s, 0.0, c, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+fn rot_z(rad: f32) -> Row {
+    // Clockwise in y-down screen space, matching `affine`.
+    let (s, c) = rad.sin_cos();
+    [
+        [c, -s, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+/// Perspective about the card center: w = 1 − z·inv_focal (the rasterizer
+/// divides x/y/z by w, so nearer parts of the tilt grow and farther parts shrink).
+fn perspective(inv_focal: f32) -> Row {
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, -inv_focal, 1.0],
+    ]
+}
+
+/// Canvas pixels (y down) → NDC (y up): x·2/w − 1, 1 − y·2/h.
+fn ndc(canvas: (f32, f32)) -> Row {
+    [
+        [2.0 / canvas.0, 0.0, 0.0, -1.0],
+        [0.0, -2.0 / canvas.1, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
 /// A transform that centers a source on the canvas, scaled down (never up)
 /// to fit — the first-frame placement for newly added items.
 pub fn fit_to_canvas(source_w: u32, source_h: u32, canvas_w: u32, canvas_h: u32) -> Transform {
@@ -107,6 +249,7 @@ pub fn fit_to_canvas(source_w: u32, source_h: u32, canvas_w: u32, canvas_h: u32)
         scale_y: scale,
         rotation: 0.0,
         crop: Crop::default(),
+        ..Default::default()
     }
 }
 
@@ -131,6 +274,7 @@ pub fn fit_into_slot(
         scale_y: scale,
         rotation: 0.0,
         crop: Crop::default(),
+        ..Default::default()
     }
 }
 
@@ -183,6 +327,7 @@ pub fn backdrop_layout(
         scale_y: scale,
         rotation: 0.0,
         crop: Crop::default(),
+        ..Default::default()
     }
 }
 
@@ -262,6 +407,70 @@ mod tests {
             y,
             ..Transform::default()
         }
+    }
+
+    /// Project a local content corner through a column-major clip matrix, then
+    /// do the perspective divide — the same thing the GPU does.
+    fn project(m: &[[f32; 4]; 4], x: f32, y: f32) -> [f32; 2] {
+        let v = [x, y, 0.0, 1.0];
+        let mut clip = [0.0f32; 4];
+        for (r, out) in clip.iter_mut().enumerate() {
+            *out = (0..4).map(|c| m[c][r] * v[c]).sum();
+        }
+        [clip[0] / clip[3], clip[1] / clip[3]]
+    }
+
+    #[test]
+    fn perspective_reduces_to_the_affine_without_tilt() {
+        // With no 3D tilt the projective matrix must equal the 2D affine path,
+        // so plain transforms render pixel-identically (CAP-N23 invariant).
+        let t = Transform {
+            x: 100.0,
+            y: 80.0,
+            scale_x: 1.5,
+            scale_y: 0.8,
+            rotation: 20.0,
+            ..Default::default()
+        };
+        let a = clip_matrix(&t, (64.0, 48.0), (1920.0, 1080.0));
+        let b = perspective_clip_matrix(&t, (64.0, 48.0), (1920.0, 1080.0));
+        for c in 0..4 {
+            for r in 0..4 {
+                assert!(
+                    (a[c][r] - b[c][r]).abs() < 1e-4,
+                    "mismatch at [{c}][{r}]: {} vs {}",
+                    a[c][r],
+                    b[c][r]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn y_rotation_foreshortens_into_a_trapezoid() {
+        let content = (100.0, 100.0);
+        let canvas = (1000.0, 1000.0);
+        let t = Transform {
+            x: 500.0,
+            y: 500.0,
+            rotation_y: 50.0,
+            perspective: 1.0,
+            ..Default::default()
+        };
+        let m = perspective_clip_matrix(&t, content, canvas);
+        // The card center stays put on screen (NDC origin) under the tilt.
+        let center = project(&m, content.0 * 0.5, content.1 * 0.5);
+        assert!(
+            center[0].abs() < 1e-4 && center[1].abs() < 1e-4,
+            "center held"
+        );
+        // A Y-tilt sends one vertical edge farther than the other → a trapezoid.
+        let left_h = (project(&m, 0.0, content.1)[1] - project(&m, 0.0, 0.0)[1]).abs();
+        let right_h = (project(&m, content.0, content.1)[1] - project(&m, content.0, 0.0)[1]).abs();
+        assert!(
+            (left_h - right_h).abs() > 1e-3,
+            "the tilt should foreshorten: {left_h} vs {right_h}"
+        );
     }
 
     #[test]
@@ -574,6 +783,7 @@ mod tests {
             scale_y: 0.75,
             rotation: -37.0,
             crop: Crop::default(),
+            ..Default::default()
         };
         let content = (200.0, 100.0);
         let canvas = (1920.0, 1080.0);

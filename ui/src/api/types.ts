@@ -36,6 +36,14 @@ export type BuildInfo = {
   target: string;
 };
 
+/** The running version's changelog, for Help → What's New (mirrors
+ *  `ReleaseNotes` in `buildinfo.rs`). `notes` is Markdown, or `null` if this
+ *  build has no changelog section. */
+export type ReleaseNotes = {
+  version: string;
+  notes: string | null;
+};
+
 /** What `autoconfig_suggest` proposes (mirrors `AutoConfig` in autoconfig.rs).
  * `encoderReason` / `qualityReason` are i18n KEYS, not sentences. */
 export type AutoConfig = {
@@ -702,6 +710,12 @@ export type StatsPayload = {
   dropped: number;
   /** Mean GPU compose time per frame, milliseconds. */
   renderMs: number;
+  /** Free space on the recording drive, bytes; null if unknown (~5 s cadence). */
+  diskFreeBytes: number | null;
+  /** Recording write rate, bytes/sec; null when not recording. */
+  burnBytesPerSec: number | null;
+  /** Seconds until the recording drive fills at the current rate; null when not recording. */
+  secsUntilFull: number | null;
   /** True only in the brief pre-compose-loop startup window. */
   placeholder: boolean;
 };
@@ -768,6 +782,11 @@ export type Transform = {
   scaleY: number;
   rotation: number;
   crop: Crop;
+  /** 3D tilt (CAP-N23), degrees; optional so older transforms round-trip. */
+  rotationX?: number;
+  rotationY?: number;
+  /** Perspective strength for the 3D tilt, 0..=1 (0 = orthographic). */
+  perspective?: number;
 };
 
 export type BlendMode =
@@ -1324,7 +1343,12 @@ export type FilterKind =
   | { type: "sharpen"; amount: number }
   | { type: "scroll"; speedX: number; speedY: number }
   | { type: "crop"; left: number; top: number; right: number; bottom: number }
-  | { type: "flip"; horizontal: boolean; vertical: boolean };
+  | { type: "flip"; horizontal: boolean; vertical: boolean }
+  | { type: "directionalBlur"; radius: number; angle: number }
+  | { type: "radialBlur"; amount: number; centerX: number; centerY: number }
+  | { type: "zoomBlur"; amount: number; centerX: number; centerY: number }
+  | { type: "pixelate"; size: number }
+  | { type: "freeze" };
 
 export type FilterTypeName = FilterKind["type"];
 
@@ -1435,6 +1459,18 @@ export type VerticalCanvas = {
   scene: SceneId;
 };
 
+export type DskId = string;
+
+/** One downstream-keyer layer (CAP-N24): a source composited over the program,
+ *  above every scene, surviving scene cuts. Mirrors `DownstreamKeyer` in Rust. */
+export type DownstreamKeyer = {
+  id: DskId;
+  source: SourceId;
+  enabled: boolean;
+  opacity: number;
+  transform: Transform;
+};
+
 /** The whole model (the on-disk scene-collection format). */
 export type Collection = {
   formatVersion: number;
@@ -1445,6 +1481,8 @@ export type Collection = {
   activeScene: SceneId;
   /** The optional second (vertical) output canvas (Phase 6). */
   vertical?: VerticalCanvas | null;
+  /** Downstream keyer layers (CAP-N24), bottom-to-top; omitted when empty. */
+  downstream?: DownstreamKeyer[];
 };
 
 /** The `studio` event / `studio_get` payload. */

@@ -16,7 +16,9 @@ use std::num::NonZeroU64;
 use std::time::Instant;
 
 use fcap_capture::{Frame, PixelFormat};
-use fcap_scene::{BlendMode, FilterId, ItemId, Scene, SceneId, SourceId, TransitionKind};
+use fcap_scene::{
+    BlendMode, FilterId, ItemId, Scene, SceneId, SourceId, Transform, TransitionKind,
+};
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
 use crate::gpu::Gpu;
@@ -64,6 +66,8 @@ struct ChainTex {
 
 /// One queued composite draw for the current render.
 struct Draw {
+    /// The scene item this draw is for — its id keys the freeze snapshot.
+    item: ItemId,
     source: SourceId,
     blend: BlendMode,
     uniform_offset: u32,
@@ -192,6 +196,10 @@ pub struct Compositor {
     uniform_stride: u64,
 
     sources: HashMap<SourceId, SourceSlot>,
+    /// Per-item held snapshots for the freeze-frame filter (CAP-N25). A frozen
+    /// item samples its snapshot instead of the live source, so a clone of the
+    /// same source (or another placement) keeps updating.
+    frozen: HashMap<ItemId, SourceSlot>,
 
     /// Nested scenes (Phase 6): the scenes a scene-source can reference and
     /// the source→scene mapping, refreshed by the studio each tick. A
@@ -261,6 +269,17 @@ pub struct ReactionDraw {
     /// Sprite size on the canvas, px (square-ish; the sprite's aspect holds).
     pub size: f32,
     pub alpha: f32,
+}
+
+/// One downstream-keyer layer to draw over the finished program (CAP-N24).
+#[derive(Debug, Clone)]
+pub struct DownstreamDraw {
+    /// The overlay's live source (its uploaded texture is composited on top).
+    pub source: SourceId,
+    /// Where/how it sits — the same transform a scene item uses (2D or 3D).
+    pub transform: Transform,
+    /// Layer opacity, 0..=1.
+    pub opacity: f32,
 }
 
 /// The floating-reactions pass (TASK-614): a bounded pool of textured
@@ -474,6 +493,7 @@ impl Compositor {
             uniform_capacity: INITIAL_ITEM_CAPACITY,
             uniform_stride,
             sources: HashMap::new(),
+            frozen: HashMap::new(),
             scene_pool: Vec::new(),
             lenses: HashMap::new(),
             scene_refs: HashMap::new(),
@@ -1177,6 +1197,104 @@ impl Compositor {
         Ok(())
     }
 
+    /// Composite the downstream-keyer layers over the finished program
+    /// (CAP-N24): persistent overlays that ride ON TOP of every scene and
+    /// survive scene cuts. Drawn after compose/transition (and reactions),
+    /// before readback, so program, preview, recording, and stream all carry
+    /// them. Each layer is a live source drawn through its own transform (2D or
+    /// 3D) at its own opacity, straight-alpha over the program — reusing the
+    /// item pipeline, so filters/blend behave exactly like a scene item.
+    pub fn render_downstream(&mut self, draws: &[DownstreamDraw]) -> Result<(), CompositorError> {
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        // Resolve each enabled layer to a live source slot + its item uniform.
+        // (Owned data, so the immutable `self.sources` borrow is released before
+        // the mutable capacity grow below.)
+        let mut jobs: Vec<(SourceId, ItemUniform)> = Vec::new();
+        for draw in draws {
+            let Some(slot) = self.sources.get(&draw.source) else {
+                continue; // no live feed yet — nothing to key
+            };
+            let (sw, sh) = (slot.width, slot.height);
+            let Some(content) = transform::content_size(sw, sh, &draw.transform.crop) else {
+                continue; // cropped away
+            };
+            let mvp = if draw.transform.has_3d() {
+                transform::perspective_clip_matrix(&draw.transform, content, canvas)
+            } else {
+                transform::clip_matrix(&draw.transform, content, canvas)
+            };
+            jobs.push((
+                draw.source,
+                ItemUniform {
+                    mvp,
+                    uv_rect: transform::uv_rect(sw, sh, &draw.transform.crop),
+                    size: [content.0, content.1, 0.0, 0.0],
+                    misc: [
+                        0.0,
+                        0.0,
+                        draw.transform.scale_x.abs(),
+                        draw.opacity.clamp(0.0, 1.0),
+                    ],
+                },
+            ));
+        }
+        if jobs.is_empty() {
+            return Ok(());
+        }
+
+        self.ensure_uniform_capacity(jobs.len() as u64);
+        let mut staging: Vec<u8> = Vec::new();
+        for (index, (_, uniform)) in jobs.iter().enumerate() {
+            let offset = index as u64 * self.uniform_stride;
+            staging.resize(offset as usize, 0);
+            staging.extend_from_slice(bytemuck::bytes_of(uniform));
+        }
+        self.gpu
+            .queue
+            .write_buffer(&self.uniform_buffer, 0, &staging);
+
+        let pipeline = self
+            .pipelines
+            .iter()
+            .find(|(mode, _)| *mode == BlendMode::Normal)
+            .map(|(_, pipeline)| pipeline)
+            .expect("the Normal blend pipeline always exists");
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap downstream"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap downstream pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the composed program
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(pipeline);
+            for (index, (source, _)) in jobs.iter().enumerate() {
+                let offset = (index as u64 * self.uniform_stride) as u32;
+                let bind = &self.sources.get(source).expect("resolved above").bind_group;
+                pass.set_bind_group(0, &self.uniform_bind, &[offset]);
+                pass.set_bind_group(1, bind, &[]);
+                pass.draw(0..4, 0..1);
+            }
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
     fn ensure_reaction_rig(&mut self) {
         if self.reactions.is_some() {
             return;
@@ -1470,6 +1588,95 @@ impl Compositor {
         self.sources.retain(|id, _| keep.contains(id));
     }
 
+    /// Freeze-frame filter (CAP-N25): hold a per-item snapshot of each `(item,
+    /// source)`'s current texture. An item already held keeps its original
+    /// snapshot; a live copy of the same source (a CAP-N26 clone, or another
+    /// placement) is untouched, so only the frozen item holds. Call after this
+    /// tick's sources are uploaded and before `render`.
+    pub fn freeze_items(&mut self, items: &[(ItemId, SourceId)]) {
+        // Snapshot only the newly-frozen items whose source is live.
+        let pending: Vec<(ItemId, SourceId, u32, u32, PixelFormat)> = items
+            .iter()
+            .filter(|(item, _)| !self.frozen.contains_key(item))
+            .filter_map(|&(item, source)| {
+                let slot = self.sources.get(&source)?;
+                Some((item, source, slot.width, slot.height, slot.format))
+            })
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap freeze snapshot"),
+            });
+        let mut new_slots: Vec<(ItemId, SourceSlot)> = Vec::new();
+        for (item, source, width, height, format) in pending {
+            let held = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("fcap frozen item"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture_format(format),
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.sources[&source].texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &held,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = held.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = Self::make_texture_bind(
+                &self.gpu.device,
+                &self.texture_layout,
+                &self.sampler,
+                &self.repeat_sampler,
+                &view,
+            );
+            new_slots.push((
+                item,
+                SourceSlot {
+                    texture: held,
+                    bind_group,
+                    width,
+                    height,
+                    format,
+                },
+            ));
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        for (item, slot) in new_slots {
+            self.frozen.insert(item, slot);
+        }
+    }
+
+    /// Drop held freeze snapshots for items no longer frozen (thaw).
+    pub fn retain_frozen(&mut self, keep: &[ItemId]) {
+        self.frozen.retain(|item, _| keep.contains(item));
+    }
+
     /// Upload a captured frame into `source`'s texture, (re)creating it when
     /// the size or pixel format changed. Rejects frames whose geometry does
     /// not hold together rather than reading out of bounds.
@@ -1519,7 +1726,11 @@ impl Compositor {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: texture_format(frame.format),
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                // COPY_SRC lets the freeze-frame filter (CAP-N25) snapshot this
+                // source into a per-item held texture.
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1856,11 +2067,20 @@ impl Compositor {
                 continue; // fully cropped away
             };
             let (_, prep) = blend_config(item.blend);
+            // CAP-N23: a 3D-tilted item uses the projective matrix; a plain 2D
+            // transform stays on the exact affine path (pixel-identical).
+            let mvp = if transform.has_3d() {
+                transform::perspective_clip_matrix(&transform, content, canvas)
+            } else {
+                transform::clip_matrix(&transform, content, canvas)
+            };
             let uniform = ItemUniform {
-                mvp: transform::clip_matrix(&transform, content, canvas),
+                mvp,
                 uv_rect: transform::uv_rect(chain_size.0, chain_size.1, &transform.crop),
                 size: [content.0, content.1, 0.0, 0.0],
-                misc: [prep, sampling, transform.scale_x.abs(), 0.0],
+                // misc.w = 1.0: scene items are fully opaque (the downstream
+                // keyer is the only thing that sets a partial opacity).
+                misc: [prep, sampling, transform.scale_x.abs(), 1.0],
             };
             let offset = draws.len() as u64 * self.uniform_stride;
             item_staging.resize(offset as usize, 0);
@@ -1890,6 +2110,7 @@ impl Compositor {
                 }
             }
             draws.push(Draw {
+                item: item.id,
                 source: item.source,
                 blend: item.blend,
                 uniform_offset: offset as u32,
@@ -1927,16 +2148,22 @@ impl Compositor {
             let chain = &self.chain_cache[&chain_pass.item];
             let target = &chain[chain_pass.pass_index].view;
             let input_bind = if chain_pass.pass_index == 0 {
-                let source = draws
-                    .iter()
-                    .find(|draw| draw.chain == Some(chain_pass.item))
-                    .map(|draw| draw.source)
-                    .expect("chained items have a draw");
-                &self
-                    .sources
-                    .get(&source)
-                    .expect("chained items have a live slot")
-                    .bind_group
+                // A frozen item (CAP-N25) feeds its held snapshot into the chain,
+                // not the live source — so a clone of the same source stays live.
+                if let Some(held) = self.frozen.get(&chain_pass.item) {
+                    &held.bind_group
+                } else {
+                    let source = draws
+                        .iter()
+                        .find(|draw| draw.chain == Some(chain_pass.item))
+                        .map(|draw| draw.source)
+                        .expect("chained items have a draw");
+                    &self
+                        .sources
+                        .get(&source)
+                        .expect("chained items have a live slot")
+                        .bind_group
+                }
             } else {
                 &chain[chain_pass.pass_index - 1].bind_group
             };
@@ -2008,13 +2235,18 @@ impl Compositor {
                         let chain = &self.chain_cache[&item];
                         &chain.last().expect("chains are non-empty").bind_group
                     }
-                    None => {
-                        &self
-                            .sources
-                            .get(&draw.source)
-                            .expect("draws reference live slots")
-                            .bind_group
-                    }
+                    // A frozen, unfiltered item samples its held snapshot; a live
+                    // copy of the same source is unaffected (CAP-N25).
+                    None => match self.frozen.get(&draw.item) {
+                        Some(held) => &held.bind_group,
+                        None => {
+                            &self
+                                .sources
+                                .get(&draw.source)
+                                .expect("draws reference live slots")
+                                .bind_group
+                        }
+                    },
                 };
                 pass.set_bind_group(0, &self.uniform_bind, &[draw.uniform_offset]);
                 pass.set_bind_group(1, texture_bind, &[]);
