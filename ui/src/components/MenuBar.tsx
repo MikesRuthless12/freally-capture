@@ -17,13 +17,7 @@ import {
 import type { Settings } from "../api/types";
 import { useT } from "../i18n/t";
 import { useClipboard } from "../lib/clipboard";
-import {
-  DISCORD_URL,
-  HELP_URL,
-  WEBSITE_URL,
-  type MenuDef,
-  type MenuEntry,
-} from "../lib/menuDefs";
+import { DISCORD_URL, HELP_URL, WEBSITE_URL, type MenuDef, type MenuEntry } from "../lib/menuDefs";
 import { pushModal } from "../lib/modal";
 import type { ControlsDialogKind } from "../panels/ControlsDock";
 

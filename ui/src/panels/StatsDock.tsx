@@ -87,7 +87,9 @@ export function StatsDock() {
         <Stat
           label={t("stats-disk")}
           value={
-            stats?.diskFreeBytes != null ? `${formatBytes(stats.diskFreeBytes)} ${t("stats-disk-free")}` : "—"
+            stats?.diskFreeBytes != null
+              ? `${formatBytes(stats.diskFreeBytes)} ${t("stats-disk-free")}`
+              : "—"
           }
         />
         {stats?.secsUntilFull != null && stats.burnBytesPerSec != null && (

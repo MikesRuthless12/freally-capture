@@ -35,7 +35,9 @@ export function DownstreamKeyersDialog({
   const warn = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
 
   const setTransform = (dsk: DownstreamKeyer, patch: Partial<DownstreamKeyer["transform"]>) => {
-    studioDownstreamSetTransform(dsk.id, { ...dsk.transform, ...patch }).catch(warn("dsk transform"));
+    studioDownstreamSetTransform(dsk.id, { ...dsk.transform, ...patch }).catch(
+      warn("dsk transform"),
+    );
   };
 
   return (
@@ -52,7 +54,10 @@ export function DownstreamKeyersDialog({
               .map((dsk, index) => ({ dsk, index }))
               .reverse()
               .map(({ dsk, index }) => (
-                <li key={dsk.id} className="flex flex-col gap-1.5 rounded-md border border-white/10 p-2">
+                <li
+                  key={dsk.id}
+                  className="flex flex-col gap-1.5 rounded-md border border-white/10 p-2"
+                >
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -108,7 +113,9 @@ export function DownstreamKeyersDialog({
                       }
                       className="flex-1"
                     />
-                    <span className="w-8 text-right font-mono">{Math.round(dsk.opacity * 100)}%</span>
+                    <span className="w-8 text-right font-mono">
+                      {Math.round(dsk.opacity * 100)}%
+                    </span>
                   </label>
 
                   <div className="grid grid-cols-3 gap-2">
