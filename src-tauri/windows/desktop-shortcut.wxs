@@ -12,14 +12,17 @@
    - The shortcut is a per-user component keyed under HKCU (its RegistryValue is
      the KeyPath), and RemoveFolder cleans the Desktop entry on uninstall — so
      install/uninstall are both tidy and ICE-clean.
-   - DesktopFolder is declared under TARGETDIR here because Tauri's generated
-     main template only wires the Start-menu (ProgramMenuFolder) shortcut.
+   - DesktopFolder is added under the EXISTING TARGETDIR via DirectoryRef (NOT a
+     second `<Directory Id="TARGETDIR">`, which would duplicate the symbol Tauri's
+     main.wxs already defines — candle compiles each .wxs alone, but light fails
+     linking the duplicate). Tauri's main template only wires the Start-menu
+     (ProgramMenuFolder) shortcut, so DesktopFolder itself is new.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
-    <Directory Id="TARGETDIR" Name="SourceDir">
+    <DirectoryRef Id="TARGETDIR">
       <Directory Id="DesktopFolder" Name="Desktop" />
-    </Directory>
+    </DirectoryRef>
   </Fragment>
 
   <Fragment>
