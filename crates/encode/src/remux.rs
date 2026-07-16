@@ -335,42 +335,62 @@ pub fn concat_copy(ffmpeg: &Ffmpeg, segments: &[PathBuf], out: &Path) -> Result<
     Ok(())
 }
 
-/// The FFMETADATA chapter block for marker timestamps (ms). Each chapter
-/// runs to the next marker (the last to `total_ms`, or +1 s past itself).
-fn ffmetadata_chapters(markers_ms: &[u64], total_ms: Option<u64>) -> String {
+/// FFMETADATA value escaping: `=`, `;`, `#` and `\` are special, and a
+/// newline would start a new key — labels are user-adjacent text (scene
+/// names, rule names), so escape defensively.
+fn ffmeta_escape(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    for c in label.chars() {
+        match c {
+            '=' | ';' | '#' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '\n' | '\r' => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The FFMETADATA chapter block for labeled markers `(ms, label)` — CAP-N44
+/// typed markers carry their event label into the chapter titles. Each
+/// chapter runs to the next marker (the last to `total_ms`, or +1 s).
+fn ffmetadata_chapters(markers: &[(u64, String)], total_ms: Option<u64>) -> String {
     let mut text = String::from(";FFMETADATA1\n");
-    for (index, &start) in markers_ms.iter().enumerate() {
-        let end = markers_ms
+    for (index, (start, label)) in markers.iter().enumerate() {
+        let end = markers
             .get(index + 1)
-            .copied()
-            .or(total_ms.filter(|total| *total > start))
+            .map(|(ms, _)| *ms)
+            .or(total_ms.filter(|total| total > start))
             .unwrap_or(start + 1_000);
         text.push_str(&format!(
-            "[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle=Marker {}\n",
-            index + 1
+            "[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={}\n",
+            ffmeta_escape(label)
         ));
     }
     text
 }
 
-/// Embed `markers_ms` as chapters into an **mkv** recording (TASK-610): a
-/// stream-copy remux with the chapter metadata attached, replacing the
-/// original file. Non-mkv containers get a sidecar (the app writes it) —
-/// mp4 chapter atoms are not worth a full rewrite of a fresh recording.
+/// Embed labeled markers as chapters into an **mkv** recording (TASK-610 +
+/// CAP-N44): a stream-copy remux with the chapter metadata attached,
+/// replacing the original file. Non-mkv containers get a sidecar (the app
+/// writes it) — mp4 chapter atoms are not worth a full rewrite of a fresh
+/// recording.
 pub fn write_mkv_chapters(
     ffmpeg: &Ffmpeg,
     input: &Path,
-    markers_ms: &[u64],
+    markers: &[(u64, String)],
     total_ms: Option<u64>,
 ) -> Result<(), String> {
-    if markers_ms.is_empty() {
+    if markers.is_empty() {
         return Ok(());
     }
     if input.extension().and_then(|ext| ext.to_str()) != Some("mkv") {
         return Err("chapters embed into mkv recordings".to_string());
     }
     let meta_path = input.with_extension("ffmeta.txt");
-    std::fs::write(&meta_path, ffmetadata_chapters(markers_ms, total_ms))
+    std::fs::write(&meta_path, ffmetadata_chapters(markers, total_ms))
         .map_err(|err| format!("could not write the chapter metadata: {err}"))?;
     let tmp_path = input.with_extension("chapters.tmp.mkv");
 
@@ -404,13 +424,29 @@ mod tests {
 
     #[test]
     fn chapter_metadata_runs_each_marker_to_the_next() {
-        let text = ffmetadata_chapters(&[5_000, 12_000], Some(30_000));
+        let markers = vec![
+            (5_000, "Marker 1".to_owned()),
+            (12_000, "Scene: Gameplay".to_owned()),
+        ];
+        let text = ffmetadata_chapters(&markers, Some(30_000));
         assert!(text.starts_with(";FFMETADATA1"));
         assert!(text.contains("START=5000\nEND=12000\ntitle=Marker 1"));
-        assert!(text.contains("START=12000\nEND=30000\ntitle=Marker 2"));
+        assert!(text.contains("START=12000\nEND=30000\ntitle=Scene: Gameplay"));
         // Without a known total, the last chapter gets a nominal second.
-        let open_ended = ffmetadata_chapters(&[7_000], None);
+        let open_ended = ffmetadata_chapters(&[(7_000, "Marker 1".to_owned())], None);
         assert!(open_ended.contains("START=7000\nEND=8000"));
+    }
+
+    /// CAP-N44: labels are user-adjacent text (scene/rule names) — the
+    /// FFMETADATA specials must not break the chapter block.
+    #[test]
+    fn chapter_titles_escape_ffmetadata_specials() {
+        let markers = vec![(0, "Rule: a=b;c#d\\e\nnewline".to_owned())];
+        let text = ffmetadata_chapters(&markers, None);
+        assert!(
+            text.contains("title=Rule: a\\=b\\;c\\#d\\\\e newline"),
+            "specials escape, newlines flatten: {text}"
+        );
     }
 
     #[test]

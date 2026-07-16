@@ -7,7 +7,7 @@
 
 /// The numbers one HUD face can show. Everything here is measured — the
 /// HUD never guesses (which is why there is no GPU% field).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct StatsNumbers {
     /// Composed frames per second (the program render rate).
     pub fps: u32,
@@ -21,6 +21,8 @@ pub struct StatsNumbers {
     pub dropped: u64,
     /// Live publish bitrate summed across targets; `None` = not streaming.
     pub bitrate_kbps: Option<u32>,
+    /// CAP-N47: the LTC reader's decode (`HH:MM:SS:FF`); `None` = no lock.
+    pub ltc: Option<String>,
 }
 
 /// Which lines the face shows (mirrors the source's `show_*` settings).
@@ -32,6 +34,8 @@ pub struct HudToggles {
     pub render_ms: bool,
     pub dropped: bool,
     pub bitrate: bool,
+    /// CAP-N47: the burn-in timecode line.
+    pub timecode: bool,
 }
 
 /// One line per enabled stat, rounded so the text (and therefore the
@@ -60,6 +64,13 @@ pub fn format_hud(numbers: &StatsNumbers, show: &HudToggles) -> String {
             None => lines.push("BITRATE —".to_string()),
         }
     }
+    if show.timecode {
+        // CAP-N47: the burn-in — the LTC reader's decode, honest about lock.
+        match &numbers.ltc {
+            Some(tc) => lines.push(format!("TC {tc}")),
+            None => lines.push("TC —".to_string()),
+        }
+    }
     if lines.is_empty() {
         return "—".to_string();
     }
@@ -77,6 +88,7 @@ mod tests {
         render_ms: true,
         dropped: true,
         bitrate: true,
+        timecode: true,
     };
 
     fn numbers() -> StatsNumbers {
@@ -87,6 +99,7 @@ mod tests {
             render_ms: 3.13,
             dropped: 2,
             bitrate_kbps: Some(6000),
+            ltc: Some("12:34:56:12".to_string()),
         }
     }
 
@@ -95,7 +108,7 @@ mod tests {
         let face = format_hud(&numbers(), &ALL);
         assert_eq!(
             face,
-            "FPS 60\nCPU 12%\nMEM 542 MB\nRENDER 3.1 ms\nDROPPED 2\nBITRATE 6000 kbps"
+            "FPS 60\nCPU 12%\nMEM 542 MB\nRENDER 3.1 ms\nDROPPED 2\nBITRATE 6000 kbps\nTC 12:34:56:12"
         );
     }
 
@@ -112,6 +125,7 @@ mod tests {
                 render_ms: false,
                 dropped: false,
                 bitrate: true,
+                timecode: false,
             },
         );
         assert_eq!(face, "BITRATE —");
@@ -128,6 +142,7 @@ mod tests {
                 render_ms: false,
                 dropped: true,
                 bitrate: false,
+                timecode: false,
             },
         );
         assert_eq!(face, "FPS 60\nDROPPED 2");
@@ -144,6 +159,7 @@ mod tests {
                 render_ms: false,
                 dropped: false,
                 bitrate: false,
+                timecode: false,
             },
         );
         assert_eq!(face, "—");

@@ -114,6 +114,16 @@ impl RundownState {
             hold: (step.hold_secs > 0).then(|| Duration::from_secs(u64::from(step.hold_secs))),
         });
         run_step(app, &step);
+        // CAP-N43: "new file per rundown step" — cut the recording's frec
+        // lanes on every step start when the trigger is armed. (The 1 s
+        // minimum part length in the sink absorbs the double-fire when the
+        // step ALSO switches scenes and split-on-scene is armed too.)
+        {
+            let recording = app.state::<crate::recording::RecordingState>();
+            if recording.splits_on_rundown() {
+                recording.request_split_all();
+            }
+        }
         emit(app, self, &settings);
         Ok(())
     }

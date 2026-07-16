@@ -12,6 +12,7 @@ import type {
   CefStatus,
   EncoderFallback,
   ExportStatus,
+  PipelineJob,
   FfmpegStatus,
   ProgramStatus,
   QuitConsequences,
@@ -121,6 +122,11 @@ export function onRecording(handler: (status: RecordingStatus) => void): Promise
 /** Subscribe to .frec export progress (frames done/total + terminal state). */
 export function onRecordingExport(handler: (status: ExportStatus) => void): Promise<UnlistenFn> {
   return listen<ExportStatus>("recording-export", (event) => handler(event.payload));
+}
+
+/** CAP-N45: subscribe to post-record pipeline queue updates. */
+export function onPipeline(handler: (jobs: PipelineJob[]) => void): Promise<UnlistenFn> {
+  return listen<PipelineJob[]>("pipeline", (event) => handler(event.payload));
 }
 
 /** Subscribe to a .frec opened via the OS while the app is already running. */

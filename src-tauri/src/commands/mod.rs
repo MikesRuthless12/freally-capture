@@ -295,7 +295,7 @@ fn thumbnail_data_uri(thumb: &fcap_capture::Thumbnail) -> Option<String> {
 }
 
 /// Minimal standard base64 (padded) — a few KB per thumbnail, not worth a dep.
-fn base64_encode(data: &[u8]) -> String {
+pub(crate) fn base64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len() * 4 / 3 + 4);
     for chunk in data.chunks(3) {

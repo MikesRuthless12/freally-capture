@@ -241,6 +241,13 @@ pub struct MixerCore {
     meter_target: Option<SourceId>,
     /// The armed strip's per-filter `(id, in_peak, out_peak)` this block.
     filter_meters: Vec<(AudioFilterId, f32, f32)>,
+    /// CAP-N40 ISO recording: the sources whose **clean** block (post-filter,
+    /// pre-pan/fader/mute) is captured each `process` — an ISO lane records
+    /// the strip as processed, never silenced by a mix decision. Empty unless
+    /// an ISO session runs, so the idle path costs nothing.
+    iso_sources: HashSet<SourceId>,
+    /// The captured clean blocks for `iso_sources` from the last `process`.
+    iso_blocks: HashMap<SourceId, Vec<f32>>,
 }
 
 impl Default for MixerCore {
@@ -276,7 +283,25 @@ impl MixerCore {
             mix_minus: HashMap::new(),
             meter_target: None,
             filter_meters: Vec::new(),
+            iso_sources: HashSet::new(),
+            iso_blocks: HashMap::new(),
         }
+    }
+
+    /// Set the CAP-N40 ISO capture set — the sources whose clean (post-filter,
+    /// pre-fader) block is kept each `process`. Empty disarms it entirely.
+    pub fn set_iso_sources(&mut self, sources: HashSet<SourceId>) {
+        let keep = &sources;
+        self.iso_blocks.retain(|id, _| keep.contains(id));
+        self.iso_sources = sources;
+    }
+
+    /// Every captured ISO clean block from the last `process` — the engine
+    /// hands these to the ISO recorder lanes (CAP-N40).
+    pub fn iso_blocks(&self) -> impl Iterator<Item = (SourceId, &[f32])> + '_ {
+        self.iso_blocks
+            .iter()
+            .map(|(id, block)| (*id, block.as_slice()))
     }
 
     /// Arm (or clear) per-filter metering on one source — the strip whose filter
@@ -340,6 +365,9 @@ impl MixerCore {
         self.envelopes.retain(|id, _| controls.contains_key(id));
         self.automix_envelopes
             .retain(|id, _| controls.contains_key(id));
+        // An ISO-tapped source that left the scene stops publishing a block
+        // (its lane duplicates the last frame; audio simply ends).
+        self.iso_blocks.retain(|id, _| controls.contains_key(id));
         for (id, control) in controls {
             match self.strips.get_mut(id) {
                 Some(strip) => strip.reconcile(&control.settings),
@@ -461,6 +489,17 @@ impl MixerCore {
                 for filter in &mut strip.chain {
                     filter.process(&mut strip.scratch, &ctx);
                 }
+            }
+
+            // 2b. The CAP-N40 ISO tap point: capture the strip **clean** —
+            //     post-filter, pre-pan/fader/mute — so an ISO lane records
+            //     the processed source, never silenced by a mix decision
+            //     (the same lesson as the pre-fade PFL tap below).
+            if self.iso_sources.contains(id) {
+                self.iso_blocks
+                    .entry(*id)
+                    .or_insert_with(|| vec![0.0; BLOCK_SAMPLES])
+                    .copy_from_slice(&strip.scratch);
             }
 
             // 3. Mono downmix + stereo balance (CAP-M19; center = unity, so
@@ -629,6 +668,17 @@ impl MixerCore {
     /// One track bus's last block (0-based; recording consumes these in P4).
     pub fn track(&self, index: usize) -> &[f32] {
         &self.tracks[index]
+    }
+
+    /// CAP-N47: add `samples` into one track bus AFTER the mix (the LTC
+    /// generator's injection point — timecode rides its assigned track into
+    /// the recording/stream taps, never the master or monitor mix).
+    pub fn mix_into_track(&mut self, index: usize, samples: &[f32]) {
+        if let Some(track) = self.tracks.get_mut(index) {
+            for (out, sample) in track.iter_mut().zip(samples) {
+                *out += sample;
+            }
+        }
     }
 
     /// The program (master) mix's last block.
@@ -1391,5 +1441,83 @@ mod tests {
             (-14.0..=-4.0).contains(&momentary),
             "a 0.5-amp stereo tone lands around -6..-9 LUFS, got {momentary}"
         );
+    }
+
+    /// CAP-N40: the ISO tap is pre-fader/mute — a muted strip still delivers
+    /// its clean block (the whole point: a mix decision never silences the
+    /// ISO file), while the program mix stays silent.
+    #[test]
+    fn iso_tap_captures_a_muted_strip_clean() {
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        core.set_iso_sources([id].into_iter().collect());
+        let control = StripControl::new(AudioSettings {
+            muted: true,
+            ..AudioSettings::default()
+        });
+        run_one(&mut core, id, &control, 0.5, 20);
+
+        assert_eq!(peak(core.master()), 0.0, "muted strip never mixes");
+        let blocks: Vec<_> = core.iso_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].0, id);
+        assert!(
+            (peak(blocks[0].1) - 0.5).abs() < 0.02,
+            "the ISO block carries the un-faded source, got {}",
+            peak(blocks[0].1)
+        );
+    }
+
+    /// CAP-N40: the ISO tap is post-filter — a gain filter shapes the block
+    /// (record the strip *as processed*), and pan never does (pre-pan tap).
+    #[test]
+    fn iso_tap_is_post_filter_and_pre_pan() {
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        core.set_iso_sources([id].into_iter().collect());
+        let control = StripControl::new(AudioSettings {
+            pan: -1.0, // hard left — must NOT reach the ISO block
+            filters: vec![fcap_scene::AudioFilter::new(AudioFilterKind::Gain {
+                db: -6.0,
+            })],
+            ..AudioSettings::default()
+        });
+        run_one(&mut core, id, &control, 0.5, 30);
+
+        let blocks: Vec<_> = core.iso_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        let expected = 0.5 * db_to_lin(-6.0);
+        assert!(
+            (channel_peak(blocks[0].1, 0) - expected).abs() < 0.02,
+            "left carries the filtered level, got {}",
+            channel_peak(blocks[0].1, 0)
+        );
+        assert!(
+            (channel_peak(blocks[0].1, 1) - expected).abs() < 0.02,
+            "right is untouched by the hard-left pan, got {}",
+            channel_peak(blocks[0].1, 1)
+        );
+    }
+
+    /// CAP-N40: disarming (or a source leaving the scene) stops publishing.
+    #[test]
+    fn iso_tap_disarms_and_follows_the_scene() {
+        let mut core = MixerCore::new();
+        let id = SourceId::new();
+        core.set_iso_sources([id].into_iter().collect());
+        let control = StripControl::new(AudioSettings::default());
+        run_one(&mut core, id, &control, 0.5, 5);
+        assert_eq!(core.iso_blocks().count(), 1);
+
+        // The source leaves the scene → its block stops publishing.
+        core.process(&HashMap::new(), &HashMap::new());
+        assert_eq!(core.iso_blocks().count(), 0, "gone with its strip");
+
+        // Re-appears → publishes again; disarm → stops for good.
+        run_one(&mut core, id, &control, 0.5, 5);
+        assert_eq!(core.iso_blocks().count(), 1);
+        core.set_iso_sources(HashSet::new());
+        run_one(&mut core, id, &control, 0.5, 5);
+        assert_eq!(core.iso_blocks().count(), 0, "disarmed");
     }
 }

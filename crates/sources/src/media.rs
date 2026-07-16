@@ -1330,6 +1330,7 @@ mod tests {
             pixel_format: fcap_encode::freally_video::PixelFormat::Rgba8,
             audio_tracks: 1,
             sample_rate: 48_000,
+            alpha: false,
         };
         let mut writer = FrecWriter::create(&path, spec).expect("create");
         for t in 0..10u64 {
@@ -1415,6 +1416,7 @@ mod tests {
             pixel_format: fcap_encode::freally_video::PixelFormat::Rgba8,
             audio_tracks: 1,
             sample_rate: 48_000,
+            alpha: false,
         };
         let mut writer = FrecWriter::create(&path, spec).expect("create");
         for t in 0..10u64 {

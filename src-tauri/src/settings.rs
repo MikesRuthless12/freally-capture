@@ -291,6 +291,9 @@ pub struct Settings {
     /// CAP-N34 loudness normalization (the live rider). Off by default.
     #[serde(default)]
     pub loudness: LoudnessSettings,
+    /// CAP-N47 SMPTE LTC timecode (generator + reader). Off by default.
+    #[serde(default)]
+    pub ltc: LtcSettings,
     /// CAP-N37 soundboard pads. Empty until populated.
     #[serde(default)]
     pub soundboard: SoundboardSettings,
@@ -454,6 +457,7 @@ impl Default for Settings {
             monitor_device: None,
             audio_outputs: Vec::new(),
             loudness: LoudnessSettings::default(),
+            ltc: LtcSettings::default(),
             soundboard: SoundboardSettings::default(),
             mixer_layout: MixerLayout::default(),
             theme: ThemeSettings::default(),
@@ -1210,6 +1214,102 @@ impl AudioRecFormat {
     }
 }
 
+/// CAP-N47: SMPTE LTC timecode — classic audio timecode, fully offline. The
+/// generator rides one track bus (assign that track in Output settings to
+/// record it; feed it to an output route to jam-sync external recorders);
+/// the reader taps one source's raw input and drives the stats overlay's
+/// timecode line + LTC-stamped markers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LtcSettings {
+    /// Generate LTC (time-of-day, non-drop) onto `track`.
+    pub enabled: bool,
+    /// The track bus the generator rides (0-based, 0..=5).
+    pub track: u8,
+    /// LTC frame rate: 24, 25 or 30.
+    pub fps: u32,
+    /// The source (uuid) whose raw input the reader taps ("" = off).
+    pub read_source: String,
+}
+
+impl Default for LtcSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            track: 5, // track 6 — the conventional spare
+            fps: 30,
+            read_source: String::new(),
+        }
+    }
+}
+
+impl LtcSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.track as usize >= fcap_scene::TRACK_COUNT {
+            return Err("LTC track out of range (1–6)".to_owned());
+        }
+        if !matches!(self.fps, 24 | 25 | 30) {
+            return Err("LTC frame rate must be 24, 25 or 30".to_owned());
+        }
+        if !self.read_source.is_empty()
+            && (self.read_source.len() != 36
+                || !self
+                    .read_source
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() || b == b'-'))
+        {
+            return Err("invalid LTC reader source id".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// CAP-N45: one step of the post-record pipeline. A **closed** action set —
+/// there is deliberately no "run a command" variant and never will be; the
+/// sandbox IS the design (the ShareX-style chain without the shell).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "action",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PipelineStep {
+    /// Integrity-check the file (CAP-N46). A FAIL stops the chain — later
+    /// steps must not polish or move a broken file.
+    Verify,
+    /// Stream-copy remux an mkv to a playable mp4 sibling (the chain then
+    /// continues on the mp4).
+    Remux,
+    /// Loudness-normalize to the app's target (CAP-N34; wire files only).
+    Normalize,
+    /// Rename with a CAP-M25 token template (same folder).
+    Rename { template: String },
+    /// Move to a folder (the chain continues on the moved file).
+    Move { folder: String },
+    /// Copy to a folder (the chain continues on the ORIGINAL).
+    Copy { folder: String },
+    /// Show the file in the OS file manager.
+    Reveal,
+    /// Emit a `recordingPipeline` event to the sandboxed Lua scripts.
+    LuaEvent,
+}
+
+impl PipelineStep {
+    /// Stable id for the UI/i18n ("verify", "remux", …).
+    pub fn id(&self) -> &'static str {
+        match self {
+            PipelineStep::Verify => "verify",
+            PipelineStep::Remux => "remux",
+            PipelineStep::Normalize => "normalize",
+            PipelineStep::Rename { .. } => "rename",
+            PipelineStep::Move { .. } => "move",
+            PipelineStep::Copy { .. } => "copy",
+            PipelineStep::Reveal => "reveal",
+            PipelineStep::LuaEvent => "luaEvent",
+        }
+    }
+}
+
 /// Recording configuration (Settings → Output). Independent of any future
 /// stream settings by design — the local copy never rides a stream's knobs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1257,6 +1357,39 @@ pub struct RecordingSettings {
     /// containers only — the lossless .frec always records the canvas.
     pub output_width: u32,
     pub output_height: u32,
+    /// CAP-N40 ISO recording: the scene-source ids (uuid strings) recorded
+    /// as their own clean per-source files alongside the program (each remote
+    /// guest's feed is just a source). Empty = off.
+    pub iso_sources: Vec<String>,
+    /// ISO lanes record the source post-filter (as processed) when true, or
+    /// raw pre-filter when false.
+    pub iso_post_filter: bool,
+    /// The ISO lanes' own container + encoder — independent of the program
+    /// recording's (rate control, preset, keyframe and audio bitrate are
+    /// shared with the program settings above).
+    pub iso_container: Container,
+    pub iso_encoder_id: String,
+    /// CAP-N42: record the program with real transparency (`.frec` only —
+    /// wire codecs flatten). The recorder gets its own transparent-clear
+    /// render; the preview/stream keep the normal opaque program.
+    pub alpha_frec: bool,
+    /// CAP-N43: event-driven split triggers for the owned `.frec` splitter
+    /// (wire containers split by time only — the ffmpeg segment muxer can't
+    /// cut on demand; the UI says so). Each starts a new part file exactly
+    /// on the event's frame boundary, minimum part length one second.
+    pub split_on_scene: bool,
+    pub split_on_marker: bool,
+    pub split_on_rundown: bool,
+    /// CAP-N44: studio events (scene switch, replay save, stream reconnect,
+    /// dropped-frame burst, alarm, rule firing) drop typed chapter markers
+    /// automatically, alongside the manual marker hotkey.
+    pub auto_markers: bool,
+    /// CAP-N45: the post-record pipeline — after a recording finalizes, run
+    /// these steps on the main file(s), in order, in the background. Steps
+    /// come from the closed [`PipelineStep`] set only. Settings are
+    /// per-profile by construction, so pipelines are too.
+    pub pipeline_enabled: bool,
+    pub pipeline: Vec<PipelineStep>,
 }
 
 impl Default for RecordingSettings {
@@ -1287,6 +1420,17 @@ impl Default for RecordingSettings {
             record_vertical: false,
             output_width: 0,
             output_height: 0,
+            iso_sources: Vec::new(),
+            iso_post_filter: true,
+            iso_container: Container::Frec,
+            iso_encoder_id: "auto".to_owned(),
+            alpha_frec: false,
+            split_on_scene: false,
+            split_on_marker: false,
+            split_on_rundown: false,
+            auto_markers: false,
+            pipeline_enabled: false,
+            pipeline: Vec::new(),
         }
     }
 }
@@ -1365,6 +1509,60 @@ impl RecordingSettings {
                 return Err("invalid output folder".to_owned());
             }
         }
+        // CAP-N40: ISO lanes — bounded count, well-formed ids, no duplicates,
+        // and an encoder id shaped like the program one.
+        if self.iso_sources.len() > 8 {
+            return Err("at most 8 ISO sources can record at once".to_owned());
+        }
+        let mut iso_seen = std::collections::HashSet::new();
+        for id in &self.iso_sources {
+            let shaped = id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+            if !shaped {
+                return Err("invalid ISO source id".to_owned());
+            }
+            if !iso_seen.insert(id) {
+                return Err("duplicate ISO source".to_owned());
+            }
+        }
+        if self.iso_encoder_id.len() > 64
+            || !self
+                .iso_encoder_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err("invalid ISO encoder id".to_owned());
+        }
+        // CAP-N45: a bounded pipeline of well-formed steps. (Folders are
+        // additionally is_remote-guarded at RUN time — validation shape here,
+        // the NTLM rule there.)
+        if self.pipeline.len() > 10 {
+            return Err("the post-record pipeline is limited to 10 steps".to_owned());
+        }
+        for step in &self.pipeline {
+            match step {
+                PipelineStep::Rename { template } => {
+                    if template.is_empty() || template.chars().count() > 200 {
+                        return Err("pipeline rename template must be 1–200 characters".to_owned());
+                    }
+                    if template.chars().any(crate::filename::is_reserved) {
+                        return Err(
+                            "pipeline rename template has characters not allowed in filenames"
+                                .to_owned(),
+                        );
+                    }
+                    crate::filename::template_tokens_valid(template)
+                        .map_err(|err| format!("pipeline rename template: {err}"))?;
+                }
+                PipelineStep::Move { folder } | PipelineStep::Copy { folder }
+                    if folder.trim().is_empty()
+                        || folder.len() > 1024
+                        || folder.chars().any(char::is_control) =>
+                {
+                    return Err("invalid pipeline folder".to_owned());
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
 }
@@ -1414,6 +1612,7 @@ impl Settings {
             }
         }
         self.loudness.validate()?;
+        self.ltc.validate()?;
         self.soundboard.validate()?;
         self.theme.validate()?;
         self.accessibility.validate()?;
@@ -1564,6 +1763,11 @@ impl SettingsStore {
     /// Just the CAP-N34 loudness settings — polled by the audio bridge.
     pub fn loudness(&self) -> LoudnessSettings {
         self.lock().loudness
+    }
+
+    /// Just the CAP-N47 LTC settings — polled by the audio bridge.
+    pub fn ltc(&self) -> LtcSettings {
+        self.lock().ltc.clone()
     }
 
     /// A CAP-N37 soundboard pad by id (for the trigger command).
@@ -1880,6 +2084,12 @@ mod tests {
                 target_lufs: -14.0,
                 ceiling_db: -1.5,
             },
+            ltc: LtcSettings {
+                enabled: true,
+                track: 4,
+                fps: 25,
+                read_source: "33333333-3333-3333-3333-333333333333".to_owned(),
+            },
             soundboard: SoundboardSettings {
                 pads: vec![SoundboardPad {
                     id: "11111111-1111-1111-1111-111111111111".to_owned(),
@@ -1912,6 +2122,25 @@ mod tests {
             recording: RecordingSettings {
                 container: Container::Mkv,
                 split_minutes: 30,
+                iso_sources: vec!["22222222-2222-2222-2222-222222222222".to_owned()],
+                iso_post_filter: false,
+                iso_container: Container::Mkv,
+                alpha_frec: true,
+                split_on_scene: true,
+                split_on_marker: true,
+                auto_markers: true,
+                pipeline_enabled: true,
+                pipeline: vec![
+                    PipelineStep::Verify,
+                    PipelineStep::Remux,
+                    PipelineStep::Rename {
+                        template: "{prefix} {date}".to_owned(),
+                    },
+                    PipelineStep::Copy {
+                        folder: "D:/archive".to_owned(),
+                    },
+                    PipelineStep::LuaEvent,
+                ],
                 ..RecordingSettings::default()
             },
             remote: RemoteSettings {
@@ -2817,9 +3046,77 @@ mod tests {
                     ..RecordingSettings::default()
                 },
             ),
+            (
+                "ISO source ids are uuid-shaped",
+                RecordingSettings {
+                    iso_sources: vec!["../../etc/passwd".to_owned()],
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "ISO sources have no duplicates",
+                RecordingSettings {
+                    iso_sources: vec![
+                        "22222222-2222-2222-2222-222222222222".to_owned(),
+                        "22222222-2222-2222-2222-222222222222".to_owned(),
+                    ],
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "ISO lane count is bounded",
+                RecordingSettings {
+                    iso_sources: (0..9)
+                        .map(|n| format!("22222222-2222-2222-2222-22222222222{n}"))
+                        .collect(),
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "ISO encoder ids are ffmpeg names only",
+                RecordingSettings {
+                    iso_encoder_id: "x264; rm -rf".to_owned(),
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "pipeline length is bounded",
+                RecordingSettings {
+                    pipeline: vec![PipelineStep::Reveal; 11],
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "pipeline rename templates use known tokens",
+                RecordingSettings {
+                    pipeline: vec![PipelineStep::Rename {
+                        template: "{not-a-token}".to_owned(),
+                    }],
+                    ..RecordingSettings::default()
+                },
+            ),
+            (
+                "pipeline folders reject control characters",
+                RecordingSettings {
+                    pipeline: vec![PipelineStep::Move {
+                        folder: "D:/archive\u{0007}".to_owned(),
+                    }],
+                    ..RecordingSettings::default()
+                },
+            ),
         ];
         for (why, bad) in cases {
             assert!(bad.validate().is_err(), "should reject: {why}");
         }
+
+        // A well-formed ISO config passes.
+        assert!(RecordingSettings {
+            iso_sources: vec!["22222222-2222-2222-2222-222222222222".to_owned()],
+            iso_post_filter: false,
+            iso_container: Container::Mkv,
+            ..RecordingSettings::default()
+        }
+        .validate()
+        .is_ok());
     }
 }

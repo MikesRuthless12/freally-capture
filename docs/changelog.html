@@ -24,8 +24,38 @@
     </header>
 
     <main>
-      <!-- 0.500.0 — audio production depth, Phase 4 -->
+      <!-- 0.600.0 — recording & replay depth, Phase 5 -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.600.0</span>
+            <span class="date">Jul 16, 2026 · Recording &amp; replay depth</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.600.0">Download</a>
+        </div>
+
+        <h2>0.600.0 — Recording &amp; replay depth (Phase 5)</h2>
+        <p class="summary">
+          Everything around the file. Phase 5 builds out what happens to a recording before, during,
+          and after it lands on disk: isolated per-source files, a clip trimmer, real transparency,
+          event-driven splitting and chapter markers, an after-recording task pipeline, an integrity
+          verifier, and SMPTE LTC timecode. Every new capability is off or neutral by default — an
+          untouched recording is bit-identical to before — and nothing here adds a network call.
+        </p>
+        <ul class="features">
+          <li><strong>Per-source ISO recording</strong> — record selected sources clean to their own files alongside the program, pre-composite, at canvas size and frame rate so every ISO drops onto an editing timeline aligned with the program. Each remote guest is just a source, so per-guest ISOs come free.</li>
+          <li><strong>Replay &amp; clip trimmer</strong> — a trim window for any saved recording with frame-step in/out points and a live preview; an honest badge says up front whether the clip will stream-copy (a keyframe-aligned cut — instant, lossless) or re-encode. One click reframes to a 9:16 vertical master.</li>
+          <li><strong>Alpha-channel recording</strong> — record the program with real transparency to the owned lossless <code>.frec</code> (the preview and stream keep the normal opaque program), and export a ProRes 4444 or QuickTime Animation <code>.mov</code> master for editing.</li>
+          <li><strong>Split on scene change / marker</strong> — start a new file on a scene switch, a chapter-marker drop, or a rundown step, each part beginning exactly on the event's frame boundary.</li>
+          <li><strong>Auto-markers from events</strong> — chapter markers dropped automatically by studio events (scene switches, replay saves, reconnects, dropped-frame bursts, alarms, rule actions) with typed labels, alongside the manual marker hotkey; written as mkv chapters or a sidecar.</li>
+          <li><strong>Post-record pipeline</strong> — a per-profile after-recording task chain from a closed, sandboxed action set (verify → remux → normalize → rename → move/copy → reveal → notify scripts) that runs in the background with a live queue and stops at the first failure. No arbitrary commands, by design.</li>
+          <li><strong>Recording integrity verifier</strong> — a fast local pass that checks container structure, frame and per-track continuity, A/V interleave, and duration versus wall-clock, with a plain-language OK / warning / fail report — catch a broken file minutes after the show, not during the edit.</li>
+          <li><strong>SMPTE LTC timecode source &amp; reader</strong> — an owned linear-timecode generator on an assignable track and a reader on any audio input, driving a burn-in timecode line and LTC-stamped markers. Classic audio timecode, fully offline, accurate to ±1 frame.</li>
+        </ul>
+      </article>
+
+      <!-- 0.500.0 — audio production depth, Phase 4 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.500.0</span>

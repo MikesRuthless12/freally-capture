@@ -91,6 +91,71 @@ pub fn export_frec(
     }
 }
 
+/// CAP-N42: decode an **alpha** `.frec` and transcode it into an
+/// alpha-preserving `.mov` master (ProRes 4444 or QTRLE) via the labeled
+/// on-demand ffmpeg component. Refuses a file whose header doesn't flag real
+/// transparency — exporting fake alpha would be dishonest, and the normal
+/// export path already covers opaque files.
+pub fn export_frec_alpha(
+    ffmpeg: &Ffmpeg,
+    frec_path: &Path,
+    dst: &Path,
+    codec: crate::mux::AlphaCodec,
+    mut progress: impl FnMut(ExportProgress),
+    cancel: &AtomicBool,
+) -> Result<PathBuf, String> {
+    let frames_total = frame_count(frec_path).map_err(|err| err.to_string())?;
+    let mut reader = FrecReader::open(frec_path).map_err(|err| err.to_string())?;
+    let spec = *reader.spec();
+    if !spec.alpha {
+        return Err(
+            "this recording has no alpha channel — use the normal MP4/MKV export".to_string(),
+        );
+    }
+    let fps = ((f64::from(spec.fps_num) / f64::from(spec.fps_den.max(1))).round() as u32).max(1);
+    let record_spec = RecordSpec {
+        width: spec.width,
+        height: spec.height,
+        fps,
+        tracks: (0..spec.audio_tracks as usize).collect(),
+    };
+    let needs_swap = spec.pixel_format == PixelFormat::Bgra8;
+
+    let mut sink: Box<dyn RecordSink> =
+        Box::new(FfmpegSink::spawn_alpha(ffmpeg, &record_spec, codec, dst)?);
+
+    let mut frames_done = 0u64;
+    let pumped = pump(
+        &mut reader,
+        sink.as_mut(),
+        record_spec.tracks.len(),
+        needs_swap,
+        &mut frames_done,
+        frames_total,
+        &mut progress,
+        cancel,
+    );
+
+    match pumped {
+        Ok(()) => {
+            let paths = sink.finish()?;
+            progress(ExportProgress {
+                frames_done,
+                frames_total,
+            });
+            paths
+                .into_iter()
+                .next()
+                .ok_or_else(|| "the export produced no file".to_string())
+        }
+        Err(err) => {
+            drop(sink);
+            let _ = std::fs::remove_file(dst);
+            Err(err)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn pump(
     reader: &mut FrecReader,
@@ -153,6 +218,7 @@ mod tests {
             pixel_format: PixelFormat::Rgba8,
             audio_tracks: 1,
             sample_rate: 48_000,
+            alpha: false,
         };
         let mut writer = FrecWriter::create(path, spec).expect("create");
         let frame = vec![0u8; 16 * 8 * 4];

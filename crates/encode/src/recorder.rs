@@ -71,6 +71,13 @@ pub trait RecordSink: Send {
     fn write_video(&mut self, pixels: &Arc<Vec<u8>>) -> Result<(), String>;
     /// One interleaved stereo f32 block for sink slot `slot`.
     fn write_audio(&mut self, slot: usize, sample_pos: u64, samples: &[f32]) -> Result<(), String>;
+    /// CAP-N43: cut to a new part file *now* (an event split — scene switch,
+    /// marker, rundown step). Default no-op: only the owned `.frec` splitter
+    /// can cut on demand; the ffmpeg segment muxer cuts by time alone, so
+    /// wire sinks ignore the request (the UI says so up front).
+    fn split_now(&mut self) -> Result<(), String> {
+        Ok(())
+    }
     /// Flush + finalize; returns every file the session produced.
     fn finish(self: Box<Self>) -> Result<Vec<PathBuf>, String>;
 }
@@ -81,6 +88,9 @@ struct Shared {
     video_slot: Mutex<Option<Arc<Vec<u8>>>>,
     paused: AtomicBool,
     stop: AtomicBool,
+    /// CAP-N43: an event split is pending — the pacing thread cuts to a new
+    /// part before its next frame write (collapses duplicates by design).
+    split_requested: AtomicBool,
     /// Audio sample position for the *next* block (advances while unpaused).
     audio_pos: AtomicU64,
     audio_tx: mpsc::SyncSender<AudioMsg>,
@@ -142,6 +152,13 @@ impl RecorderHandle {
         self.shared.paused.store(paused, Ordering::Relaxed);
     }
 
+    /// CAP-N43: cut to a new part at the next frame boundary (scene switch /
+    /// marker / rundown step). Requests in the same tick collapse to one;
+    /// sinks that cannot cut on demand (wire containers) ignore it.
+    pub fn request_split(&self) {
+        self.shared.split_requested.store(true, Ordering::Relaxed);
+    }
+
     pub fn is_paused(&self) -> bool {
         self.shared.paused.load(Ordering::Relaxed)
     }
@@ -180,6 +197,7 @@ impl Recorder {
             video_slot: Mutex::new(None),
             paused: AtomicBool::new(false),
             stop: AtomicBool::new(false),
+            split_requested: AtomicBool::new(false),
             audio_pos: AtomicU64::new(0),
             audio_tx,
             stats: Mutex::new(RecorderStats::default()),
@@ -295,6 +313,15 @@ fn run_pacing(
             stats.frames_behind = stats.frames_behind.max(deficit.saturating_sub(1));
         }
 
+        // CAP-N43: an event split cuts BEFORE the next frame lands, so the
+        // new part starts exactly on the event's frame boundary.
+        if shared.split_requested.swap(false, Ordering::Relaxed) {
+            if let Err(err) = sink.split_now() {
+                result = Err(err);
+                break 'session;
+            }
+        }
+
         for _ in 0..to_write {
             let newest = shared.video_slot.lock().expect("video slot lock").take();
             let duplicated = newest.is_none();
@@ -343,6 +370,7 @@ mod tests {
         videos: Arc<Mutex<Vec<Arc<Vec<u8>>>>>,
         audio: Arc<Mutex<Vec<(usize, u64, usize)>>>,
         finished: Arc<AtomicBool>,
+        splits: Arc<Mutex<usize>>,
     }
 
     impl RecordSink for MockSink {
@@ -360,6 +388,10 @@ mod tests {
                 .lock()
                 .expect("lock")
                 .push((slot, sample_pos, samples.len()));
+            Ok(())
+        }
+        fn split_now(&mut self) -> Result<(), String> {
+            *self.splits.lock().expect("lock") += 1;
             Ok(())
         }
         fn finish(self: Box<Self>) -> Result<Vec<PathBuf>, String> {
@@ -497,6 +529,30 @@ mod tests {
             "sample positions stay contiguous across the pause: {positions:?}"
         );
         assert_eq!(recorder_stats.frames_wrong_size, 0);
+    }
+
+    /// CAP-N43: a split request reaches the sink exactly once, on the pacing
+    /// thread, before the next frame write; duplicates in one tick collapse.
+    #[test]
+    fn a_split_request_reaches_the_sink_once() {
+        let spec = spec_30fps();
+        let sink = MockSink::default();
+        let splits = Arc::clone(&sink.splits);
+        let recorder = Recorder::start(spec.clone(), Box::new(sink));
+        let handle = recorder.handle();
+
+        handle.push_frame(frame(&spec, 1));
+        wait_for("the first frame to land", || {
+            handle.stats().frames_written > 0
+        });
+        handle.request_split();
+        handle.request_split(); // same tick — collapses into one cut
+        wait_for("the split to reach the sink", || {
+            *splits.lock().expect("lock") > 0
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(*splits.lock().expect("lock"), 1, "duplicates collapse");
+        recorder.stop().expect("stops clean");
     }
 
     #[test]

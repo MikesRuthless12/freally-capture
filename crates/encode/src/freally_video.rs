@@ -13,7 +13,9 @@
 //! file    := header chunk* [index]
 //! header  := magic "FREC" | version u8 (1) | pixel_format u8 | audio_tracks u8
 //!            | audio_channels u8 | width u32 | height u32 | fps_num u32
-//!            | fps_den u32 | sample_rate u32 | flags u16 (0)
+//!            | fps_den u32 | sample_rate u32 | flags u16
+//!            (flags bit 0 = the alpha channel is meaningful — CAP-N42;
+//!             all other bits reserved, written 0, ignored on read)
 //! chunk   := tag u8 | payload_len u32 | payload
 //! video   := tag 0x01 | frame_index u64 | kind u8 (0 intra, 1 delta)
 //!            | slice_count u16 | slices…
@@ -114,6 +116,12 @@ pub struct FrecSpec {
     /// Audio track count (0..=6); every track is interleaved stereo f32.
     pub audio_tracks: u8,
     pub sample_rate: u32,
+    /// CAP-N42: the alpha channel carries real transparency (header flags
+    /// bit 0). The pixel data is 4 bytes/px either way — this bit tells
+    /// readers/exporters the alpha is meaningful rather than opaque padding.
+    /// Old readers ignore the flags field entirely, so alpha files stay
+    /// playable everywhere; old files read back as `alpha: false`.
+    pub alpha: bool,
 }
 
 impl FrecSpec {
@@ -313,7 +321,9 @@ impl FrecWriter {
         header.extend_from_slice(&spec.fps_num.to_le_bytes());
         header.extend_from_slice(&spec.fps_den.to_le_bytes());
         header.extend_from_slice(&spec.sample_rate.to_le_bytes());
-        header.extend_from_slice(&0u16.to_le_bytes()); // flags
+        // flags: bit 0 = the alpha channel is meaningful (CAP-N42).
+        let flags: u16 = if spec.alpha { 1 } else { 0 };
+        header.extend_from_slice(&flags.to_le_bytes());
         self.out.write_all(&header)?;
         self.written += header.len() as u64;
         Ok(())
@@ -477,6 +487,7 @@ impl FrecReader {
             return Err(FrecError::Version(header[4]));
         }
         let le_u32 = |at: usize| u32::from_le_bytes(header[at..at + 4].try_into().expect("4"));
+        let flags = u16::from_le_bytes(header[28..30].try_into().expect("2"));
         let spec = FrecSpec {
             pixel_format: PixelFormat::from_byte(header[5])?,
             audio_tracks: header[6],
@@ -485,6 +496,8 @@ impl FrecReader {
             fps_num: le_u32(16),
             fps_den: le_u32(20),
             sample_rate: le_u32(24),
+            // flags bit 0 (CAP-N42); pre-alpha files wrote 0 — exactly false.
+            alpha: flags & 1 != 0,
         };
         spec.validate()
             .map_err(|_| FrecError::Corrupt("bad header"))?;
@@ -816,6 +829,7 @@ mod tests {
             pixel_format: PixelFormat::Rgba8,
             audio_tracks: 2,
             sample_rate: 48_000,
+            alpha: false,
         }
     }
 
@@ -888,6 +902,62 @@ mod tests {
         }
         assert_eq!(got, 150);
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// CAP-N42 golden: an alpha file round-trips its transparency bit-exactly
+    /// (varying alpha bytes survive intra AND delta coding), the header flag
+    /// reads back true, and a flag-less file reads back `alpha: false` — the
+    /// pre-alpha compatibility contract.
+    #[test]
+    fn alpha_round_trips_bit_exactly_and_the_flag_is_honest() {
+        let path = temp_frec("alpha");
+        let spec = FrecSpec {
+            alpha: true,
+            ..spec_64x48()
+        };
+        // Synthetic frames with a moving alpha gradient: fully transparent,
+        // translucent, and opaque regions — over enough frames to cross an
+        // intra boundary (keyframe_every = 120 at 60 fps).
+        let frames: Vec<Vec<u8>> = (0..130)
+            .map(|t| {
+                let mut frame = synth_frame(&spec, t);
+                for (i, px) in frame.chunks_exact_mut(4).enumerate() {
+                    px[3] = ((i + t * 7) % 256) as u8;
+                }
+                frame
+            })
+            .collect();
+
+        let mut writer = FrecWriter::create(&path, spec).expect("create");
+        for frame in &frames {
+            writer.write_frame(frame).expect("write");
+        }
+        writer.finish().expect("finish");
+
+        let mut reader = FrecReader::open(&path).expect("open");
+        assert!(reader.spec().alpha, "the alpha flag survives the header");
+        let mut got = 0usize;
+        while let Some(chunk) = reader.next_chunk().expect("read") {
+            if let FrecChunk::Video { pixels, .. } = chunk {
+                assert_eq!(pixels, frames[got], "frame {got} alpha must be bit-exact");
+                got += 1;
+            }
+        }
+        assert_eq!(got, 130);
+        let _ = std::fs::remove_file(&path);
+
+        // A plain file (flags 0) reads back as non-alpha.
+        let plain = temp_frec("alpha-plain");
+        let mut writer = FrecWriter::create(&plain, spec_64x48()).expect("create");
+        writer
+            .write_frame(&synth_frame(&spec_64x48(), 0))
+            .expect("write");
+        writer.finish().expect("finish");
+        assert!(
+            !FrecReader::open(&plain).expect("open").spec().alpha,
+            "pre-alpha files stay alpha: false"
+        );
+        let _ = std::fs::remove_file(&plain);
     }
 
     #[test]
@@ -1038,6 +1108,7 @@ mod tests {
             pixel_format: PixelFormat::Rgba8,
             audio_tracks: 0,
             sample_rate: 48_000,
+            alpha: false,
         };
         let path = temp_frec("perf");
         let frames: Vec<Vec<u8>> = (0..60).map(|t| synth_frame(&spec, t)).collect();

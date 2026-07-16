@@ -120,6 +120,17 @@ export type LoudnessSettings = {
   ceilingDb: number;
 };
 
+/** CAP-N47 SMPTE LTC timecode (generator + reader). */
+export type LtcSettings = {
+  enabled: boolean;
+  /** The track bus the generator rides (0-based, 0..=5). */
+  track: number;
+  /** LTC frame rate: 24, 25 or 30. */
+  fps: number;
+  /** The source id whose raw input the reader taps ("" = off). */
+  readSource: string;
+};
+
 /** One CAP-N37 soundboard pad. */
 export type SoundboardPad = {
   id: string;
@@ -146,6 +157,8 @@ export type Settings = {
   audioOutputs?: AudioOutputRoute[];
   /** CAP-N34 loudness normalization (the live rider). */
   loudness?: LoudnessSettings;
+  /** CAP-N47 SMPTE LTC timecode (generator + reader). */
+  ltc?: LtcSettings;
   /** CAP-N37 soundboard pads. */
   soundboard?: SoundboardSettings;
   /** Audio Mixer strip orientation. */
@@ -731,6 +744,77 @@ export type RecordingSettings = {
   /** Encode at this size instead of the canvas (0 = canvas; wire only). */
   outputWidth: number;
   outputHeight: number;
+  /** CAP-N40 ISO recording: source ids recorded as their own clean files. */
+  isoSources: string[];
+  /** ISO lanes record post-filter (as processed) or raw pre-filter. */
+  isoPostFilter: boolean;
+  /** The ISO lanes' own container + encoder (independent of the program's). */
+  isoContainer: Container;
+  isoEncoderId: string;
+  /** CAP-N42: record the program with real transparency (.frec only). */
+  alphaFrec: boolean;
+  /** CAP-N43: event-driven split triggers (the owned .frec splitter only). */
+  splitOnScene: boolean;
+  splitOnMarker: boolean;
+  splitOnRundown: boolean;
+  /** CAP-N44: studio events drop typed chapter markers automatically. */
+  autoMarkers: boolean;
+  /** CAP-N45: the post-record pipeline (closed action set, per-profile). */
+  pipelineEnabled: boolean;
+  pipeline: PipelineStep[];
+};
+
+/** CAP-N45: one post-record pipeline step (a CLOSED action set — there is
+ * deliberately no "run a command" variant). */
+export type PipelineStep =
+  | { action: "verify" }
+  | { action: "remux" }
+  | { action: "normalize" }
+  | { action: "rename"; template: string }
+  | { action: "move"; folder: string }
+  | { action: "copy"; folder: string }
+  | { action: "reveal" }
+  | { action: "luaEvent" };
+
+/** CAP-N45: one step's live status in the queue view. */
+export type PipelineStepStatus = {
+  action: string;
+  status: "pending" | "running" | "ok" | "warn" | "fail" | "skipped";
+  detail: string;
+};
+
+/** CAP-N45: one queued/finished pipeline job (`pipeline_status` + event). */
+export type PipelineJob = {
+  id: number;
+  file: string;
+  steps: PipelineStepStatus[];
+  done: boolean;
+};
+
+/** CAP-N46: one integrity check in a `recording_verify` report. */
+export type VerifyCheck = {
+  /** Stable id: "container" | "video-continuity" | "audio-continuity" |
+   * "av-interleave" | "duration". */
+  id: string;
+  status: "pass" | "warn" | "fail" | "skipped";
+  detail: string;
+};
+
+/** CAP-N46: the integrity report — verdict is the worst check. */
+export type VerifyReport = {
+  verdict: "pass" | "warn" | "fail" | "skipped";
+  checks: VerifyCheck[];
+};
+
+/** CAP-N41: the trim window's probe payload (`recording_trim_info`). */
+export type TrimInfo = {
+  durationSecs: number;
+  fps: number;
+  width: number;
+  height: number;
+  hasAudio: boolean;
+  /** Keyframe presentation times, seconds, ascending. */
+  keyframesSecs: number[];
 };
 
 /** One file in the recordings folder (`recordings_list`). */
@@ -741,6 +825,8 @@ export type RecordingFile = {
   modifiedMs: number;
   /** Lowercase extension ("frec", "mkv", …). */
   ext: string;
+  /** CAP-N42: a .frec flagged as carrying real transparency (null otherwise). */
+  frecAlpha: boolean | null;
 };
 
 /** The `recording` event + `recording_status` payload. */
@@ -757,6 +843,8 @@ export type RecordingStatus =
       audioBlocksDropped: number;
       /** Chapter markers dropped so far. */
       markers: number;
+      /** CAP-N40: ISO lanes recording alongside the program (0 = none). */
+      isoLanes: number;
     }
   | {
       state: "paused";
@@ -1098,6 +1186,8 @@ export type SourceSettings =
       showRenderMs: boolean;
       showDropped: boolean;
       showBitrate: boolean;
+      /** CAP-N47: the burn-in timecode line (the LTC reader's decode). */
+      showTimecode: boolean;
       fontFamily?: string | null;
       fontFile?: string | null;
       sizePx: number;
@@ -1419,6 +1509,8 @@ export type AudioLevelsPayload = {
   filterMeters?: { source: string; meters: { id: string; inPeak: number; outPeak: number }[] };
   /** Capture samples dropped across sources (ring overflows). */
   dropped: number;
+  /** CAP-N47: the LTC reader's live decode (`HH:MM:SS:FF`), when locked. */
+  ltc?: string | null;
 };
 
 /** One filter's parameters (serde tag = `type`). */

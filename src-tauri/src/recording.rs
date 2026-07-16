@@ -16,10 +16,11 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use fcap_audio::RecordTap;
+use fcap_audio::{IsoTap, RecordTap};
 use fcap_encode::mux::{Container, FfmpegSink, FrecSink, WirePlan};
 use fcap_encode::recorder::{RecordSink, RecordSpec, Recorder, RecorderHandle};
 use fcap_encode::VideoCodec;
+use fcap_scene::SourceId;
 
 use crate::audio::AudioRuntime;
 use crate::commands::recording::EncodeState;
@@ -54,6 +55,8 @@ pub enum RecordingDto {
         audio_blocks_dropped: u64,
         /// Chapter markers dropped so far (TASK-610).
         markers: u32,
+        /// CAP-N40: ISO lanes recording alongside the program (0 = none).
+        iso_lanes: u32,
     },
     Paused {
         duration_sec: f64,
@@ -73,10 +76,23 @@ struct Active {
     /// `… (vertical)` file, same settings, paused/stopped with the main one.
     vertical_recorder: Option<Recorder>,
     vertical_handle: Option<RecorderHandle>,
+    /// CAP-N40: the ISO lanes — one independent recorder per selected
+    /// source, paused/stopped in lockstep with the main recording. A lane
+    /// failure never invalidates the finished program file.
+    iso_lanes: Vec<IsoLane>,
     display_path: String,
     container: Container,
     tracks: u32,
     finalizing: bool,
+}
+
+/// One CAP-N40 ISO lane: a source recorded clean to its own file.
+struct IsoLane {
+    recorder: Option<Recorder>,
+    handle: RecorderHandle,
+    source: SourceId,
+    /// The source's display name at start — for honest stop-time reporting.
+    name: String,
 }
 
 /// Tauri-managed recording state.
@@ -93,11 +109,35 @@ pub struct RecordingState {
     /// The vertical canvas's gate + feed (set only when it records too).
     vertical_active: AtomicBool,
     vertical_feed: Mutex<Option<RecorderHandle>>,
+    /// The ISO lanes' gate + feeds (CAP-N40): `(source, post_filter, handle)`
+    /// per lane, set only while ISO lanes record.
+    iso_active: AtomicBool,
+    #[allow(clippy::type_complexity)]
+    iso_feed: Mutex<Vec<(SourceId, bool, RecorderHandle)>>,
+    /// CAP-M22 × CAP-N40: while the panic button holds the program on a
+    /// slate, the ISO lanes hold too — they record sources CLEAN (pre-fader,
+    /// pre-composite), so without this gate a panic would leak straight into
+    /// every ISO file.
+    iso_panic_hold: AtomicBool,
+    /// CAP-N42: the main recording wants the transparent-clear alpha render
+    /// instead of the shared opaque program readback (`.frec` + alpha on).
+    alpha_active: AtomicBool,
+    /// CAP-N43: the session's armed event-split triggers (settings are read
+    /// once at start — a mid-session settings edit applies next session).
+    split_on_scene: AtomicBool,
+    split_on_marker: AtomicBool,
+    split_on_rundown: AtomicBool,
+    /// CAP-N44: auto-markers armed — studio events (scene switch, replay
+    /// save, reconnect, dropped-frame burst, alarm, rule firing) drop typed
+    /// chapter markers alongside the manual hotkey's.
+    auto_markers: AtomicBool,
     /// The last finished session's result.
     last: Mutex<(Vec<String>, Option<String>)>,
-    /// Stream markers (TASK-610): timestamps (ms) dropped by the hotkey,
-    /// written as mkv chapters / a sidecar file at stop.
-    markers: Mutex<Vec<u64>>,
+    /// Chapter markers (TASK-610 + CAP-N44): `(position ms, label)` — the
+    /// manual hotkey drops "Marker N", auto-markers carry their event label
+    /// ("Scene: …", "Replay saved", …). Written as mkv chapters / a sidecar
+    /// file at stop.
+    markers: Mutex<Vec<(u64, String)>>,
     /// Encoder failover (CAP-M12): the session's ladder, consulted by the
     /// watchdog when the sink dies. `None` for .frec (no wire encoder).
     failover: Mutex<Option<fcap_encode::FailoverLadder>>,
@@ -115,6 +155,14 @@ impl RecordingState {
             feed: Mutex::new(None),
             vertical_active: AtomicBool::new(false),
             vertical_feed: Mutex::new(None),
+            iso_active: AtomicBool::new(false),
+            iso_feed: Mutex::new(Vec::new()),
+            iso_panic_hold: AtomicBool::new(false),
+            alpha_active: AtomicBool::new(false),
+            split_on_scene: AtomicBool::new(false),
+            split_on_marker: AtomicBool::new(false),
+            split_on_rundown: AtomicBool::new(false),
+            auto_markers: AtomicBool::new(false),
             last: Mutex::new((Vec::new(), None)),
             markers: Mutex::new(Vec::new()),
             failover: Mutex::new(None),
@@ -171,6 +219,91 @@ impl RecordingState {
         }
     }
 
+    /// Whether any ISO lane records (a relaxed atomic — the render thread's
+    /// per-tick gate, like the two above).
+    pub fn wants_iso_frames(&self) -> bool {
+        self.iso_active.load(Ordering::Relaxed)
+    }
+
+    /// CAP-N42: whether the main recording wants the transparent alpha
+    /// render instead of the shared opaque program readback.
+    pub fn wants_alpha_frames(&self) -> bool {
+        self.alpha_active.load(Ordering::Relaxed)
+    }
+
+    /// CAP-N43: whether this session splits on scene switches (the loop's
+    /// per-tick gate — a relaxed atomic).
+    pub fn splits_on_scene(&self) -> bool {
+        self.split_on_scene.load(Ordering::Relaxed)
+    }
+
+    /// CAP-N43: whether this session splits on rundown steps.
+    pub fn splits_on_rundown(&self) -> bool {
+        self.split_on_rundown.load(Ordering::Relaxed)
+    }
+
+    /// CAP-N44: whether this session drops auto-markers on studio events.
+    pub fn auto_markers(&self) -> bool {
+        self.auto_markers.load(Ordering::Relaxed)
+    }
+
+    /// CAP-N43: cut every lane (main + vertical + ISO) to a new part at the
+    /// next frame boundary. Wire sinks ignore it (they cut by time alone);
+    /// frec lanes rotate together, so part boundaries stay aligned across
+    /// the whole take.
+    pub fn request_split_all(&self) {
+        let inner = self.lock_inner();
+        if let Some(active) = inner.as_ref() {
+            if active.finalizing {
+                return;
+            }
+            active.handle.request_split();
+            if let Some(vertical) = &active.vertical_handle {
+                vertical.request_split();
+            }
+            for lane in &active.iso_lanes {
+                lane.handle.request_split();
+            }
+        }
+    }
+
+    /// The lanes the render thread must feed: `(source, post_filter)` pairs.
+    pub fn iso_lanes_wanted(&self) -> Vec<(SourceId, bool)> {
+        self.iso_feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(source, post_filter, _)| (*source, *post_filter))
+            .collect()
+    }
+
+    /// Push the newest clean frame for one ISO lane (render thread).
+    pub fn push_video_iso(&self, source: SourceId, pixels: Arc<Vec<u8>>) {
+        let feed = self
+            .iso_feed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, _, handle)) = feed.iter().find(|(lane, _, _)| *lane == source) {
+            handle.push_frame(pixels);
+        }
+    }
+
+    /// Hold (or release) every ISO lane for the panic slate (CAP-M22): lanes
+    /// record sources clean, so a panic must pause them — video AND audio —
+    /// or the cut content lands in the ISO files. Pause is the recorder's
+    /// gapless gate, so release resumes one contiguous timeline. A
+    /// user-initiated pause is respected on release.
+    pub fn set_iso_panic_hold(&self, hold: bool) {
+        self.iso_panic_hold.store(hold, Ordering::Relaxed);
+        let inner = self.lock_inner();
+        if let Some(active) = inner.as_ref() {
+            let user_paused = active.handle.is_paused();
+            for lane in &active.iso_lanes {
+                lane.handle.set_paused(hold || user_paused);
+            }
+        }
+    }
+
     /// Whether a session is up (running, paused or finalizing) — the quit
     /// guard's check (CAP-M23).
     pub fn is_active(&self) -> bool {
@@ -217,6 +350,7 @@ impl RecordingState {
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .len() as u32,
+                        iso_lanes: active.iso_lanes.len() as u32,
                     }
                 }
             }
@@ -398,6 +532,54 @@ impl Drop for ResetOnDrop<'_> {
     }
 }
 
+/// Build one recording sink — the owned `.frec` writer or the labeled ffmpeg
+/// muxer — for a lane's `(container, encoder_id, scale, alpha)`, with the
+/// rate-control knobs shared from `settings`. The one seam for the program,
+/// vertical, and ISO lanes, so a new option (alpha, event splits) is threaded
+/// in exactly one place. `encoder_id` is ignored for `.frec` (pass `""`).
+#[allow(clippy::too_many_arguments)]
+fn make_sink<R: Runtime>(
+    app: &AppHandle<R>,
+    settings: &RecordingSettings,
+    spec: &RecordSpec,
+    path: &std::path::Path,
+    container: Container,
+    encoder_id: &str,
+    scale: Option<(u32, u32)>,
+    split: Option<u32>,
+    alpha: bool,
+    event_splits: bool,
+) -> Result<Box<dyn RecordSink>, String> {
+    match container {
+        Container::Frec => Ok(Box::new(FrecSink::create_with_options(
+            spec.clone(),
+            path.to_path_buf(),
+            split,
+            alpha,
+            event_splits,
+        )?)),
+        wire => {
+            let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
+                "recording to this container needs the ffmpeg component — install it from \
+                 Components (the owned lossless .frec format needs nothing)"
+                    .to_string()
+            })?;
+            let plan = WirePlan {
+                container: wire,
+                encoder_id: encoder_id.to_owned(),
+                rate_control: settings.rate_control,
+                preset: settings.preset,
+                keyframe_sec: settings.keyframe_sec,
+                audio_bitrate_kbps: settings.audio_bitrate_kbps,
+                split_minutes: split,
+                scale,
+                path: path.to_path_buf(),
+            };
+            Ok(Box::new(FfmpegSink::spawn(&ready, spec, &plan)?))
+        }
+    }
+}
+
 /// Start a recording session from the persisted settings.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     start_with(app, None)
@@ -470,46 +652,47 @@ pub(crate) fn start_with<R: Runtime>(
         split.is_some(),
     );
 
-    // One sink builder serves both canvases — the vertical file is the same
-    // configuration at its own geometry and `… (vertical)` path.
-    let build_sink =
-        |spec: &RecordSpec, path: &std::path::Path| -> Result<Box<dyn RecordSink>, String> {
-            match settings.container {
-                Container::Frec => Ok(Box::new(FrecSink::create(
-                    spec.clone(),
-                    path.to_path_buf(),
-                    split,
-                )?)),
-                wire => {
-                    let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or_else(|| {
-                        "recording to this container needs the ffmpeg component — install it from \
-                     Components (the owned lossless .frec format needs nothing)"
-                            .to_string()
-                    })?;
-                    let encoder_id = match &encoder_override {
-                        Some(id) => id.clone(),
-                        None => resolve_encoder(app, &settings, wire)?,
-                    };
-                    let plan = WirePlan {
-                        container: wire,
-                        encoder_id,
-                        rate_control: settings.rate_control,
-                        preset: settings.preset,
-                        keyframe_sec: settings.keyframe_sec,
-                        audio_bitrate_kbps: settings.audio_bitrate_kbps,
-                        split_minutes: split,
-                        // TASK-609: optional output downscale (wire only —
-                        // the lossless .frec always records the canvas).
-                        scale: (settings.output_width > 0 && settings.output_height > 0)
-                            .then_some((settings.output_width, settings.output_height)),
-                        path: path.to_path_buf(),
-                    };
-                    Ok(Box::new(FfmpegSink::spawn(&ready, spec, &plan)?))
-                }
-            }
-        };
+    // CAP-N42: the main lane records real transparency when asked — `.frec`
+    // only (wire codecs flatten; validate/UI say so). The vertical + ISO
+    // lanes stay opaque: their renders come from opaque-clear passes, and a
+    // lying alpha flag would be worse than no flag.
+    let alpha = settings.alpha_frec && settings.container == Container::Frec;
+    // CAP-N43: whether any event-split trigger is armed this session — frec
+    // lanes name their files in part mode from the first one when so.
+    let event_splits =
+        settings.split_on_scene || settings.split_on_marker || settings.split_on_rundown;
 
-    let sink = build_sink(&spec, &path)?;
+    // Resolve the program lane's wire encoder once (empty for `.frec`); the
+    // failover restart keeps its advanced ladder via `encoder_override`.
+    let program_encoder = if settings.container == Container::Frec {
+        String::new()
+    } else {
+        match &encoder_override {
+            Some(id) => id.clone(),
+            None => resolve_encoder(app, &settings, settings.container)?,
+        }
+    };
+    // TASK-609: optional output downscale (wire only — `.frec` always records
+    // the canvas). One sink builder serves both canvases — the vertical file
+    // is the same configuration at its own geometry and `… (vertical)` path.
+    let program_scale = (settings.output_width > 0 && settings.output_height > 0)
+        .then_some((settings.output_width, settings.output_height));
+    let build_sink = |spec: &RecordSpec, path: &std::path::Path, with_alpha: bool| {
+        make_sink(
+            app,
+            &settings,
+            spec,
+            path,
+            settings.container,
+            &program_encoder,
+            program_scale,
+            split,
+            with_alpha,
+            event_splits,
+        )
+    };
+
+    let sink = build_sink(&spec, &path, alpha)?;
 
     // The optional parallel vertical-canvas recording (Phase 6, TASK-604).
     let vertical = if settings.record_vertical {
@@ -540,7 +723,8 @@ pub(crate) fn start_with<R: Runtime>(
                     settings.container.extension(),
                     split.is_some(),
                 );
-                let vertical_sink = build_sink(&vertical_spec, &vertical_path)?;
+                // The vertical render is an opaque-clear pass — never alpha.
+                let vertical_sink = build_sink(&vertical_spec, &vertical_path, false)?;
                 Some((vertical_spec, vertical_sink, vertical_path))
             }
             None => None, // no vertical canvas configured — record main only
@@ -549,20 +733,105 @@ pub(crate) fn start_with<R: Runtime>(
         None
     };
 
+    // CAP-N40: the ISO lanes — the selected sources recorded clean, each to
+    // its own file with the ISO container/encoder (the program's rate-control
+    // knobs). Selection resolves against the live collection; a selected
+    // source that left the collection is skipped with a note, never a failed
+    // start. Lanes record at canvas geometry (the source fit inside), so
+    // every file drops onto an NLE timeline frame-aligned with the program.
+    let iso_selected: Vec<(SourceId, String, bool)> = settings
+        .iso_sources
+        .iter()
+        .filter_map(|wanted| {
+            let wanted = wanted.to_lowercase();
+            let found = snapshot
+                .collection
+                .sources
+                .iter()
+                .find(|source| source.id.0.to_string() == wanted);
+            if found.is_none() {
+                println!("recording: ISO source {wanted} is not in the collection — skipped");
+            }
+            found.map(|source| (source.id, source.name.clone(), source.audio.is_some()))
+        })
+        .collect();
+    let iso_encoder = if iso_selected.is_empty() || settings.iso_container == Container::Frec {
+        None
+    } else {
+        let iso_settings = RecordingSettings {
+            encoder_id: settings.iso_encoder_id.clone(),
+            ..settings.clone()
+        };
+        Some(resolve_encoder(app, &iso_settings, settings.iso_container)?)
+    };
+    type BuiltLane = (
+        RecordSpec,
+        Box<dyn RecordSink>,
+        PathBuf,
+        SourceId,
+        String,
+        bool,
+    );
+    let mut iso_built: Vec<BuiltLane> = Vec::new();
+    for (source, name, has_audio) in &iso_selected {
+        let iso_spec = RecordSpec {
+            width,
+            height,
+            fps: settings.fps,
+            // Slot 0 carries the source's own clean audio; video-only
+            // sources record a video-only file.
+            tracks: if *has_audio { vec![0] } else { Vec::new() },
+        };
+        let iso_stem = format!("{stem} ISO {}", iso_safe_name(name));
+        let iso_path = unique_recording_path(
+            &folder,
+            &iso_stem,
+            settings.iso_container.extension(),
+            split.is_some(),
+        );
+        // ISO lanes record the canvas clean (no downscale) and are never
+        // alpha; frec lanes honor the same event splits so part boundaries
+        // stay aligned with the program's across the whole take.
+        let sink = make_sink(
+            app,
+            &settings,
+            &iso_spec,
+            &iso_path,
+            settings.iso_container,
+            iso_encoder.as_deref().unwrap_or_default(),
+            None,
+            split,
+            false,
+            event_splits,
+        )?;
+        iso_built.push((iso_spec, sink, iso_path, *source, name.clone(), *has_audio));
+    }
+
     // CAP-M11: track the in-flight outputs so an unclean exit can offer to
     // repair them next launch. The owned .frec is crash-safe by design and
     // is never listed.
+    let mut in_progress = Vec::new();
     if settings.container != Container::Frec {
-        let mut in_progress = vec![crate::salvage::InProgressFile {
+        in_progress.push(crate::salvage::InProgressFile {
             path: path.clone(),
             split: split.is_some(),
-        }];
+        });
         if let Some((_, _, vertical_path)) = &vertical {
             in_progress.push(crate::salvage::InProgressFile {
                 path: vertical_path.clone(),
                 split: split.is_some(),
             });
         }
+    }
+    if settings.iso_container != Container::Frec {
+        for (_, _, iso_path, _, _, _) in &iso_built {
+            in_progress.push(crate::salvage::InProgressFile {
+                path: iso_path.clone(),
+                split: split.is_some(),
+            });
+        }
+    }
+    if !in_progress.is_empty() {
         crate::salvage::write_in_progress(&in_progress);
     }
 
@@ -577,6 +846,23 @@ pub(crate) fn start_with<R: Runtime>(
         }
         None => (None, None),
     };
+    // CAP-N40: start every ISO lane; remember which carry audio for the tap.
+    let mut iso_lanes: Vec<IsoLane> = Vec::with_capacity(iso_built.len());
+    let mut iso_audio: Vec<(SourceId, RecorderHandle)> = Vec::new();
+    for (iso_spec, iso_sink, iso_path, source, name, has_audio) in iso_built {
+        let recorder = Recorder::start(iso_spec, iso_sink);
+        let lane_handle = recorder.handle();
+        if has_audio {
+            iso_audio.push((source, lane_handle.clone()));
+        }
+        println!("recording: ISO {name} → {}", iso_path.display());
+        iso_lanes.push(IsoLane {
+            recorder: Some(recorder),
+            handle: lane_handle,
+            source,
+            name,
+        });
+    }
 
     // Tap the mixer: every 10 ms block of the enabled tracks flows to the
     // recorder(s) from this moment (pause gating happens in the handles).
@@ -593,6 +879,22 @@ pub(crate) fn start_with<R: Runtime>(
                 }
             }),
         }));
+    // CAP-N40: the independent per-source clean tap feeds each audio lane.
+    if iso_audio.is_empty() {
+        app.state::<AudioRuntime>().engine.set_iso_tap(None);
+    } else {
+        let taps = iso_audio;
+        app.state::<AudioRuntime>().engine.set_iso_tap(Some(IsoTap {
+            sources: taps.iter().map(|(id, _)| *id).collect(),
+            sink: Box::new(move |blocks| {
+                for (id, block) in blocks {
+                    if let Some((_, lane)) = taps.iter().find(|(source, _)| source == id) {
+                        lane.push_audio_blocks(&[(0, *block)]);
+                    }
+                }
+            }),
+        }));
+    }
 
     *state
         .feed
@@ -605,16 +907,46 @@ pub(crate) fn start_with<R: Runtime>(
     state
         .vertical_active
         .store(vertical_handle.is_some(), Ordering::Relaxed);
+    *state
+        .iso_feed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = iso_lanes
+        .iter()
+        .map(|lane| (lane.source, settings.iso_post_filter, lane.handle.clone()))
+        .collect();
+    state
+        .iso_active
+        .store(!iso_lanes.is_empty(), Ordering::Relaxed);
+    state.alpha_active.store(alpha, Ordering::Relaxed);
+    // CAP-N43: arm the session's event-split triggers (frec lanes only —
+    // wire sinks ignore split requests by design).
+    state
+        .split_on_scene
+        .store(settings.split_on_scene, Ordering::Relaxed);
+    state
+        .split_on_marker
+        .store(settings.split_on_marker, Ordering::Relaxed);
+    state
+        .split_on_rundown
+        .store(settings.split_on_rundown, Ordering::Relaxed);
+    // CAP-N44: arm auto-markers for the session.
+    state
+        .auto_markers
+        .store(settings.auto_markers, Ordering::Relaxed);
     *state.lock_inner() = Some(Active {
         recorder: Some(recorder),
         handle,
         vertical_recorder,
         vertical_handle,
+        iso_lanes,
         display_path: path.display().to_string(),
         container: settings.container,
         tracks: track_count,
         finalizing: false,
     });
+    // CAP-M22 × CAP-N40: a session started while the panic slate is up
+    // begins with its ISO lanes held (the render loop keeps this in sync).
+    state.set_iso_panic_hold(app.state::<StudioState>().panic_active());
     *state
         .since
         .lock()
@@ -668,25 +1000,110 @@ pub fn add_marker<R: Runtime>(app: &AppHandle<R>) -> Result<u32, String> {
             .markers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        markers.push(position_ms);
+        // Number by MANUAL markers only — auto-markers (CAP-N44) share the vec
+        // but carry their own event labels, so "Marker N" must not count them
+        // (or the operator's first manual marker reads "Marker 3" after two
+        // auto-markers fired).
+        let manual = markers
+            .iter()
+            .filter(|(_, label)| label.starts_with("Marker "))
+            .count();
+        let label = format!("Marker {}{}", manual + 1, ltc_suffix(app));
+        markers.push((position_ms, label));
         markers.len() as u32
     };
+    // CAP-N43: a marker can also cut a new part (frec lanes only).
+    if state.split_on_marker.load(Ordering::Relaxed) {
+        state.request_split_all();
+    }
     emit_status(app);
     println!("recording: marker {count} at {position_ms} ms");
     Ok(count)
 }
 
-/// `HH:MM:SS Marker N` lines — the sidecar shape (YouTube-chapter-like).
-fn markers_sidecar_text(markers_ms: &[u64]) -> String {
+/// CAP-N44: drop a typed auto-marker at the current recording position — the
+/// studio-event path (scene switch, replay save, reconnect, dropped-frame
+/// burst, alarm, rule firing). A silent no-op unless a session is running
+/// with auto-markers armed, so callers can fire unconditionally. Labels are
+/// bounded and flattened to one line (scene/rule names are user text).
+pub fn add_auto_marker<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let state = app.state::<RecordingState>();
+    if !state.auto_markers.load(Ordering::Relaxed) {
+        return;
+    }
+    let position_ms = {
+        let inner = state.lock_inner();
+        let Some(active) = inner.as_ref() else {
+            return;
+        };
+        if active.finalizing {
+            return;
+        }
+        active.handle.duration().as_millis() as u64
+    };
+    let clean: String = label
+        .chars()
+        .take(80)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let clean = format!("{clean}{}", ltc_suffix(app));
+    let count = {
+        let mut markers = state
+            .markers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        markers.push((position_ms, clean.clone()));
+        markers.len() as u32
+    };
+    emit_status(app);
+    println!("recording: auto-marker {count} \u{201c}{clean}\u{201d} at {position_ms} ms");
+}
+
+/// CAP-N47: when the LTC reader is armed and locked, markers carry the
+/// incoming timecode — a bridge from this recording to the external
+/// recorders synced to the same LTC.
+fn ltc_suffix<R: Runtime>(app: &AppHandle<R>) -> String {
+    app.state::<AudioRuntime>()
+        .engine
+        .ltc()
+        .map(|tc| format!(" @ LTC {tc}"))
+        .unwrap_or_default()
+}
+
+/// A source name reduced to filename-safe characters for an ISO file stem
+/// (CAP-N40). Source names are user text — separators and reserved
+/// characters become `-`, and an empty result falls back honestly.
+fn iso_safe_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .take(48)
+        .map(|c| {
+            if crate::filename::is_reserved(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = safe.trim().trim_end_matches('.').trim();
+    if trimmed.is_empty() {
+        "source".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// `HH:MM:SS {label}` lines — the sidecar shape (YouTube-chapter-like);
+/// CAP-N44 labels carry the event through ("Scene: …", "Replay saved", …).
+fn markers_sidecar_text(markers: &[(u64, String)]) -> String {
     let mut text = String::new();
-    for (index, &ms) in markers_ms.iter().enumerate() {
+    for (ms, label) in markers {
         let secs = ms / 1000;
         text.push_str(&format!(
-            "{:02}:{:02}:{:02} Marker {}\n",
+            "{:02}:{:02}:{:02} {label}\n",
             secs / 3600,
             (secs % 3600) / 60,
             secs % 60,
-            index + 1
         ));
     }
     text
@@ -761,6 +1178,11 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
     if let Some(vertical) = &active.vertical_handle {
         vertical.set_paused(paused);
     }
+    // ISO lanes also stay held while the panic slate is up (CAP-M22).
+    let panic_hold = state.iso_panic_hold.load(Ordering::Relaxed);
+    for lane in &active.iso_lanes {
+        lane.handle.set_paused(paused || panic_hold);
+    }
     drop(inner);
     emit_status(app);
     Ok(())
@@ -770,7 +1192,7 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
 /// thread. Returns the finished file paths.
 pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     let state = app.state::<RecordingState>();
-    let (recorder, vertical_recorder, total_ms) = {
+    let (recorder, vertical_recorder, iso_lanes, total_ms) = {
         let mut inner = state.lock_inner();
         let active = inner.as_mut().ok_or("no recording is running")?;
         if active.finalizing {
@@ -782,11 +1204,18 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
             .take()
             .ok_or("the recorder is already stopping")?;
         let total_ms = active.handle.duration().as_millis() as u64;
-        (recorder, active.vertical_recorder.take(), total_ms)
+        (
+            recorder,
+            active.vertical_recorder.take(),
+            std::mem::take(&mut active.iso_lanes),
+            total_ms,
+        )
     };
     // Stop the feeds first: no frame lands after the user pressed Stop.
     state.active.store(false, Ordering::Relaxed);
     state.vertical_active.store(false, Ordering::Relaxed);
+    state.iso_active.store(false, Ordering::Relaxed);
+    state.alpha_active.store(false, Ordering::Relaxed);
     *state
         .feed
         .lock()
@@ -795,7 +1224,13 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
         .vertical_feed
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    state
+        .iso_feed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
     app.state::<AudioRuntime>().engine.set_record_tap(None);
+    app.state::<AudioRuntime>().engine.set_iso_tap(None);
     emit_status(app);
 
     let result = recorder.stop();
@@ -812,6 +1247,9 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
         ),
         Err(err) => (Vec::new(), Some(err.clone())),
     };
+    // How many files the MAIN recording produced — the chapter-embed check
+    // below must see the main file alone, not the vertical/ISO additions.
+    let main_paths = paths.len();
     match &vertical_result {
         Some(Ok(vertical_paths)) => {
             paths.extend(vertical_paths.iter().map(|p| p.display().to_string()));
@@ -825,6 +1263,24 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
         }
         None => {}
     }
+    // CAP-N40: finalize every ISO lane. Lane failures are reported in the
+    // sticky idle error, never as a stop failure that hides the program file.
+    for lane in iso_lanes {
+        let IsoLane { recorder, name, .. } = lane;
+        let Some(recorder) = recorder else { continue };
+        match recorder.stop() {
+            Ok(iso_paths) => {
+                paths.extend(iso_paths.iter().map(|p| p.display().to_string()));
+            }
+            Err(err) => {
+                let note = format!("the ISO recording for \u{201c}{name}\u{201d} failed: {err}");
+                error = Some(match error {
+                    Some(main) => format!("{main}; {note}"),
+                    None => note,
+                });
+            }
+        }
+    }
     // CAP-M11: every output finalized cleanly — nothing to salvage next
     // launch. Any finalize failure keeps the sidecar, so a later crash still
     // surfaces the repair offer for the damaged file.
@@ -833,8 +1289,12 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     }
     // TASK-610: attach the dropped markers — embedded chapters for a single
     // mkv, a readable sidecar otherwise. Best-effort: a chapter failure
-    // never invalidates the finished recording.
-    let markers: Vec<u64> = std::mem::take(
+    // never invalidates the finished recording. This MUST run before the
+    // post-record pipeline is enqueued: the pipeline opens/remuxes/moves the
+    // same main file on a worker thread, so chapters have to be on the file
+    // first (a Move step would otherwise relocate it out from under the
+    // chapter-embed rewrite, silently losing the operator's chapters).
+    let markers: Vec<(u64, String)> = std::mem::take(
         &mut *state
             .markers
             .lock()
@@ -842,7 +1302,7 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
     );
     if !markers.is_empty() && !paths.is_empty() {
         let first = std::path::PathBuf::from(&paths[0]);
-        let embedded = paths.len() == 1
+        let embedded = main_paths == 1
             && first.extension().and_then(|ext| ext.to_str()) == Some("mkv")
             && match app.state::<EncodeState>().ready_ffmpeg() {
                 Some(ready) => {
@@ -865,6 +1325,17 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
                 println!("recording: chapters → {}", sidecar.display());
             }
         }
+    }
+    // CAP-N45: hand the finished MAIN file(s) — now carrying their embedded
+    // chapters — to the post-record pipeline (vertical/ISO lanes are
+    // companions, not the show master; a lane failure never blocks the
+    // master's chain). No-op unless enabled.
+    if result.is_ok() {
+        let main_files: Vec<std::path::PathBuf> = paths[..main_paths.min(paths.len())]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        crate::pipeline::enqueue(app, main_files, Some(total_ms as f64 / 1000.0));
     }
     {
         let mut last = state
@@ -995,7 +1466,7 @@ pub fn spawn_status_thread<R: Runtime>(app: AppHandle<R>) {
 
 #[cfg(test)]
 mod tests {
-    use super::unique_recording_path;
+    use super::{iso_safe_name, unique_recording_path};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -1006,6 +1477,22 @@ mod tests {
             std::env::temp_dir().join(format!("fcap-recname-{}-{nanos}-{tag}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
         dir
+    }
+
+    /// CAP-N40: source names are user text — the ISO stem must be
+    /// filename-safe on every OS, bounded, and never empty.
+    #[test]
+    fn iso_names_are_reduced_to_filename_safe_stems() {
+        assert_eq!(iso_safe_name("Webcam"), "Webcam");
+        assert_eq!(iso_safe_name("Guest: Ana / Berlin"), "Guest- Ana - Berlin");
+        assert_eq!(iso_safe_name("a\\b*c?d\"e<f>g|h"), "a-b-c-d-e-f-g-h");
+        // Trailing dots break Windows filenames; whitespace-only falls back.
+        assert_eq!(iso_safe_name("cam..."), "cam");
+        assert_eq!(iso_safe_name("   "), "source");
+        assert_eq!(iso_safe_name(""), "source");
+        // Bounded to 48 chars — measured in characters, never mid-UTF-8.
+        let long = "é".repeat(120);
+        assert_eq!(iso_safe_name(&long).chars().count(), 48);
     }
 
     #[test]

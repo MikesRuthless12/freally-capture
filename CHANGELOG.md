@@ -15,6 +15,61 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.600.0] — 2026-07-16 (Recording & Replay Depth — Phase 5)
+
+> *Everything around the file.* Phase 5 builds out what happens to a recording before, during, and
+> after it lands on disk: isolated per-source files, a clip trimmer, real transparency, event-driven
+> splitting and chapter markers, an after-recording task pipeline, an integrity verifier, and SMPTE
+> LTC timecode. Every new capability is off/neutral by default — an untouched recording is
+> bit-identical to before — and nothing here adds a network call.
+
+### Added
+
+- **Per-source ISO recording (CAP-N40)** — record selected sources clean to their own files
+  alongside the program, pre-composite (with or without the source's filters), at canvas size and
+  frame rate so every ISO drops onto an editing timeline aligned with the program. Each remote guest
+  is just a source, so per-guest ISOs come free. Own container/encoder per lane; audio is tapped
+  post-filter but pre-fader/mute (a mix decision never silences an ISO file); the panic button holds
+  the ISO lanes too. Off until sources are selected; honest lane-cost guidance up front.
+- **Replay & clip trimmer (CAP-N41)** — a lightweight trim window for any saved wire recording:
+  frame-step in/out points with live preview, and an honest export badge that says up front whether
+  the clip will **stream-copy** (a keyframe-aligned in-point — near-instant, lossless) or re-encode.
+  One click reframes to a 9:16 vertical master through the vertical-canvas geometry.
+- **Alpha-channel recording (CAP-N42)** — record the program with real transparency to the owned
+  `.frec` (a new header flag; the format version is unchanged, so alpha files stay playable
+  everywhere and old files read back opaque). The recorder gets its own transparent-clear render, so
+  the preview and stream keep the normal opaque program. Export to a **ProRes 4444** or **QuickTime
+  Animation (QTRLE)** `.mov` master for NLEs through the labeled ffmpeg component.
+- **Split on scene change / marker (CAP-N43)** — new event triggers for the owned `.frec` splitter:
+  start a new part file on a scene switch, on a chapter-marker drop, or on a show-rundown step. Each
+  part begins exactly on the event's frame boundary (one-second minimum part length so an event
+  storm can't make confetti files). Wire containers split by time only, said plainly in Settings.
+- **Auto-markers from events (CAP-N44)** — chapter markers dropped automatically by studio events —
+  scene switches, replay saves, stream reconnects, dropped-frame bursts, alarm firings, and
+  rule-engine actions — each with a typed label, alongside the existing manual marker hotkey. Labels
+  ride into the mkv chapter titles and the `.chapters.txt` sidecar.
+- **Post-record pipeline (CAP-N45)** — a per-profile after-recording task chain from a **closed,
+  sandboxed** action set: verify → remux to MP4 → normalize loudness → apply a naming rule →
+  move/copy to a folder → reveal in the file manager → notify Lua scripts. Runs in the background
+  with a live queue view; the chain stops at the first failure. There is deliberately no
+  "run a command" step.
+- **Recording integrity verifier (CAP-N46)** — a fast local pass (post-finalize or on demand) that
+  checks container structure, the finalization trailer, video frame continuity, per-track audio
+  sample continuity, A/V interleave skew, and duration versus the recorder's wall-clock, producing a
+  plain-language OK / warning / fail report. The owned `.frec` gets the deep treatment; wire files
+  get an honest ffmpeg structure + decode-error scan.
+- **LTC timecode source & reader (CAP-N47)** — an owned SMPTE 12M linear-timecode generator and
+  reader (classic audio timecode, fully offline). Generate LTC onto an assignable mixer track (record
+  it or route it to external gear); read incoming LTC from any audio input to drive a burn-in
+  timecode line on the system-stats overlay and LTC-stamped chapter markers. Round-trip accurate to
+  ±1 frame at 24/25/30 fps.
+
+### Fixed
+
+- **Chapter embedding no longer degrades when a vertical recording runs.** The mkv chapter-embed
+  check now looks at the main recording's file alone, so a parallel vertical (or ISO) file no longer
+  pushes a single-file mkv recording onto the sidecar path.
+
 ## [0.500.0] — 2026-07-15 (Audio Production Depth — Phase 4)
 
 > *From mixer to console.* Phase 4 turns the shipped mixer into a broadcast console: physical

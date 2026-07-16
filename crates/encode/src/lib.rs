@@ -28,6 +28,8 @@ pub mod link;
 pub mod mux;
 pub mod recorder;
 pub mod remux;
+pub mod trim;
+pub mod verify;
 pub mod wav;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};

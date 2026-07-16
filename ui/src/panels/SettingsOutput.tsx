@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 
-import { encodersList, ffmpegStatus, settingsSet } from "../api/commands";
+import { encodersList, ffmpegStatus, settingsSet, studioGet } from "../api/commands";
 import { onFfmpeg } from "../api/events";
 import type {
   Container,
   EncPreset,
   EncoderCatalog,
   FfmpegStatus,
+  PipelineStep,
   RcMode,
   RecordingSettings,
   Settings,
+  Source,
   VideoCodec,
 } from "../api/types";
 import { TRACK_COUNT } from "../api/types";
@@ -34,6 +36,25 @@ const CONTAINERS: { value: Container; label: string; wire: boolean }[] = [
 ];
 
 const FPS_CHOICES = [24, 30, 50, 60, 120, 144, 240];
+
+/** CAP-N45: the closed pipeline action set (mirrors settings.rs — there is
+ * deliberately no "run a command" action). */
+const PIPELINE_ACTIONS = [
+  "verify",
+  "remux",
+  "normalize",
+  "rename",
+  "move",
+  "copy",
+  "reveal",
+  "luaEvent",
+] as const;
+
+function makePipelineStep(action: (typeof PIPELINE_ACTIONS)[number]): PipelineStep {
+  if (action === "rename") return { action, template: "{prefix} {date} {time}" };
+  if (action === "move" || action === "copy") return { action, folder: "" };
+  return { action };
+}
 
 /** The codecs each wire container legally holds (mirrors recording.rs). */
 function containerAccepts(container: Container, codec: VideoCodec): boolean {
@@ -94,6 +115,7 @@ export function OutputSettingsBody({
   const t = useT();
   const [ffmpeg, setFfmpeg] = useState<FfmpegStatus | null>(null);
   const [catalog, setCatalog] = useState<EncoderCatalog | null>(null);
+  const [sources, setSources] = useState<Source[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -104,6 +126,10 @@ export function OutputSettingsBody({
     encodersList()
       .then((found) => alive && setCatalog(found))
       .catch(() => alive && setCatalog(null));
+    // The ISO picker (CAP-N40) offers the collection's sources by name.
+    studioGet()
+      .then((studio) => alive && setSources(studio.collection.sources))
+      .catch(() => alive && setSources([]));
     onFfmpeg((status) => {
       setFfmpeg(status);
       // A fresh install re-verifies the catalog — refetch it.
@@ -127,6 +153,19 @@ export function OutputSettingsBody({
   const wire = rec.container !== "frec";
   const ffmpegReady = ffmpeg?.state === "ready";
 
+  // CAP-N45: pipeline mutations — one seam so the per-step handlers stay
+  // one-liners (replace one step in place, or swap two adjacent steps).
+  const updateStep = (index: number, next: PipelineStep) => {
+    const pipeline = rec.pipeline.slice();
+    pipeline[index] = next;
+    onPatch({ pipeline });
+  };
+  const moveStep = (from: number, to: number) => {
+    const pipeline = rec.pipeline.slice();
+    [pipeline[from], pipeline[to]] = [pipeline[to], pipeline[from]];
+    onPatch({ pipeline });
+  };
+
   return (
     <div className="flex flex-col gap-3 text-xs text-havoc-text">
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
@@ -143,6 +182,57 @@ export function OutputSettingsBody({
           ))}
         </select>
       </label>
+
+      {/* CAP-N42: alpha recording — the owned lossless format only. */}
+      {!wire && (
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={rec.alphaFrec}
+            onChange={(event) => onPatch({ alphaFrec: event.target.checked })}
+            title={t("output-alpha-title")}
+          />
+          {t("output-alpha-frec")}
+        </label>
+      )}
+
+      {/* CAP-N44: typed auto-markers from studio events (any container —
+          mkv embeds chapters, the rest get the sidecar). */}
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <input
+          type="checkbox"
+          checked={rec.autoMarkers}
+          onChange={(event) => onPatch({ autoMarkers: event.target.checked })}
+          title={t("output-auto-markers-title")}
+        />
+        {t("output-auto-markers")}
+      </label>
+
+      {/* CAP-N43: event-driven splits — the owned .frec splitter only
+          (the ffmpeg segment muxer cuts by time alone). */}
+      {!wire && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] text-havoc-muted">{t("output-split-events")}</span>
+          <div className="flex flex-wrap gap-3">
+            {(
+              [
+                ["splitOnScene", "output-split-on-scene"],
+                ["splitOnMarker", "output-split-on-marker"],
+                ["splitOnRundown", "output-split-on-rundown"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                <input
+                  type="checkbox"
+                  checked={rec[field]}
+                  onChange={(event) => onPatch({ [field]: event.target.checked })}
+                />
+                {t(label)}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {wire && !ffmpegReady && (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-2">
@@ -443,6 +533,210 @@ export function OutputSettingsBody({
           </div>
         </section>
       )}
+
+      {/* CAP-N40: per-source ISO recording — clean per-source files. */}
+      <section className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+        <h4 className="m-0 text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+          {t("output-iso-heading")}
+        </h4>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">{t("output-iso-explainer")}</p>
+        {sources.length === 0 ? (
+          <p className="m-0 text-[11px] text-havoc-muted">{t("output-iso-none")}</p>
+        ) : (
+          <div className="flex flex-wrap gap-1" role="group" aria-label={t("output-iso-heading")}>
+            {sources.map((source) => {
+              const on = rec.isoSources.includes(source.id);
+              return (
+                <button
+                  key={source.id}
+                  type="button"
+                  aria-pressed={on}
+                  title={
+                    on
+                      ? t("output-iso-source-on", { name: source.name })
+                      : t("output-iso-source-off", { name: source.name })
+                  }
+                  onClick={() =>
+                    onPatch({
+                      isoSources: on
+                        ? rec.isoSources.filter((id) => id !== source.id)
+                        : [...rec.isoSources, source.id],
+                    })
+                  }
+                  className={`max-w-full truncate rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                    on
+                      ? "border-havoc-accent/60 bg-havoc-accent/25 text-havoc-text"
+                      : "border-white/10 bg-white/[0.04] text-havoc-muted hover:text-havoc-text"
+                  }`}
+                >
+                  {source.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {rec.isoSources.length > 0 && (
+          <>
+            <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+              <input
+                type="checkbox"
+                checked={rec.isoPostFilter}
+                onChange={(event) => onPatch({ isoPostFilter: event.target.checked })}
+              />
+              {t("output-iso-post-filter")}
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                {t("output-iso-format")}
+                <select
+                  value={rec.isoContainer}
+                  onChange={(event) => onPatch({ isoContainer: event.target.value as Container })}
+                  className={selectClass}
+                >
+                  {CONTAINERS.map((entry) => (
+                    <option key={entry.value} value={entry.value}>
+                      {t(entry.label)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {rec.isoContainer !== "frec" && (
+                <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                  {t("output-iso-encoder")}
+                  <select
+                    value={rec.isoEncoderId}
+                    onChange={(event) => onPatch({ isoEncoderId: event.target.value })}
+                    className={selectClass}
+                  >
+                    <option value="auto">{t("output-encoder-auto")}</option>
+                    {(catalog?.encoders ?? [])
+                      .filter((encoder) => containerAccepts(rec.isoContainer, encoder.codec))
+                      .map((encoder) => (
+                        <option
+                          key={encoder.id}
+                          value={encoder.id}
+                          disabled={encoder.verified === false}
+                        >
+                          {encoder.label}
+                          {encoder.verified === false ? ` ${t("output-encoder-unavailable")}` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            {rec.isoContainer !== "frec" && !ffmpegReady && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-2">
+                <span className="text-[11px] text-amber-200">{t("output-ffmpeg-warning")}</span>
+                <button
+                  type="button"
+                  onClick={onOpenComponents}
+                  className="shrink-0 rounded-md border border-amber-400/40 px-2 py-1 text-[11px] text-amber-200 transition-colors hover:border-amber-300"
+                >
+                  {t("output-install")}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* CAP-N45: the post-record pipeline — a closed action set. */}
+      <section className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+        <h4 className="m-0 text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+          {t("output-pipeline-heading")}
+        </h4>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("output-pipeline-explainer")}
+        </p>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={rec.pipelineEnabled}
+            onChange={(event) => onPatch({ pipelineEnabled: event.target.checked })}
+          />
+          {t("output-pipeline-enabled")}
+        </label>
+        {rec.pipeline.map((step, index) => (
+          <div key={`${step.action}-${index}`} className="flex items-center gap-1.5">
+            <span className="w-8 shrink-0 text-right text-[10px] text-havoc-muted">
+              {index + 1}.
+            </span>
+            <span className="w-24 shrink-0 text-[11px] text-havoc-text">
+              {t(`pipeline-${step.action}`)}
+            </span>
+            {step.action === "rename" && (
+              <input
+                type="text"
+                value={step.template}
+                aria-label={t("output-pipeline-template")}
+                onChange={(event) =>
+                  updateStep(index, { action: "rename", template: event.target.value })
+                }
+                className={`${inputClass} flex-1`}
+              />
+            )}
+            {(step.action === "move" || step.action === "copy") && (
+              <input
+                type="text"
+                value={step.folder}
+                placeholder={t("output-pipeline-folder")}
+                aria-label={t("output-pipeline-folder")}
+                onChange={(event) =>
+                  updateStep(index, { action: step.action, folder: event.target.value })
+                }
+                className={`${inputClass} flex-1`}
+              />
+            )}
+            <span className="flex-1" />
+            <button
+              type="button"
+              disabled={index === 0}
+              title={t("output-pipeline-up")}
+              onClick={() => moveStep(index, index - 1)}
+              className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-havoc-muted transition-colors enabled:hover:text-havoc-text disabled:opacity-40"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              disabled={index === rec.pipeline.length - 1}
+              title={t("output-pipeline-down")}
+              onClick={() => moveStep(index, index + 1)}
+              className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-havoc-muted transition-colors enabled:hover:text-havoc-text disabled:opacity-40"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              title={t("output-pipeline-remove")}
+              onClick={() => onPatch({ pipeline: rec.pipeline.filter((_, at) => at !== index) })}
+              className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-havoc-muted transition-colors hover:text-havoc-text"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {rec.pipeline.length < 10 && (
+          <select
+            value=""
+            aria-label={t("output-pipeline-add")}
+            onChange={(event) => {
+              const action = event.target.value as (typeof PIPELINE_ACTIONS)[number];
+              if (!action) return;
+              onPatch({ pipeline: [...rec.pipeline, makePipelineStep(action)] });
+            }}
+            className={`${selectClass} self-start`}
+          >
+            <option value="">{t("output-pipeline-add")}</option>
+            {PIPELINE_ACTIONS.map((action) => (
+              <option key={action} value={action}>
+                {t(`pipeline-${action}`)}
+              </option>
+            ))}
+          </select>
+        )}
+      </section>
 
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] text-havoc-muted">{t("output-presets")}</span>
