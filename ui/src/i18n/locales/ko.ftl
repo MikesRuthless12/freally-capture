@@ -456,6 +456,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = 모니터
 mixer-monitor-device-aria = 모니터 출력 장치
 mixer-default-output = 기본 출력
+mixer-routing = 라우팅
+mixer-routing-title = 오디오 출력 라우팅
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = 오디오 라우팅
+routing-intro = 스트립을 트랙 버스에 할당한 다음, 원하는 버스를 물리적 출력으로 보냅니다 — 하드웨어 레코더 피드, 다른 방의 스피커, 또는 여분 트랙의 헤드폰 큐 등입니다. 모니터는 자체 장치를 유지하며, 이 경로는 그 위에 추가되므로 아무것도 설정하지 않으면 믹스는 그대로입니다.
+routing-sends-title = 트랙 센드
+routing-no-strips = 이 장면에 오디오 소스가 없습니다.
+routing-source = 소스
+routing-track = 트랙 { $n }
+routing-send-aria = { $source }을(를) 트랙 { $n }으로 보내기
+routing-outputs-title = 물리적 출력
+routing-master = 마스터
+routing-off = 끔
+routing-default-output = 기본 출력
+routing-device-aria = { $bus }의 출력 장치
+routing-trim-aria = { $bus }의 출력 트림
+routing-trim-db = { $db } dB
+routing-muted = 음소거됨
+routing-device-error = 장치를 사용할 수 없음
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = 더킹
+mixer-ducking-title = 더킹 매트릭스
+ducking-title = 더킹 매트릭스
+ducking-intro = 어떤 소스든 다른 소스를 더킹할 수 있습니다. 트리거(행)가 소리를 낼 때마다 셀이 대상(열)을 낮춥니다 — 셀을 선택해 깊이, 스레숄드, 타이밍을 설정하세요. 각 쌍은 개별 더킹이므로 한 스트립을 여러 트리거가 동시에 더킹할 수 있습니다.
+ducking-need-two = 서로 더킹하려면 오디오 소스를 두 개 이상 추가하세요.
+ducking-trigger-target = 트리거 ↓ / 대상 →
+ducking-cell-aria = { $trigger }이(가) { $target }을(를) 더킹
+ducking-pair = { $trigger } → { $target }
+ducking-remove = 제거
+ducking-amount = 양
+ducking-threshold = 스레숄드
+ducking-attack = 어택
+ducking-release = 릴리스
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = 라우드니스 정규화
+loudness-intro = 피크 실링과 함께 프로그램을 라우드니스 목표로 천천히 이끌어, 스트림과 녹화가 일관된 레벨에 도달하도록 합니다. 느리고 부드럽게 — 조종할 뿐, 절대 펌핑하지 않습니다.
+loudness-enable = 프로그램을 목표로 이끌기
+loudness-target = 목표
+loudness-target-option = { $target } LUFS
+loudness-ceiling = 피크 실링 (dBFS)
+loudness-note = −14 LUFS는 YouTube 스타일 재생에 적합합니다. −16은 일반적인 스트리밍 목표입니다. −23은 EBU R128 방송입니다. 녹화 후 정규화 작업에도 동일한 목표가 사용됩니다.
+loudness-on = LUFS { $target }
+loudness-off = 정규화 끔
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = 사운드보드
+mixer-soundboard-title = 사운드보드
+soundboard-title = 사운드보드
+soundboard-add-pad = + 패드
+soundboard-stop-all = 모두 중지
+soundboard-edit = 편집
+soundboard-empty = 아직 패드가 없습니다 — 하나 추가하고 로컬 오디오 클립을 지정하세요.
+soundboard-new-pad = 새 패드
+soundboard-no-clip = 클립 없음
+soundboard-audio-files = 오디오 파일
+soundboard-name = 이름
+soundboard-choose-clip = 클립 선택…
+soundboard-gain = 게인
+soundboard-choke = 초크
+soundboard-choke-none = 없음
+soundboard-loop = 반복
+soundboard-auto-duck = 자동 더킹
+soundboard-tracks = 트랙
+soundboard-hotkey = 단축키
+soundboard-hotkey-placeholder = 예: Ctrl+Shift+1
+soundboard-remove = 제거
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = 플러그인
+mixer-plugins-title = 오디오 플러그인 (CLAP / VST3)
+plugins-title = 오디오 플러그인
+plugins-scanning = 검색 중…
+plugins-none = 표준 폴더에서 CLAP 또는 VST3 플러그인을 찾을 수 없습니다.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -534,6 +612,10 @@ channelstrip-solo-source = { $name } 솔로(PFL)
 channelstrip-pan-label = 밸런스 (더블 클릭으로 초기화)
 channelstrip-pan-aria = { $name } 밸런스
 channelstrip-mono-label = 모노로 다운믹스
+channelstrip-automix-label = 오토믹스 (게인 셰어링)
+channelstrip-automix-note = 게인 셰어링: 믹서가 모든 오토믹스 스트립의 합산 레벨을 일정하게 유지하고, 지금 말하는 사람에게 넘겨줍니다 — 멀티 마이크 패널과 팟캐스트에 적합합니다. 스트립을 추가하기 전까지는 꺼져 있습니다.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = 이 소스를 위한 에코 없는 리턴을 생성합니다 — 이 소스 자신을 제외한 프로그램의 모든 사람. 원격 게스트에게 사용하면 자신의 지연된 목소리를 듣지 않습니다.
 channelstrip-ptt-hotkey = 푸시투토크 단축키 (누르고 있을 때만 소리)
 channelstrip-ptt-placeholder = 예: Ctrl+Shift+T 또는 F13
 channelstrip-ptt-aria = 푸시투토크 단축키
@@ -768,7 +850,36 @@ audiofilters-name-limiter = 리미터
 audiofilters-name-eq = 3밴드 EQ
 audiofilters-name-denoise = 잡음 제거
 audiofilters-name-ducking = 더킹
+audiofilters-name-parametric-eq = 파라메트릭 EQ
+audiofilters-name-de-esser = 디에서
+audiofilters-name-rumble-guard = 럼블 필터
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = 프리셋
+audiofilters-voice-preset-pick = 음성 프리셋…
+audiofilters-voice-broadcast = 방송 음성
+audiofilters-voice-podcast = 팟캐스트 음성
+audiofilters-voice-clean = 깨끗한 음성
+audiofilters-voice-none = 체인 지우기
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = 치찰음 주파수 (Hz)
+audiofilters-deesser-amount = 최대 감쇠 (dB)
+audiofilters-rumble-freq = 로우 컷 (Hz)
 audiofilters-title = 오디오 필터 — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = 실시간 스펙트럼이 있는 파라메트릭 EQ 응답 곡선
+eq-band-type = 유형
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + 밴드
+eq-remove-band = 밴드 제거
+eq-type-bell = 벨
+eq-type-lowShelf = 로우 셸프
+eq-type-highShelf = 하이 셸프
+eq-type-notch = 노치
+eq-type-highPass = 하이패스
+eq-type-lowPass = 로우패스
 audiofilters-chain-header = 필터 체인 (위쪽이 먼저 실행됨, 페이더 이전)
 audiofilters-add = + 필터 추가
 audiofilters-add-menu = 오디오 필터 추가
@@ -984,6 +1095,23 @@ recordings-cancel = 취소
 recordings-export-cancelled = 내보내기가 취소되었습니다.
 recordings-exported-to = { $path }(으)로 내보냄
 recordings-remuxed-to = { $path }(으)로 리먹스함
+recordings-normalize = 정규화
+recordings-normalizing = 정규화 중…
+recordings-normalize-title = 라우드니스를 목표로 정규화 (사본을 씁니다)
+recordings-normalized-to = { $path }(으)로 정규화함
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = 오디오 전용
+audiorec-format = 오디오 녹음 형식
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = 오디오 녹음
+audiorec-stop = 중지
+audiorec-pause = 일시정지
+audiorec-resume = 재개
+audiorec-recording = REC { $sec }초
+audiorec-saved = 트랙 파일 { $count }개 저장됨
 
 
 # --- OpenedFrec.tsx ---

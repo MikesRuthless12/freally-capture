@@ -234,6 +234,41 @@ pub struct LufsDto {
     pub short_term: Option<f32>,
 }
 
+/// One CAP-N30 output route that could not open its device (the UI flags the
+/// bus in the routing matrix). `bus` is the stable key: "master" | "track1"…
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputRouteErrorDto {
+    pub bus: String,
+    pub message: String,
+}
+
+/// The CAP-N35 live spectrum of the armed source: dBFS magnitude bins + the
+/// source id (a stale editor ignores a spectrum that isn't its own).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpectrumDto {
+    pub source: String,
+    pub magnitudes: Vec<f32>,
+}
+
+/// One filter's live meter (linear in/out peaks) for the armed strip's editor.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterMeterDto {
+    pub id: String,
+    pub in_peak: f32,
+    pub out_peak: f32,
+}
+
+/// The armed strip's per-filter meters + the source they belong to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterMetersDto {
+    pub source: String,
+    pub meters: Vec<FilterMeterDto>,
+}
+
 /// The `audio` event: per-source levels/status + the program mix health.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -244,6 +279,15 @@ pub struct AudioLevelsDto {
     pub lufs: LufsDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monitor_error: Option<String>,
+    /// CAP-N30 program-bus routes that could not open their device.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub output_errors: Vec<OutputRouteErrorDto>,
+    /// CAP-N35 live spectrum of the armed source (a parametric-EQ editor open).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spectrum: Option<SpectrumDto>,
+    /// Per-filter live meters for the strip whose filter editor is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_meters: Option<FilterMetersDto>,
     /// Capture samples dropped across sources (ring overflows).
     pub dropped: u64,
 }
@@ -276,6 +320,30 @@ fn snapshot_dto(snapshot: EngineSnapshot) -> AudioLevelsDto {
             short_term: snapshot.lufs_short_term,
         },
         monitor_error: snapshot.monitor_error,
+        output_errors: snapshot
+            .output_errors
+            .into_iter()
+            .map(|err| OutputRouteErrorDto {
+                bus: err.bus.key(),
+                message: err.message,
+            })
+            .collect(),
+        spectrum: snapshot.spectrum.map(|spectrum| SpectrumDto {
+            source: spectrum.source.0.to_string(),
+            magnitudes: spectrum.magnitudes,
+        }),
+        filter_meters: snapshot.filter_meters.map(|fm| FilterMetersDto {
+            source: fm.source.0.to_string(),
+            meters: fm
+                .meters
+                .into_iter()
+                .map(|meter| FilterMeterDto {
+                    id: meter.id.0.to_string(),
+                    in_peak: meter.in_peak,
+                    out_peak: meter.out_peak,
+                })
+                .collect(),
+        }),
         dropped: snapshot.dropped,
     }
 }
@@ -340,6 +408,28 @@ fn specs_to_configs(
                 input,
                 settings,
                 nonce: spec.nonce,
+            })
+        })
+        .collect()
+}
+
+/// Build the engine source configs for the CAP-N37 pads sounding right now. A
+/// pad's id is both its media-hub ring key and its transient source id, so the
+/// engine drains exactly the ring the soundboard player feeds.
+fn soundboard_configs(active: &[crate::soundboard::ActivePad]) -> Vec<SourceConfig> {
+    active
+        .iter()
+        .filter_map(|pad| {
+            let id = SourceId::parse(&pad.id)?;
+            Some(SourceConfig {
+                id,
+                input: InputSpec::Media { id: pad.id.clone() },
+                settings: fcap_scene::AudioSettings {
+                    volume_db: pad.gain_db,
+                    tracks: pad.tracks,
+                    ..Default::default()
+                },
+                nonce: 0,
             })
         })
         .collect()
@@ -416,6 +506,16 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             let engine = app.state::<AudioRuntime>().engine.clone();
             let mut seen_revision = 0u64;
             let mut seen_monitor: Option<String> = None;
+            // CAP-N30 output routes last sent to the engine (change-detected).
+            let mut seen_outputs: Vec<fcap_scene::AudioOutputRoute> = Vec::new();
+            // CAP-N34 loudness spec last sent (change-detected).
+            let mut seen_loudness: Option<crate::settings::LoudnessSettings> = None;
+            // CAP-N37: the scene's engine configs (cached so soundboard pads can
+            // be appended without a scene-revision change), the last-seen active
+            // pads, and a flag to re-send the combined set when either changes.
+            let mut scene_configs: Vec<SourceConfig> = Vec::new();
+            let mut seen_soundboard: Vec<crate::soundboard::ActivePad> = Vec::new();
+            let mut sources_dirty = false;
             let mut had_sources = false;
             // Running per-app captures, keyed by source id (owned by this thread).
             let mut app_captures: HashMap<String, (u32, fcap_appaudio::AppCapture)> =
@@ -437,9 +537,31 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                     // push-to-talk gates are actually live (fail-open).
                     reconcile_hotkeys(&app, &specs);
                     let registered = app.state::<HotkeyRegistry>().registered();
-                    engine.set_sources(specs_to_configs(&specs, &registered));
+                    scene_configs = specs_to_configs(&specs, &registered);
                     reconcile_app_audio(&specs, &mut app_captures);
                     reconcile_test_tones(&specs, &mut tone_tasks);
+                    sources_dirty = true;
+                }
+
+                // 1b. CAP-N37 soundboard: transient pad sources + auto-duck. A
+                //     playing pad is drained like Media; the active set changes
+                //     as pads start/end, so re-send the combined list on change.
+                let active = app.state::<crate::soundboard::SoundboardState>().active();
+                if active != seen_soundboard {
+                    seen_soundboard = active;
+                    sources_dirty = true;
+                }
+                if sources_dirty {
+                    let mut configs = scene_configs.clone();
+                    configs.extend(soundboard_configs(&seen_soundboard));
+                    engine.set_sources(configs);
+                    let duck: Vec<SourceId> = seen_soundboard
+                        .iter()
+                        .filter(|pad| pad.auto_duck)
+                        .filter_map(|pad| SourceId::parse(&pad.id))
+                        .collect();
+                    engine.set_soundboard_duck(duck);
+                    sources_dirty = false;
                 }
 
                 // 2. Settings → monitor device, only on change (read just the
@@ -453,6 +575,24 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                     seen_monitor = Some(monitor);
                 }
 
+                // 2b. Settings → CAP-N30 program-bus output routes, on change.
+                let outputs = app.state::<SettingsStore>().audio_outputs();
+                if outputs != seen_outputs {
+                    engine.set_audio_outputs(outputs.clone());
+                    seen_outputs = outputs;
+                }
+
+                // 2c. Settings → CAP-N34 loudness rider, on change.
+                let loudness = app.state::<SettingsStore>().loudness();
+                if seen_loudness != Some(loudness) {
+                    engine.set_loudness(
+                        loudness
+                            .enabled
+                            .then_some((loudness.target_lufs, loudness.ceiling_db)),
+                    );
+                    seen_loudness = Some(loudness);
+                }
+
                 // 3. Levels out (skip the idle no-sources steady state, but
                 //    always send the transition back to empty).
                 let snapshot = engine.snapshot();
@@ -462,7 +602,8 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                 // the mix actually goes out (live or recording). A panic
                 // (CAP-M22) mutes deliberately — no alarm for that.
                 let engaged = (app.state::<crate::stream::StreamBridgeState>().is_live()
-                    || app.state::<crate::recording::RecordingState>().is_active())
+                    || app.state::<crate::recording::RecordingState>().is_active()
+                    || app.state::<crate::audiorec::AudioRecState>().is_active())
                     && !app.state::<StudioState>().is_panicked();
                 let peak = dto.master.peak[0].max(dto.master.peak[1]);
                 for (kind, active) in audio_watch.evaluate(peak, engaged, std::time::Instant::now())

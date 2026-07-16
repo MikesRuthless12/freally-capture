@@ -90,8 +90,8 @@ pub fn remux_to_mp4(ffmpeg: &Ffmpeg, input: &Path) -> Result<PathBuf, String> {
     Ok(output)
 }
 
-/// `name.mkv` → a non-colliding `name (repaired).mkv` sibling (CAP-M11).
-fn repaired_sibling(input: &Path) -> PathBuf {
+/// `name.ext` → a non-colliding `name (<suffix>).ext` sibling.
+fn suffixed_sibling(input: &Path, suffix: &str) -> PathBuf {
     let stem = input
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -99,18 +99,139 @@ fn repaired_sibling(input: &Path) -> PathBuf {
     let ext = input
         .extension()
         .and_then(|ext| ext.to_str())
-        .unwrap_or("mkv");
-    let first = input.with_file_name(format!("{stem} (repaired).{ext}"));
+        .unwrap_or("mp4");
+    let first = input.with_file_name(format!("{stem} ({suffix}).{ext}"));
     if !first.exists() {
         return first;
     }
     for index in 2..1000 {
-        let candidate = input.with_file_name(format!("{stem} (repaired {index}).{ext}"));
+        let candidate = input.with_file_name(format!("{stem} ({suffix} {index}).{ext}"));
         if !candidate.exists() {
             return candidate;
         }
     }
-    input.with_file_name(format!("{stem}.repaired.{ext}"))
+    input.with_file_name(format!("{stem}.{suffix}.{ext}"))
+}
+
+/// `<input stem>.<ext>` beside `input`, appending ` (2)`, ` (3)`… until free —
+/// so transcoding to a different container never clobbers an existing sibling.
+fn unique_with_extension(input: &Path, ext: &str) -> PathBuf {
+    let first = input.with_extension(ext);
+    if !first.exists() {
+        return first;
+    }
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("audio");
+    for index in 2..10_000 {
+        let candidate = input.with_file_name(format!("{stem} ({index}).{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    first
+}
+
+/// CAP-N34 post-record loudness normalization: measure + gain a finished wire
+/// recording to `target_lufs` with a `ceiling_db` true-peak limit via ffmpeg's
+/// `loudnorm`, writing a `(normalized)` sibling — the video is stream-copied,
+/// only the audio is re-encoded. The owned `.frec` isn't touched (export it to
+/// a wire file first). Blocking; minutes on long files.
+pub fn normalize_loudness(
+    ffmpeg: &Ffmpeg,
+    input: &Path,
+    target_lufs: f32,
+    ceiling_db: f32,
+) -> Result<PathBuf, String> {
+    let ext = input
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "frec" {
+        return Err("normalize the exported wire file, not the owned .frec".to_owned());
+    }
+    if !matches!(ext.as_str(), "mp4" | "mkv" | "mov" | "webm") {
+        return Err("normalize takes an mp4/mkv/mov/webm recording".to_owned());
+    }
+    if !input.is_file() {
+        return Err(format!("{} is not a file", input.display()));
+    }
+    let target = target_lufs.clamp(-30.0, -5.0);
+    let ceiling = ceiling_db.clamp(-9.0, 0.0);
+    let output = suffixed_sibling(input, "normalized");
+    // webm carries Opus/Vorbis; everything else takes AAC.
+    let audio_codec = if ext == "webm" { "libopus" } else { "aac" };
+    let filter = format!("loudnorm=I={target:.1}:TP={ceiling:.1}:LRA=11");
+
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+        .arg(input);
+    cmd.args([
+        "-map",
+        "0",
+        "-c:v",
+        "copy",
+        "-af",
+        &filter,
+        "-c:a",
+        audio_codec,
+    ])
+    .arg(&output);
+    let result = run_with_timeout(cmd, Duration::from_secs(60 * 60))?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&output);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "normalize failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    Ok(output)
+}
+
+/// CAP-N38: transcode a finished WAV to FLAC or Opus via the labeled ffmpeg
+/// component (a sibling `.flac` / `.opus`). The owned WAV is written on-device;
+/// the compressed formats are the only part that needs the bridge.
+pub fn transcode_wav(ffmpeg: &Ffmpeg, input: &Path, codec: &str) -> Result<PathBuf, String> {
+    if input.extension().and_then(|ext| ext.to_str()) != Some("wav") {
+        return Err("audio transcode takes a wav file".to_owned());
+    }
+    if !input.is_file() {
+        return Err(format!("{} is not a file", input.display()));
+    }
+    let (ext, encoder) = match codec {
+        "flac" => ("flac", "flac"),
+        "opus" => ("opus", "libopus"),
+        other => return Err(format!("unsupported audio codec: {other}")),
+    };
+    // The `.wav` is intermediate and gets deleted, so the target `.flac`/`.opus`
+    // must be uniqueness-checked on its OWN extension — otherwise two recordings
+    // resolving to the same stem (static template, same-second `{time}`) would
+    // let the second transcode overwrite the first's compressed output.
+    let output = unique_with_extension(input, ext);
+    let mut cmd = command(ffmpeg);
+    cmd.args(["-hide_banner", "-v", "error", "-y", "-i"])
+        .arg(input);
+    cmd.args(["-c:a", encoder]).arg(&output);
+    let result = run_with_timeout(cmd, Duration::from_secs(30 * 60))?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&output);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!(
+            "audio transcode failed ({}): {}",
+            result.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        ));
+    }
+    Ok(output)
+}
+
+/// `name.mkv` → a non-colliding `name (repaired).mkv` sibling (CAP-M11).
+fn repaired_sibling(input: &Path) -> PathBuf {
+    suffixed_sibling(input, "repaired")
 }
 
 /// Salvage an interrupted recording (CAP-M11): a tolerant stream-copy remux
@@ -376,5 +497,38 @@ mod tests {
         };
         let err = repair_recording(&fake, Path::new("take.frec")).unwrap_err();
         assert!(err.contains("crash-safe by design"));
+    }
+
+    #[test]
+    fn normalize_refuses_frec_and_non_wire_inputs() {
+        let fake = Ffmpeg {
+            path: PathBuf::from("ffmpeg-not-real"),
+            version: "test".to_string(),
+        };
+        let frec = normalize_loudness(&fake, Path::new("take.frec"), -16.0, -1.0).unwrap_err();
+        assert!(frec.contains(".frec"));
+        let other = normalize_loudness(&fake, Path::new("take.wav"), -16.0, -1.0).unwrap_err();
+        assert!(other.contains("mp4/mkv/mov/webm"));
+    }
+
+    #[test]
+    fn suffixed_siblings_avoid_collisions() {
+        let dir = std::env::temp_dir().join(format!(
+            "fcap-norm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let input = dir.join("take.mp4");
+        std::fs::write(&input, b"x").expect("write");
+        let first = suffixed_sibling(&input, "normalized");
+        assert_eq!(first.file_name().unwrap(), "take (normalized).mp4");
+        std::fs::write(&first, b"x").expect("write");
+        let second = suffixed_sibling(&input, "normalized");
+        assert_eq!(second.file_name().unwrap(), "take (normalized 2).mp4");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

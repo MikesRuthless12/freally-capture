@@ -121,6 +121,79 @@ fn default_duck_release_ms() -> f32 {
     300.0
 }
 
+fn default_deesser_freq_hz() -> f32 {
+    6_500.0
+}
+
+fn default_deesser_threshold_db() -> f32 {
+    -30.0
+}
+
+fn default_deesser_amount_db() -> f32 {
+    8.0
+}
+
+fn default_rumble_freq_hz() -> f32 {
+    90.0
+}
+
+/// One band's shape in the parametric EQ (CAP-N35).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EqBandType {
+    /// Peaking (boost/cut a band around `freq_hz`).
+    Bell,
+    LowShelf,
+    HighShelf,
+    /// Band-reject at `freq_hz`.
+    Notch,
+    /// 12 dB/oct high-pass (low-cut) at `freq_hz`.
+    HighPass,
+    /// 12 dB/oct low-pass (high-cut) at `freq_hz`.
+    LowPass,
+}
+
+/// One parametric-EQ band (CAP-N35). `gain_db` is used only by bell + shelf
+/// bands; notch/HP/LP ignore it. Ranges are clamped by the DSP.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EqBand {
+    #[serde(rename = "type")]
+    pub kind: EqBandType,
+    /// Center / corner frequency, 20..=20000 Hz.
+    pub freq_hz: f32,
+    /// Gain for bell + shelf bands, -30..=30 dB (ignored by notch/HP/LP).
+    #[serde(default)]
+    pub gain_db: f32,
+    /// Resonance / width, 0.1..=18.
+    pub q: f32,
+}
+
+/// The starting bands for a fresh parametric EQ: three flat bells the operator
+/// can drag, so the editor opens with something on the curve rather than blank.
+fn default_eq_bands() -> Vec<EqBand> {
+    vec![
+        EqBand {
+            kind: EqBandType::Bell,
+            freq_hz: 120.0,
+            gain_db: 0.0,
+            q: 1.0,
+        },
+        EqBand {
+            kind: EqBandType::Bell,
+            freq_hz: 1_000.0,
+            gain_db: 0.0,
+            q: 1.0,
+        },
+        EqBand {
+            kind: EqBandType::Bell,
+            freq_hz: 6_000.0,
+            gain_db: 0.0,
+            q: 1.0,
+        },
+    ]
+}
+
 /// One audio filter's kind + parameters. Tagged by `type` in JSON.
 ///
 /// Ranges are documented per field; the DSP clamps defensively, the UI keeps
@@ -222,6 +295,32 @@ pub enum AudioFilterKind {
         #[serde(default = "default_duck_release_ms")]
         release_ms: f32,
     },
+    /// Owned N-band parametric EQ (CAP-N35): a cascade of bell / shelf / notch /
+    /// high-pass / low-pass biquads with draggable nodes on a live spectrum.
+    ParametricEq {
+        #[serde(default = "default_eq_bands")]
+        bands: Vec<EqBand>,
+    },
+    /// Split-band de-esser (CAP-N36): a high-band detector drives gain
+    /// reduction of just the sibilance band — classic DSP, no ML.
+    DeEsser {
+        /// Sibilance crossover, 3000..=12000 Hz.
+        #[serde(default = "default_deesser_freq_hz")]
+        freq_hz: f32,
+        /// High-band level that starts de-essing, dBFS.
+        #[serde(default = "default_deesser_threshold_db")]
+        threshold_db: f32,
+        /// Maximum reduction of the sibilance band, 0..=24 dB.
+        #[serde(default = "default_deesser_amount_db")]
+        amount_db: f32,
+    },
+    /// Rumble guard (CAP-N36): a clean 2nd-order low-cut for desk thumps and
+    /// plosives.
+    RumbleGuard {
+        /// Low-cut corner, 20..=300 Hz.
+        #[serde(default = "default_rumble_freq_hz")]
+        freq_hz: f32,
+    },
 }
 
 impl AudioFilterKind {
@@ -235,6 +334,9 @@ impl AudioFilterKind {
             AudioFilterKind::Eq { .. } => "eq",
             AudioFilterKind::Denoise { .. } => "denoise",
             AudioFilterKind::Ducker { .. } => "ducker",
+            AudioFilterKind::ParametricEq { .. } => "parametricEq",
+            AudioFilterKind::DeEsser { .. } => "deEsser",
+            AudioFilterKind::RumbleGuard { .. } => "rumbleGuard",
         }
     }
 
@@ -248,6 +350,9 @@ impl AudioFilterKind {
             AudioFilterKind::Eq { .. } => "3-Band EQ",
             AudioFilterKind::Denoise { .. } => "Denoise",
             AudioFilterKind::Ducker { .. } => "Ducking",
+            AudioFilterKind::ParametricEq { .. } => "Parametric EQ",
+            AudioFilterKind::DeEsser { .. } => "De-esser",
+            AudioFilterKind::RumbleGuard { .. } => "Rumble Guard",
         }
     }
 }
@@ -306,6 +411,16 @@ pub struct AudioSettings {
     pub solo: bool,
     /// Downmix to mono before the balance (CAP-M19).
     pub mono: bool,
+    /// Join the gain-sharing auto-mixer (CAP-N32): the mixer keeps the total
+    /// gain of all automixed strips ~constant and hands it to whoever is
+    /// speaking. Off by default — a strip joins only when the operator asks.
+    #[serde(default)]
+    pub automix: bool,
+    /// Produce a mix-minus (N−1) return for this source (CAP-N39): the program
+    /// minus this source itself, so a remote guest hears everyone but their own
+    /// echo. Off by default.
+    #[serde(default)]
+    pub mix_minus: bool,
     /// Delays this source's audio to line it up with video, ms
     /// (0..=[`MAX_SYNC_OFFSET_MS`]).
     pub sync_offset_ms: u32,
@@ -329,6 +444,8 @@ impl Default for AudioSettings {
             pan: 0.0,
             solo: false,
             mono: false,
+            automix: false,
+            mix_minus: false,
             sync_offset_ms: 0,
             push_to_talk: None,
             push_to_mute: None,
@@ -360,6 +477,50 @@ impl AudioSettings {
     pub fn track_enabled(&self, index: usize) -> bool {
         index < TRACK_COUNT && self.tracks & (1 << index) != 0
     }
+}
+
+/// Which mixer bus a physical-output route (CAP-N30) carries. The monitor bus
+/// keeps its own dedicated device (`Settings.monitor_device`); these routes
+/// send the **program buses** — the master mix and the six track buses — to
+/// *additional* physical outputs (a hardware-recorder feed, a confidence
+/// speaker in another room, or a headphone cue built on a spare track bus).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "bus", rename_all = "camelCase")]
+pub enum OutputBus {
+    /// The program (master) mix.
+    Master,
+    /// One of the six track buses (0-based `index`; 0 = "Track 1").
+    Track { index: u8 },
+}
+
+impl OutputBus {
+    /// A stable, compact key for wire/UI use: `"master"` or `"track1"`..`"track6"`.
+    pub fn key(&self) -> String {
+        match self {
+            OutputBus::Master => "master".to_owned(),
+            OutputBus::Track { index } => format!("track{}", index.saturating_add(1)),
+        }
+    }
+}
+
+/// One physical-output route (CAP-N30): a program [`OutputBus`] → an output
+/// device, with a trim. `device_id` empty = the OS default output. Off by
+/// default — the mixer ships with no routes, so nothing but the monitor bus
+/// reaches a device unless the operator adds one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioOutputRoute {
+    /// The bus this route sends (flattened onto the wire object, so a route is
+    /// `{ "bus": "master", … }` or `{ "bus": "track", "index": 2, … }`).
+    #[serde(flatten)]
+    pub bus: OutputBus,
+    /// The output device name ("" = the OS default), as the OS reports it.
+    #[serde(default)]
+    pub device_id: String,
+    /// Output trim, [`MIN_VOLUME_DB`]..=[`MAX_VOLUME_DB`] dB; the floor is
+    /// silence. 0 dB passes the bus through unchanged.
+    #[serde(default)]
+    pub gain_db: f32,
 }
 
 #[cfg(test)]
@@ -407,5 +568,36 @@ mod tests {
         };
         assert!(settings.track_enabled(5));
         assert!(!settings.track_enabled(6), "there is no track 7");
+    }
+
+    #[test]
+    fn output_bus_keys_are_stable() {
+        assert_eq!(OutputBus::Master.key(), "master");
+        assert_eq!(OutputBus::Track { index: 0 }.key(), "track1");
+        assert_eq!(OutputBus::Track { index: 5 }.key(), "track6");
+    }
+
+    #[test]
+    fn output_route_serializes_flat() {
+        // The bus flattens onto the route object so the wire stays flat.
+        let master = AudioOutputRoute {
+            bus: OutputBus::Master,
+            device_id: "Speakers".to_owned(),
+            gain_db: -3.0,
+        };
+        let json = serde_json::to_value(&master).unwrap();
+        assert_eq!(json["bus"], "master");
+        assert_eq!(json["deviceId"], "Speakers");
+        let track = AudioOutputRoute {
+            bus: OutputBus::Track { index: 2 },
+            device_id: String::new(),
+            gain_db: 0.0,
+        };
+        let json = serde_json::to_value(&track).unwrap();
+        assert_eq!(json["bus"], "track");
+        assert_eq!(json["index"], 2);
+        // Round-trips.
+        let back: AudioOutputRoute = serde_json::from_value(json).unwrap();
+        assert_eq!(back, track);
     }
 }

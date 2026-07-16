@@ -8,17 +8,19 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fcap_scene::{AudioSettings, MonitorMode, SourceId};
+use fcap_scene::{AudioOutputRoute, AudioSettings, MonitorMode, OutputBus, SourceId};
 use parking_lot::Mutex;
 
-use crate::capture::{open_capture, CaptureStream};
+use crate::capture::{open_capture, CaptureRing, CaptureStream};
 use crate::graph::{MixerCore, StripControl, TransitionDuck};
 use crate::meter::Levels;
 use crate::monitor::{open_monitor, MonitorStream};
+use crate::spectrum::SpectrumAnalyzer;
 use crate::{AudioError, InputSpec, BLOCK_FRAMES};
 
 const TICK: Duration = Duration::from_millis(10);
-/// Backoff between monitor-device (re)open attempts after a failure/break.
+/// Backoff between output-device (re)open attempts after a failure/break —
+/// shared by the monitor and the CAP-N30 program-bus routes.
 const MONITOR_RETRY: Duration = Duration::from_secs(2);
 const BLOCK_SAMPLES: usize = BLOCK_FRAMES * 2;
 /// The calibration tap's sample cap (~40 s of 10 ms blocks) — a workbench
@@ -29,6 +31,17 @@ const CALIBRATION_MAX_SAMPLES: usize = 4_096;
 const PREBUFFER_SAMPLES: usize = BLOCK_SAMPLES * 3; // 30 ms
 /// Past this the ring is trimmed back (device clock running fast).
 const MAX_BUFFER_SAMPLES: usize = BLOCK_SAMPLES * 12; // 120 ms
+
+/// Linear gain for an output-route trim (CAP-N30), with the fader floor =
+/// silence: a trim parked at the bottom mutes the route rather than passing
+/// −60 dB through.
+fn output_gain(gain_db: f32) -> f32 {
+    if !gain_db.is_finite() || gain_db <= fcap_scene::MIN_VOLUME_DB + 0.01 {
+        0.0
+    } else {
+        crate::dsp::db_to_lin(gain_db)
+    }
+}
 
 /// One audio source the engine should run.
 #[derive(Debug, Clone)]
@@ -70,6 +83,38 @@ pub struct SourceSnapshot {
     pub gated: bool,
 }
 
+/// One CAP-N30 program-bus output route that could not open its device — the
+/// route is configured but currently silent (the UI flags it in the matrix).
+#[derive(Debug, Clone)]
+pub struct OutputRouteError {
+    pub bus: OutputBus,
+    pub message: String,
+}
+
+/// The CAP-N35 live spectrum of the armed source: log-spaced magnitude bins
+/// (dBFS) plus the source it belongs to, so a stale editor ignores it.
+#[derive(Debug, Clone)]
+pub struct SpectrumSnapshot {
+    pub source: SourceId,
+    pub magnitudes: Vec<f32>,
+}
+
+/// One filter's live meter (the armed strip's plugin editor): linear in/out
+/// peaks; the UI derives gain reduction as 20·log10(out/in).
+#[derive(Debug, Clone, Copy)]
+pub struct FilterMeter {
+    pub id: fcap_scene::AudioFilterId,
+    pub in_peak: f32,
+    pub out_peak: f32,
+}
+
+/// The armed strip's per-filter meters + the source they belong to.
+#[derive(Debug, Clone)]
+pub struct FilterMetersSnapshot {
+    pub source: SourceId,
+    pub meters: Vec<FilterMeter>,
+}
+
 /// What the app polls and pushes to the UI (~20 Hz).
 #[derive(Debug, Clone, Default)]
 pub struct EngineSnapshot {
@@ -79,6 +124,13 @@ pub struct EngineSnapshot {
     pub lufs_short_term: Option<f32>,
     /// The monitor device failed (monitoring is requested but silent).
     pub monitor_error: Option<String>,
+    /// CAP-N30 program-bus routes that failed to open their device.
+    pub output_errors: Vec<OutputRouteError>,
+    /// CAP-N35 live spectrum of the armed source, when a parametric-EQ editor
+    /// is open (`None` when nothing is armed — costs nothing otherwise).
+    pub spectrum: Option<SpectrumSnapshot>,
+    /// Per-filter live meters for the strip whose filter editor is open.
+    pub filter_meters: Option<FilterMetersSnapshot>,
     /// Total capture samples dropped across sources (ring overflows).
     pub dropped: u64,
 }
@@ -100,6 +152,22 @@ pub struct RecordTap {
 enum Cmd {
     Sources(Vec<SourceConfig>),
     MonitorDevice(String),
+    /// The CAP-N30 program-bus output routes (master / track buses → physical
+    /// output devices). Replaces the whole set; empty = today's behavior
+    /// (only the monitor bus reaches a device).
+    AudioOutputs(Vec<AudioOutputRoute>),
+    /// Arm (`Some`) or disarm (`None`) the CAP-N35 spectrum tap on one source —
+    /// the strip whose parametric-EQ editor is open.
+    Spectrum(Option<SourceId>),
+    /// Arm (`Some`) or disarm (`None`) per-filter metering on one source — the
+    /// strip whose filter editor is open (the plugin meters).
+    MeterTarget(Option<SourceId>),
+    /// Arm (`Some((target_lufs, ceiling_db))`) or disarm (`None`) the CAP-N34
+    /// loudness rider over the program.
+    Loudness(Option<(f32, f32)>),
+    /// The CAP-N37 soundboard auto-duck trigger set (currently-playing auto-duck
+    /// pad source ids). Empty = idle.
+    SoundboardDuck(Vec<SourceId>),
     Keys {
         id: SourceId,
         ptt_held: bool,
@@ -172,6 +240,32 @@ impl AudioEngine {
         let _ = self.tx.send(Cmd::MonitorDevice(device_id));
     }
 
+    /// Replace the CAP-N30 program-bus output routes (master / track buses →
+    /// physical output devices). An empty set routes nothing but the monitor.
+    pub fn set_audio_outputs(&self, routes: Vec<AudioOutputRoute>) {
+        let _ = self.tx.send(Cmd::AudioOutputs(routes));
+    }
+
+    /// Arm (or clear with `None`) the CAP-N35 spectrum tap on one source.
+    pub fn set_spectrum_target(&self, source: Option<SourceId>) {
+        let _ = self.tx.send(Cmd::Spectrum(source));
+    }
+
+    /// Arm (or clear with `None`) per-filter metering on one source.
+    pub fn set_meter_target(&self, source: Option<SourceId>) {
+        let _ = self.tx.send(Cmd::MeterTarget(source));
+    }
+
+    /// Arm (or clear with `None`) the CAP-N34 loudness rider over the program.
+    pub fn set_loudness(&self, spec: Option<(f32, f32)>) {
+        let _ = self.tx.send(Cmd::Loudness(spec));
+    }
+
+    /// Set the CAP-N37 soundboard auto-duck trigger set (empty = idle).
+    pub fn set_soundboard_duck(&self, triggers: Vec<SourceId>) {
+        let _ = self.tx.send(Cmd::SoundboardDuck(triggers));
+    }
+
     /// Update a source's push-to-talk / push-to-mute key state.
     pub fn set_key_state(&self, id: SourceId, ptt_held: bool, ptm_held: bool) {
         let _ = self.tx.send(Cmd::Keys {
@@ -234,6 +328,34 @@ struct SourceRuntime {
     ptm_held: bool,
 }
 
+/// One CAP-N30 program-bus route the engine keeps a device open for. Mirrors
+/// the monitor's open/retry/broken bookkeeping so a route survives an
+/// unplug/replug the same way monitoring does.
+struct OutputRuntime {
+    route: AudioOutputRoute,
+    stream: Option<MonitorStream>,
+    /// Cached linear trim (`output_gain(route.gain_db)`).
+    gain: f32,
+    error: Option<String>,
+    /// When to next attempt an open after a failure/break.
+    next_retry: Instant,
+    /// Reused scaled block, so applying the trim allocates nothing per tick.
+    scratch: Vec<f32>,
+}
+
+impl OutputRuntime {
+    fn new(route: AudioOutputRoute) -> Self {
+        Self {
+            gain: output_gain(route.gain_db),
+            route,
+            stream: None,
+            error: None,
+            next_retry: Instant::now(),
+            scratch: Vec::with_capacity(BLOCK_SAMPLES),
+        }
+    }
+}
+
 impl SourceRuntime {
     /// This runtime's ring's cumulative dropped-sample count (0 if no stream).
     fn dropped(&self) -> u64 {
@@ -273,6 +395,26 @@ fn run(
     let mut monitor: Option<MonitorStream> = None;
     let mut monitor_device = String::new();
     let mut monitor_error: Option<String> = None;
+    // CAP-N30 program-bus output routes (master / track buses → physical
+    // devices). Empty by default — nothing but the monitor reaches a device.
+    let mut outputs: Vec<OutputRuntime> = Vec::new();
+    // CAP-N35 spectrum tap: the armed source (a strip's EQ editor is open) and
+    // its rolling analyzer. `None` = nothing armed, so this costs nothing.
+    let mut spectrum_target: Option<SourceId> = None;
+    // The armed source's strip key, cached on arm so the per-block tap avoids a
+    // `to_string()` allocation every 10 ms tick.
+    let mut spectrum_key: Option<String> = None;
+    let mut spectrum = SpectrumAnalyzer::new();
+    // The strip whose filter editor is open (per-filter plugin meters).
+    let mut meter_target: Option<SourceId> = None;
+    // CAP-N34 loudness rider config currently armed (rebuild only on change).
+    let mut loudness_spec: Option<(f32, f32)> = None;
+    // CAP-N39 mix-minus return rings, HELD so the per-block publish never
+    // re-locks the media hub or reallocates a swept ring (the hub is a
+    // per-reconcile lookup, not per-block). Rebuilt only when the guest set
+    // changes; `mixminus_present` is a reused scratch to prune departed guests.
+    let mut mixminus_rings: HashMap<SourceId, Arc<CaptureRing>> = HashMap::new();
+    let mut mixminus_present: Vec<SourceId> = Vec::new();
     // When to next attempt a monitor (re)open — a broken/failed device is
     // retried on this backoff instead of never (the reopen must not spin every
     // 10 ms tick).
@@ -337,6 +479,49 @@ fn run(
                         next_monitor_retry = Instant::now();
                     }
                 }
+                Ok(Cmd::AudioOutputs(routes)) => {
+                    // Reconcile in place: a route whose device is unchanged
+                    // keeps its open stream (a trim edit never reopens); a
+                    // changed device reopens; a dropped route closes.
+                    let mut next: Vec<OutputRuntime> = Vec::with_capacity(routes.len());
+                    for route in routes {
+                        match outputs.iter().position(|out| out.route.bus == route.bus) {
+                            Some(pos) => {
+                                let mut existing = outputs.swap_remove(pos);
+                                if existing.route.device_id != route.device_id {
+                                    existing.stream = None; // device changed → reopen
+                                    existing.error = None;
+                                    existing.next_retry = Instant::now();
+                                }
+                                existing.gain = output_gain(route.gain_db);
+                                existing.route = route;
+                                next.push(existing);
+                            }
+                            None => next.push(OutputRuntime::new(route)),
+                        }
+                    }
+                    outputs = next; // dropped runtimes close their streams
+                }
+                Ok(Cmd::Spectrum(target)) => {
+                    if target != spectrum_target {
+                        spectrum_key = target.as_ref().map(|id| id.0.to_string());
+                        spectrum_target = target;
+                        spectrum.clear(); // fresh history on a re-arm
+                    }
+                }
+                Ok(Cmd::MeterTarget(target)) => {
+                    if target != meter_target {
+                        meter_target = target;
+                        core.set_meter_target(target);
+                    }
+                }
+                Ok(Cmd::Loudness(spec)) => {
+                    if spec != loudness_spec {
+                        loudness_spec = spec;
+                        core.set_loudness(spec); // keeps the rider on an unchanged re-arm
+                    }
+                }
+                Ok(Cmd::SoundboardDuck(triggers)) => core.set_soundboard_duck(triggers),
                 Ok(Cmd::Keys {
                     id,
                     ptt_held,
@@ -469,6 +654,32 @@ fn run(
             }
         });
 
+        // -- CAP-N35 spectrum tap: feed the armed source's post-chain block
+        //    (post-EQ — the analyzer shows what the strip actually outputs) ----
+        if let Some(key) = &spectrum_key {
+            if let Some(block) = core.strip_block(key) {
+                spectrum.push(block);
+            }
+        }
+
+        // -- CAP-N39 mix-minus: publish each guest's N−1 return into a hub ring
+        //    (`mixminus:<id>`) the remote transport drains as their echo-free
+        //    return. The ring Arc is HELD across ticks, so the common case is a
+        //    map hit + push — no hub lock, no `format!`, and (critically) no
+        //    realloc of a swept ring when the guest's consumer is offline.
+        mixminus_present.clear();
+        core.for_each_mix_minus(|id, block| {
+            let ring = mixminus_rings
+                .entry(id)
+                .or_insert_with(|| crate::media_hub::ring(&format!("mixminus:{}", id.0)));
+            ring.push(block);
+            mixminus_present.push(id);
+        });
+        // A guest left → drop our Arc so its ring frees once the consumer does.
+        if mixminus_rings.len() != mixminus_present.len() {
+            mixminus_rings.retain(|id, _| mixminus_present.contains(id));
+        }
+
         // -- the recording tap (P4): every block, whether sources exist or
         //    not — a video-only scene records silent tracks, correctly ------
         if let Some(tap) = &mut record_tap {
@@ -532,6 +743,58 @@ fn run(
             next_monitor_retry = Instant::now();
         }
 
+        // -- CAP-N30 program-bus output routes ---------------------------------
+        // Each configured route holds its output device open (a hardware-
+        // recorder feed / other-room speakers want to stay fed), pushing its
+        // bus's block — trimmed — every tick. A device that fails or dies is
+        // retried on the shared backoff, never abandoned. The buses read here
+        // are post-duck, post-mix — exactly what records and streams.
+        let now = Instant::now();
+        for out in outputs.iter_mut() {
+            if out.stream.is_none() && now >= out.next_retry {
+                match open_monitor(&out.route.device_id) {
+                    Ok(stream) => {
+                        out.stream = Some(stream);
+                        out.error = None;
+                    }
+                    Err(err) => {
+                        out.error = Some(err.to_string());
+                        out.next_retry = now + MONITOR_RETRY;
+                    }
+                }
+            }
+            let Some(stream) = &mut out.stream else {
+                continue;
+            };
+            if stream.is_broken() {
+                out.stream = None;
+                out.error = Some("the output device stream ended".into());
+                out.next_retry = now + MONITOR_RETRY;
+                continue;
+            }
+            let bus = match out.route.bus {
+                OutputBus::Master => core.master(),
+                OutputBus::Track { index } => {
+                    let index = index as usize;
+                    if index < fcap_scene::TRACK_COUNT {
+                        core.track(index)
+                    } else {
+                        continue; // clamp keeps this unreachable; stay safe
+                    }
+                }
+            };
+            if (out.gain - 1.0).abs() < 1e-4 {
+                stream.push(bus);
+            } else {
+                out.scratch.clear();
+                out.scratch.extend_from_slice(bus);
+                for sample in out.scratch.iter_mut() {
+                    *sample *= out.gain;
+                }
+                stream.push(&out.scratch);
+            }
+        }
+
         // -- publish the snapshot ----------------------------------------------
         let mut snapshot_sources = HashMap::with_capacity(sources.len());
         for (id, runtime) in sources.iter() {
@@ -556,12 +819,40 @@ fn run(
             );
         }
         let (lufs_momentary, lufs_short_term) = core.lufs();
+        let output_errors = outputs
+            .iter()
+            .filter_map(|out| {
+                out.error.clone().map(|message| OutputRouteError {
+                    bus: out.route.bus,
+                    message,
+                })
+            })
+            .collect();
+        let spectrum_out = spectrum_target.map(|source| SpectrumSnapshot {
+            source,
+            magnitudes: spectrum.magnitudes(),
+        });
+        let filter_meters_out = meter_target.map(|source| FilterMetersSnapshot {
+            source,
+            meters: core
+                .filter_meters()
+                .iter()
+                .map(|&(id, in_peak, out_peak)| FilterMeter {
+                    id,
+                    in_peak,
+                    out_peak,
+                })
+                .collect(),
+        });
         *shared.lock() = EngineSnapshot {
             sources: snapshot_sources,
             master: core.take_master_levels(),
             lufs_momentary,
             lufs_short_term,
             monitor_error: monitor_error.clone(),
+            output_errors,
+            spectrum: spectrum_out,
+            filter_meters: filter_meters_out,
             dropped: retired_dropped + dropped_total,
         };
 
@@ -575,5 +866,21 @@ fn run(
         if next_tick + Duration::from_millis(100) < Instant::now() {
             next_tick = Instant::now() + TICK;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::output_gain;
+    use fcap_scene::{MAX_VOLUME_DB, MIN_VOLUME_DB};
+
+    #[test]
+    fn output_trim_floor_is_silence_and_unity_passes() {
+        assert_eq!(output_gain(MIN_VOLUME_DB), 0.0, "the trim floor mutes");
+        assert_eq!(output_gain(f32::NAN), 0.0, "a non-finite trim mutes");
+        assert!((output_gain(0.0) - 1.0).abs() < 1e-6, "0 dB = unity");
+        let half = output_gain(-6.0);
+        assert!((half - 0.501).abs() < 0.01, "-6 dB ~ 0.5, got {half}");
+        assert!(output_gain(MAX_VOLUME_DB) > 1.0, "positive trim boosts");
     }
 }

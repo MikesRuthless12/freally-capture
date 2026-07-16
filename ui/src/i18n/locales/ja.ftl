@@ -465,6 +465,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = モニター
 mixer-monitor-device-aria = モニター出力デバイス
 mixer-default-output = デフォルト出力
+mixer-routing = ルーティング
+mixer-routing-title = オーディオ出力ルーティング
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = オーディオルーティング
+routing-intro = ストリップをトラックバスに割り当て、任意のバスを物理出力に送ります — ハードウェアレコーダーへの送り、別室のスピーカー、空きトラックでのヘッドフォンキューなど。モニターは独自のデバイスを保持し、これらのルートはその上に追加されるため、何も設定しなければミックスは変わりません。
+routing-sends-title = トラックへの送り
+routing-no-strips = このシーンには音声ソースがありません。
+routing-source = ソース
+routing-track = トラック { $n }
+routing-send-aria = { $source } をトラック { $n } に送る
+routing-outputs-title = 物理出力
+routing-master = マスター
+routing-off = オフ
+routing-default-output = デフォルト出力
+routing-device-aria = { $bus } の出力デバイス
+routing-trim-aria = { $bus } の出力トリム
+routing-trim-db = { $db } dB
+routing-muted = ミュート
+routing-device-error = デバイスを利用できません
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = ダッキング
+mixer-ducking-title = ダッキングマトリクス
+ducking-title = ダッキングマトリクス
+ducking-intro = どのソースでも他のソースをダッキングできます。トリガー（行）が鳴るたびに、セルがターゲット（列）を下げます。セルを選んで、深さ・スレッショルド・タイミングを設定してください。各ペアはそれぞれ独立したダッキングなので、1つのストリップを複数のトリガーで同時にダッキングできます。
+ducking-need-two = ダッキングを行うには、オーディオソースを2つ以上追加してください。
+ducking-trigger-target = トリガー ↓ / ターゲット →
+ducking-cell-aria = { $trigger } が { $target } をダッキング
+ducking-pair = { $trigger } → { $target }
+ducking-remove = 削除
+ducking-amount = 量
+ducking-threshold = スレッショルド
+ducking-attack = アタック
+ducking-release = リリース
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = ラウドネス正規化
+loudness-intro = ピーク上限を設けながら、プログラムをラウドネスターゲットへ緩やかに寄せて、配信と録画を一定のレベルに揃えます。ゆっくり穏やかに — 誘導するだけで、決してポンピングしません。
+loudness-enable = プログラムをターゲットへ誘導
+loudness-target = ターゲット
+loudness-target-option = { $target } LUFS
+loudness-ceiling = ピーク上限（dBFS）
+loudness-note = −14 LUFS は YouTube 系の再生に適しています。−16 は一般的な配信ターゲットです。−23 は EBU R128 の放送向けです。録画後の正規化アクションでも同じターゲットが使われます。
+loudness-on = LUFS { $target }
+loudness-off = 正規化オフ
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = サウンドボード
+mixer-soundboard-title = サウンドボード
+soundboard-title = サウンドボード
+soundboard-add-pad = + パッド
+soundboard-stop-all = すべて停止
+soundboard-edit = 編集
+soundboard-empty = まだパッドがありません — 追加してローカルの音声クリップを割り当ててください。
+soundboard-new-pad = 新規パッド
+soundboard-no-clip = クリップなし
+soundboard-audio-files = オーディオファイル
+soundboard-name = 名前
+soundboard-choose-clip = クリップを選択…
+soundboard-gain = ゲイン
+soundboard-choke = チョーク
+soundboard-choke-none = なし
+soundboard-loop = ループ
+soundboard-auto-duck = オートダッキング
+soundboard-tracks = トラック
+soundboard-hotkey = ホットキー
+soundboard-hotkey-placeholder = 例: Ctrl+Shift+1
+soundboard-remove = 削除
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = プラグイン
+mixer-plugins-title = 音声プラグイン (CLAP / VST3)
+plugins-title = 音声プラグイン
+plugins-scanning = スキャン中…
+plugins-none = 標準フォルダーに CLAP または VST3 プラグインが見つかりませんでした。
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -550,6 +628,10 @@ channelstrip-solo-source = { $name } をソロ（PFL）
 channelstrip-pan-label = バランス（ダブルクリックでリセット）
 channelstrip-pan-aria = { $name } のバランス
 channelstrip-mono-label = モノラルにダウンミックス
+channelstrip-automix-label = オートミックス（ゲインシェアリング）
+channelstrip-automix-note = ゲインシェアリング：ミキサーはすべてのオートミックス・ストリップの合計レベルを一定に保ち、それを話している人に受け渡します — 複数マイクのパネルやポッドキャストに最適です。ストリップを追加するまではオフです。
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = このソースのためにエコーのない返しを生成します — このソース自身を除く、プログラム内の全員。リモートゲストに使えば、自分の遅れた声を聞かずに済みます。
 channelstrip-ptt-hotkey = プッシュトゥトークのホットキー（押している間だけ発声）
 channelstrip-ptt-placeholder = 例: Ctrl+Shift+T または F13
 channelstrip-ptt-aria = プッシュトゥトークのホットキー
@@ -784,7 +866,36 @@ audiofilters-name-limiter = リミッター
 audiofilters-name-eq = 3バンドEQ
 audiofilters-name-denoise = ノイズ抑制
 audiofilters-name-ducking = ダッキング
+audiofilters-name-parametric-eq = パラメトリックEQ
+audiofilters-name-de-esser = ディエッサー
+audiofilters-name-rumble-guard = ランブルフィルター
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = プリセット
+audiofilters-voice-preset-pick = ボイスプリセット…
+audiofilters-voice-broadcast = 放送ボイス
+audiofilters-voice-podcast = ポッドキャストボイス
+audiofilters-voice-clean = クリーンボイス
+audiofilters-voice-none = チェーンをクリア
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = 歯擦音の周波数 (Hz)
+audiofilters-deesser-amount = 最大リダクション (dB)
+audiofilters-rumble-freq = ローカット (Hz)
 audiofilters-title = 音声フィルタ — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = ライブスペクトラム付きパラメトリックEQ特性カーブ
+eq-band-type = タイプ
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + バンド
+eq-remove-band = バンドを削除
+eq-type-bell = ベル
+eq-type-lowShelf = ローシェルフ
+eq-type-highShelf = ハイシェルフ
+eq-type-notch = ノッチ
+eq-type-highPass = ハイパス
+eq-type-lowPass = ローパス
 audiofilters-chain-header = フィルタチェーン（上が先に、フェーダーの前に実行）
 audiofilters-add = + フィルタを追加
 audiofilters-add-menu = 音声フィルタを追加
@@ -1006,6 +1117,23 @@ recordings-cancel = キャンセル
 recordings-export-cancelled = エクスポートをキャンセルしました。
 recordings-exported-to = { $path } にエクスポートしました
 recordings-remuxed-to = { $path } にRemuxしました
+recordings-normalize = 正規化
+recordings-normalizing = 正規化中…
+recordings-normalize-title = ラウドネスをターゲットに正規化（コピーを書き出します）
+recordings-normalized-to = { $path } に正規化しました
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = 音声のみ
+audiorec-format = 音声録音フォーマット
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = 音声を録音
+audiorec-stop = 停止
+audiorec-pause = 一時停止
+audiorec-resume = 再開
+audiorec-recording = REC { $sec }秒
+audiorec-saved = { $count } 個のトラックファイルを保存しました
 
 
 # --- OpenedFrec.tsx ---

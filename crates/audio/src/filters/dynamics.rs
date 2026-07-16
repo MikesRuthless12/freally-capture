@@ -195,6 +195,13 @@ impl Limiter {
             reduction_db: 0.0,
         }
     }
+
+    /// Move the ceiling in place, keeping the running reduction state (so a live
+    /// ceiling edit doesn't reset the limiter).
+    pub fn set_ceiling(&mut self, ceiling_db: f32) {
+        self.ceiling_db = ceiling_db;
+        self.ceiling_lin = db_to_lin(ceiling_db);
+    }
 }
 
 impl FilterProc for Limiter {

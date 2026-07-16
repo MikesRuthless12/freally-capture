@@ -121,7 +121,8 @@ the other wire-codec tooling. (Default recording uses hardware encoders or the o
 | Component | Role | License | Notes |
 |-----------|------|---------|-------|
 | **NDI** SDK | optional networked source/output | NewTek/NDI SDK terms | optional; driven, not vendored; clearly labeled |
-| **VST2/VST3** plugins (host) | optional audio plugins | Steinberg VST SDK terms | the user's own plugins; the host integration is behind an interface |
+| **CLAP** plugin standard (host) | optional audio plugins (CAP-N33) | **MIT** | the user's own plugins; discovery is local-dir/opt-in; hosting runs in a crash-isolated process behind an interface |
+| **VST3** plugins (host) | optional audio plugins | **MIT** (VST 3.8 SDK, Steinberg, 2025-10-29) | relicensed from GPLv3-or-proprietary to MIT — a $0-clean host path like CLAP; behind the same interface. Legacy **VST2** stays out (Steinberg withdrew its SDK) |
 
 ## Codec / patent note
 

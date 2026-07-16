@@ -9,15 +9,16 @@
 //! what actually mixes (post-gain: a muted strip meters flat); the LUFS meter
 //! reads the master.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use fcap_scene::{AudioSettings, MonitorMode, SourceId, MIN_VOLUME_DB, TRACK_COUNT};
 
-use fcap_scene::AudioFilter;
+use fcap_scene::{AudioFilter, AudioFilterId};
 
 use crate::delay::DelayLine;
 use crate::dsp::{db_to_lin, one_pole_coef};
 use crate::filters::{build_chain, enabled_filters, reconcile_chain, FilterCtx, FilterProc};
+use crate::loudness::LoudnessRider;
 use crate::lufs::LufsMeter;
 use crate::meter::{LevelAccumulator, Levels};
 use crate::{BLOCK_FRAMES, SAMPLE_RATE};
@@ -25,6 +26,32 @@ use crate::{BLOCK_FRAMES, SAMPLE_RATE};
 const BLOCK_SAMPLES: usize = BLOCK_FRAMES * 2;
 /// Per-block envelope fall (~35 ms) for the ducker sidechain.
 const ENVELOPE_FALL: f32 = 0.6;
+/// Below this the automix group counts as silent and shares gain equally
+/// (CAP-N32) — so a talker's first syllable rises from a partly-open channel
+/// instead of from zero.
+const AUTOMIX_FLOOR: f32 = 1e-4;
+/// CAP-N37 soundboard auto-duck: how far the rest of the mix dips while an
+/// auto-duck pad plays, and the trigger level that engages it.
+const SB_DUCK_DEPTH_DB: f32 = 12.0;
+const SB_DUCK_THRESHOLD_DB: f32 = -35.0;
+/// The mixer's block rate (48 kHz / 480 frames = 100 Hz) — for per-block ramps.
+const BLOCK_RATE: f32 = SAMPLE_RATE as f32 / BLOCK_FRAMES as f32;
+
+/// Dugan-style gain-sharing (CAP-N32): one channel's gain is its share of the
+/// group's total level. Across the group these sum to ~1 (constant total gain),
+/// so the mix goes to whoever is loudest; at rest everyone holds an equal share.
+/// `env` is this channel's level, `group_sum` the group's total, `group_len` its
+/// size.
+fn automix_share(env: f32, group_sum: f32, group_len: usize) -> f32 {
+    if group_len == 0 {
+        return 1.0;
+    }
+    if group_sum <= AUTOMIX_FLOOR {
+        1.0 / group_len as f32
+    } else {
+        (env / group_sum).clamp(0.0, 1.0)
+    }
+}
 
 /// The fader curve: the bottom of the fader is silence, everything else dB.
 fn fader_gain(volume_db: f32) -> f32 {
@@ -89,6 +116,9 @@ struct Strip {
     chain_filters: Vec<AudioFilter>,
     meter: LevelAccumulator,
     envelope: f32,
+    /// Prev-block **pre-fader** peak — the CAP-N32 automix level detector. It's
+    /// pre-fader so the automix gain never feeds back into its own detector.
+    automix_env: f32,
     gain: f32,
     scratch: Vec<f32>,
 }
@@ -102,6 +132,7 @@ impl Strip {
             chain_filters: enabled_filters(&settings.filters),
             meter: LevelAccumulator::default(),
             envelope: 0.0,
+            automix_env: 0.0,
             gain: 0.0,
             scratch: vec![0.0; BLOCK_SAMPLES],
         }
@@ -174,6 +205,8 @@ fn apply_frame_gain(bus: &mut [f32], gain: &[f32]) {
 pub struct MixerCore {
     strips: HashMap<SourceId, Strip>,
     envelopes: HashMap<SourceId, f32>,
+    /// Prev block's pre-fader automix level per source (CAP-N32 detector).
+    automix_envelopes: HashMap<SourceId, f32>,
     tracks: Vec<Vec<f32>>,
     master: Vec<f32>,
     monitor: Vec<f32>,
@@ -190,6 +223,24 @@ pub struct MixerCore {
     duck_reduction_db: f32,
     /// Reused per-frame duck gain, so the same curve hits master + every track.
     duck_gain: Vec<f32>,
+    /// CAP-N34 loudness rider over the program buses; `None` when disarmed.
+    loudness: Option<LoudnessRider>,
+    /// CAP-N37 soundboard auto-duck: the trigger pad source ids + the smoothed
+    /// reduction the rest of the mix currently gets. Empty triggers = idle.
+    sb_triggers: HashSet<SourceId>,
+    sb_reduction_db: f32,
+    sb_threshold_lin: f32,
+    sb_attack_coef: f32,
+    sb_release_coef: f32,
+    /// CAP-N39 mix-minus: one N−1 bus (everything minus itself) per source
+    /// flagged `mix_minus` — the echo-free return for a remote guest. Empty
+    /// unless some source opts in.
+    mix_minus: HashMap<SourceId, Vec<f32>>,
+    /// The strip whose filter editor is open — the only one metered per filter
+    /// (0.51-line plugin meters). `None` = nothing armed, so this costs nothing.
+    meter_target: Option<SourceId>,
+    /// The armed strip's per-filter `(id, in_peak, out_peak)` this block.
+    filter_meters: Vec<(AudioFilterId, f32, f32)>,
 }
 
 impl Default for MixerCore {
@@ -203,6 +254,7 @@ impl MixerCore {
         Self {
             strips: HashMap::new(),
             envelopes: HashMap::new(),
+            automix_envelopes: HashMap::new(),
             tracks: vec![vec![0.0; BLOCK_SAMPLES]; TRACK_COUNT],
             master: vec![0.0; BLOCK_SAMPLES],
             monitor: vec![0.0; BLOCK_SAMPLES],
@@ -215,6 +267,63 @@ impl MixerCore {
             duck_env: 0.0,
             duck_reduction_db: 0.0,
             duck_gain: vec![1.0; BLOCK_FRAMES],
+            loudness: None,
+            sb_triggers: HashSet::new(),
+            sb_reduction_db: 0.0,
+            sb_threshold_lin: db_to_lin(SB_DUCK_THRESHOLD_DB),
+            sb_attack_coef: one_pole_coef(40.0, BLOCK_RATE),
+            sb_release_coef: one_pole_coef(300.0, BLOCK_RATE),
+            mix_minus: HashMap::new(),
+            meter_target: None,
+            filter_meters: Vec::new(),
+        }
+    }
+
+    /// Arm (or clear) per-filter metering on one source — the strip whose filter
+    /// editor is open. Only that strip measures per-filter levels.
+    pub fn set_meter_target(&mut self, target: Option<SourceId>) {
+        self.meter_target = target;
+        if target.is_none() {
+            self.filter_meters.clear();
+        }
+    }
+
+    /// The armed strip's per-filter `(id, in_peak, out_peak)` from the last
+    /// block (linear peaks; the UI derives gain reduction as 20·log10(out/in)).
+    pub fn filter_meters(&self) -> &[(AudioFilterId, f32, f32)] {
+        &self.filter_meters
+    }
+
+    /// One source's CAP-N39 mix-minus (N−1) return block, if it opted in.
+    pub fn mix_minus_bus(&self, id: SourceId) -> Option<&[f32]> {
+        self.mix_minus.get(&id).map(|bus| bus.as_slice())
+    }
+
+    /// Visit every produced mix-minus return (id, N−1 block) — the engine
+    /// hands these to the remote transport as each guest's echo-free return.
+    pub fn for_each_mix_minus(&self, mut visit: impl FnMut(SourceId, &[f32])) {
+        for (id, bus) in &self.mix_minus {
+            visit(*id, bus);
+        }
+    }
+
+    /// Set the CAP-N37 soundboard auto-duck trigger set (the currently-playing
+    /// auto-duck pad source ids). Empty = the auto-duck is idle.
+    pub fn set_soundboard_duck(&mut self, triggers: Vec<SourceId>) {
+        self.sb_triggers = triggers.into_iter().collect();
+    }
+
+    /// Arm (`Some((target_lufs, ceiling_db))`) or disarm (`None`) the CAP-N34
+    /// loudness rider. A target/ceiling edit while armed **retunes in place** so
+    /// the slow gain (and LUFS history) carries — only arming from disarmed
+    /// builds a fresh rider at unity.
+    pub fn set_loudness(&mut self, spec: Option<(f32, f32)>) {
+        match spec {
+            Some((target, ceiling)) => match &mut self.loudness {
+                Some(rider) => rider.retune(target, ceiling),
+                None => self.loudness = Some(LoudnessRider::new(target, ceiling)),
+            },
+            None => self.loudness = None,
         }
     }
 
@@ -229,6 +338,8 @@ impl MixerCore {
         // Reconcile the strip set with the control set.
         self.strips.retain(|id, _| controls.contains_key(id));
         self.envelopes.retain(|id, _| controls.contains_key(id));
+        self.automix_envelopes
+            .retain(|id, _| controls.contains_key(id));
         for (id, control) in controls {
             match self.strips.get_mut(id) {
                 Some(strip) => strip.reconcile(&control.settings),
@@ -238,6 +349,17 @@ impl MixerCore {
             }
         }
 
+        // The per-filter meter probe below only runs while the armed source is
+        // in `controls`; if it left the scene with its editor still open, clear
+        // the meters so the snapshot stops publishing frozen values.
+        if self
+            .meter_target
+            .as_ref()
+            .is_some_and(|id| !controls.contains_key(id))
+        {
+            self.filter_meters.clear();
+        }
+
         for track in &mut self.tracks {
             track.fill(0.0);
         }
@@ -245,10 +367,62 @@ impl MixerCore {
         self.monitor.fill(0.0);
 
         let mut next_envelopes: HashMap<SourceId, f32> = HashMap::with_capacity(controls.len());
+        let mut next_automix_envelopes: HashMap<SourceId, f32> =
+            HashMap::with_capacity(controls.len());
 
         // CAP-M19 PFL: while ANY strip is soloed, the monitor bus carries
         // ONLY soloed strips — the program/track mix never changes.
         let any_solo = controls.values().any(|control| control.settings.solo);
+
+        // CAP-N32 gain-sharing: from the automix group's PREVIOUS-block levels
+        // (pre-fader, so the automix gain never feeds its own detector) — one
+        // pass for the size + total; each member's share is computed inline in
+        // the fader stage below (no per-block map).
+        let mut automix_len = 0usize;
+        let mut automix_sum = 0.0f32;
+        for (id, control) in controls {
+            if control.settings.automix {
+                automix_len += 1;
+                automix_sum += self.automix_envelopes.get(id).copied().unwrap_or(0.0);
+            }
+        }
+
+        // CAP-N37 soundboard auto-duck: while any trigger pad is above the
+        // threshold, dip every non-trigger strip so the pad plays on top. The
+        // per-block reduction ramps (attack/release) to stay click-free.
+        let sb_trigger_env = self
+            .sb_triggers
+            .iter()
+            .filter_map(|id| self.envelopes.get(id).copied())
+            .fold(0.0f32, f32::max);
+        let sb_target = if !self.sb_triggers.is_empty() && sb_trigger_env >= self.sb_threshold_lin {
+            SB_DUCK_DEPTH_DB
+        } else {
+            0.0
+        };
+        let sb_coef = if sb_target > self.sb_reduction_db {
+            self.sb_attack_coef
+        } else {
+            self.sb_release_coef
+        };
+        self.sb_reduction_db += (sb_target - self.sb_reduction_db) * (1.0 - sb_coef);
+        let sb_gain = db_to_lin(-self.sb_reduction_db);
+        let sb_active = self.sb_reduction_db > 1e-3;
+
+        // CAP-N39 mix-minus: keep one cleared N−1 bus per opted-in source.
+        self.mix_minus
+            .retain(|id, _| controls.get(id).is_some_and(|c| c.settings.mix_minus));
+        for (id, control) in controls {
+            if control.settings.mix_minus {
+                self.mix_minus
+                    .entry(*id)
+                    .or_insert_with(|| vec![0.0; BLOCK_SAMPLES]);
+            }
+        }
+        let mix_minus_active = !self.mix_minus.is_empty();
+        for bus in self.mix_minus.values_mut() {
+            bus.fill(0.0);
+        }
 
         for (id, control) in controls {
             let strip = self.strips.get_mut(id).expect("reconciled above");
@@ -272,14 +446,30 @@ impl MixerCore {
             let ctx = FilterCtx {
                 envelopes: &self.envelopes,
             };
-            for filter in &mut strip.chain {
-                filter.process(&mut strip.scratch, &ctx);
+            if self.meter_target == Some(*id) {
+                // The armed strip: measure each filter's in/out peak so the UI
+                // meters (gain reduction / levels) can move. Only one strip is
+                // ever armed, so the extra peak scans are negligible.
+                self.filter_meters.clear();
+                for (proc, filter) in strip.chain.iter_mut().zip(&strip.chain_filters) {
+                    let in_peak = block_peak(&strip.scratch);
+                    proc.process(&mut strip.scratch, &ctx);
+                    let out_peak = block_peak(&strip.scratch);
+                    self.filter_meters.push((filter.id, in_peak, out_peak));
+                }
+            } else {
+                for filter in &mut strip.chain {
+                    filter.process(&mut strip.scratch, &ctx);
+                }
             }
 
             // 3. Mono downmix + stereo balance (CAP-M19; center = unity, so
             //    an untouched pan leaves the mix bit-identical).
             let (left_bal, right_bal) = balance_gains(control.settings.pan);
             let mono = control.settings.mono;
+            // Track the pre-fader peak here (post pan/mono) — the CAP-N32
+            // automix level detector, fed to next block's gain-sharing.
+            let mut prefader_peak = 0.0f32;
             for frame in strip.scratch.chunks_exact_mut(2) {
                 if mono {
                     let mixed = (frame[0] + frame[1]) * 0.5;
@@ -288,7 +478,10 @@ impl MixerCore {
                 }
                 frame[0] *= left_bal;
                 frame[1] *= right_bal;
+                prefader_peak = prefader_peak.max(frame[0].abs()).max(frame[1].abs());
             }
+            strip.automix_env = prefader_peak.max(strip.automix_env * ENVELOPE_FALL);
+            next_automix_envelopes.insert(*id, strip.automix_env);
 
             // 4. PFL (CAP-M19) taps HERE — pre-fader and pre-mute, which is
             //    the whole point of pre-fade listen: cueing a muted or
@@ -298,11 +491,20 @@ impl MixerCore {
                 add_into(&mut self.monitor, &strip.scratch);
             }
 
-            // 5. Mute/PTT/fader, smoothed per sample against clicks.
+            // 5. Mute/PTT/fader, smoothed per sample against clicks. The
+            //    CAP-N32 automix gain (this block's gain-share, 1.0 when the
+            //    strip isn't automixed) folds into the fader target so the same
+            //    smoothing rides it click-free.
+            let automix_gain = if control.settings.automix {
+                let env = self.automix_envelopes.get(id).copied().unwrap_or(0.0);
+                automix_share(env, automix_sum, automix_len)
+            } else {
+                1.0
+            };
             let target = if control.effectively_muted() {
                 0.0
             } else {
-                fader_gain(control.settings.volume_db)
+                fader_gain(control.settings.volume_db) * automix_gain
             };
             let mut peak = 0.0f32;
             for frame in strip.scratch.chunks_exact_mut(2) {
@@ -325,10 +527,26 @@ impl MixerCore {
                 add_into(&mut self.monitor, &strip.scratch);
             }
             if monitor != MonitorMode::MonitorOnly {
-                add_into(&mut self.master, &strip.scratch);
+                // The soundboard duck (CAP-N37) is just a bus gain: non-trigger
+                // strips dip while a pad plays, everything else passes at unity.
+                let bus_gain = if sb_active && !self.sb_triggers.contains(id) {
+                    sb_gain
+                } else {
+                    1.0
+                };
+                add_into_scaled(&mut self.master, &strip.scratch, bus_gain);
                 for (index, track) in self.tracks.iter_mut().enumerate() {
                     if control.settings.track_enabled(index) {
-                        add_into(track, &strip.scratch);
+                        add_into_scaled(track, &strip.scratch, bus_gain);
+                    }
+                }
+                // CAP-N39: this strip feeds every guest's N−1 return except its
+                // own — so each guest hears everyone but themselves.
+                if mix_minus_active {
+                    for (mm_id, bus) in self.mix_minus.iter_mut() {
+                        if *mm_id != *id {
+                            add_into_scaled(bus, &strip.scratch, bus_gain);
+                        }
                     }
                 }
             }
@@ -339,7 +557,15 @@ impl MixerCore {
         // metering, recording, and streaming all see the same duck.
         self.apply_transition_duck();
 
+        // CAP-N34: the loudness rider steers the whole program (master + every
+        // track bus) toward the target, so the display meter below and the
+        // record/stream taps all see the normalized mix.
+        if let Some(rider) = &mut self.loudness {
+            rider.process(&mut self.master, &mut self.tracks);
+        }
+
         self.envelopes = next_envelopes;
+        self.automix_envelopes = next_automix_envelopes;
         self.lufs.push(&self.master);
         self.master_meter.push_block(&self.master);
     }
@@ -443,9 +669,26 @@ impl MixerCore {
     }
 }
 
+/// Peak absolute sample of an interleaved block (the plugin-meter probe).
+fn block_peak(block: &[f32]) -> f32 {
+    block.iter().fold(0.0f32, |acc, s| acc.max(s.abs()))
+}
+
 fn add_into(bus: &mut [f32], block: &[f32]) {
     for (out, sample) in bus.iter_mut().zip(block) {
         *out += sample;
+    }
+}
+
+/// Sum `block` into `bus` scaled by `gain`. Unity gain (the common,
+/// un-ducked path) skips the multiply.
+fn add_into_scaled(bus: &mut [f32], block: &[f32], gain: f32) {
+    if gain == 1.0 {
+        add_into(bus, block);
+        return;
+    }
+    for (out, sample) in bus.iter_mut().zip(block) {
+        *out += sample * gain;
     }
 }
 
@@ -830,6 +1073,223 @@ mod tests {
         assert!(
             peak(core.track(1)) > 0.35,
             "music recovers once the mic is quiet"
+        );
+    }
+
+    /// CAP-N31 ducking matrix: a target can be ducked by MORE than one trigger
+    /// at once (two Ducker filters on one strip). Each trigger's dip stacks —
+    /// the engine N×M path the matrix UI drives is just multiple Duckers.
+    #[test]
+    fn two_triggers_each_duck_the_same_target() {
+        let mut core = MixerCore::new();
+        let mic_a = SourceId::new();
+        let mic_b = SourceId::new();
+        let music = SourceId::new();
+
+        let mut music_settings = AudioSettings {
+            tracks: 0b10, // isolate the target on track 2 to read it cleanly
+            ..AudioSettings::default()
+        };
+        music_settings
+            .filters
+            .push(fcap_scene::AudioFilter::new(AudioFilterKind::Ducker {
+                trigger: Some(mic_a),
+                threshold_db: -30.0,
+                amount_db: 12.0,
+                attack_ms: 10.0,
+                release_ms: 50.0,
+            }));
+        music_settings
+            .filters
+            .push(fcap_scene::AudioFilter::new(AudioFilterKind::Ducker {
+                trigger: Some(mic_b),
+                threshold_db: -30.0,
+                amount_db: 6.0,
+                attack_ms: 10.0,
+                release_ms: 50.0,
+            }));
+
+        let mut controls = HashMap::new();
+        controls.insert(mic_a, StripControl::new(AudioSettings::default()));
+        controls.insert(mic_b, StripControl::new(AudioSettings::default()));
+        controls.insert(music, StripControl::new(music_settings));
+
+        // Only mic A speaks → music dips ~12 dB.
+        for block in 0..60 {
+            let mut inputs = HashMap::new();
+            inputs.insert(mic_a, tone_block(db_to_lin(-10.0), block * BLOCK_FRAMES));
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let a_only = peak(core.track(1));
+        assert!(
+            (a_only - 0.4 * db_to_lin(-12.0)).abs() < 0.03,
+            "one trigger dips ~12 dB, got {a_only}"
+        );
+
+        // Both mics speak → the dips stack (~18 dB): the two Duckers multiply.
+        for block in 0..60 {
+            let mut inputs = HashMap::new();
+            inputs.insert(mic_a, tone_block(db_to_lin(-10.0), block * BLOCK_FRAMES));
+            inputs.insert(mic_b, tone_block(db_to_lin(-10.0), block * BLOCK_FRAMES));
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let both = peak(core.track(1));
+        assert!(
+            (both - 0.4 * db_to_lin(-18.0)).abs() < 0.03,
+            "two triggers stack to ~18 dB, got {both}"
+        );
+    }
+
+    /// CAP-N32: the gain-sharing shares always sum to ~1 (constant total gain),
+    /// with the biggest share to the loudest — the automixer's core invariant.
+    #[test]
+    fn automix_gains_sum_to_one() {
+        let envs = [0.8f32, 0.2, 0.05];
+        let sum: f32 = envs.iter().sum();
+        let gains: Vec<f32> = envs
+            .iter()
+            .map(|&e| automix_share(e, sum, envs.len()))
+            .collect();
+        let total: f32 = gains.iter().sum();
+        assert!(
+            (total - 1.0).abs() < 1e-5,
+            "active shares sum to 1, got {total}"
+        );
+        assert!(
+            gains[0] > gains[1] && gains[1] > gains[2],
+            "the loudest channel gets the biggest share"
+        );
+
+        // At rest (silent group): equal shares that still sum to 1, so a
+        // talker's onset rises from a partly-open channel, not from zero.
+        let rest: Vec<f32> = (0..3).map(|_| automix_share(0.0, 0.0, 3)).collect();
+        let total: f32 = rest.iter().sum();
+        assert!(
+            (total - 1.0).abs() < 1e-5,
+            "rest shares sum to 1, got {total}"
+        );
+        assert!(
+            rest.iter().all(|&g| (g - 1.0 / 3.0).abs() < 1e-5),
+            "everyone holds an equal share at rest"
+        );
+    }
+
+    /// CAP-N32: two automixed mics — the loud talker keeps ~full gain while the
+    /// quiet one is held down, and two equal talkers hold the total ~constant.
+    #[test]
+    fn automix_gives_the_floor_to_the_loudest_talker() {
+        let mut core = MixerCore::new();
+        let a = SourceId::new();
+        let b = SourceId::new();
+        let settings = AudioSettings {
+            automix: true,
+            ..AudioSettings::default()
+        };
+        let mut controls = HashMap::new();
+        controls.insert(a, StripControl::new(settings.clone()));
+        controls.insert(b, StripControl::new(settings));
+
+        // A speaks at 0.5, B is near-silent: A passes ~full, B is held down, so
+        // the program is ~A alone.
+        for block in 0..80 {
+            let mut inputs = HashMap::new();
+            inputs.insert(a, tone_block(0.5, block * BLOCK_FRAMES));
+            inputs.insert(b, tone_block(0.001, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let solo = peak(core.master());
+        assert!(
+            (solo - 0.5).abs() < 0.06,
+            "the loud talker passes ~full, got {solo}"
+        );
+
+        // Both talk equally loud: each gets half the gain (0.25), summing back
+        // to ~0.5 — the total gain held constant, the point of gain-sharing.
+        for block in 0..80 {
+            let mut inputs = HashMap::new();
+            inputs.insert(a, tone_block(0.5, block * BLOCK_FRAMES));
+            inputs.insert(b, tone_block(0.5, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let both = peak(core.master());
+        assert!(
+            (both - 0.5).abs() < 0.06,
+            "two equal talkers hold the total ~constant, got {both}"
+        );
+    }
+
+    /// CAP-N37: while a soundboard pad plays, the rest of the mix ducks under
+    /// it — but the pad itself is not ducked.
+    #[test]
+    fn soundboard_duck_dips_others_but_not_the_pad() {
+        let mut core = MixerCore::new();
+        let pad = SourceId::new();
+        let music = SourceId::new();
+        core.set_soundboard_duck(vec![pad]);
+        let mut controls = HashMap::new();
+        controls.insert(pad, StripControl::new(AudioSettings::default())); // track 1
+        controls.insert(
+            music,
+            StripControl::new(AudioSettings {
+                tracks: 0b10, // isolate the music on track 2
+                ..AudioSettings::default()
+            }),
+        );
+        for block in 0..100 {
+            let mut inputs = HashMap::new();
+            inputs.insert(pad, tone_block(0.5, block * BLOCK_FRAMES));
+            inputs.insert(music, tone_block(0.4, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let music_level = peak(core.track(1));
+        assert!(
+            (music_level - 0.4 * db_to_lin(-12.0)).abs() < 0.03,
+            "the music ducks ~12 dB, got {music_level}"
+        );
+        let pad_level = peak(core.track(0));
+        assert!(
+            (pad_level - 0.5).abs() < 0.03,
+            "the pad plays on top, unducked, got {pad_level}"
+        );
+    }
+
+    /// CAP-N39: a mix-minus source's N−1 return carries everyone BUT itself,
+    /// while the program still carries everyone.
+    #[test]
+    fn mix_minus_excludes_the_source_itself() {
+        let mut core = MixerCore::new();
+        let guest = SourceId::new();
+        let host = SourceId::new();
+        let mut controls = HashMap::new();
+        controls.insert(
+            guest,
+            StripControl::new(AudioSettings {
+                mix_minus: true,
+                ..AudioSettings::default()
+            }),
+        );
+        controls.insert(host, StripControl::new(AudioSettings::default()));
+        for block in 0..30 {
+            let mut inputs = HashMap::new();
+            inputs.insert(guest, tone_block(0.5, block * BLOCK_FRAMES));
+            inputs.insert(host, tone_block(0.3, block * BLOCK_FRAMES));
+            core.process(&inputs, &controls);
+        }
+        let n_minus_1 = core.mix_minus_bus(guest).expect("the guest opted in");
+        assert!(
+            (peak(n_minus_1) - 0.3).abs() < 0.03,
+            "the guest hears the host (0.3), not their own 0.5, got {}",
+            peak(n_minus_1)
+        );
+        assert!(
+            (peak(core.master()) - 0.8).abs() < 0.03,
+            "the program still carries both"
+        );
+        assert!(
+            core.mix_minus_bus(host).is_none(),
+            "the host didn't opt into a return"
         );
     }
 

@@ -15,6 +15,71 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.500.0] — 2026-07-15 (Audio Production Depth — Phase 4)
+
+> *From mixer to console.* Phase 4 turns the shipped mixer into a broadcast console: physical
+> output routing and aux/cue mixes, an N×M ducking matrix, a gain-sharing auto-mixer, EBU R128
+> loudness normalization (live rider + post-record pass), a parametric EQ with a live spectrum, a
+> de-esser and rumble guard, a soundboard, audio-only (podcast) recording, per-guest mix-minus with
+> one-click voice-chain presets, and the discovery + MIT-clean foundation for CLAP **and VST3**
+> plugin hosting. Everything is owned classic DSP — no ML, per the charter — and ships off/neutral
+> by default, so an untouched mix is bit-identical to before.
+
+### Added
+
+- **Aux buses & physical output routing (CAP-N30)** — route the master mix or any of the six track
+  buses to additional physical output devices, each with a trim, from a **Routing** matrix (the
+  Audio Mixer's Routing button). A track bus sent to headphones is a cue mix that differs from the
+  monitor. Defaults to today's exact behavior (only the monitor bus reaches a device).
+- **Sidechain ducking matrix (CAP-N31)** — a consolidated **Ducking** grid of who ducks whom: any
+  source can duck any set, each pair with its own depth, threshold, attack, and release. The engine
+  stacks multiple duckers per strip, so one strip can be ducked by several triggers at once.
+- **Gain-sharing auto-mixer (CAP-N32)** — a Dugan-style **Auto-mix** toggle per strip: across all
+  auto-mixed mics the total gain is held ~constant and handed to whoever is speaking (a deterministic
+  gain-sum-of-one law), ideal for multi-host panels and podcasts. Off by default.
+- **EBU R128 loudness normalization (CAP-N34)** — a live **loudness rider** steers the program
+  toward a target (−14 / −16 / −23 LUFS) with a peak ceiling, applied to the master and every track
+  bus so recordings and streams land at a consistent level; plus a post-record **Normalize** action
+  on the recordings list (ffmpeg `loudnorm`). Off by default.
+- **Parametric EQ + spectrum view (CAP-N35)** — an N-band parametric EQ (bell / low-shelf /
+  high-shelf / notch / high-pass / low-pass) with **draggable nodes over a live spectrum analyzer**;
+  the curve is the same RBJ math the engine runs. Owned FFT; the analyzer arms per-strip only while
+  the editor is open.
+- **De-esser + rumble guard (CAP-N36)** — a split-band **de-esser** (a sibilance detector drives a
+  dynamic high-shelf cut, phase-correct, no ML) and a clean 2nd-order low-cut **rumble guard** for
+  desk thumps and plosives — both as regular audio filters.
+- **Soundboard (CAP-N37)** — a pad grid of local audio clips with per-pad gain, choke groups
+  (a new pad stops the last in its group), loop, hotkey, track assignment, and optional auto-duck
+  of the rest of the mix while a pad plays. Pads decode through the labeled ffmpeg component into
+  the mixer like any source.
+- **Audio-only recording (CAP-N38)** — a **podcast mode** that records per-track **WAV** via the
+  owned writer (no video encoder spun up at all), optionally transcoded to **FLAC/Opus** through the
+  labeled ffmpeg component, with silent-skip markers written to a sidecar and CAP-M25 filename
+  templates. From the recordings dialog.
+- **Per-guest mix-minus & voice-chain presets (CAP-N39)** — one-click **voice-chain presets**
+  (broadcast / podcast / clean gate→comp→EQ→limiter chains) applied to any strip, and an owned
+  **mix-minus (N−1)** return per source (everyone in the program except that source) so a remote
+  guest hears no echo.
+- **Audio plugins — CLAP + VST3 discovery (CAP-N33)** — a **Plugins** panel that finds your
+  installed **CLAP and VST3** plugins in the standard folders (opt-in, local-directory only, nothing
+  fetched). Both formats are MIT-licensed, $0-clean; live hosting runs each plugin in a
+  crash-isolated process with its own GUI — that host-process integration is in progress and the
+  panel states the plan plainly rather than faking a toggle.
+- **Live filter visualizers (plugin showpiece)** — every audio filter is now a visual instrument
+  while its editor is open: a **transfer curve** for the dynamics (compressor / limiter / gate) with
+  the live signal riding the curve, a **frequency-response curve** for the tone filters (EQ /
+  de-esser / rumble guard), or a level readout for the rest — each beside **in / out / gain-reduction
+  meters** that move with the audio, in the same sleek dark-analyzer look as the parametric EQ.
+- **Desktop shortcut on Windows install** — the MSI now creates a **Freally Capture** desktop
+  shortcut (removed on uninstall).
+
+### Changed
+
+- **VST3 is now MIT-licensed.** Steinberg relicensed the VST 3.8 SDK to MIT on **2025-10-29**, so
+  the earlier "VST3 is GPLv3-or-proprietary, incompatible" note was corrected across `vst.rs`,
+  `claphost.rs`, and `THIRD-PARTY-NOTICES.md` — VST3 is now a $0-clean plugin path on the same
+  footing as CLAP.
+
 ## [0.400.0] — 2026-07-15 (Compositor & FX depth — Phase 3 complete)
 
 > The second half of Phase 3 lands the five deferred motion-and-effects features, completing the

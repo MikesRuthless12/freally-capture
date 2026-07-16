@@ -456,6 +456,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = Giám sát
 mixer-monitor-device-aria = Thiết bị đầu ra giám sát
 mixer-default-output = Đầu ra mặc định
+mixer-routing = Định tuyến
+mixer-routing-title = Định tuyến đầu ra âm thanh
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Định tuyến âm thanh
+routing-intro = Gán các dải vào bus track, rồi gửi bất kỳ bus nào tới một đầu ra vật lý — tín hiệu cho máy ghi phần cứng, loa ở phòng khác, hoặc tín hiệu tai nghe trên một track dự phòng. Bộ giám sát vẫn giữ thiết bị riêng; các tuyến này được thêm vào bên trên, nên khi không đặt gì thì bản trộn không thay đổi.
+routing-sends-title = Gửi tới track
+routing-no-strips = Không có nguồn âm thanh nào trong cảnh này.
+routing-source = Nguồn
+routing-track = Track { $n }
+routing-send-aria = Gửi { $source } tới track { $n }
+routing-outputs-title = Đầu ra vật lý
+routing-master = Master
+routing-off = Tắt
+routing-default-output = Đầu ra mặc định
+routing-device-aria = Thiết bị đầu ra cho { $bus }
+routing-trim-aria = Trim đầu ra cho { $bus }
+routing-trim-db = { $db } dB
+routing-muted = Đã tắt tiếng
+routing-device-error = Thiết bị không khả dụng
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Ducking
+mixer-ducking-title = Ma trận ducking
+ducking-title = Ma trận ducking
+ducking-intro = Bất kỳ nguồn nào cũng có thể duck các nguồn khác. Một ô sẽ hạ mục tiêu (cột) mỗi khi nguồn kích hoạt (hàng) phát ra âm thanh — chọn một ô để đặt độ sâu, ngưỡng và thời gian. Mỗi cặp là một duck riêng, nên một kênh có thể bị duck bởi nhiều nguồn kích hoạt cùng lúc.
+ducking-need-two = Thêm ít nhất hai nguồn âm thanh để duck giữa chúng.
+ducking-trigger-target = Kích hoạt ↓ / Đích →
+ducking-cell-aria = { $trigger } duck { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Xóa
+ducking-amount = Lượng
+ducking-threshold = Ngưỡng
+ducking-attack = Attack
+ducking-release = Release
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Chuẩn hóa độ lớn
+loudness-intro = Đưa chương trình dần về mục tiêu độ lớn với trần đỉnh, để luồng phát và bản ghi của bạn đạt mức nhất quán. Chậm rãi và nhẹ nhàng — nó điều hướng, không bao giờ bơm.
+loudness-enable = Đưa chương trình về mục tiêu
+loudness-target = Mục tiêu
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Trần đỉnh (dBFS)
+loudness-note = −14 LUFS phù hợp với phát lại kiểu YouTube; −16 là mục tiêu phát trực tuyến phổ biến; −23 là phát sóng EBU R128. Cùng mục tiêu này được dùng cho thao tác Chuẩn hóa sau khi ghi.
+loudness-on = LUFS { $target }
+loudness-off = Tắt chuẩn hóa
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Soundboard
+mixer-soundboard-title = Soundboard
+soundboard-title = Soundboard
+soundboard-add-pad = + Pad
+soundboard-stop-all = Dừng tất cả
+soundboard-edit = Chỉnh sửa
+soundboard-empty = Chưa có pad nào — thêm một pad và gán một clip âm thanh cục bộ.
+soundboard-new-pad = Pad mới
+soundboard-no-clip = Không có clip
+soundboard-audio-files = Tệp âm thanh
+soundboard-name = Tên
+soundboard-choose-clip = Chọn clip…
+soundboard-gain = Khuếch đại
+soundboard-choke = Choke
+soundboard-choke-none = Không
+soundboard-loop = Lặp
+soundboard-auto-duck = Tự động ducking
+soundboard-tracks = Track
+soundboard-hotkey = Phím tắt
+soundboard-hotkey-placeholder = ví dụ Ctrl+Shift+1
+soundboard-remove = Xóa
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Plugin
+mixer-plugins-title = Plugin âm thanh (CLAP / VST3)
+plugins-title = Plugin âm thanh
+plugins-scanning = Đang quét…
+plugins-none = Không tìm thấy plugin CLAP hoặc VST3 trong các thư mục tiêu chuẩn.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -534,6 +612,10 @@ channelstrip-solo-source = Solo { $name } (PFL)
 channelstrip-pan-label = Cân bằng (nhấp đúp để đặt lại)
 channelstrip-pan-aria = Cân bằng của { $name }
 channelstrip-mono-label = Trộn xuống mono
+channelstrip-automix-label = Auto-mix (chia sẻ gain)
+channelstrip-automix-note = Chia sẻ gain: bộ trộn giữ mức tổng hợp của tất cả các dải auto-mix ổn định và trao nó cho ai đang nói — lý tưởng cho panel nhiều micro và podcast. Tắt cho đến khi bạn thêm một dải.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Tạo một đường hồi âm không vọng cho nguồn này — mọi người trong chương trình trừ chính nguồn này. Dùng cho khách từ xa để họ không nghe thấy giọng nói bị trễ của chính mình.
 channelstrip-ptt-hotkey = Phím nhấn-để-nói (im lặng trừ khi giữ)
 channelstrip-ptt-placeholder = ví dụ Ctrl+Shift+T hoặc F13
 channelstrip-ptt-aria = Phím nhấn-để-nói
@@ -768,7 +850,36 @@ audiofilters-name-limiter = Bộ giới hạn (Limiter)
 audiofilters-name-eq = EQ 3-Băng
 audiofilters-name-denoise = Khử ồn
 audiofilters-name-ducking = Ducking
+audiofilters-name-parametric-eq = EQ tham số
+audiofilters-name-de-esser = Bộ khử tiếng xì (De-esser)
+audiofilters-name-rumble-guard = Bộ lọc tiếng ầm (Rumble Guard)
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Cài đặt sẵn
+audiofilters-voice-preset-pick = Cài đặt giọng…
+audiofilters-voice-broadcast = Giọng phát sóng
+audiofilters-voice-podcast = Giọng podcast
+audiofilters-voice-clean = Giọng trong
+audiofilters-voice-none = Xóa chuỗi
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Tần số tiếng xì (Hz)
+audiofilters-deesser-amount = Giảm tối đa (dB)
+audiofilters-rumble-freq = Cắt tần thấp (Hz)
 audiofilters-title = Bộ lọc âm thanh — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Đường đáp tuyến EQ tham số với phổ trực tiếp
+eq-band-type = Loại
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Băng
+eq-remove-band = Xóa băng
+eq-type-bell = Bell
+eq-type-lowShelf = Low shelf
+eq-type-highShelf = High shelf
+eq-type-notch = Notch
+eq-type-highPass = Thông cao
+eq-type-lowPass = Thông thấp
 audiofilters-chain-header = Chuỗi bộ lọc (trên cùng chạy trước, trước fader)
 audiofilters-add = + Thêm bộ lọc
 audiofilters-add-menu = Thêm một bộ lọc âm thanh
@@ -984,6 +1095,23 @@ recordings-cancel = Hủy
 recordings-export-cancelled = Đã hủy xuất.
 recordings-exported-to = Đã xuất tới { $path }
 recordings-remuxed-to = Đã remux tới { $path }
+recordings-normalize = Chuẩn hóa
+recordings-normalizing = Đang chuẩn hóa…
+recordings-normalize-title = Chuẩn hóa độ lớn về mục tiêu (ghi một bản sao)
+recordings-normalized-to = Đã chuẩn hóa tới { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Chỉ âm thanh
+audiorec-format = Định dạng ghi âm
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Ghi âm
+audiorec-stop = Dừng
+audiorec-pause = Tạm dừng
+audiorec-resume = Tiếp tục
+audiorec-recording = REC { $sec }s
+audiorec-saved = Đã lưu { $count } tệp track
 
 
 # --- OpenedFrec.tsx ---

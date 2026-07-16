@@ -12,6 +12,7 @@
 
 mod alarms;
 mod audio;
+mod audiorec;
 mod autoconfig;
 mod automation;
 mod bezier_mask;
@@ -46,6 +47,7 @@ mod salvage;
 mod scripting;
 mod settings;
 mod shutdown;
+mod soundboard;
 mod statshud;
 mod stream;
 mod studio;
@@ -152,6 +154,8 @@ fn main() {
         .manage(commands::cef::CefState::new())
         .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
+        .manage(audiorec::AudioRecState::default())
+        .manage(soundboard::SoundboardState::default())
         // CAP-M23: drop this session's crash marker, remembering whether the
         // previous one exited uncleanly (CAP-M11's salvage signal).
         .manage(shutdown::QuitState::new(shutdown::mark_session_start()))
@@ -368,6 +372,15 @@ fn main() {
             commands::audio::studio_set_audio_pan,
             commands::audio::studio_set_audio_solo,
             commands::audio::studio_set_audio_mono,
+            commands::audio::studio_set_audio_automix,
+            commands::audio::studio_set_audio_mix_minus,
+            commands::audio::studio_apply_voice_preset,
+            commands::audio::audio_clap_plugins,
+            commands::audio::audio_arm_spectrum,
+            commands::audio::audio_arm_filter_meters,
+            commands::audio::soundboard_trigger,
+            commands::audio::soundboard_stop,
+            commands::audio::soundboard_stop_all,
             commands::audio::studio_set_audio_sync_offset,
             commands::audio::studio_set_audio_hotkeys,
             commands::audio::studio_add_audio_filter,
@@ -421,6 +434,11 @@ fn main() {
             commands::recording::recording_status,
             commands::recording::recordings_list,
             commands::recording::recording_remux,
+            commands::recording::recording_normalize,
+            commands::recording::audiorec_start,
+            commands::recording::audiorec_stop,
+            commands::recording::audiorec_status,
+            commands::recording::audiorec_set_paused,
             commands::recording::recording_export,
             commands::recording::recording_export_cancel,
             commands::recording::open_frec_export,

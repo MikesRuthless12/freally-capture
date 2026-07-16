@@ -1,14 +1,19 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { useDismiss } from "../lib/useDismiss";
 
 import {
+  audioArmFilterMeters,
   studioAddAudioFilter,
+  studioApplyVoicePreset,
   studioRemoveAudioFilter,
   studioReorderAudioFilter,
   studioSetAudioFilterEnabled,
   studioUpdateAudioFilter,
 } from "../api/commands";
+import { onAudio } from "../api/events";
+import { FilterViz } from "./FilterViz";
 import type {
   AudioFilter,
   AudioFilterKind,
@@ -19,6 +24,7 @@ import type {
 } from "../api/types";
 import { kindHasAudio } from "../api/types";
 import { useT } from "../i18n/t";
+import { ParametricEqEditor } from "./ParametricEqEditor";
 import { PickerShell } from "./PickerShell";
 
 /**
@@ -34,6 +40,9 @@ const FILTER_NAME_KEYS: Record<AudioFilterTypeName, string> = {
   eq: "audiofilters-name-eq",
   denoise: "audiofilters-name-denoise",
   ducker: "audiofilters-name-ducking",
+  parametricEq: "audiofilters-name-parametric-eq",
+  deEsser: "audiofilters-name-de-esser",
+  rumbleGuard: "audiofilters-name-rumble-guard",
 };
 
 const FILTER_DEFAULTS: Record<AudioFilterTypeName, AudioFilterKind> = {
@@ -65,6 +74,16 @@ const FILTER_DEFAULTS: Record<AudioFilterTypeName, AudioFilterKind> = {
     attackMs: 50,
     releaseMs: 300,
   },
+  parametricEq: {
+    type: "parametricEq",
+    bands: [
+      { type: "bell", freqHz: 120, gainDb: 0, q: 1 },
+      { type: "bell", freqHz: 1000, gainDb: 0, q: 1 },
+      { type: "bell", freqHz: 6000, gainDb: 0, q: 1 },
+    ],
+  },
+  deEsser: { type: "deEsser", freqHz: 6500, thresholdDb: -30, amountDb: 8 },
+  rumbleGuard: { type: "rumbleGuard", freqHz: 90 },
 };
 
 const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
@@ -87,6 +106,37 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
   useDismiss(addOpen, addMenuRef, () => setAddOpen(false));
   const filters = source.audio?.filters ?? [];
 
+  // Arm per-filter live metering for this strip while the dialog is open; the
+  // meters ride the ~20 Hz `audio` event so every plugin graph moves.
+  const [meters, setMeters] = useState<Record<string, { inPeak: number; outPeak: number }>>({});
+  useEffect(() => {
+    audioArmFilterMeters(source.id).catch(() => {});
+    // `listen` resolves on a microtask; if this effect is torn down first
+    // (StrictMode remount, fast close) capture the unlisten and call it, so the
+    // ~20 Hz listener can't leak past the dialog.
+    let alive = true;
+    let unlisten: UnlistenFn | undefined;
+    onAudio((levels) => {
+      if (levels.filterMeters && levels.filterMeters.source === source.id) {
+        const next: Record<string, { inPeak: number; outPeak: number }> = {};
+        for (const meter of levels.filterMeters.meters) {
+          next[meter.id] = { inPeak: meter.inPeak, outPeak: meter.outPeak };
+        }
+        setMeters(next);
+      }
+    })
+      .then((un) => {
+        if (alive) unlisten = un;
+        else un();
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      audioArmFilterMeters(null).catch(() => {});
+      unlisten?.();
+    };
+  }, [source.id]);
+
   // Ducking triggers: every *other* audio source in the collection.
   const triggerOptions =
     collection?.sources.filter(
@@ -104,40 +154,62 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
           <span className="text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
             {t("audiofilters-chain-header")}
           </span>
-          <div className="relative" ref={addMenuRef}>
-            <button
-              type="button"
-              onClick={() => setAddOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={addOpen}
-              className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
-            >
-              {t("audiofilters-add")}
-            </button>
-            {addOpen && (
-              <div
-                role="menu"
-                aria-label={t("audiofilters-add-menu")}
-                className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+          <div className="ml-auto flex items-center gap-2">
+            <label className="flex items-center gap-1 text-[10px] text-havoc-muted">
+              {t("audiofilters-voice-preset")}
+              <select
+                value=""
+                onChange={(event) => {
+                  const preset = event.target.value;
+                  if (preset) {
+                    studioApplyVoicePreset(source.id, preset).catch(fail("voice preset"));
+                  }
+                }}
+                aria-label={t("audiofilters-voice-preset")}
+                className="rounded-md border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[10px] text-havoc-text"
               >
-                {(Object.keys(FILTER_DEFAULTS) as AudioFilterTypeName[]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAddOpen(false);
-                      studioAddAudioFilter(source.id, FILTER_DEFAULTS[type]).catch(
-                        fail("audio filter add"),
-                      );
-                    }}
-                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                  >
-                    {t(FILTER_NAME_KEYS[type])}
-                  </button>
-                ))}
-              </div>
-            )}
+                <option value="">{t("audiofilters-voice-preset-pick")}</option>
+                <option value="broadcast">{t("audiofilters-voice-broadcast")}</option>
+                <option value="podcast">{t("audiofilters-voice-podcast")}</option>
+                <option value="clean">{t("audiofilters-voice-clean")}</option>
+                <option value="none">{t("audiofilters-voice-none")}</option>
+              </select>
+            </label>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                type="button"
+                onClick={() => setAddOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={addOpen}
+                className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+              >
+                {t("audiofilters-add")}
+              </button>
+              {addOpen && (
+                <div
+                  role="menu"
+                  aria-label={t("audiofilters-add-menu")}
+                  className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
+                >
+                  {(Object.keys(FILTER_DEFAULTS) as AudioFilterTypeName[]).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddOpen(false);
+                        studioAddAudioFilter(source.id, FILTER_DEFAULTS[type]).catch(
+                          fail("audio filter add"),
+                        );
+                      }}
+                      className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                    >
+                      {t(FILTER_NAME_KEYS[type])}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -211,8 +283,14 @@ export function AudioFiltersDialog({ source, collection, onClose }: AudioFilters
                     ×
                   </button>
                 </div>
+                {filter.type !== "parametricEq" && (
+                  <div className="mt-2">
+                    <FilterViz filter={filter} meter={meters[filter.id]} />
+                  </div>
+                )}
                 <AudioFilterParams
                   filter={filter}
+                  sourceId={source.id}
                   triggers={triggerOptions}
                   onChange={(kind) => update(filter, kind)}
                 />
@@ -266,10 +344,12 @@ function Slider({
 
 function AudioFilterParams({
   filter,
+  sourceId,
   triggers,
   onChange,
 }: {
   filter: AudioFilter;
+  sourceId: SourceId;
   triggers: Source[];
   onChange: (kind: AudioFilterKind) => void;
 }) {
@@ -496,6 +576,56 @@ function AudioFilterParams({
             max={5000}
             step={10}
             onChange={(releaseMs) => onChange({ ...filter, releaseMs })}
+          />
+        </div>
+      );
+    case "parametricEq":
+      return (
+        <ParametricEqEditor
+          sourceId={sourceId}
+          bands={filter.bands}
+          onChange={(bands) => onChange({ type: "parametricEq", bands })}
+        />
+      );
+    case "deEsser":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label={t("audiofilters-deesser-freq")}
+            value={filter.freqHz}
+            min={3000}
+            max={12000}
+            step={100}
+            onChange={(freqHz) => onChange({ ...filter, freqHz })}
+          />
+          <Slider
+            label={t("audiofilters-trigger-at-db")}
+            value={filter.thresholdDb}
+            min={-60}
+            max={0}
+            step={1}
+            onChange={(thresholdDb) => onChange({ ...filter, thresholdDb })}
+          />
+          <Slider
+            label={t("audiofilters-deesser-amount")}
+            value={filter.amountDb}
+            min={0}
+            max={24}
+            step={0.5}
+            onChange={(amountDb) => onChange({ ...filter, amountDb })}
+          />
+        </div>
+      );
+    case "rumbleGuard":
+      return (
+        <div className="mt-2">
+          <Slider
+            label={t("audiofilters-rumble-freq")}
+            value={filter.freqHz}
+            min={20}
+            max={300}
+            step={5}
+            onChange={(freqHz) => onChange({ ...filter, freqHz })}
           />
         </div>
       );

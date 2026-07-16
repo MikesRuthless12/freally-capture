@@ -456,6 +456,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = Monitor
 mixer-monitor-device-aria = Dispositivo de salida del monitor
 mixer-default-output = Salida predeterminada
+mixer-routing = Enrutamiento
+mixer-routing-title = Enrutamiento de salida de audio
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Enrutamiento de audio
+routing-intro = Asigna los canales a los buses de pista y luego envía cualquier bus a una salida física: una señal para un grabador de hardware, altavoces en otra sala o una escucha por auriculares en una pista libre. El monitor conserva su propio dispositivo; estas rutas se añaden por encima, así que sin ninguna configurada la mezcla no cambia.
+routing-sends-title = Envíos a pistas
+routing-no-strips = No hay fuentes de audio en esta escena.
+routing-source = Fuente
+routing-track = Pista { $n }
+routing-send-aria = Enviar { $source } a la pista { $n }
+routing-outputs-title = Salidas físicas
+routing-master = Master
+routing-off = Desactivado
+routing-default-output = Salida predeterminada
+routing-device-aria = Dispositivo de salida para { $bus }
+routing-trim-aria = Trim de salida para { $bus }
+routing-trim-db = { $db } dB
+routing-muted = Silenciado
+routing-device-error = Dispositivo no disponible
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Atenuación
+mixer-ducking-title = Matriz de atenuación
+ducking-title = Matriz de atenuación
+ducking-intro = Cualquier fuente puede atenuar a las demás. Una celda baja el destino (columna) cada vez que suena el disparador (fila): elige una celda para ajustar su profundidad, umbral y tiempos. Cada par es su propia atenuación, así que un canal puede ser atenuado por varios disparadores a la vez.
+ducking-need-two = Añade al menos dos fuentes de audio para atenuar entre ellas.
+ducking-trigger-target = Disparador ↓ / Destino →
+ducking-cell-aria = { $trigger } atenúa a { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Quitar
+ducking-amount = Cantidad
+ducking-threshold = Umbral
+ducking-attack = Ataque
+ducking-release = Liberación
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Normalización de sonoridad
+loudness-intro = Lleva el programa hacia un objetivo de sonoridad con un techo de picos, para que tu transmisión y tus grabaciones queden en un nivel constante. Lento y suave — dirige, nunca bombea.
+loudness-enable = Llevar el programa al objetivo
+loudness-target = Objetivo
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Techo de picos (dBFS)
+loudness-note = −14 LUFS va bien para reproducción tipo YouTube; −16 es un objetivo común de streaming; −23 es difusión EBU R128. La acción Normalizar posterior a la grabación usa el mismo objetivo.
+loudness-on = LUFS { $target }
+loudness-off = Norm. desactivada
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Tablero de sonidos
+mixer-soundboard-title = Tablero de sonidos
+soundboard-title = Tablero de sonidos
+soundboard-add-pad = + Pad
+soundboard-stop-all = Detener todo
+soundboard-edit = Editar
+soundboard-empty = Aún no hay pads — añade uno y asígnale un clip de audio local.
+soundboard-new-pad = Nuevo pad
+soundboard-no-clip = Sin clip
+soundboard-audio-files = Archivos de audio
+soundboard-name = Nombre
+soundboard-choose-clip = Elegir clip…
+soundboard-gain = Ganancia
+soundboard-choke = Choke
+soundboard-choke-none = Ninguno
+soundboard-loop = Bucle
+soundboard-auto-duck = Auto-atenuar
+soundboard-tracks = Pistas
+soundboard-hotkey = Atajo
+soundboard-hotkey-placeholder = p. ej. Ctrl+Shift+1
+soundboard-remove = Quitar
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Plugins
+mixer-plugins-title = Plugins de audio (CLAP / VST3)
+plugins-title = Plugins de audio
+plugins-scanning = Buscando…
+plugins-none = No se encontraron plugins CLAP ni VST3 en las carpetas estándar.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -534,6 +612,10 @@ channelstrip-solo-source = Solo de { $name } (PFL)
 channelstrip-pan-label = Balance (doble clic restablece)
 channelstrip-pan-aria = Balance de { $name }
 channelstrip-mono-label = Mezclar a mono
+channelstrip-automix-label = Automezcla (reparto de ganancia)
+channelstrip-automix-note = Reparto de ganancia: el mezclador mantiene estable el nivel combinado de todas las tiras en automezcla y se lo cede a quien esté hablando — ideal para paneles multimicrófono y pódcasts. Desactivado hasta que añadas una tira.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Genera un retorno sin eco para esta fuente — todos los del programa excepto la propia fuente. Úsalo con un invitado remoto para que no oiga su propia voz retardada.
 channelstrip-ptt-hotkey = Atajo de pulsar para hablar (silencioso salvo que se mantenga)
 channelstrip-ptt-placeholder = p. ej. Ctrl+Shift+T o F13
 channelstrip-ptt-aria = Atajo de pulsar para hablar
@@ -768,7 +850,36 @@ audiofilters-name-limiter = Limitador
 audiofilters-name-eq = Ecualizador de 3 bandas
 audiofilters-name-denoise = Reducción de ruido
 audiofilters-name-ducking = Atenuación automática
+audiofilters-name-parametric-eq = Ecualizador paramétrico
+audiofilters-name-de-esser = De-esser
+audiofilters-name-rumble-guard = Filtro antirretumbo
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Preajuste
+audiofilters-voice-preset-pick = Preajuste de voz…
+audiofilters-voice-broadcast = Voz de emisión
+audiofilters-voice-podcast = Voz de pódcast
+audiofilters-voice-clean = Voz limpia
+audiofilters-voice-none = Vaciar cadena
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Frecuencia de sibilancia (Hz)
+audiofilters-deesser-amount = Reducción máx. (dB)
+audiofilters-rumble-freq = Corte de graves (Hz)
 audiofilters-title = Filtros de audio — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Curva de respuesta del ecualizador paramétrico con espectro en vivo
+eq-band-type = Tipo
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Banda
+eq-remove-band = Quitar banda
+eq-type-bell = Campana
+eq-type-lowShelf = Shelf bajo
+eq-type-highShelf = Shelf alto
+eq-type-notch = Notch
+eq-type-highPass = Paso alto
+eq-type-lowPass = Paso bajo
 audiofilters-chain-header = Cadena de filtros (el primero se ejecuta antes, previo al fader)
 audiofilters-add = + Añadir filtro
 audiofilters-add-menu = Añadir un filtro de audio
@@ -984,6 +1095,23 @@ recordings-cancel = Cancelar
 recordings-export-cancelled = Exportación cancelada.
 recordings-exported-to = Exportado a { $path }
 recordings-remuxed-to = Remultiplexado a { $path }
+recordings-normalize = Normalizar
+recordings-normalizing = Normalizando…
+recordings-normalize-title = Normalizar la sonoridad al objetivo (escribe una copia)
+recordings-normalized-to = Normalizado a { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Solo audio
+audiorec-format = Formato de grabación de audio
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Grabar audio
+audiorec-stop = Detener
+audiorec-pause = Pausar
+audiorec-resume = Reanudar
+audiorec-recording = REC { $sec }s
+audiorec-saved = Se guardaron { $count } archivo(s) de pista
 
 
 # --- OpenedFrec.tsx ---

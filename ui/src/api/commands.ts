@@ -884,6 +884,54 @@ export function studioSetAudioMono(sourceId: SourceId, mono: boolean): Promise<v
   return invoke("studio_set_audio_mono", { sourceId, mono });
 }
 
+/** CAP-N32: join/leave the gain-sharing auto-mixer. */
+export function studioSetAudioAutomix(sourceId: SourceId, automix: boolean): Promise<void> {
+  return invoke("studio_set_audio_automix", { sourceId, automix });
+}
+
+/** CAP-N39: toggle a mix-minus (N−1) return for a source. */
+export function studioSetAudioMixMinus(sourceId: SourceId, mixMinus: boolean): Promise<void> {
+  return invoke("studio_set_audio_mix_minus", { sourceId, mixMinus });
+}
+
+/** CAP-N39: apply a one-click voice-chain preset to a source's filter chain. */
+export function studioApplyVoicePreset(sourceId: SourceId, preset: string): Promise<void> {
+  return invoke("studio_apply_voice_preset", { sourceId, preset });
+}
+
+/** CAP-N35: arm (or clear with null) the live spectrum tap for a source. */
+export function audioArmSpectrum(sourceId: SourceId | null): Promise<void> {
+  return invoke("audio_arm_spectrum", { sourceId });
+}
+
+/** Arm (or clear with null) per-filter live metering for a source (plugin meters). */
+export function audioArmFilterMeters(sourceId: SourceId | null): Promise<void> {
+  return invoke("audio_arm_filter_meters", { sourceId });
+}
+
+/** CAP-N33: scan for installed CLAP + VST3 plugins (opt-in). */
+export function audioClapPlugins(): Promise<{
+  plugins: { path: string; name: string; format: string }[];
+  status: string;
+}> {
+  return invoke("audio_clap_plugins");
+}
+
+/** CAP-N37: fire a soundboard pad by id. */
+export function soundboardTrigger(id: string): Promise<void> {
+  return invoke("soundboard_trigger", { id });
+}
+
+/** CAP-N37: stop one sounding pad. */
+export function soundboardStop(id: string): Promise<void> {
+  return invoke("soundboard_stop", { id });
+}
+
+/** CAP-N37: stop every sounding pad. */
+export function soundboardStopAll(): Promise<void> {
+  return invoke("soundboard_stop_all");
+}
+
 export function studioSetAudioSyncOffset(sourceId: SourceId, syncOffsetMs: number): Promise<void> {
   return invoke("studio_set_audio_sync_offset", { sourceId, syncOffsetMs });
 }
@@ -1093,6 +1141,25 @@ export function recordingsList(): Promise<RecordingFile[]> {
 /** Remux an mkv recording to a sibling mp4 (stream copy, no re-encode). */
 export function recordingRemux(path: string): Promise<string> {
   return invoke<string>("recording_remux", { path });
+}
+
+/** CAP-N34: normalize a wire recording to the app's loudness target. */
+export function recordingNormalize(path: string): Promise<string> {
+  return invoke<string>("recording_normalize", { path });
+}
+
+/** CAP-N38 audio-only recording. */
+export function audiorecStart(): Promise<void> {
+  return invoke("audiorec_start");
+}
+export function audiorecStop(): Promise<string[]> {
+  return invoke<string[]>("audiorec_stop");
+}
+export function audiorecStatus(): Promise<import("./types").AudioRecStatus> {
+  return invoke("audiorec_status");
+}
+export function audiorecSetPaused(paused: boolean): Promise<void> {
+  return invoke("audiorec_set_paused", { paused });
 }
 
 /** Export a .frec recording to a sibling mp4/mkv/mov/webm (decode + re-encode

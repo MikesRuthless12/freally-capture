@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Desktop shortcut for the Freally Capture MSI (WiX v3, as Tauri v2 uses).
+
+  Wired from src-tauri/tauri.conf.json:
+    bundle.windows.wix.fragmentPaths     = ["windows/desktop-shortcut.wxs"]
+    bundle.windows.wix.componentGroupRefs = ["DesktopShortcutGroup"]
+
+  Notes:
+   - `Target="[!Path]"` references Tauri's main-binary File (its WiX File Id is
+     `Path`), so this stays correct regardless of the exe filename.
+   - The shortcut is a per-user component keyed under HKCU (its RegistryValue is
+     the KeyPath), and RemoveFolder cleans the Desktop entry on uninstall — so
+     install/uninstall are both tidy and ICE-clean.
+   - DesktopFolder is declared under TARGETDIR here because Tauri's generated
+     main template only wires the Start-menu (ProgramMenuFolder) shortcut.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="DesktopShortcutGroup">
+      <Component Id="FreallyCaptureDesktopShortcut" Directory="DesktopFolder" Guid="*">
+        <Shortcut Id="FreallyCaptureDesktopShortcutLink"
+                  Name="Freally Capture"
+                  Description="Freally Capture — local-first live production studio"
+                  Target="[!Path]"
+                  WorkingDirectory="INSTALLDIR" />
+        <RemoveFolder Id="RemoveDesktopShortcutFolder"
+                      Directory="DesktopFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Freally\Freally Capture"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

@@ -465,6 +465,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = Monitor
 mixer-monitor-device-aria = Monitoruitvoerapparaat
 mixer-default-output = Standaarduitvoer
+mixer-routing = Routering
+mixer-routing-title = Audio-uitvoerroutering
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Audioroutering
+routing-intro = Wijs strooks toe aan trackbussen en stuur vervolgens elke bus naar een fysieke uitgang — een feed voor een hardwarerecorder, luidsprekers in een andere kamer of een koptelefooncue op een vrije track. De monitor houdt zijn eigen apparaat; deze routes komen er bovenop, dus zonder ingestelde route blijft de mix ongewijzigd.
+routing-sends-title = Track-sends
+routing-no-strips = Geen audiobronnen in deze scène.
+routing-source = Bron
+routing-track = Track { $n }
+routing-send-aria = { $source } naar track { $n } sturen
+routing-outputs-title = Fysieke uitgangen
+routing-master = Master
+routing-off = Uit
+routing-default-output = Standaarduitvoer
+routing-device-aria = Uitvoerapparaat voor { $bus }
+routing-trim-aria = Uitvoer-trim voor { $bus }
+routing-trim-db = { $db } dB
+routing-muted = Gedempt
+routing-device-error = Apparaat niet beschikbaar
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Ducking
+mixer-ducking-title = Ducking-matrix
+ducking-title = Ducking-matrix
+ducking-intro = Elke bron kan elke andere ducken. Een cel verlaagt het doel (kolom) zodra de trigger (rij) klinkt — kies een cel om de diepte, drempel en timing in te stellen. Elk paar is zijn eigen ducking, dus één kanaal kan door meerdere triggers tegelijk worden geduckt.
+ducking-need-two = Voeg minstens twee audiobronnen toe om ertussen te ducken.
+ducking-trigger-target = Trigger ↓ / Doel →
+ducking-cell-aria = { $trigger } duckt { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Verwijderen
+ducking-amount = Hoeveelheid
+ducking-threshold = Drempel
+ducking-attack = Attack
+ducking-release = Release
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Luidheidsnormalisatie
+loudness-intro = Stuurt het programma geleidelijk naar een luidheidsdoel met een piekplafond, zodat je stream en opnames op een consistent niveau uitkomen. Langzaam en voorzichtig — het stuurt, het pompt nooit.
+loudness-enable = Programma naar het doel sturen
+loudness-target = Doel
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Piekplafond (dBFS)
+loudness-note = −14 LUFS past bij YouTube-achtige weergave; −16 is een gangbaar streamingdoel; −23 is EBU R128-uitzending. Dezelfde doelwaarde wordt gebruikt door de Normaliseren-actie na de opname.
+loudness-on = LUFS { $target }
+loudness-off = Norm. uit
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Soundboard
+mixer-soundboard-title = Soundboard
+soundboard-title = Soundboard
+soundboard-add-pad = + Pad
+soundboard-stop-all = Alles stoppen
+soundboard-edit = Bewerken
+soundboard-empty = Nog geen pads — voeg er een toe en wijs een lokale audioclip toe.
+soundboard-new-pad = Nieuwe pad
+soundboard-no-clip = Geen clip
+soundboard-audio-files = Audiobestanden
+soundboard-name = Naam
+soundboard-choose-clip = Clip kiezen…
+soundboard-gain = Versterking
+soundboard-choke = Choke
+soundboard-choke-none = Geen
+soundboard-loop = Herhalen
+soundboard-auto-duck = Auto-ducking
+soundboard-tracks = Tracks
+soundboard-hotkey = Sneltoets
+soundboard-hotkey-placeholder = bijv. Ctrl+Shift+1
+soundboard-remove = Verwijderen
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Plug-ins
+mixer-plugins-title = Audioplug-ins (CLAP / VST3)
+plugins-title = Audioplug-ins
+plugins-scanning = Scannen…
+plugins-none = Geen CLAP- of VST3-plug-ins gevonden in de standaardmappen.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -550,6 +628,10 @@ channelstrip-solo-source = { $name } solo (PFL)
 channelstrip-pan-label = Balans (dubbelklik herstelt)
 channelstrip-pan-aria = Balans van { $name }
 channelstrip-mono-label = Downmixen naar mono
+channelstrip-automix-label = Auto-mix (gain-sharing)
+channelstrip-automix-note = Gain-sharing: de mixer houdt het gecombineerde niveau van alle auto-mix-stroken stabiel en geeft het aan wie er spreekt — ideaal voor panels met meerdere microfoons en podcasts. Uit totdat je een strook toevoegt.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Genereert een echovrije return voor deze bron — iedereen in het programma behalve deze bron zelf. Gebruik het voor een externe gast zodat die zijn eigen vertraagde stem niet hoort.
 channelstrip-ptt-hotkey = Push-to-talk-sneltoets (stil tenzij ingedrukt)
 channelstrip-ptt-placeholder = bijv. Ctrl+Shift+T of F13
 channelstrip-ptt-aria = Push-to-talk-sneltoets
@@ -784,7 +866,36 @@ audiofilters-name-limiter = Limiter
 audiofilters-name-eq = 3-Bands EQ
 audiofilters-name-denoise = Ruisonderdrukking
 audiofilters-name-ducking = Ducking
+audiofilters-name-parametric-eq = Parametrische EQ
+audiofilters-name-de-esser = De-esser
+audiofilters-name-rumble-guard = Rommelfilter
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Preset
+audiofilters-voice-preset-pick = Stem-preset…
+audiofilters-voice-broadcast = Broadcaststem
+audiofilters-voice-podcast = Podcaststem
+audiofilters-voice-clean = Heldere stem
+audiofilters-voice-none = Keten wissen
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Sisfrequentie (Hz)
+audiofilters-deesser-amount = Max. reductie (dB)
+audiofilters-rumble-freq = Low-cut (Hz)
 audiofilters-title = Audiofilters — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Frequentiekromme van de parametrische EQ met live spectrum
+eq-band-type = Type
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Band
+eq-remove-band = Band verwijderen
+eq-type-bell = Bell
+eq-type-lowShelf = Low shelf
+eq-type-highShelf = High shelf
+eq-type-notch = Notch
+eq-type-highPass = Hoogdoorlaat
+eq-type-lowPass = Laagdoorlaat
 audiofilters-chain-header = Filterketen (bovenste draait eerst, vóór de fader)
 audiofilters-add = + Filter toevoegen
 audiofilters-add-menu = Een audiofilter toevoegen
@@ -1006,6 +1117,23 @@ recordings-cancel = Annuleren
 recordings-export-cancelled = Export geannuleerd.
 recordings-exported-to = Geëxporteerd naar { $path }
 recordings-remuxed-to = Gehermuxed naar { $path }
+recordings-normalize = Normaliseren
+recordings-normalizing = Normaliseren…
+recordings-normalize-title = Luidheid naar het doel normaliseren (schrijft een kopie)
+recordings-normalized-to = Genormaliseerd naar { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Alleen audio
+audiorec-format = Audio-opnameformaat
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Audio opnemen
+audiorec-stop = Stoppen
+audiorec-pause = Pauzeren
+audiorec-resume = Hervatten
+audiorec-recording = REC { $sec }s
+audiorec-saved = { $count } trackbestand(en) opgeslagen
 
 
 # --- OpenedFrec.tsx ---

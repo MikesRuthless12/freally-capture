@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  audiorecSetPaused,
+  audiorecStart,
+  audiorecStatus,
+  audiorecStop,
   recordingExport,
   recordingExportCancel,
+  recordingNormalize,
   recordingRemux,
   recordingsList,
+  settingsGet,
+  settingsSet,
 } from "../api/commands";
 import { onRecordingExport } from "../api/events";
-import type { ExportStatus, RecordingFile } from "../api/types";
+import type {
+  AudioRecFormat,
+  AudioRecStatus,
+  ExportStatus,
+  RecordingFile,
+  Settings,
+} from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
 import { formatBytes } from "../lib/format";
@@ -26,6 +39,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
   const t = useT();
   const [files, setFiles] = useState<RecordingFile[] | null>(null);
   const [remuxing, setRemuxing] = useState<string | null>(null);
+  const [normalizing, setNormalizing] = useState<string | null>(null);
   const [exportingPath, setExportingPath] = useState<string | null>(null);
   const [progress, setProgress] = useState<ExportStatus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -93,6 +107,21 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const normalize = async (path: string) => {
+    setNormalizing(path);
+    setError(null);
+    setNotice(null);
+    try {
+      const output = await recordingNormalize(path);
+      setNotice(t("recordings-normalized-to", { path: output }));
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setNormalizing(null);
+    }
+  };
+
   const startExport = async (path: string, container: string) => {
     setError(null);
     setNotice(null);
@@ -115,6 +144,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <PickerShell title={t("recordings-title")} onClose={onClose} wide>
       <div className="flex flex-col gap-2 text-xs text-havoc-text">
+        <AudioRecPanel onNotice={setNotice} onError={setError} />
         {files === null && <p className="m-0 text-havoc-muted">{t("recordings-loading")}</p>}
         {files?.length === 0 && <p className="m-0 text-havoc-muted">{t("recordings-empty")}</p>}
         {(files ?? []).map((file) => (
@@ -131,22 +161,39 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 {file.ext === "frec" && ` · ${t("recordings-frec-label")}`}
               </p>
             </div>
-            {file.ext === "mkv" && (
-              <button
-                type="button"
-                disabled={remuxing !== null || exportingPath !== null}
-                onClick={() => remux(file.path)}
-                title={t("recordings-remux-title")}
-                className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
-              >
-                {remuxing === file.path ? t("recordings-remuxing") : t("recordings-remux-to-mp4")}
-              </button>
+            {["mkv", "mp4", "mov", "webm"].includes(file.ext) && (
+              <div className="flex shrink-0 gap-1.5">
+                {file.ext === "mkv" && (
+                  <button
+                    type="button"
+                    disabled={remuxing !== null || normalizing !== null || exportingPath !== null}
+                    onClick={() => remux(file.path)}
+                    title={t("recordings-remux-title")}
+                    className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                  >
+                    {remuxing === file.path
+                      ? t("recordings-remuxing")
+                      : t("recordings-remux-to-mp4")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={normalizing !== null || remuxing !== null || exportingPath !== null}
+                  onClick={() => normalize(file.path)}
+                  title={t("recordings-normalize-title")}
+                  className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                >
+                  {normalizing === file.path
+                    ? t("recordings-normalizing")
+                    : t("recordings-normalize")}
+                </button>
+              </div>
             )}
             {file.ext === "frec" && (
               <div className="flex shrink-0 gap-1.5">
                 <button
                   type="button"
-                  disabled={exportingPath !== null || remuxing !== null}
+                  disabled={exportingPath !== null || remuxing !== null || normalizing !== null}
                   onClick={() => startExport(file.path, "mp4")}
                   title={t("recordings-export-mp4-title")}
                   className="rounded-md border border-havoc-accent/40 bg-havoc-accent/10 px-2 py-1 text-[11px] text-havoc-text transition-colors enabled:hover:border-havoc-accent/70 disabled:opacity-50"
@@ -157,7 +204,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 </button>
                 <button
                   type="button"
-                  disabled={exportingPath !== null || remuxing !== null}
+                  disabled={exportingPath !== null || remuxing !== null || normalizing !== null}
                   onClick={() => startExport(file.path, "mkv")}
                   title={t("recordings-export-mkv-title")}
                   className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
@@ -204,5 +251,128 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
         )}
       </div>
     </PickerShell>
+  );
+}
+
+const AUDIO_FORMATS: AudioRecFormat[] = ["wav", "flac", "opus"];
+
+/** CAP-N38 audio-only recorder: format picker + start/stop + live duration. */
+function AudioRecPanel({
+  onNotice,
+  onError,
+}: {
+  onNotice: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const t = useT();
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [status, setStatus] = useState<AudioRecStatus>({ state: "idle" });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    settingsGet()
+      .then(setSettings)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const poll = () =>
+      audiorecStatus()
+        .then((s) => alive && setStatus(s))
+        .catch(() => undefined);
+    poll();
+    const id = setInterval(poll, 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const recording = status.state === "recording";
+  const format = settings?.recording.audioFormat ?? "wav";
+
+  const setFormat = (next: AudioRecFormat) => {
+    if (!settings) return;
+    const nextSettings: Settings = {
+      ...settings,
+      recording: { ...settings.recording, audioFormat: next },
+    };
+    setSettings(nextSettings);
+    settingsSet(nextSettings).catch((err) => onError(String(err)));
+  };
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      await audiorecStart();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async () => {
+    setBusy(true);
+    try {
+      const outputs = await audiorecStop();
+      onNotice(t("audiorec-saved", { count: outputs.length }));
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-havoc-accent/30 bg-havoc-accent/[0.06] px-2.5 py-2">
+      <span className="font-medium text-havoc-text">{t("audiorec-title")}</span>
+      <select
+        value={format}
+        disabled={recording}
+        onChange={(e) => setFormat(e.target.value as AudioRecFormat)}
+        aria-label={t("audiorec-format")}
+        className="rounded-md border border-white/10 bg-havoc-panel px-1.5 py-0.5 text-[11px] text-havoc-text disabled:opacity-50"
+      >
+        {AUDIO_FORMATS.map((f) => (
+          <option key={f} value={f}>
+            {t(`audiorec-format-${f}`)}
+          </option>
+        ))}
+      </select>
+      {recording ? (
+        <>
+          <span className="font-mono text-havoc-accent">
+            {t("audiorec-recording", { sec: Math.floor(status.durationSec) })}
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => audiorecSetPaused(!status.paused).catch((err) => onError(String(err)))}
+            className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-havoc-muted enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+          >
+            {status.paused ? t("audiorec-resume") : t("audiorec-pause")}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={stop}
+            className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300 enabled:hover:border-red-500/70 disabled:opacity-50"
+          >
+            {t("audiorec-stop")}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={busy || !settings}
+          onClick={start}
+          className="ml-auto rounded-md border border-havoc-accent/40 bg-havoc-accent/10 px-2 py-0.5 text-[11px] text-havoc-text enabled:hover:border-havoc-accent/70 disabled:opacity-50"
+        >
+          {t("audiorec-start")}
+        </button>
+      )}
+    </div>
   );
 }

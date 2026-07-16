@@ -29,6 +29,116 @@ pub enum MixerLayout {
     Vertical,
 }
 
+/// CAP-N34 loudness normalization: the live rider that steers the program
+/// toward a target LUFS with a peak ceiling. Off by default.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LoudnessSettings {
+    pub enabled: bool,
+    /// Integrated-loudness target, LUFS (e.g. −14 YouTube, −16, −23 EBU R128).
+    pub target_lufs: f32,
+    /// Peak ceiling, dBFS (the rider's output limiter).
+    pub ceiling_db: f32,
+}
+
+impl Default for LoudnessSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_lufs: -16.0,
+            ceiling_db: -1.0,
+        }
+    }
+}
+
+impl LoudnessSettings {
+    fn validate(&self) -> Result<(), String> {
+        if !self.target_lufs.is_finite() || !(-30.0..=-5.0).contains(&self.target_lufs) {
+            return Err("loudness target must be between -30 and -5 LUFS".to_owned());
+        }
+        if !self.ceiling_db.is_finite() || !(-9.0..=0.0).contains(&self.ceiling_db) {
+            return Err("loudness ceiling must be between -9 and 0 dBFS".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// One CAP-N37 soundboard pad: a local clip with playback + mix options.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SoundboardPad {
+    /// Stable UUID (the media-hub ring key + the engine source id).
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    /// Local hotkey accelerator that fires the pad from the dock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
+    pub gain_db: f32,
+    /// Track bitmask this pad mixes into (bit 0 = track 1).
+    pub tracks: u8,
+    /// Choke group 1..=8 (a new pad stops the others in its group); 0 = none.
+    pub choke_group: u8,
+    pub looping: bool,
+    /// Duck the rest of the mix while this pad plays.
+    pub auto_duck: bool,
+}
+
+impl Default for SoundboardPad {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            path: String::new(),
+            hotkey: None,
+            gain_db: 0.0,
+            tracks: 1,
+            choke_group: 0,
+            looping: false,
+            auto_duck: false,
+        }
+    }
+}
+
+/// CAP-N37 soundboard: a grid of local audio-clip pads. Empty until populated.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SoundboardSettings {
+    pub pads: Vec<SoundboardPad>,
+}
+
+impl SoundboardSettings {
+    fn validate(&self) -> Result<(), String> {
+        if self.pads.len() > 64 {
+            return Err("too many soundboard pads (64 max)".to_owned());
+        }
+        for pad in &self.pads {
+            if pad.id.len() > 64 || pad.name.len() > 128 || pad.path.len() > 4_096 {
+                return Err("invalid soundboard pad".to_owned());
+            }
+            if pad.name.chars().any(char::is_control) || pad.path.chars().any(char::is_control) {
+                return Err("soundboard pad name/path has control characters".to_owned());
+            }
+            // The pad id is the media-hub ring key AND the engine source id; a
+            // non-UUID would decode into a ring nothing drains (a burnt decoder
+            // and no sound). The UI mints these with `crypto.randomUUID()`.
+            if fcap_scene::SourceId::parse(&pad.id).is_none() {
+                return Err("soundboard pad id must be a valid source id".to_owned());
+            }
+            if pad.choke_group > 8 {
+                return Err("soundboard choke group must be 0–8".to_owned());
+            }
+            if !pad.gain_db.is_finite() || !(-60.0..=12.0).contains(&pad.gain_db) {
+                return Err("soundboard pad gain out of range".to_owned());
+            }
+            if pad.hotkey.as_ref().is_some_and(|hk| hk.len() > 64) {
+                return Err("soundboard hotkey is too long".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Which palette the UI paints with (TASK-906). Applied live through the
 /// frontend's CSS-variable theme provider — never a rebuild, never a reload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -173,6 +283,17 @@ pub struct Settings {
     pub show_stats_dock: bool,
     /// The audio monitor output device name (`None`/empty = the OS default).
     pub monitor_device: Option<String>,
+    /// CAP-N30 program-bus output routes: master / track buses → physical
+    /// output devices, each with a trim. Empty by default — only the monitor
+    /// bus reaches a device until the operator adds a route.
+    #[serde(default)]
+    pub audio_outputs: Vec<fcap_scene::AudioOutputRoute>,
+    /// CAP-N34 loudness normalization (the live rider). Off by default.
+    #[serde(default)]
+    pub loudness: LoudnessSettings,
+    /// CAP-N37 soundboard pads. Empty until populated.
+    #[serde(default)]
+    pub soundboard: SoundboardSettings,
     /// Audio Mixer strip orientation.
     pub mixer_layout: MixerLayout,
     /// Appearance: palette + custom accent (Phase 9, TASK-906).
@@ -331,6 +452,9 @@ impl Default for Settings {
             language: AUTO_LANGUAGE.to_owned(),
             show_stats_dock: true,
             monitor_device: None,
+            audio_outputs: Vec::new(),
+            loudness: LoudnessSettings::default(),
+            soundboard: SoundboardSettings::default(),
             mixer_layout: MixerLayout::default(),
             theme: ThemeSettings::default(),
             alignment: AlignmentSettings::default(),
@@ -1064,6 +1188,28 @@ impl RemoteControlSettings {
     }
 }
 
+/// CAP-N38 audio-only recording format. WAV is the owned writer; FLAC/Opus go
+/// through the labeled ffmpeg component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioRecFormat {
+    #[default]
+    Wav,
+    Flac,
+    Opus,
+}
+
+impl AudioRecFormat {
+    /// The ffmpeg codec name to transcode the owned WAV to, or `None` for WAV.
+    pub fn codec(self) -> Option<&'static str> {
+        match self {
+            AudioRecFormat::Wav => None,
+            AudioRecFormat::Flac => Some("flac"),
+            AudioRecFormat::Opus => Some("opus"),
+        }
+    }
+}
+
 /// Recording configuration (Settings → Output). Independent of any future
 /// stream settings by design — the local copy never rides a stream's knobs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1071,6 +1217,9 @@ impl RemoteControlSettings {
 pub struct RecordingSettings {
     /// Output container; `frec` is the owned lossless default.
     pub container: Container,
+    /// CAP-N38 audio-only recording format (WAV owned; FLAC/Opus via ffmpeg).
+    #[serde(default)]
+    pub audio_format: AudioRecFormat,
     /// ffmpeg encoder id, or "auto" = best detected H.264 encoder.
     pub encoder_id: String,
     pub rate_control: RateControl,
@@ -1114,6 +1263,7 @@ impl Default for RecordingSettings {
     fn default() -> Self {
         Self {
             container: Container::Frec,
+            audio_format: AudioRecFormat::default(),
             encoder_id: "auto".to_owned(),
             rate_control: RateControl {
                 mode: RcMode::Cqp,
@@ -1238,6 +1388,33 @@ impl Settings {
                 return Err("invalid monitor device name".to_owned());
             }
         }
+        // CAP-N30 output routes: bounded (≤ one per program bus), sane device
+        // names + trims, and no two routes fighting over the same bus.
+        if self.audio_outputs.len() > fcap_scene::TRACK_COUNT + 1 {
+            return Err("too many audio output routes".to_owned());
+        }
+        let mut seen_buses = std::collections::HashSet::new();
+        for route in &self.audio_outputs {
+            if route.device_id.len() > 256 || route.device_id.chars().any(char::is_control) {
+                return Err("invalid audio output device name".to_owned());
+            }
+            if let fcap_scene::OutputBus::Track { index } = route.bus {
+                if index as usize >= fcap_scene::TRACK_COUNT {
+                    return Err("audio output route names a nonexistent track".to_owned());
+                }
+            }
+            if !route.gain_db.is_finite()
+                || route.gain_db < fcap_scene::MIN_VOLUME_DB
+                || route.gain_db > fcap_scene::MAX_VOLUME_DB
+            {
+                return Err("audio output trim out of range".to_owned());
+            }
+            if !seen_buses.insert(route.bus) {
+                return Err("duplicate audio output route for one bus".to_owned());
+            }
+        }
+        self.loudness.validate()?;
+        self.soundboard.validate()?;
         self.theme.validate()?;
         self.accessibility.validate()?;
         self.recording.validate()?;
@@ -1376,6 +1553,27 @@ impl SettingsStore {
     /// doesn't clone the whole [`Settings`] every 50 ms to compare one string.
     pub fn monitor_device(&self) -> Option<String> {
         self.lock().monitor_device.clone()
+    }
+
+    /// Just the CAP-N30 output routes — the audio bridge polls these each tick
+    /// to reconcile the engine's physical outputs without a full clone.
+    pub fn audio_outputs(&self) -> Vec<fcap_scene::AudioOutputRoute> {
+        self.lock().audio_outputs.clone()
+    }
+
+    /// Just the CAP-N34 loudness settings — polled by the audio bridge.
+    pub fn loudness(&self) -> LoudnessSettings {
+        self.lock().loudness
+    }
+
+    /// A CAP-N37 soundboard pad by id (for the trigger command).
+    pub fn soundboard_pad(&self, id: &str) -> Option<SoundboardPad> {
+        self.lock()
+            .soundboard
+            .pads
+            .iter()
+            .find(|pad| pad.id == id)
+            .cloned()
     }
 
     /// Replace the settings and persist them atomically.
@@ -1672,6 +1870,29 @@ mod tests {
             language: "de".to_owned(),
             show_stats_dock: false,
             monitor_device: Some("Speakers (Realtek)".to_owned()),
+            audio_outputs: vec![fcap_scene::AudioOutputRoute {
+                bus: fcap_scene::OutputBus::Track { index: 3 },
+                device_id: "Headphones (USB)".to_owned(),
+                gain_db: -3.0,
+            }],
+            loudness: LoudnessSettings {
+                enabled: true,
+                target_lufs: -14.0,
+                ceiling_db: -1.5,
+            },
+            soundboard: SoundboardSettings {
+                pads: vec![SoundboardPad {
+                    id: "11111111-1111-1111-1111-111111111111".to_owned(),
+                    name: "Applause".to_owned(),
+                    path: "C:/sfx/applause.wav".to_owned(),
+                    hotkey: Some("Ctrl+Shift+1".to_owned()),
+                    gain_db: -3.0,
+                    tracks: 0b11,
+                    choke_group: 1,
+                    looping: false,
+                    auto_duck: true,
+                }],
+            },
             mixer_layout: MixerLayout::Vertical,
             theme: ThemeSettings {
                 mode: ThemeMode::Custom,
@@ -2104,6 +2325,72 @@ mod tests {
         for bad in ["x".repeat(300), "spk\u{0007}".to_owned()] {
             let settings = Settings {
                 monitor_device: Some(bad.clone()),
+                ..Settings::default()
+            };
+            assert!(settings.validate().is_err(), "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn validate_bounds_the_audio_output_routes() {
+        use fcap_scene::{AudioOutputRoute, OutputBus};
+
+        // A sane route on the master and a track passes.
+        let ok = Settings {
+            audio_outputs: vec![
+                AudioOutputRoute {
+                    bus: OutputBus::Master,
+                    device_id: "Recorder".to_owned(),
+                    gain_db: 0.0,
+                },
+                AudioOutputRoute {
+                    bus: OutputBus::Track { index: 4 },
+                    device_id: String::new(), // OS default is legal
+                    gain_db: -6.0,
+                },
+            ],
+            ..Settings::default()
+        };
+        assert!(ok.validate().is_ok());
+
+        // Two routes fighting over the same bus is rejected.
+        let dup = Settings {
+            audio_outputs: vec![
+                AudioOutputRoute {
+                    bus: OutputBus::Master,
+                    device_id: "A".to_owned(),
+                    gain_db: 0.0,
+                },
+                AudioOutputRoute {
+                    bus: OutputBus::Master,
+                    device_id: "B".to_owned(),
+                    gain_db: 0.0,
+                },
+            ],
+            ..Settings::default()
+        };
+        assert!(dup.validate().is_err(), "one bus, at most one route");
+
+        // A nonexistent track, an out-of-range trim, and a junk device name.
+        for bad in [
+            AudioOutputRoute {
+                bus: OutputBus::Track { index: 9 },
+                device_id: String::new(),
+                gain_db: 0.0,
+            },
+            AudioOutputRoute {
+                bus: OutputBus::Master,
+                device_id: String::new(),
+                gain_db: 999.0,
+            },
+            AudioOutputRoute {
+                bus: OutputBus::Master,
+                device_id: "spk\u{0007}".to_owned(),
+                gain_db: 0.0,
+            },
+        ] {
+            let settings = Settings {
+                audio_outputs: vec![bad.clone()],
                 ..Settings::default()
             };
             assert!(settings.validate().is_err(), "should reject {bad:?}");

@@ -588,6 +588,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = Monitor
 mixer-monitor-device-aria = Monitor output device
 mixer-default-output = Default output
+mixer-routing = Routing
+mixer-routing-title = Audio output routing
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Audio routing
+routing-intro = Assign strips to track buses, then send any bus to a physical output — a hardware-recorder feed, speakers in another room, or a headphone cue on a spare track. The monitor keeps its own device; these routes are added on top, so with none set the mix is unchanged.
+routing-sends-title = Track sends
+routing-no-strips = No audio sources in this scene.
+routing-source = Source
+routing-track = Track { $n }
+routing-send-aria = Send { $source } to track { $n }
+routing-outputs-title = Physical outputs
+routing-master = Master
+routing-off = Off
+routing-default-output = Default output
+routing-device-aria = Output device for { $bus }
+routing-trim-aria = Output trim for { $bus }
+routing-trim-db = { $db } dB
+routing-muted = Muted
+routing-device-error = Device unavailable
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Ducking
+mixer-ducking-title = Ducking matrix
+ducking-title = Ducking matrix
+ducking-intro = Any source can duck any others. A cell dips the target (column) whenever the trigger (row) speaks — pick a cell to set its depth, threshold, and timing. Each pair is its own duck, so one strip can be ducked by several triggers at once.
+ducking-need-two = Add at least two audio sources to duck between them.
+ducking-trigger-target = Trigger ↓ / Target →
+ducking-cell-aria = { $trigger } ducks { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Remove
+ducking-amount = Amount
+ducking-threshold = Threshold
+ducking-attack = Attack
+ducking-release = Release
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Loudness normalization
+loudness-intro = Ride the program toward a loudness target with a peak ceiling, so your stream and recordings land at a consistent level. Slow and gentle — it steers, never pumps.
+loudness-enable = Ride the program to the target
+loudness-target = Target
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Peak ceiling (dBFS)
+loudness-note = −14 LUFS suits YouTube-style playback; −16 is a common streaming target; −23 is EBU R128 broadcast. The same target is used by the post-record Normalize action.
+loudness-on = LUFS { $target }
+loudness-off = Norm off
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Soundboard
+mixer-soundboard-title = Soundboard
+soundboard-title = Soundboard
+soundboard-add-pad = + Pad
+soundboard-stop-all = Stop all
+soundboard-edit = Edit
+soundboard-empty = No pads yet — add one and assign a local audio clip.
+soundboard-new-pad = New pad
+soundboard-no-clip = No clip
+soundboard-audio-files = Audio files
+soundboard-name = Name
+soundboard-choose-clip = Choose clip…
+soundboard-gain = Gain
+soundboard-choke = Choke
+soundboard-choke-none = None
+soundboard-loop = Loop
+soundboard-auto-duck = Auto-duck
+soundboard-tracks = Tracks
+soundboard-hotkey = Hotkey
+soundboard-hotkey-placeholder = e.g. Ctrl+Shift+1
+soundboard-remove = Remove
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Plugins
+mixer-plugins-title = Audio plugins (CLAP / VST3)
+plugins-title = Audio plugins
+plugins-scanning = Scanning…
+plugins-none = No CLAP or VST3 plugins found in the standard folders.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -673,6 +751,10 @@ channelstrip-solo-source = Solo { $name } (PFL)
 channelstrip-pan-label = Balance (double-click resets)
 channelstrip-pan-aria = Balance of { $name }
 channelstrip-mono-label = Downmix to mono
+channelstrip-automix-label = Auto-mix (gain-sharing)
+channelstrip-automix-note = Gain-sharing: the mixer keeps the combined level of all auto-mixed strips steady and hands it to whoever is speaking — ideal for multi-mic panels and podcasts. Off until you add a strip.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Produce an echo-free return for this source — everyone in the program except this source itself. Use it for a remote guest so they don't hear their own delayed voice.
 channelstrip-ptt-hotkey = Push-to-talk hotkey (silent unless held)
 channelstrip-ptt-placeholder = e.g. Ctrl+Shift+T or F13
 channelstrip-ptt-aria = Push-to-talk hotkey
@@ -983,7 +1065,36 @@ audiofilters-name-limiter = Limiter
 audiofilters-name-eq = 3-Band EQ
 audiofilters-name-denoise = Denoise
 audiofilters-name-ducking = Ducking
+audiofilters-name-parametric-eq = Parametric EQ
+audiofilters-name-de-esser = De-esser
+audiofilters-name-rumble-guard = Rumble Guard
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Preset
+audiofilters-voice-preset-pick = Voice preset…
+audiofilters-voice-broadcast = Broadcast voice
+audiofilters-voice-podcast = Podcast voice
+audiofilters-voice-clean = Clean voice
+audiofilters-voice-none = Clear chain
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Sibilance freq (Hz)
+audiofilters-deesser-amount = Max reduction (dB)
+audiofilters-rumble-freq = Low-cut (Hz)
 audiofilters-title = Audio filters — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Parametric EQ response curve with a live spectrum
+eq-band-type = Type
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Band
+eq-remove-band = Remove band
+eq-type-bell = Bell
+eq-type-lowShelf = Low shelf
+eq-type-highShelf = High shelf
+eq-type-notch = Notch
+eq-type-highPass = High-pass
+eq-type-lowPass = Low-pass
 audiofilters-chain-header = Filter chain (top runs first, before the fader)
 audiofilters-add = + Add filter
 audiofilters-add-menu = Add an audio filter
@@ -1231,6 +1342,23 @@ recordings-cancel = Cancel
 recordings-export-cancelled = Export cancelled.
 recordings-exported-to = Exported to { $path }
 recordings-remuxed-to = Remuxed to { $path }
+recordings-normalize = Normalize
+recordings-normalizing = Normalizing…
+recordings-normalize-title = Normalize loudness to the target (writes a copy)
+recordings-normalized-to = Normalized to { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Audio-only
+audiorec-format = Audio recording format
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Record audio
+audiorec-stop = Stop
+audiorec-pause = Pause
+audiorec-resume = Resume
+audiorec-recording = REC { $sec }s
+audiorec-saved = Saved { $count } track file(s)
 
 
 # --- OpenedFrec.tsx ---

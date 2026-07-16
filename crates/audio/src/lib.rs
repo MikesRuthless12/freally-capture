@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 
 pub mod capture;
+pub mod claphost;
 pub mod delay;
 pub mod devices;
 pub mod dsp;
@@ -22,11 +23,13 @@ pub mod engine;
 pub mod fft;
 pub mod filters;
 pub mod graph;
+pub mod loudness;
 pub mod lufs;
 pub mod media_hub;
 pub mod meter;
 pub mod monitor;
 pub mod resample;
+pub mod spectrum;
 pub mod vis;
 pub mod vst;
 
@@ -34,8 +37,8 @@ pub use devices::{
     list_input_devices, list_loopback_devices, list_output_devices, AudioDeviceInfo,
 };
 pub use engine::{
-    AudioEngine, EngineSnapshot, RecordTap, SourceConfig, SourceSnapshot, SourceState,
-    TransitionDuckSpec,
+    AudioEngine, EngineSnapshot, FilterMeter, FilterMetersSnapshot, OutputRouteError, RecordTap,
+    SourceConfig, SourceSnapshot, SourceState, SpectrumSnapshot, TransitionDuckSpec,
 };
 pub use graph::{MixerCore, StripControl};
 pub use meter::Levels;

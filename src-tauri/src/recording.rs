@@ -306,6 +306,15 @@ pub fn output_folder(settings: &RecordingSettings, override_folder: &str) -> Pat
 /// The `{counter}` value for one naming event (CAP-M25): advance the
 /// persisted counter only when the template actually uses it — no settings
 /// write otherwise.
+/// CAP-N38: resolve the CAP-M25 filename stem for an audio-only recording,
+/// reusing the same template + counter machinery as a video recording (the
+/// canvas tokens resolve to 0 — there is no canvas in podcast mode).
+pub fn audio_only_stem<R: Runtime>(app: &AppHandle<R>, settings: &RecordingSettings) -> String {
+    let counter = counter_for(app, &settings.template, settings.counter);
+    let naming = naming_context(app, settings.filename_prefix.clone(), (0, 0), counter);
+    crate::filename::resolve_template(&settings.template, &naming)
+}
+
 pub(crate) fn counter_for<R: Runtime>(app: &AppHandle<R>, template: &str, current: u32) -> u32 {
     if template.contains("{counter}") {
         app.state::<SettingsStore>().bump_recording_counter()
@@ -411,6 +420,11 @@ pub(crate) fn start_with<R: Runtime>(
     let _reset = ResetOnDrop(&state.starting);
     if state.lock_inner().is_some() {
         return Err("a recording is already running".to_string());
+    }
+    // The record tap is a single sink — an audio-only recording owns it if one
+    // runs (mirrors the reverse guard in `audiorec::start`).
+    if app.state::<crate::audiorec::AudioRecState>().is_active() {
+        return Err("stop the audio-only recording before starting a video one".to_owned());
     }
 
     let settings = app.state::<SettingsStore>().get().recording;

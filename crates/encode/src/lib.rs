@@ -28,6 +28,7 @@ pub mod link;
 pub mod mux;
 pub mod recorder;
 pub mod remux;
+pub mod wav;
 
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
 pub use export::{export_frec, ExportProgress};

@@ -316,6 +316,38 @@ pub fn recording_status(
 }
 
 // ---------------------------------------------------------------------------
+// Audio-only recording (CAP-N38)
+// ---------------------------------------------------------------------------
+
+/// Start an audio-only recording (per-track WAV via the owned writer).
+#[tauri::command]
+pub async fn audiorec_start<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::audiorec::start(&app))
+        .await
+        .map_err(|err| format!("audio recording start task failed: {err}"))?
+}
+
+/// Stop + finalize the audio-only recording; returns the finished file paths.
+#[tauri::command]
+pub async fn audiorec_stop<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::audiorec::stop(&app))
+        .await
+        .map_err(|err| format!("audio recording stop task failed: {err}"))?
+}
+
+/// The audio-only recording status.
+#[tauri::command]
+pub fn audiorec_status<R: Runtime>(app: AppHandle<R>) -> crate::audiorec::AudioRecDto {
+    crate::audiorec::status(&app)
+}
+
+/// Pause / resume the audio-only recording.
+#[tauri::command]
+pub fn audiorec_set_paused<R: Runtime>(app: AppHandle<R>, paused: bool) -> Result<(), String> {
+    crate::audiorec::set_paused(&app, paused)
+}
+
+// ---------------------------------------------------------------------------
 // The recordings list + remux (P4.8)
 // ---------------------------------------------------------------------------
 
@@ -388,6 +420,19 @@ pub async fn recordings_list<R: Runtime>(
     .map_err(|err| format!("recordings listing task failed: {err}"))?
 }
 
+/// Reject a webview-supplied path that resolves off the local disk (UNC/SMB
+/// share, `file://`, or a URL) **before** any `canonicalize()`/stat probe.
+/// Resolving a `\\host\share\…` path performs an SMB/NTLM handshake that would
+/// leak the user's credential hash to that host — the CAP-M16 rule the rest of
+/// the codebase enforces (`commands::studio::is_remote`). Legitimate local
+/// paths (including mapped drive letters) pass through untouched.
+fn reject_remote(path: &str) -> Result<(), String> {
+    if crate::commands::studio::is_remote(path) {
+        return Err("network paths are not accepted".to_string());
+    }
+    Ok(())
+}
+
 /// Remux an mkv recording to a sibling mp4 (stream copy — no re-encode).
 /// The path must live in the recordings folder: the webview never gets to
 /// point this at arbitrary files.
@@ -404,6 +449,7 @@ pub async fn recording_remux<R: Runtime>(
         let folder = crate::recording::recordings_folder(&settings)
             .canonicalize()
             .map_err(|err| format!("recordings folder: {err}"))?;
+        reject_remote(&path)?;
         let input = std::path::Path::new(&path)
             .canonicalize()
             .map_err(|err| format!("recording not found: {err}"))?;
@@ -418,6 +464,42 @@ pub async fn recording_remux<R: Runtime>(
     })
     .await
     .map_err(|err| format!("remux task failed: {err}"))?
+}
+
+/// CAP-N34: normalize a wire recording to the app's loudness target via ffmpeg
+/// `loudnorm`, writing a `(normalized)` sibling. Same recordings-folder guard as
+/// remux — the webview never points this at an arbitrary file.
+#[tauri::command]
+pub async fn recording_normalize<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = app.state::<crate::settings::SettingsStore>().get();
+        let folder = crate::recording::recordings_folder(&settings.recording)
+            .canonicalize()
+            .map_err(|err| format!("recordings folder: {err}"))?;
+        reject_remote(&path)?;
+        let input = std::path::Path::new(&path)
+            .canonicalize()
+            .map_err(|err| format!("recording not found: {err}"))?;
+        if input.parent() != Some(folder.as_path()) {
+            return Err("only files in the recordings folder can be normalized".to_string());
+        }
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("normalizing needs the ffmpeg component — install it from Components")?;
+        fcap_encode::remux::normalize_loudness(
+            &ready,
+            &input,
+            settings.loudness.target_lufs,
+            settings.loudness.ceiling_db,
+        )
+        .map(|out| out.display().to_string())
+    })
+    .await
+    .map_err(|err| format!("normalize task failed: {err}"))?
 }
 
 // --- .frec → MP4/MKV export (decode + re-encode) ---------------------------
@@ -596,6 +678,7 @@ pub fn recording_export<R: Runtime>(
     let folder = crate::recording::recordings_folder(&settings)
         .canonicalize()
         .map_err(|err| format!("recordings folder: {err}"))?;
+    reject_remote(&path)?;
     let input = std::path::Path::new(&path)
         .canonicalize()
         .map_err(|err| format!("recording not found: {err}"))?;
@@ -618,6 +701,7 @@ pub fn open_frec_export<R: Runtime>(
     container: String,
 ) -> Result<(), String> {
     let target = parse_container(&container)?;
+    reject_remote(&path)?;
     let input = std::path::Path::new(&path)
         .canonicalize()
         .map_err(|err| format!("file not found: {err}"))?;
