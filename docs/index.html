@@ -265,15 +265,15 @@
             <span class="soon">Done — Jul 3, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">preview</span>
+            <span class="badge">0.56.0</span>
             <div>
               <strong>Native GPU preview ("OBS feel")</strong>
-              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag. Real-time on <strong>Windows</strong> (DirectComposition), with the selection box + transform handles drawn into the GPU frame; macOS (CAMetalLayer) and Linux (Vulkan) next. The JPEG preview stays as the universal fallback.</p>
+              <p>The live preview painted straight from the GPU compositor — no read-back/encode round-trip, no lag — on <strong>Windows</strong> (DirectComposition), <strong>macOS</strong> (CAMetalLayer), and <strong>Linux</strong> (X11/Vulkan), with the selection box + transform handles drawn into the GPU frame. The JPEG preview stays as the universal fallback (and covers Wayland).</p>
             </div>
-            <span class="soon">In development — Windows done</span>
+            <span class="soon">Done — Jul 6, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.70.0</span>
+            <span class="badge">0.70.0</span>
             <div>
               <strong>Studio MVP — first public</strong>
               <p>Single-target streaming with reconnect, Studio Mode + transitions, global hotkeys, profiles + scene collections, and a real stats dock — plus opt-in P2P remote guests. The virtual camera follows as its own signed-driver milestone.</p>
@@ -305,10 +305,106 @@
             <span class="soon">Done — Jul 9, 2026</span>
           </li>
           <li>
+            <span class="badge">0.96.0</span>
+            <div>
+              <strong>Accessibility, 18 languages, onboarding &amp; themes</strong>
+              <p>Keyboard-first accessibility with screen-reader labels and high-contrast support, the full 18-language localization (incl. RTL Arabic), guided onboarding with a first-run auto-config wizard, the unified Settings modal, dark/light/custom-accent themes, and a Ctrl/Cmd-K command palette.</p>
+            </div>
+            <span class="soon">Done — Jul 10, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.97.0</span>
+            <div>
+              <strong>Scene authoring &amp; monitoring — must-haves, batch 1</strong>
+              <p>Undo/redo, the OBS scene importer, the missing-file doctor, the alignment suite with custom guides, the transform panel with copy/paste, the keying workbench, multiview, projectors on any display, and still grabs.</p>
+            </div>
+            <span class="soon">Done — Jul 11, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.98.0</span>
+            <div>
+              <strong>Broadcast safety &amp; reliability — must-haves, batch 2</strong>
+              <p>Pre-flight checks, alarms, crash-safe recording with salvage, encoder failover, source health, the panic button, the quit guard, the diagnostics bundle, and filename templates.</p>
+            </div>
+            <span class="soon">Done — Jul 12, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.99.0</span>
+            <div>
+              <strong>Sources, devices &amp; calibration — must-haves, batch 3</strong>
+              <p>The last of the 26 must-haves: the hotkey manager, timer/clock and text-from-file sources, deinterlacing, UVC camera controls, per-strip pan/solo/mono, the A/V sync workbench, and test signals.</p>
+            </div>
+            <span class="soon">Done — Jul 12, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.200.0</span>
+            <div>
+              <strong>Automation + capture &amp; device depth</strong>
+              <p>Two themed phases in one release — the ladder steps +100 per phase from here, so this double release lands at 0.200.0. Automation: a rules engine, macros with variables, MIDI and OSC control surfaces, hotkey chords and layers, a LAN touch panel, a tally-light service, PTZ camera control, and a timed show rundown — every surface dispatching through one fixed command allowlist, off by default. Capture depth: the low-latency passthrough monitor, pixel-perfect scaling, punch-in zoom, auto black-bar crop, window↔app-audio auto-link, HDR→SDR tone-mapping, the scene backdrop, and true reverse playback.</p>
+            </div>
+            <span class="soon">Done — Jul 13, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.300.0</span>
+            <div>
+              <strong>New sources &amp; overlays</strong>
+              <p>Ten new things for the canvas: instant-replay playback, a LAN SRT/RTMP ingest source, Freally Link (instance-to-instance program share), an input overlay, a system-stats overlay, an audio visualizer, a title &amp; scoreboard designer, a gapless media playlist, a speedrun split timer, and cursor click effects — the LAN sources off by default and never touching the internet. 0.301.0 followed with the OBS-style menu bar and the Apply-only Settings modal.</p>
+            </div>
+            <span class="soon">Done — Jul 14, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.400.0</span>
+            <div>
+              <strong>Compositor &amp; FX depth</strong>
+              <p>Shipped in two parts (0.310.0 → 0.400.0): 3D corner-pin, downstream keyer layers, freeze-frame, source cloning, an expanded blur family, the move (morph) transition, per-scene-pair transition rules, the WGSL shader studio, the bezier mask editor, and track-matte stingers with program-audio duck.</p>
+            </div>
+            <span class="soon">Done — Jul 15, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.500.0</span>
+            <div>
+              <strong>Audio production depth</strong>
+              <p>The mixer becomes a broadcast console: physical output routing and aux/cue mixes, a ducking matrix, a gain-sharing auto-mixer, EBU R128 loudness normalization, a parametric EQ over a live spectrum, a de-esser and rumble guard, a soundboard, audio-only podcast recording, per-guest mix-minus with voice-chain presets, and CLAP + VST3 plugin discovery — every filter a live visual instrument, all owned classic DSP (no ML), off by default.</p>
+            </div>
+            <span class="soon">Done — Jul 15, 2026</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.600.0</span>
+            <div>
+              <strong>Recording &amp; replay depth</strong>
+              <p>Per-source ISO recording (clean per-source and per-guest files, timecode-aligned to the program), a replay &amp; clip trimmer with smart stream-copy export and one-click 9:16 reframe, alpha-channel <code>.frec</code> recording with ProRes 4444/QTRLE export, split-on-scene-change and split-on-marker, auto-markers from studio events, a sandboxed post-record pipeline, a recording integrity verifier, and SMPTE LTC timecode generate/read with a burn-in overlay.</p>
+            </div>
+            <span class="soon">In development</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.700.0</span>
+            <div>
+              <strong>Streaming reliability &amp; insight</strong>
+              <p>A network-condition simulator for pre-show drills, a dry-run mode that keeps every byte on the machine, a dropped-frame forensic timeline, a post-show session report, an encoder benchmark wizard, and per-output source visibility (stream-only / recording-only items).</p>
+            </div>
+            <span class="soon">Planned</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.800.0</span>
+            <div>
+              <strong>Remote guests &amp; show production</strong>
+              <p>A green room with private tech checks, a cue &amp; talk system over the existing P2P channels, a per-guest connection-quality dashboard, a telestrator, a teleprompter, and auto-grid guest layouts with nameplates.</p>
+            </div>
+            <span class="soon">Planned</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.900.0</span>
+            <div>
+              <strong>Studio management &amp; workflow</strong>
+              <p>Scene-collection pack export/import, collection diff &amp; merge, named version snapshots, portable mode (run from a USB stick), one-file backup &amp; restore, a theme editor, dock layout presets, settings search, and a quick-actions grid dock.</p>
+            </div>
+            <span class="soon">Planned</span>
+          </li>
+          <li>
             <span class="badge upcoming">1.0.0</span>
             <div>
-              <strong>Game-capture hooking &amp; launch</strong>
-              <p>Game-capture GPU hooking (DX/GL/Vulkan, flagged honestly), notarized macOS installers, full localization (18 languages, incl. RTL), accessibility, and guided onboarding.</p>
+              <strong>First stable</strong>
+              <p>1.0.0 ships when all 100 roadmap features are in — the 26 must-haves (done at 0.99.0) plus the 74 nice-to-haves landing phase by phase above. The virtual camera, a true browser source, and game-capture GPU hooking remain their own milestones alongside the ladder.</p>
             </div>
             <span class="soon">Coming soon</span>
           </li>
