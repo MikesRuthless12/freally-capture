@@ -1057,6 +1057,8 @@ pub fn tick<R: TauriRuntime>(
     let plans = lock(&state.engine).evaluate(&settings, &signals);
     for plan in plans {
         let _ = app.emit("automation-fired", plan.rule.clone());
+        // CAP-N44: a fired rule marks the moment in the recording.
+        crate::recording::add_auto_marker(app, &format!("Rule: {}", plan.rule));
         state.queue(plan);
     }
     drive(app);

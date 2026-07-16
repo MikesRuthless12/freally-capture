@@ -417,6 +417,8 @@ pub fn save<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
         "replay_saved",
         serde_json::json!({ "path": out.display().to_string() }),
     );
+    // CAP-N44: a saved replay marks the moment in the recording.
+    crate::recording::add_auto_marker(app, "Replay saved");
     emit_status(app);
     println!("replay: saved {}", out.display());
     Ok(out)

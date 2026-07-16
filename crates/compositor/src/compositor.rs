@@ -181,6 +181,11 @@ pub struct Compositor {
     /// at full canvas dims into a tiny texture just downscales, so the readback
     /// (which dominates) is ~36× cheaper than a full-res program readback.
     thumbnail: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+    /// The CAP-N40 ISO lanes' canvas-sized target — its OWN texture, because
+    /// ISO renders run every tick and may share a tick with the Studio-Mode
+    /// preview and workbench passes that use the transition-rig scratch.
+    /// CAP-N42's alpha render reuses it (renders are sequential in a tick).
+    iso: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
     /// Readback staging per target size (program / vertical) — keyed so the
     /// two canvases never thrash one buffer.
     readback: HashMap<(u32, u32), wgpu::Buffer>,
@@ -521,6 +526,7 @@ impl Compositor {
             program_view,
             vertical: None,
             thumbnail: None,
+            iso: None,
             readback: HashMap::new(),
             sampler,
             repeat_sampler,
@@ -769,6 +775,7 @@ impl Compositor {
             view,
             (width as f32, height as f32),
             false,
+            false,
         )?;
         self.read_texture(&texture)
     }
@@ -982,8 +989,8 @@ impl Compositor {
             (rig.scratch[0].1.clone(), rig.scratch[1].1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(from, time_seconds, from_view, canvas, false)?;
-        self.render_to(to, time_seconds, to_view, canvas, false)?;
+        self.render_to(from, time_seconds, from_view, canvas, false, false)?;
+        self.render_to(to, time_seconds, to_view, canvas, false, false)?;
 
         let rig = self.transition.as_ref().expect("ensured above");
         self.gpu.queue.write_buffer(
@@ -1759,7 +1766,7 @@ impl Compositor {
             (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, view, canvas, false)?;
+        self.render_to(scene, time_seconds, view, canvas, false, false)?;
         self.read_texture(&texture)
     }
 
@@ -1781,7 +1788,7 @@ impl Compositor {
             (rig.scratch[1].0.clone(), rig.scratch[1].1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, view, canvas, matte)?;
+        self.render_to(scene, time_seconds, view, canvas, matte, false)?;
         self.read_texture(&texture)
     }
 
@@ -1812,7 +1819,44 @@ impl Compositor {
             (thumb.0.clone(), thumb.1.clone())
         };
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, view, canvas, false)?;
+        self.render_to(scene, time_seconds, view, canvas, false, false)?;
+        self.read_texture(&texture)
+    }
+
+    /// The dedicated canvas-sized readback target shared by the ISO lanes
+    /// (CAP-N40) and the alpha render (CAP-N42) — renders inside one tick
+    /// are sequential, so one scratch serves all of them.
+    fn ensure_iso_target(&mut self) -> (wgpu::Texture, wgpu::TextureView) {
+        let (width, height) = (self.canvas_width, self.canvas_height);
+        let needs_rebuild = match &self.iso {
+            Some((_, _, w, h)) => *w != width || *h != height,
+            None => true,
+        };
+        if needs_rebuild {
+            let (texture, view) = Self::make_program_texture(&self.gpu.device, width, height);
+            self.iso = Some((texture, view, width, height));
+        }
+        let iso = self.iso.as_ref().expect("ensured above");
+        (iso.0.clone(), iso.1.clone())
+    }
+
+    /// Compose a **single-source** scene into the dedicated ISO/alpha target
+    /// at canvas size and read it back — one CAP-N40 ISO-lane frame
+    /// (`transparent = false`) or one CAP-N42 alpha-recording frame
+    /// (`transparent = true`: uncovered pixels keep alpha 0, keyed sources
+    /// keep their true coverage). The caller builds the synthetic one-item
+    /// scene. Uses its OWN texture, so it can share a tick with
+    /// `render_preview_scene`/`render_source_view`; the shared program
+    /// texture stays opaque (the native preview presents it directly).
+    pub fn render_iso_view(
+        &mut self,
+        scene: &Scene,
+        time_seconds: f32,
+        transparent: bool,
+    ) -> Result<ProgramFrame, CompositorError> {
+        let (texture, view) = self.ensure_iso_target();
+        let canvas = (self.canvas_width as f32, self.canvas_height as f32);
+        self.render_to(scene, time_seconds, view, canvas, false, transparent)?;
         self.read_texture(&texture)
     }
 
@@ -2090,7 +2134,7 @@ impl Compositor {
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
         let target = self.program_view.clone();
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
-        self.render_to(scene, time_seconds, target, canvas, false)
+        self.render_to(scene, time_seconds, target, canvas, false, false)
     }
 
     /// The scenes a nested-scene source can reference + the source→scene
@@ -2186,6 +2230,7 @@ impl Compositor {
                 view,
                 (width as f32, height as f32),
                 false,
+                false,
             )?;
         }
         Ok(())
@@ -2203,9 +2248,10 @@ impl Compositor {
         target: wgpu::TextureView,
         canvas: (f32, f32),
         matte: bool,
+        transparent: bool,
     ) -> Result<(), CompositorError> {
         self.ensure_nested(scene, time_seconds, 0)?;
-        self.compose_scene(scene, time_seconds, target, canvas, matte)
+        self.compose_scene(scene, time_seconds, target, canvas, matte, transparent)
     }
 
     /// One scene → one target, no nested pre-pass (callers ensure it).
@@ -2213,6 +2259,11 @@ impl Compositor {
     /// `matte` (CAP-M26, keying-workbench only) appends an alpha→grayscale pass
     /// to every item's chain so the composite shows the keyer's matte instead of
     /// the keyed image. Always `false` on the program/preview/vertical paths.
+    ///
+    /// `transparent` (CAP-N42, alpha recording only) clears the program pass to
+    /// TRANSPARENT black instead of opaque — uncovered pixels keep alpha 0 and
+    /// keyed sources keep their true coverage. Always `false` everywhere the
+    /// composite is presented directly (preview/stream/program).
     fn compose_scene(
         &mut self,
         scene: &Scene,
@@ -2220,6 +2271,7 @@ impl Compositor {
         target: wgpu::TextureView,
         canvas: (f32, f32),
         matte: bool,
+        transparent: bool,
     ) -> Result<(), CompositorError> {
         let started = Instant::now();
 
@@ -2474,11 +2526,13 @@ impl Compositor {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
+                        // Opaque black normally; transparent black for the
+                        // CAP-N42 alpha render (uncovered pixels keep a=0).
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.0,
                             g: 0.0,
                             b: 0.0,
-                            a: 1.0,
+                            a: if transparent { 0.0 } else { 1.0 },
                         }),
                         store: wgpu::StoreOp::Store,
                     },

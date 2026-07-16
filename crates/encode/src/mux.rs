@@ -354,6 +354,8 @@ pub struct FrecSink {
     base_path: PathBuf,
     part: u32,
     finished: Vec<PathBuf>,
+    /// CAP-N42: the frames carry real transparency (header flags bit).
+    alpha: bool,
 }
 
 impl FrecSink {
@@ -362,10 +364,26 @@ impl FrecSink {
         path: PathBuf,
         split_minutes: Option<u32>,
     ) -> Result<Self, String> {
+        Self::create_with_options(spec, path, split_minutes, false, false)
+    }
+
+    /// CAP-N42/N43: create with the full option set — `alpha` flags the
+    /// frames as carrying real transparency; `event_splits` says the session
+    /// may cut on demand (scene switch / marker / rundown step), so files
+    /// are named in part mode from the first one.
+    pub fn create_with_options(
+        spec: RecordSpec,
+        path: PathBuf,
+        split_minutes: Option<u32>,
+        alpha: bool,
+        event_splits: bool,
+    ) -> Result<Self, String> {
         let split_frames =
             split_minutes.map(|minutes| minutes.max(1) as u64 * 60 * spec.fps as u64);
-        let first = part_path(&path, split_frames.is_some(), 1);
-        let writer = FrecWriter::create(&first, frec_spec(&spec)).map_err(|err| err.to_string())?;
+        let parts = split_frames.is_some() || event_splits;
+        let first = part_path(&path, parts, 1);
+        let writer =
+            FrecWriter::create(&first, frec_spec(&spec, alpha)).map_err(|err| err.to_string())?;
         Ok(FrecSink {
             spec,
             writer: Some(writer),
@@ -375,6 +393,7 @@ impl FrecSink {
             base_path: path,
             part: 1,
             finished: vec![first],
+            alpha,
         })
     }
 
@@ -386,8 +405,10 @@ impl FrecSink {
         self.part_frames = 0;
         self.part += 1;
         let next = part_path(&self.base_path, true, self.part);
-        self.writer =
-            Some(FrecWriter::create(&next, frec_spec(&self.spec)).map_err(|err| err.to_string())?);
+        self.writer = Some(
+            FrecWriter::create(&next, frec_spec(&self.spec, self.alpha))
+                .map_err(|err| err.to_string())?,
+        );
         self.finished.push(next);
         Ok(())
     }
@@ -400,7 +421,7 @@ impl FrecSink {
     }
 }
 
-fn frec_spec(spec: &RecordSpec) -> FrecSpec {
+fn frec_spec(spec: &RecordSpec, alpha: bool) -> FrecSpec {
     FrecSpec {
         width: spec.width,
         height: spec.height,
@@ -409,6 +430,7 @@ fn frec_spec(spec: &RecordSpec) -> FrecSpec {
         pixel_format: PixelFormat::Rgba8,
         audio_tracks: spec.tracks.len() as u8,
         sample_rate: 48_000,
+        alpha,
     }
 }
 
@@ -457,6 +479,17 @@ impl RecordSink for FrecSink {
         writer
             .write_audio(slot as u8, part_pos, samples)
             .map_err(|err| err.to_string())
+    }
+
+    /// CAP-N43: cut to a new part now. A minimum part length of one second
+    /// guards against event storms (a rundown step that also switches the
+    /// scene, a mashed marker key) producing confetti files — the second
+    /// request inside the window is simply already satisfied.
+    fn split_now(&mut self) -> Result<(), String> {
+        if self.part_frames < u64::from(self.spec.fps.max(1)) {
+            return Ok(());
+        }
+        self.rotate()
     }
 
     fn finish(mut self: Box<Self>) -> Result<Vec<PathBuf>, String> {
@@ -657,6 +690,126 @@ impl FfmpegSink {
             split,
         })
     }
+
+    /// CAP-N42: spawn the **alpha-preserving** export sink — RGBA in, an NLE
+    /// master out (`.mov`): ProRes 4444 (`yuva444p10le`) or QTRLE (`argb`),
+    /// with PCM audio (a master carries lossless audio, not AAC). Codecs run
+    /// through the same labeled, on-demand ffmpeg component; nothing is
+    /// bundled. No splitting, no scaling — this is a faithful transcode.
+    pub fn spawn_alpha(
+        ffmpeg: &Ffmpeg,
+        spec: &RecordSpec,
+        codec: AlphaCodec,
+        path: &Path,
+    ) -> Result<Self, String> {
+        let mut listeners = Vec::new();
+        for _ in &spec.tracks {
+            let listener = TcpListener::bind("127.0.0.1:0")
+                .map_err(|err| format!("could not bind a loopback audio socket: {err}"))?;
+            listeners.push(listener);
+        }
+
+        let mut cmd = crate::ffmpeg::command(ffmpeg);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        cmd.args(["-hide_banner", "-v", "error", "-y"]);
+        cmd.args([
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            &format!("{}x{}", spec.width, spec.height),
+            "-r",
+            &spec.fps.to_string(),
+            "-i",
+            "pipe:0",
+        ]);
+        for listener in &listeners {
+            let port = listener.local_addr().map_err(|err| err.to_string())?.port();
+            cmd.args([
+                "-f",
+                "f32le",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "-i",
+                &format!("tcp://127.0.0.1:{port}"),
+            ]);
+        }
+        cmd.args(["-map", "0:v"]);
+        for index in 1..=listeners.len() {
+            cmd.args(["-map", &format!("{index}:a")]);
+        }
+        match codec {
+            AlphaCodec::Prores4444 => {
+                cmd.args([
+                    "-c:v",
+                    "prores_ks",
+                    "-profile:v",
+                    "4444",
+                    "-pix_fmt",
+                    "yuva444p10le",
+                ]);
+            }
+            AlphaCodec::Qtrle => {
+                cmd.args(["-c:v", "qtrle", "-pix_fmt", "argb"]);
+            }
+        }
+        if !spec.tracks.is_empty() {
+            cmd.args(["-c:a", "pcm_s16le"]);
+        }
+        cmd.args(["-f", "mov"]);
+        cmd.arg(path);
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| format!("could not start the ffmpeg component: {err}"))?;
+        let stdin = child.stdin.take().expect("stdin piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+        let stderr_thread = std::thread::Builder::new()
+            .name("fcap-alpha-ffmpeg-err".into())
+            .spawn(move || {
+                use std::io::Read;
+                let mut tail = Vec::new();
+                let mut reader = std::io::BufReader::new(stderr);
+                let _ = reader.read_to_end(&mut tail);
+                if tail.len() > 4096 {
+                    tail.drain(..tail.len() - 4096);
+                }
+                tail
+            })
+            .map_err(|err| err.to_string())?;
+
+        let connect_cancel = Arc::new(AtomicBool::new(false));
+        let (video_tx, video_thread) = spawn_video_writer(stdin)?;
+        let mut lanes = Vec::new();
+        for listener in listeners {
+            lanes.push(spawn_audio_writer(listener, Arc::clone(&connect_cancel))?);
+        }
+
+        Ok(FfmpegSink {
+            child,
+            video_tx: Some(video_tx),
+            video_thread: Some(video_thread),
+            lanes,
+            stderr_thread: Some(stderr_thread),
+            connect_cancel,
+            paths: vec![path.to_path_buf()],
+            split: false,
+        })
+    }
+}
+
+/// CAP-N42: the alpha-preserving export codecs — both classic, both `.mov`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaCodec {
+    /// ProRes 4444 (10-bit + alpha) — the NLE-standard master.
+    Prores4444,
+    /// QuickTime Animation (RLE, lossless + alpha) — the maximal-compat one.
+    Qtrle,
 }
 
 /// What a live stream pushes and how: one H.264 encode published to one or
@@ -1742,6 +1895,70 @@ mod tests {
                 "part-local audio positions stay block-aligned"
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// CAP-N43: an event split cuts a new part on demand; requests inside
+    /// the 1-second minimum part length are absorbed (no confetti files);
+    /// arming event splits names files in part mode from the first one.
+    #[test]
+    fn frec_sink_event_splits_cut_on_demand_with_a_minimum_part_length() {
+        let dir = std::env::temp_dir().join(format!(
+            "fcap-evsplit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let spec = RecordSpec {
+            width: 16,
+            height: 8,
+            fps: 5, // minimum part length = 5 frames — keeps the test tiny
+            tracks: vec![],
+        };
+        let mut sink =
+            FrecSink::create_with_options(spec.clone(), dir.join("take.frec"), None, false, true)
+                .expect("create");
+
+        let frame = Arc::new(vec![7u8; spec.frame_bytes()]);
+        for _ in 0..3 {
+            sink.write_video(&frame).expect("video");
+        }
+        // Too early: 3 < 5 frames in this part — absorbed, no rotation.
+        sink.split_now().expect("early split absorbed");
+        for _ in 0..3 {
+            sink.write_video(&frame).expect("video");
+        }
+        // 6 frames in the part now — this one cuts.
+        sink.split_now().expect("split");
+        for _ in 0..2 {
+            sink.write_video(&frame).expect("video");
+        }
+        let paths = Box::new(sink).finish().expect("finish");
+        assert_eq!(paths.len(), 2, "one absorbed request, one real cut");
+        assert_eq!(
+            paths[0].file_name().unwrap(),
+            "take part001.frec",
+            "event-split sessions name in part mode from the first file"
+        );
+        let frames_of = |path: &std::path::Path| {
+            let mut reader = crate::freally_video::FrecReader::open(path).expect("opens");
+            let mut frames = 0;
+            while let Some(chunk) = reader.next_chunk().expect("reads") {
+                if matches!(chunk, crate::freally_video::FrecChunk::Video { .. }) {
+                    frames += 1;
+                }
+            }
+            frames
+        };
+        assert_eq!(
+            frames_of(&paths[0]),
+            6,
+            "the cut lands exactly after frame 6"
+        );
+        assert_eq!(frames_of(&paths[1]), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

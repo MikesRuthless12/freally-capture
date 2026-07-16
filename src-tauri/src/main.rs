@@ -33,6 +33,7 @@ mod midi;
 mod native_preview;
 mod openfile;
 mod osc;
+mod pipeline;
 mod preview;
 mod profiles;
 mod projector;
@@ -154,6 +155,7 @@ fn main() {
         .manage(commands::cef::CefState::new())
         .manage(commands::recording::ExportState::default())
         .manage(recording::RecordingState::new())
+        .manage(pipeline::PipelineState::new())
         .manage(audiorec::AudioRecState::default())
         .manage(soundboard::SoundboardState::default())
         // CAP-M23: drop this session's crash marker, remembering whether the
@@ -441,6 +443,12 @@ fn main() {
             commands::recording::audiorec_set_paused,
             commands::recording::recording_export,
             commands::recording::recording_export_cancel,
+            commands::recording::recording_trim_info,
+            commands::recording::recording_trim_preview,
+            commands::recording::recording_trim,
+            commands::recording::recording_export_alpha,
+            commands::recording::recording_verify,
+            pipeline::pipeline_status,
             commands::recording::open_frec_export,
             openfile::open_frec_pending,
             commands::native_preview_set_region,

@@ -6,22 +6,28 @@ import {
   audiorecStatus,
   audiorecStop,
   recordingExport,
+  recordingExportAlpha,
   recordingExportCancel,
+  pipelineStatus,
   recordingNormalize,
   recordingRemux,
   recordingsList,
+  recordingVerify,
   settingsGet,
   settingsSet,
 } from "../api/commands";
-import { onRecordingExport } from "../api/events";
+import { onPipeline, onRecordingExport } from "../api/events";
 import type {
   AudioRecFormat,
   AudioRecStatus,
   ExportStatus,
+  PipelineJob,
   RecordingFile,
   Settings,
+  VerifyReport,
 } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
+import { TrimDialog } from "../components/TrimDialog";
 import { useT } from "../i18n/t";
 import { formatBytes } from "../lib/format";
 
@@ -44,6 +50,33 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<ExportStatus | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [trimFile, setTrimFile] = useState<RecordingFile | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
+  const [verifyResult, setVerifyResult] = useState<{ name: string; report: VerifyReport } | null>(
+    null,
+  );
+  const [pipelineJobs, setPipelineJobs] = useState<PipelineJob[]>([]);
+
+  // CAP-N45: the post-record pipeline queue (snapshot + live updates).
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    pipelineStatus()
+      .then((jobs) => alive && setPipelineJobs(jobs))
+      .catch(() => undefined);
+    onPipeline((jobs) => {
+      if (alive) setPipelineJobs(jobs);
+    })
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     recordingsList()
@@ -136,6 +169,53 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  // CAP-N46: on-demand integrity verification — deep for .frec (the owned
+  // walk is fast), tail-scan for wire files.
+  const verify = async (file: RecordingFile) => {
+    setVerifying(file.path);
+    setError(null);
+    setNotice(null);
+    setVerifyResult(null);
+    try {
+      const report = await recordingVerify(file.path, file.ext === "frec");
+      setVerifyResult({ name: file.name, report });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setVerifying(null);
+    }
+  };
+
+  // CAP-N42: the alpha-preserving .mov master export (ProRes 4444 / QTRLE)
+  // rides the same progress event/panel as the normal export.
+  const startAlphaExport = async (path: string, codec: string) => {
+    setError(null);
+    setNotice(null);
+    setExportingPath(path);
+    setProgress({ state: "exporting", framesDone: 0, framesTotal: 0 });
+    try {
+      await recordingExportAlpha(path, codec);
+    } catch (err) {
+      setExportingPath(null);
+      setProgress(null);
+      setError(String(err));
+    }
+  };
+
+  // CAP-N46: the Verify button appears in both the wire-file and .frec action
+  // rows — one render helper so they can't drift.
+  const verifyButton = (file: RecordingFile) => (
+    <button
+      type="button"
+      disabled={verifying !== null}
+      onClick={() => verify(file)}
+      title={t("recordings-verify-title")}
+      className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+    >
+      {verifying === file.path ? t("recordings-verifying") : t("recordings-verify")}
+    </button>
+  );
+
   const pct =
     progress?.state === "exporting" && progress.framesTotal > 0
       ? Math.min(100, (progress.framesDone / progress.framesTotal) * 100)
@@ -159,10 +239,21 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
               <p className="m-0 text-[10px] text-havoc-muted">
                 {formatBytes(file.sizeBytes)} · {formatWhen(file.modifiedMs)}
                 {file.ext === "frec" && ` · ${t("recordings-frec-label")}`}
+                {file.frecAlpha && ` · ${t("recordings-alpha-label")}`}
               </p>
             </div>
             {["mkv", "mp4", "mov", "webm"].includes(file.ext) && (
               <div className="flex shrink-0 gap-1.5">
+                {verifyButton(file)}
+                <button
+                  type="button"
+                  disabled={remuxing !== null || normalizing !== null || exportingPath !== null}
+                  onClick={() => setTrimFile(file)}
+                  title={t("recordings-trim-title")}
+                  className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                >
+                  {t("recordings-trim")}
+                </button>
                 {file.ext === "mkv" && (
                   <button
                     type="button"
@@ -191,6 +282,7 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
             )}
             {file.ext === "frec" && (
               <div className="flex shrink-0 gap-1.5">
+                {verifyButton(file)}
                 <button
                   type="button"
                   disabled={exportingPath !== null || remuxing !== null || normalizing !== null}
@@ -211,6 +303,28 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
                 >
                   MKV
                 </button>
+                {file.frecAlpha && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={exportingPath !== null || remuxing !== null || normalizing !== null}
+                      onClick={() => startAlphaExport(file.path, "prores4444")}
+                      title={t("recordings-prores-title")}
+                      className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                    >
+                      ProRes 4444
+                    </button>
+                    <button
+                      type="button"
+                      disabled={exportingPath !== null || remuxing !== null || normalizing !== null}
+                      onClick={() => startAlphaExport(file.path, "qtrle")}
+                      title={t("recordings-qtrle-title")}
+                      className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-havoc-muted transition-colors enabled:hover:border-havoc-accent/50 enabled:hover:text-havoc-text disabled:opacity-50"
+                    >
+                      QTRLE
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -243,6 +357,76 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
+        {pipelineJobs.length > 0 && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
+            <p className="m-0 text-[11px] font-semibold tracking-wider text-havoc-muted uppercase">
+              {t("pipeline-queue")}
+            </p>
+            {pipelineJobs.slice(0, 5).map((job) => (
+              <div key={job.id} className="flex flex-col gap-0.5">
+                <p className="m-0 truncate text-[11px]" title={job.file}>
+                  {job.done ? "✓" : "⏳"} {job.file}
+                </p>
+                {job.steps.map((step, at) => (
+                  <p
+                    key={`${job.id}-${at}`}
+                    className={`m-0 pl-4 text-[10px] leading-snug ${
+                      step.status === "fail"
+                        ? "text-red-300"
+                        : step.status === "warn"
+                          ? "text-amber-300"
+                          : "text-havoc-muted"
+                    }`}
+                  >
+                    {step.status === "ok"
+                      ? "✓"
+                      : step.status === "running"
+                        ? "…"
+                        : step.status === "pending"
+                          ? "·"
+                          : step.status === "skipped"
+                            ? "—"
+                            : "⚠"}{" "}
+                    {t(`pipeline-${step.action}`)}
+                    {step.detail ? `: ${step.detail}` : ""}
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        {verifyResult && (
+          <div
+            className={`flex flex-col gap-1 rounded-lg border px-2.5 py-2 ${
+              verifyResult.report.verdict === "pass"
+                ? "border-emerald-400/30 bg-emerald-400/[0.06]"
+                : verifyResult.report.verdict === "warn"
+                  ? "border-amber-400/30 bg-amber-400/[0.06]"
+                  : "border-red-400/30 bg-red-400/[0.06]"
+            }`}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="m-0 text-[11px] font-semibold">
+                {t(`verify-verdict-${verifyResult.report.verdict}`, {
+                  name: verifyResult.name,
+                })}
+              </p>
+              <button
+                type="button"
+                onClick={() => setVerifyResult(null)}
+                className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-havoc-muted transition-colors hover:text-havoc-text"
+              >
+                {t("verify-dismiss")}
+              </button>
+            </div>
+            {verifyResult.report.checks.map((check) => (
+              <p key={check.id} className="m-0 text-[10px] leading-snug text-havoc-muted">
+                {check.status === "pass" ? "✓" : check.status === "skipped" ? "—" : "⚠"}{" "}
+                {t(`verify-${check.id}`)}: {check.detail}
+              </p>
+            ))}
+          </div>
+        )}
         {notice && <p className="m-0 text-[11px] break-all text-emerald-300">{notice}</p>}
         {error && (
           <p role="alert" className="m-0 text-[11px] break-words text-red-300">
@@ -250,6 +434,20 @@ export function RecordingsDialog({ onClose }: { onClose: () => void }) {
           </p>
         )}
       </div>
+      {trimFile && (
+        <TrimDialog
+          file={trimFile}
+          onClose={() => setTrimFile(null)}
+          onStarted={() => {
+            // The trim export rides the same `recording-export` event this
+            // dialog already renders — show the progress panel right away.
+            setError(null);
+            setNotice(null);
+            setExportingPath(trimFile.path);
+            setProgress({ state: "exporting", framesDone: 0, framesTotal: 0 });
+          }}
+        />
+      )}
     </PickerShell>
   );
 }

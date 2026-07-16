@@ -46,7 +46,10 @@ const MAX_STEM_CHARS: usize = 120;
 
 /// Characters no output filename may contain (the union of the platforms'
 /// reserved sets — Windows is the strictest).
-fn is_reserved(c: char) -> bool {
+/// The characters no filename may contain on any of the three OSes (plus
+/// control chars). The one source of truth for template resolution, the ISO
+/// stem sanitizer (CAP-N40), and the pipeline rename validator (CAP-N45).
+pub(crate) fn is_reserved(c: char) -> bool {
     c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
 }
 

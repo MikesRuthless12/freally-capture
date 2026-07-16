@@ -2171,6 +2171,7 @@ mod tests {
                 show_render_ms: true,
                 show_dropped: true,
                 show_bitrate: false,
+                show_timecode: false,
                 font_family: None,
                 font_file: None,
                 size_px: 28.0,

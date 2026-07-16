@@ -362,6 +362,9 @@ pub struct RecordingFileDto {
     pub modified_ms: u64,
     /// Lowercase extension ("frec", "mkv", …).
     pub ext: String,
+    /// CAP-N42: a `.frec` whose header flags real transparency (`None` for
+    /// non-frec files) — gates the alpha-preserving export buttons.
+    pub frec_alpha: Option<bool>,
 }
 
 const RECORDING_EXTS: [&str; 5] = ["frec", "mkv", "mp4", "mov", "webm"];
@@ -404,12 +407,20 @@ pub async fn recordings_list<R: Runtime>(
                 .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|duration| duration.as_millis() as u64)
                 .unwrap_or(0);
+            // CAP-N42: read the 30-byte `.frec` header for the alpha flag —
+            // cheap (bounded read), and only for frec files.
+            let frec_alpha = (ext == "frec").then(|| {
+                fcap_encode::freally_video::FrecReader::open(&path)
+                    .map(|reader| reader.spec().alpha)
+                    .unwrap_or(false)
+            });
             files.push(RecordingFileDto {
                 name: entry.file_name().to_string_lossy().to_string(),
                 path: path.display().to_string(),
                 size_bytes: meta.len(),
                 modified_ms,
                 ext,
+                frec_alpha,
             });
         }
         files.sort_by_key(|file| std::cmp::Reverse(file.modified_ms));
@@ -442,20 +453,7 @@ pub async fn recording_remux<R: Runtime>(
     path: String,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let settings = app
-            .state::<crate::settings::SettingsStore>()
-            .get()
-            .recording;
-        let folder = crate::recording::recordings_folder(&settings)
-            .canonicalize()
-            .map_err(|err| format!("recordings folder: {err}"))?;
-        reject_remote(&path)?;
-        let input = std::path::Path::new(&path)
-            .canonicalize()
-            .map_err(|err| format!("recording not found: {err}"))?;
-        if input.parent() != Some(folder.as_path()) {
-            return Err("only files in the recordings folder can be remuxed".to_string());
-        }
+        let input = guarded_recording_path(&app, &path)?;
         let ready = app
             .state::<EncodeState>()
             .ready_ffmpeg()
@@ -475,17 +473,8 @@ pub async fn recording_normalize<R: Runtime>(
     path: String,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let input = guarded_recording_path(&app, &path)?;
         let settings = app.state::<crate::settings::SettingsStore>().get();
-        let folder = crate::recording::recordings_folder(&settings.recording)
-            .canonicalize()
-            .map_err(|err| format!("recordings folder: {err}"))?;
-        reject_remote(&path)?;
-        let input = std::path::Path::new(&path)
-            .canonicalize()
-            .map_err(|err| format!("recording not found: {err}"))?;
-        if input.parent() != Some(folder.as_path()) {
-            return Err("only files in the recordings folder can be normalized".to_string());
-        }
         let ready = app
             .state::<EncodeState>()
             .ready_ffmpeg()
@@ -671,20 +660,7 @@ pub fn recording_export<R: Runtime>(
     container: String,
 ) -> Result<(), String> {
     let target = parse_container(&container)?;
-    let settings = app
-        .state::<crate::settings::SettingsStore>()
-        .get()
-        .recording;
-    let folder = crate::recording::recordings_folder(&settings)
-        .canonicalize()
-        .map_err(|err| format!("recordings folder: {err}"))?;
-    reject_remote(&path)?;
-    let input = std::path::Path::new(&path)
-        .canonicalize()
-        .map_err(|err| format!("recording not found: {err}"))?;
-    if input.parent() != Some(folder.as_path()) {
-        return Err("only files in the recordings folder can be exported".to_string());
-    }
+    let input = guarded_recording_path(&app, &path)?;
     if !is_frec(&input) {
         return Err("only .frec recordings need exporting — others already play anywhere".into());
     }
@@ -709,4 +685,407 @@ pub fn open_frec_export<R: Runtime>(
         return Err("not a .frec file".into());
     }
     start_frec_export(&app, input, target)
+}
+
+// --- CAP-N46: the recording integrity verifier ------------------------------
+
+/// Verify a recording's integrity on demand — the owned deep walk for
+/// `.frec`, the honest ffmpeg checks for wire files (`deep` scans the whole
+/// file; otherwise the last 10 s). Folder-guarded like every recordings
+/// action. Returns the typed report for the dialog to render.
+#[tauri::command]
+pub async fn recording_verify<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    deep: bool,
+) -> Result<fcap_encode::verify::VerifyReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let input = guarded_recording_path(&app, &path)?;
+        if is_frec(&input) {
+            fcap_encode::verify::verify_frec(&input, None)
+        } else {
+            let ready = app.state::<EncodeState>().ready_ffmpeg().ok_or(
+                "verifying wire files needs the ffmpeg component — install it from \
+                        Components (.frec verifies with nothing installed)",
+            )?;
+            fcap_encode::verify::verify_wire(&ready, &input, None, deep)
+        }
+    })
+    .await
+    .map_err(|err| format!("verify task failed: {err}"))?
+}
+
+// --- CAP-N41: the replay & clip trimmer -------------------------------------
+
+/// The trim window's probe payload (mirrors `fcap_encode::trim::TrimInfo`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimInfoDto {
+    pub duration_secs: f64,
+    pub fps: f64,
+    pub width: u32,
+    pub height: u32,
+    pub has_audio: bool,
+    pub keyframes_secs: Vec<f64>,
+}
+
+/// The shared recordings-folder guard for every recordings-list action
+/// (remux / normalize / export / verify / trim / alpha-export): reject remote
+/// paths BEFORE any stat, canonicalize, and require the file to live in the
+/// recordings folder — the webview never points these at arbitrary files.
+fn guarded_recording_path<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let settings = app
+        .state::<crate::settings::SettingsStore>()
+        .get()
+        .recording;
+    let folder = crate::recording::recordings_folder(&settings)
+        .canonicalize()
+        .map_err(|err| format!("recordings folder: {err}"))?;
+    reject_remote(path)?;
+    let input = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|err| format!("recording not found: {err}"))?;
+    if input.parent() != Some(folder.as_path()) {
+        return Err("only files in the recordings folder are accepted".to_string());
+    }
+    Ok(input)
+}
+
+/// The wire container a file's extension implies. The trimmer works on wire
+/// files; a `.frec` exports first through the existing path — said honestly.
+fn container_of(input: &std::path::Path) -> Result<fcap_encode::Container, String> {
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "mkv" | "mov" | "webm" => parse_container(&ext),
+        "frec" => Err("export the .frec to MP4/MKV first — the trimmer works on wire files".into()),
+        other => Err(format!("cannot trim .{other} files")),
+    }
+}
+
+/// Probe a recording for the trim window: duration, fps, geometry, and the
+/// keyframe times that drive the "no re-encode" badge.
+#[tauri::command]
+pub async fn recording_trim_info<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<TrimInfoDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let input = guarded_recording_path(&app, &path)?;
+        container_of(&input)?;
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("trimming needs the ffmpeg component — install it from Components")?;
+        let mut info = fcap_encode::trim::trim_info(&ready, &input)?;
+        // Bound the IPC payload — far above any sane keyframe count.
+        info.keyframes_secs.truncate(100_000);
+        Ok(TrimInfoDto {
+            duration_secs: info.duration_secs,
+            fps: info.fps,
+            width: info.width,
+            height: info.height,
+            has_audio: info.has_audio,
+            keyframes_secs: info.keyframes_secs,
+        })
+    })
+    .await
+    .map_err(|err| format!("trim probe task failed: {err}"))?
+}
+
+/// One preview frame at `at_secs`, as a bounded JPEG data URL.
+#[tauri::command]
+pub async fn recording_trim_preview<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    at_secs: f64,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let input = guarded_recording_path(&app, &path)?;
+        container_of(&input)?;
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("trimming needs the ffmpeg component — install it from Components")?;
+        let jpeg = fcap_encode::trim::trim_preview_jpeg(&ready, &input, at_secs)?;
+        Ok(format!(
+            "data:image/jpeg;base64,{}",
+            crate::commands::base64_encode(&jpeg)
+        ))
+    })
+    .await
+    .map_err(|err| format!("trim preview task failed: {err}"))?
+}
+
+/// CAP-N42: export an alpha `.frec` to an alpha-preserving `.mov` master —
+/// `codec` is `"prores4444"` or `"qtrle"`. Folder-guarded like every other
+/// recordings action; progress rides the `recording-export` event.
+#[tauri::command]
+pub fn recording_export_alpha<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    codec: String,
+) -> Result<(), String> {
+    use fcap_encode::mux::AlphaCodec;
+
+    let alpha_codec = match codec.as_str() {
+        "prores4444" => AlphaCodec::Prores4444,
+        "qtrle" => AlphaCodec::Qtrle,
+        other => return Err(format!("unsupported alpha codec: {other}")),
+    };
+    let input = guarded_recording_path(&app, &path)?;
+    if !is_frec(&input) {
+        return Err("alpha export reads the owned .frec format".to_string());
+    }
+
+    let export = app.state::<ExportState>();
+    if export.running.swap(true, Ordering::SeqCst) {
+        return Err("an export is already running".to_string());
+    }
+    export.cancel.store(false, Ordering::SeqCst);
+    let cancel = Arc::clone(&export.cancel);
+
+    let ready = match app
+        .state::<EncodeState>()
+        .ready_ffmpeg()
+        .ok_or("alpha export needs the ffmpeg component — install it from Components")
+    {
+        Ok(ready) => ready,
+        Err(err) => {
+            export.running.store(false, Ordering::SeqCst);
+            return Err(err.to_string());
+        }
+    };
+    let suffix = match alpha_codec {
+        AlphaCodec::Prores4444 => " ProRes4444",
+        AlphaCodec::Qtrle => " QTRLE",
+    };
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("recording");
+    let output = unique_sibling(&input.with_file_name(format!("{stem}{suffix}")), "mov");
+
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fcap-alpha-export".into())
+        .spawn(move || {
+            let progress_handle = handle.clone();
+            let result = fcap_encode::export::export_frec_alpha(
+                &ready,
+                &input,
+                &output,
+                alpha_codec,
+                move |p: fcap_encode::ExportProgress| {
+                    let _ = progress_handle.emit(
+                        "recording-export",
+                        ExportStatusDto::Exporting {
+                            frames_done: p.frames_done,
+                            frames_total: p.frames_total,
+                        },
+                    );
+                },
+                &cancel,
+            );
+            let status = match result {
+                Ok(out) => ExportStatusDto::Done {
+                    path: out.display().to_string(),
+                },
+                Err(err) if err.contains("cancelled") => ExportStatusDto::Cancelled,
+                Err(err) => ExportStatusDto::Error { message: err },
+            };
+            let _ = handle.emit("recording-export", status);
+            handle
+                .state::<ExportState>()
+                .running
+                .store(false, Ordering::SeqCst);
+        });
+    if let Err(err) = spawned {
+        app.state::<ExportState>()
+            .running
+            .store(false, Ordering::SeqCst);
+        return Err(format!("could not start the alpha export: {err}"));
+    }
+    Ok(())
+}
+
+/// Export `[inSecs, outSecs)` of a recording to a ` trim` sibling — stream
+/// copy when the in-point lands on a keyframe, an honest re-encode otherwise;
+/// `reframe916` re-encodes through the vertical-canvas geometry. Progress
+/// rides the `recording-export` event (one export at a time, shared cancel).
+#[tauri::command]
+pub fn recording_trim<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    in_secs: f64,
+    out_secs: f64,
+    reframe916: bool,
+) -> Result<(), String> {
+    let input = guarded_recording_path(&app, &path)?;
+    let container = container_of(&input)?;
+    if !(in_secs >= 0.0 && out_secs > in_secs && in_secs.is_finite() && out_secs.is_finite()) {
+        return Err("the out-point must come after the in-point".to_string());
+    }
+
+    let export = app.state::<ExportState>();
+    if export.running.swap(true, Ordering::SeqCst) {
+        return Err("an export is already running".to_string());
+    }
+    export.cancel.store(false, Ordering::SeqCst);
+    let cancel = Arc::clone(&export.cancel);
+
+    let settings = app
+        .state::<crate::settings::SettingsStore>()
+        .get()
+        .recording;
+    let prep = (|| -> Result<(fcap_encode::Ffmpeg, String), String> {
+        let ready = app
+            .state::<EncodeState>()
+            .ready_ffmpeg()
+            .ok_or("trimming needs the ffmpeg component — install it from Components")?;
+        let encoder_id = crate::recording::resolve_encoder(&app, &settings, container)?;
+        Ok((ready, encoder_id))
+    })();
+    let (ready, encoder_id) = match prep {
+        Ok(v) => v,
+        Err(err) => {
+            export.running.store(false, Ordering::SeqCst);
+            return Err(err);
+        }
+    };
+
+    // The 9:16 reframe rides the vertical-canvas geometry when configured.
+    let reframe = reframe916.then(|| {
+        app.state::<crate::studio::StudioState>()
+            .with_collection(|collection| {
+                collection
+                    .vertical
+                    .as_ref()
+                    .map(|vertical| (vertical.width, vertical.height))
+            })
+            .unwrap_or((1080, 1920))
+    });
+    let suffix = if reframe.is_some() {
+        " trim 9x16"
+    } else {
+        " trim"
+    };
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("recording");
+    let output = unique_sibling(
+        &input.with_file_name(format!("{stem}{suffix}")),
+        container.extension(),
+    );
+    let encode = fcap_encode::trim::TrimEncode {
+        encoder_id,
+        rate_control: settings.rate_control,
+        preset: settings.preset,
+        keyframe_sec: settings.keyframe_sec,
+        audio_bitrate_kbps: settings.audio_bitrate_kbps,
+    };
+
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fcap-trim-export".into())
+        .spawn(move || {
+            let result = (|| -> Result<std::path::PathBuf, String> {
+                // Re-probe server-side: the copy-vs-re-encode decision never
+                // trusts webview-supplied keyframe data.
+                let info = fcap_encode::trim::trim_info(&ready, &input)?;
+                if in_secs >= info.duration_secs {
+                    return Err("the in-point is past the end of the file".into());
+                }
+                let spec = fcap_encode::trim::TrimSpec {
+                    in_secs,
+                    out_secs: out_secs.min(info.duration_secs),
+                    reframe,
+                };
+                let progress_handle = handle.clone();
+                let copied = fcap_encode::trim::trim_export(
+                    &ready,
+                    &input,
+                    &output,
+                    container,
+                    spec,
+                    &encode,
+                    &info,
+                    move |frames_done, frames_total| {
+                        let _ = progress_handle.emit(
+                            "recording-export",
+                            ExportStatusDto::Exporting {
+                                frames_done,
+                                frames_total,
+                            },
+                        );
+                    },
+                    &cancel,
+                )?;
+                println!(
+                    "trim: {} → {} ({})",
+                    input.display(),
+                    output.display(),
+                    if copied { "stream copy" } else { "re-encoded" }
+                );
+                Ok(output.clone())
+            })();
+            let status = match result {
+                Ok(out) => ExportStatusDto::Done {
+                    path: out.display().to_string(),
+                },
+                Err(err) if err.contains("cancelled") => ExportStatusDto::Cancelled,
+                Err(err) => ExportStatusDto::Error { message: err },
+            };
+            let _ = handle.emit("recording-export", status);
+            handle
+                .state::<ExportState>()
+                .running
+                .store(false, Ordering::SeqCst);
+        });
+    if let Err(err) = spawned {
+        app.state::<ExportState>()
+            .running
+            .store(false, Ordering::SeqCst);
+        return Err(format!("could not start the trim export: {err}"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::container_of;
+    use crate::commands::base64_encode;
+
+    /// The shared base64 (used by the trim preview data URL): RFC 4648 vectors.
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(&[0xff, 0xef, 0xbe]), "/+++");
+    }
+
+    /// The trimmer works on wire files; .frec and strangers are told honestly.
+    #[test]
+    fn trim_accepts_wire_containers_only() {
+        use std::path::Path;
+        assert!(container_of(Path::new("C:/r/a.mkv")).is_ok());
+        assert!(container_of(Path::new("C:/r/a.MP4")).is_ok());
+        assert!(container_of(Path::new("C:/r/a.frec"))
+            .unwrap_err()
+            .contains("export the .frec"));
+        assert!(container_of(Path::new("C:/r/a.wav")).is_err());
+        assert!(container_of(Path::new("C:/r/noext")).is_err());
+    }
 }

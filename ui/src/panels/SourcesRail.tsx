@@ -3151,6 +3151,7 @@ function SystemStatsForm({
               showRenderMs: true,
               showDropped: true,
               showBitrate: true,
+              showTimecode: false,
               fontFamily: null,
               fontFile: null,
               sizePx: 28,

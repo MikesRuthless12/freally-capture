@@ -261,6 +261,11 @@ export function ControlsDock({
             {rec?.state === "recording" && rec.markers > 0 ? ` (${rec.markers})` : ""}
           </button>
         )}
+        {rec?.state === "recording" && rec.isoLanes > 0 && (
+          <p className="m-0 text-[10px] text-havoc-muted">
+            {t("controls-iso-lanes", { count: rec.isoLanes })}
+          </p>
+        )}
         {active && (
           <button
             type="button"

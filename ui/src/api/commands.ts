@@ -54,10 +54,13 @@ import type {
   SourceId,
   SourceSettings,
   StillTarget,
+  PipelineJob,
   StreamStatus,
   StudioDto,
   Transform,
   TransitionKind,
+  TrimInfo,
+  VerifyReport,
   VerticalCanvas,
   VideoDevice,
   VideoFormat,
@@ -1172,6 +1175,47 @@ export function recordingExport(path: string, container: string): Promise<void> 
 /** Cancel the running .frec export. */
 export function recordingExportCancel(): Promise<void> {
   return invoke("recording_export_cancel");
+}
+
+/** CAP-N42: export an alpha .frec to an alpha-preserving .mov master —
+ * `codec` is "prores4444" or "qtrle". Progress rides `recording-export`. */
+export function recordingExportAlpha(path: string, codec: string): Promise<void> {
+  return invoke("recording_export_alpha", { path, codec });
+}
+
+/** CAP-N45: the post-record pipeline queue's snapshot (the `pipeline` event
+ * pushes updates). */
+export function pipelineStatus(): Promise<PipelineJob[]> {
+  return invoke<PipelineJob[]>("pipeline_status");
+}
+
+/** CAP-N46: verify a recording's integrity — the owned deep walk for .frec,
+ * honest ffmpeg checks for wire files (`deep` scans the whole file). */
+export function recordingVerify(path: string, deep: boolean): Promise<VerifyReport> {
+  return invoke<VerifyReport>("recording_verify", { path, deep });
+}
+
+/** CAP-N41: probe a recording for the trim window (duration/fps/keyframes). */
+export function recordingTrimInfo(path: string): Promise<TrimInfo> {
+  return invoke<TrimInfo>("recording_trim_info", { path });
+}
+
+/** CAP-N41: one preview frame at `atSecs`, as a JPEG data URL. */
+export function recordingTrimPreview(path: string, atSecs: number): Promise<string> {
+  return invoke<string>("recording_trim_preview", { path, atSecs });
+}
+
+/** CAP-N41: export `[inSecs, outSecs)` to a ` trim` sibling — stream copy on
+ * a keyframe-aligned in-point, an honest re-encode otherwise; `reframe916`
+ * re-encodes through the vertical-canvas geometry. Progress rides the
+ * `recording-export` event. */
+export function recordingTrim(
+  path: string,
+  inSecs: number,
+  outSecs: number,
+  reframe916: boolean,
+): Promise<void> {
+  return invoke("recording_trim", { path, inSecs, outSecs, reframe916 });
 }
 
 /** A `.frec` the app was opened with (OS double-click), if any — one-shot. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { audioOutputDevices, settingsSet, studioSetAudioHotkeys } from "../api/commands";
+import { audioOutputDevices, settingsSet, studioGet, studioSetAudioHotkeys } from "../api/commands";
 import type {
   AudioDevice,
   AudioLevelsPayload,
@@ -11,7 +11,7 @@ import type {
   Source,
   SourceId,
 } from "../api/types";
-import { kindHasAudio } from "../api/types";
+import { kindHasAudio, TRACK_COUNT } from "../api/types";
 import { AdvancedAudioFields, ChannelStrip } from "../components/ChannelStrip";
 import { resolveMeterColors } from "../lib/meters";
 import { EmptyHint, Panel } from "../components/Panel";
@@ -280,10 +280,12 @@ function LufsStrip({
 }) {
   const t = useT();
   const [loudnessOpen, setLoudnessOpen] = useState(false);
+  const [ltcOpen, setLtcOpen] = useState(false);
   const momentary = audio?.lufs.momentary;
   const shortTerm = audio?.lufs.shortTerm;
   const show = (value?: number) => (value === undefined ? "–" : value.toFixed(1));
   const riding = settings?.loudness?.enabled ?? false;
+  const ltcOn = settings?.ltc?.enabled ?? false;
   return (
     <div
       aria-label={t("mixer-loudness-label")}
@@ -318,6 +320,19 @@ function LufsStrip({
             : t("loudness-off")}
         </button>
       )}
+      {settings && (
+        <button
+          type="button"
+          onClick={() => setLtcOpen(true)}
+          title={t("ltc-title")}
+          className={`rounded px-1 text-[9px] tracking-wide uppercase transition-colors ${
+            ltcOn ? "text-havoc-accent" : "text-havoc-muted hover:text-havoc-text"
+          }`}
+        >
+          {t("ltc-badge")}
+          {ltcOn ? ` ${settings.ltc?.fps ?? 30}` : ""}
+        </button>
+      )}
       {loudnessOpen && settings && (
         <LoudnessDialog
           settings={settings}
@@ -325,7 +340,120 @@ function LufsStrip({
           onClose={() => setLoudnessOpen(false)}
         />
       )}
+      {ltcOpen && settings && (
+        <LtcDialog
+          settings={settings}
+          audio={audio}
+          onSettingsSaved={onSettingsSaved}
+          onClose={() => setLtcOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/** CAP-N47: the SMPTE LTC generator + reader control. */
+function LtcDialog({
+  settings,
+  audio,
+  onSettingsSaved,
+  onClose,
+}: {
+  settings: Settings;
+  audio: AudioLevelsPayload | null;
+  onSettingsSaved: (settings: Settings) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const ltc = settings.ltc ?? { enabled: false, track: 5, fps: 30, readSource: "" };
+  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    studioGet()
+      .then((studio) => {
+        if (!alive) return;
+        // The reader taps a raw audio input — offer the sources that carry audio.
+        setSources(
+          studio.collection.sources
+            .filter((source) => source.audio)
+            .map((source) => ({ id: source.id, name: source.name })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const save = (patch: Partial<NonNullable<Settings["ltc"]>>) => {
+    const next: Settings = { ...settings, ltc: { ...ltc, ...patch } };
+    settingsSet(next)
+      .then(() => onSettingsSaved(next))
+      .catch(fail("ltc save"));
+  };
+  const decoded = audio?.ltc;
+  return (
+    <PickerShell title={t("ltc-title")} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-xs text-havoc-text">
+        <p className="m-0 text-havoc-muted">{t("ltc-intro")}</p>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={ltc.enabled}
+            onChange={(event) => save({ enabled: event.target.checked })}
+          />
+          {t("ltc-generate")}
+        </label>
+        <div className="flex items-center justify-between gap-2">
+          {t("ltc-track")}
+          <select
+            value={ltc.track}
+            onChange={(event) => save({ track: Number(event.target.value) })}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+          >
+            {Array.from({ length: TRACK_COUNT }, (_, index) => (
+              <option key={index} value={index}>
+                {t("ltc-track-option", { track: index + 1 })}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          {t("ltc-fps")}
+          <select
+            value={ltc.fps}
+            onChange={(event) => save({ fps: Number(event.target.value) })}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+          >
+            {[24, 25, 30].map((fps) => (
+              <option key={fps} value={fps}>
+                {fps}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          {t("ltc-read")}
+          <select
+            value={ltc.readSource}
+            onChange={(event) => save({ readSource: event.target.value })}
+            className="max-w-40 rounded-md border border-white/10 bg-havoc-panel px-2 py-1 text-xs text-havoc-text"
+          >
+            <option value="">{t("ltc-read-off")}</option>
+            {sources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {ltc.readSource && (
+          <p className="m-0 font-mono text-[13px] text-havoc-text">
+            {t("ltc-decoded")}: {decoded ?? t("ltc-no-lock")}
+          </p>
+        )}
+        <p className="m-0 text-[10px] text-havoc-muted">{t("ltc-note")}</p>
+      </div>
+    </PickerShell>
   );
 }
 

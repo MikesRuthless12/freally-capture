@@ -133,6 +133,9 @@ pub struct EngineSnapshot {
     pub filter_meters: Option<FilterMetersSnapshot>,
     /// Total capture samples dropped across sources (ring overflows).
     pub dropped: u64,
+    /// CAP-N47: the LTC reader's latest decode (`HH:MM:SS:FF`), when armed
+    /// and locked onto a signal.
+    pub ltc: Option<String>,
 }
 
 /// The recording tap (Phase 4): called on the engine thread after **every**
@@ -147,6 +150,29 @@ pub struct RecordTap {
     /// `(track_index, block)` pairs for the enabled tracks, every 10 ms.
     #[allow(clippy::type_complexity)]
     pub sink: Box<dyn FnMut(&[(usize, &[f32])]) + Send>,
+}
+
+/// CAP-N47: what arms the LTC generator — the track bus it rides, the frame
+/// rate (24/25/30), and the starting timecode (the app passes time of day —
+/// the standard free-run jam-sync practice).
+#[derive(Debug, Clone, Copy)]
+pub struct LtcSpec {
+    pub track: usize,
+    pub fps: u32,
+    pub start: crate::ltc::LtcTime,
+}
+
+/// The CAP-N40 ISO tap: called on the engine thread after every mixed block
+/// with each selected source's **clean** strip block (post-filter,
+/// pre-pan/fader/mute) — what an ISO lane records. Independent of the
+/// record/stream/replay taps; sources without a live strip simply don't
+/// appear in a delivery.
+pub struct IsoTap {
+    /// The sources whose clean blocks are delivered.
+    pub sources: Vec<SourceId>,
+    /// `(source, block)` pairs for the sources with a live strip, every 10 ms.
+    #[allow(clippy::type_complexity)]
+    pub sink: Box<dyn FnMut(&[(SourceId, &[f32])]) + Send>,
 }
 
 enum Cmd {
@@ -180,6 +206,13 @@ enum Cmd {
     /// The replay buffer's tap (Phase 6) — the third independent twin, so
     /// the rolling buffer never contends with recording or streaming.
     ReplayTap(Option<RecordTap>),
+    /// The CAP-N40 ISO lanes' per-source clean tap — independent of the
+    /// program taps above, so ISO files never contend with the main copy.
+    IsoTap(Option<IsoTap>),
+    /// CAP-N47: arm (or disarm) the LTC generator on one track bus.
+    Ltc(Option<LtcSpec>),
+    /// CAP-N47: arm (or disarm) the LTC reader on one source's raw input.
+    LtcRead(Option<SourceId>),
     /// Arm (or clear) the A/V sync calibration tap (CAP-M20): record one
     /// source's raw pre-gain block peaks, timestamped against the shared
     /// arm instant so the video probe's clock matches.
@@ -289,6 +322,22 @@ impl AudioEngine {
 
     /// Install (or clear) the replay-buffer tap — the third independent
     /// twin, so the rolling buffer never contends with the other two.
+    /// Install (or clear) the CAP-N40 ISO tap — per-source clean blocks for
+    /// the ISO recorder lanes, independent of every program tap.
+    pub fn set_iso_tap(&self, tap: Option<IsoTap>) {
+        let _ = self.tx.send(Cmd::IsoTap(tap));
+    }
+
+    /// CAP-N47: arm (or disarm) the LTC generator on a track bus.
+    pub fn set_ltc(&self, spec: Option<LtcSpec>) {
+        let _ = self.tx.send(Cmd::Ltc(spec));
+    }
+
+    /// CAP-N47: arm (or disarm) the LTC reader on one source's raw input.
+    pub fn set_ltc_read(&self, source: Option<SourceId>) {
+        let _ = self.tx.send(Cmd::LtcRead(source));
+    }
+
     pub fn set_replay_tap(&self, tap: Option<RecordTap>) {
         let _ = self.tx.send(Cmd::ReplayTap(tap));
     }
@@ -296,6 +345,13 @@ impl AudioEngine {
     /// The latest levels/status snapshot.
     pub fn snapshot(&self) -> EngineSnapshot {
         self.snapshot.lock().clone()
+    }
+
+    /// CAP-N47: just the LTC reader's latest decode — clones one small string
+    /// instead of the whole snapshot (the stats-face tick + marker path read
+    /// this without the HashMap deep-clone `snapshot()` does).
+    pub fn ltc(&self) -> Option<String> {
+        self.snapshot.lock().ltc.clone()
     }
 
     /// Arm (or clear) the calibration tap on one source (CAP-M20). Pass the
@@ -391,6 +447,13 @@ fn run(
     let mut record_tap: Option<RecordTap> = None;
     let mut stream_tap: Option<RecordTap> = None;
     let mut replay_tap: Option<RecordTap> = None;
+    let mut iso_tap: Option<IsoTap> = None;
+    // CAP-N47: the LTC generator (rides one track bus) and reader (taps one
+    // source's raw input, publishing the latest decode in the snapshot).
+    let mut ltc_generator: Option<(crate::ltc::LtcGenerator, usize)> = None;
+    let mut ltc_reader: Option<(SourceId, crate::ltc::LtcDecoder)> = None;
+    // Reused each block so the LTC generator never allocates on the 10 ms loop.
+    let mut ltc_block = vec![0.0f32; BLOCK_SAMPLES];
     let mut calibration_target: Option<(SourceId, Instant)> = None;
     let mut monitor: Option<MonitorStream> = None;
     let mut monitor_device = String::new();
@@ -535,6 +598,27 @@ fn run(
                 Ok(Cmd::RecordTap(tap)) => record_tap = tap,
                 Ok(Cmd::StreamTap(tap)) => stream_tap = tap,
                 Ok(Cmd::ReplayTap(tap)) => replay_tap = tap,
+                Ok(Cmd::IsoTap(tap)) => {
+                    // Arm/disarm the core's clean-block capture with the tap.
+                    core.set_iso_sources(
+                        tap.as_ref()
+                            .map(|tap| tap.sources.iter().copied().collect())
+                            .unwrap_or_default(),
+                    );
+                    iso_tap = tap;
+                }
+                Ok(Cmd::Ltc(spec)) => {
+                    ltc_generator = spec.map(|spec| {
+                        (
+                            crate::ltc::LtcGenerator::new(crate::SAMPLE_RATE, spec.fps, spec.start),
+                            spec.track.min(fcap_scene::TRACK_COUNT - 1),
+                        )
+                    });
+                }
+                Ok(Cmd::LtcRead(source)) => {
+                    ltc_reader =
+                        source.map(|id| (id, crate::ltc::LtcDecoder::new(crate::SAMPLE_RATE)));
+                }
                 Ok(Cmd::Calibrate(target)) => {
                     calibration_target = target;
                     // Cleared here (engine thread), never handle-side, so a
@@ -630,8 +714,23 @@ fn run(
             core.feed_duck_trigger(&duck_trigger);
         }
 
+        // -- CAP-N47: the LTC reader taps one source's RAW input (pre-mix,
+        //    pre-filter — the timecode is data, not audio to process).
+        if let Some((source, decoder)) = &mut ltc_reader {
+            if let Some(block) = inputs.get(source) {
+                decoder.feed(block);
+            }
+        }
+
         // -- mix one block -----------------------------------------------------
         core.process(&inputs, &controls);
+
+        // -- CAP-N47: the LTC generator rides its assigned track bus — into
+        //    the record/stream taps below, never the master or monitor mix.
+        if let Some((generator, track)) = &mut ltc_generator {
+            generator.render(&mut ltc_block);
+            core.mix_into_track(*track, &ltc_block);
+        }
 
         // -- the visualizer taps (CAP-N15): push this block for every live
         //    subscription — post-fader strips, track buses, or the master.
@@ -702,6 +801,13 @@ fn run(
                 .map(|index| (index, core.track(index)))
                 .collect();
             (tap.sink)(&blocks);
+        }
+        // -- the CAP-N40 ISO tap: each selected source's clean block --------
+        if let Some(tap) = &mut iso_tap {
+            let blocks: Vec<(SourceId, &[f32])> = core.iso_blocks().collect();
+            if !blocks.is_empty() {
+                (tap.sink)(&blocks);
+            }
         }
 
         // -- monitor output ----------------------------------------------------
@@ -854,6 +960,10 @@ fn run(
             spectrum: spectrum_out,
             filter_meters: filter_meters_out,
             dropped: retired_dropped + dropped_total,
+            ltc: ltc_reader
+                .as_ref()
+                .and_then(|(_, decoder)| decoder.latest())
+                .map(|time| time.display()),
         };
 
         // -- pace to the 10 ms block clock --------------------------------------

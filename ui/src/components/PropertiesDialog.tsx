@@ -520,6 +520,7 @@ function SettingsEditor({
               ["showRenderMs", "properties-stats-show-render"],
               ["showDropped", "properties-stats-show-dropped"],
               ["showBitrate", "properties-stats-show-bitrate"],
+              ["showTimecode", "properties-stats-show-timecode"],
             ] as const
           ).map(([field, label]) => (
             <label key={field} className="flex items-center gap-2 text-[11px] text-havoc-muted">

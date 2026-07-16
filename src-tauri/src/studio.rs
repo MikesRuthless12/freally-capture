@@ -529,6 +529,12 @@ impl StudioState {
         dto_of(&self.lock())
     }
 
+    /// Whether the panic slate currently holds the program (CAP-M22) — read
+    /// at recording start so ISO lanes born mid-panic start held (CAP-N40).
+    pub fn panic_active(&self) -> bool {
+        self.lock().panic.is_some()
+    }
+
     /// Read the live collection under the lock (CAP-M03 missing-file scans).
     pub fn with_collection<T>(&self, f: impl FnOnce(&Collection) -> T) -> T {
         f(&self.lock().collection)
@@ -1612,6 +1618,20 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // frame becomes their poster (upload once, then pause until recording).
     let mut was_recording = false;
     let mut poster_pause: HashSet<SourceId> = HashSet::new();
+    // ISO lanes (CAP-N40): once-per-session compose-failure log, and the
+    // loop's view of the panic hold it keeps in sync on the lanes.
+    let mut iso_errors_logged: HashSet<SourceId> = HashSet::new();
+    let mut iso_panic_held = false;
+    // Alpha recording (CAP-N42): once-per-session compose-failure log.
+    let mut alpha_error_logged = false;
+    // Split-on-scene-change (CAP-N43): the scene the recording last saw.
+    // `None` while idle, so a session never splits on its very first tick.
+    let mut split_last_scene: Option<fcap_scene::SceneId> = None;
+    // Auto-markers (CAP-N44): edge trackers for the 1 Hz reconnect and
+    // dropped-frame-burst watches.
+    let mut was_reconnecting = false;
+    let mut was_dropping = false;
+    let mut last_dropped: Option<u64> = None;
     // Punch-in zoom lenses (CAP-N71): the loop-side animated state, keyed by
     // item. Entries whose target vanished spring back to flat, then drop.
     let mut lens_anim: HashMap<ItemId, LensAnim> = HashMap::new();
@@ -3097,6 +3117,18 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let stream = app.state::<crate::stream::StreamBridgeState>().status();
             let bitrate_kbps = matches!(stream.state.as_str(), "live" | "reconnecting")
                 .then(|| stream.targets.iter().map(|target| target.kbps).sum());
+            // CAP-N47: the burn-in reads the LTC decode only when some HUD
+            // actually shows it — the light `ltc()` accessor clones one small
+            // string, and the common (no-timecode) HUD pays nothing.
+            let wants_ltc = stats_sources.values().any(|settings| {
+                matches!(
+                    settings,
+                    SourceSettings::SystemStats {
+                        show_timecode: true,
+                        ..
+                    }
+                )
+            });
             let numbers = crate::statshud::StatsNumbers {
                 fps,
                 cpu_percent: cpu,
@@ -3104,6 +3136,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 render_ms: render_micros as f32 / 1000.0,
                 dropped,
                 bitrate_kbps,
+                ltc: wants_ltc
+                    .then(|| app.state::<crate::audio::AudioRuntime>().engine.ltc())
+                    .flatten(),
             };
             for (id, settings) in &stats_sources {
                 let SourceSettings::SystemStats {
@@ -3113,6 +3148,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     show_render_ms,
                     show_dropped,
                     show_bitrate,
+                    show_timecode,
                     font_family,
                     font_file,
                     size_px,
@@ -3130,6 +3166,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         render_ms: *show_render_ms,
                         dropped: *show_dropped,
                         bitrate: *show_bitrate,
+                        timecode: *show_timecode,
                     },
                 );
                 if stats_faces.get(id) == Some(&face) {
@@ -3567,16 +3604,19 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let record_due = recording.wants_frames();
         let stream_due = streaming.wants_frames();
         let replay_due = replaying.wants_frames();
+        // CAP-N42: an alpha recording gets its own transparent-clear render
+        // below — the shared opaque readback then skips the recorder push.
+        let record_alpha = record_due && recording.wants_alpha_frames();
         // Freally Link (CAP-N12): only while a receiver is connected; the
         // link thread JPEG-encodes on its own time — this hands it an Arc.
         let link_due = linking.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if record_due || stream_due || replay_due || link_due || preview_due {
+        if (record_due && !record_alpha) || stream_due || replay_due || link_due || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
                     let data = Arc::new(frame.data);
-                    if record_due {
+                    if record_due && !record_alpha {
                         recording.push_video(Arc::clone(&data));
                     }
                     if stream_due {
@@ -3622,6 +3662,46 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 }
                 Err(err) => eprintln!("studio: program readback failed: {err}"),
             }
+        }
+
+        // -- 5a-alpha. The CAP-N42 alpha recording: the same scene composed
+        //    over a TRANSPARENT clear, feeding ONLY the recorder. The shared
+        //    program (preview/stream/replay) stays opaque above.
+        if record_alpha {
+            match compositor.render_iso_view(&scene, started_at.elapsed().as_secs_f32(), true) {
+                Ok(frame) => recording.push_video(Arc::new(frame.data)),
+                Err(err) => {
+                    if !alpha_error_logged {
+                        alpha_error_logged = true;
+                        eprintln!("studio: alpha compose failed ({err}) — recording holds");
+                    }
+                }
+            }
+        } else if alpha_error_logged {
+            alpha_error_logged = false;
+        }
+
+        // -- CAP-N43/N44: scene-switch reactions — cut the frec lanes to a
+        //    new part and/or drop a typed auto-marker when the program scene
+        //    switches. Never on the panic slate (its scene is synthetic) and
+        //    never on a session's first tick.
+        let scene_reactions = recording.splits_on_scene() || recording.auto_markers();
+        if recording.wants_frames() && scene_reactions && !panic_active {
+            match split_last_scene {
+                Some(last) if last != scene.id => {
+                    if recording.splits_on_scene() {
+                        recording.request_split_all();
+                    }
+                    if recording.auto_markers() {
+                        crate::recording::add_auto_marker(&app, &format!("Scene: {}", scene.name));
+                    }
+                    split_last_scene = Some(scene.id);
+                }
+                None => split_last_scene = Some(scene.id),
+                _ => {}
+            }
+        } else if split_last_scene.is_some() && !recording.wants_frames() {
+            split_last_scene = None;
         }
 
         // -- 5b. The Studio-Mode preview pane (its own JPEG slot) ----------------
@@ -3699,6 +3779,56 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 vertical_preview_live = false;
             }
             None => {}
+        }
+
+        // -- 5c-iso. The ISO lanes (CAP-N40): one clean per-source render +
+        //    push per tick while lanes record. Uses the compositor's own ISO
+        //    target, so it shares a tick with the preview/workbench passes.
+        //    While the panic slate is up (CAP-M22) the lanes are HELD — they
+        //    record sources clean, so panic must gate them or the cut
+        //    content lands in every ISO file.
+        {
+            let iso_hold = panic_active && recording.wants_iso_frames();
+            if iso_hold != iso_panic_held {
+                recording.set_iso_panic_hold(iso_hold);
+                iso_panic_held = iso_hold;
+            }
+        }
+        if recording.wants_iso_frames() && !panic_active {
+            for (source, post_filter) in recording.iso_lanes_wanted() {
+                let Some((sw, sh)) = compositor.source_size(source) else {
+                    // No frame yet (or the source left every scene): the
+                    // lane's CFR clock waits or duplicates its last frame.
+                    continue;
+                };
+                let filters = if post_filter {
+                    scene
+                        .items
+                        .iter()
+                        .find(|item| item.source == source)
+                        .map(|item| item.filters.clone())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let iso_scene = workbench_scene(source, filters, sw, sh, canvas);
+                match compositor.render_iso_view(
+                    &iso_scene,
+                    started_at.elapsed().as_secs_f32(),
+                    false,
+                ) {
+                    Ok(frame) => recording.push_video_iso(source, Arc::new(frame.data)),
+                    Err(err) => {
+                        if iso_errors_logged.insert(source) {
+                            eprintln!(
+                                "studio: ISO compose failed ({err}) — the lane holds its last frame"
+                            );
+                        }
+                    }
+                }
+            }
+        } else if !iso_errors_logged.is_empty() {
+            iso_errors_logged.clear();
         }
 
         // -- 5d. The keying workbench (its own JPEG slot; CAP-M26) ---------------
@@ -3989,6 +4119,31 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             // countdown live and auto-advances an expired step (when the
             // operator enabled that).
             crate::rundown::tick(&app);
+            // CAP-N44: reconnect + dropped-burst auto-markers share the 1 Hz
+            // cadence too — both are edge-triggered so a long outage marks
+            // once, not sixty times a minute.
+            if recording.wants_frames() && recording.auto_markers() {
+                let stream = app.state::<crate::stream::StreamBridgeState>().status();
+                let reconnecting = stream.state == "reconnecting";
+                if reconnecting && !was_reconnecting {
+                    crate::recording::add_auto_marker(&app, "Stream reconnecting");
+                }
+                was_reconnecting = reconnecting;
+                let (_, _, _, dropped, _) = app.state::<crate::events::RuntimeStats>().latest();
+                // A burst = ≥ 30 frames dropped inside one second; edge-trigger
+                // it so a sustained stall marks the moment it STARTS, not every
+                // second it lasts.
+                let bursting = last_dropped.is_some_and(|last| dropped.saturating_sub(last) >= 30);
+                if bursting && !was_dropping {
+                    crate::recording::add_auto_marker(&app, "Dropped frames");
+                }
+                was_dropping = bursting;
+                last_dropped = Some(dropped);
+            } else {
+                was_reconnecting = false;
+                was_dropping = false;
+                last_dropped = None;
+            }
             // PTZ per-scene preset auto-recall (CAP-N08) — on the switch only.
             if ptz_scene.as_deref() != Some(scene_name.as_str()) {
                 ptz_scene = Some(scene_name.clone());
@@ -5265,6 +5420,7 @@ mod tests {
             show_render_ms: true,
             show_dropped: true,
             show_bitrate: true,
+            show_timecode: false,
             font_family: None,
             font_file: None,
             size_px: 28.0,

@@ -290,6 +290,9 @@ pub struct AudioLevelsDto {
     pub filter_meters: Option<FilterMetersDto>,
     /// Capture samples dropped across sources (ring overflows).
     pub dropped: u64,
+    /// CAP-N47: the LTC reader's latest decode (`HH:MM:SS:FF`), when locked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ltc: Option<String>,
 }
 
 fn snapshot_dto(snapshot: EngineSnapshot) -> AudioLevelsDto {
@@ -345,6 +348,7 @@ fn snapshot_dto(snapshot: EngineSnapshot) -> AudioLevelsDto {
                 .collect(),
         }),
         dropped: snapshot.dropped,
+        ltc: snapshot.ltc,
     }
 }
 
@@ -510,6 +514,8 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
             let mut seen_outputs: Vec<fcap_scene::AudioOutputRoute> = Vec::new();
             // CAP-N34 loudness spec last sent (change-detected).
             let mut seen_loudness: Option<crate::settings::LoudnessSettings> = None;
+            // CAP-N47 LTC spec last sent (change-detected).
+            let mut seen_ltc: Option<crate::settings::LtcSettings> = None;
             // CAP-N37: the scene's engine configs (cached so soundboard pads can
             // be appended without a scene-revision change), the last-seen active
             // pads, and a flag to re-send the combined set when either changes.
@@ -591,6 +597,34 @@ pub fn spawn_audio_thread<R: Runtime>(app: AppHandle<R>) {
                             .then_some((loudness.target_lufs, loudness.ceiling_db)),
                     );
                     seen_loudness = Some(loudness);
+                }
+
+                // 2d. Settings → CAP-N47 LTC generator + reader, on change.
+                //     The generator jam-syncs to time of day at arm time —
+                //     the free-run broadcast practice.
+                let ltc = app.state::<SettingsStore>().ltc();
+                if seen_ltc.as_ref() != Some(&ltc) {
+                    engine.set_ltc(ltc.enabled.then(|| {
+                        use chrono::Timelike;
+                        let now = chrono::Local::now();
+                        let frames = (f64::from(now.nanosecond()) / 1e9 * f64::from(ltc.fps)) as u8;
+                        fcap_audio::LtcSpec {
+                            track: usize::from(ltc.track),
+                            fps: ltc.fps,
+                            start: fcap_audio::ltc::LtcTime {
+                                hours: now.hour() as u8,
+                                minutes: now.minute() as u8,
+                                seconds: now.second() as u8,
+                                frames: frames.min(ltc.fps as u8 - 1),
+                            },
+                        }
+                    }));
+                    engine.set_ltc_read(
+                        (!ltc.read_source.is_empty())
+                            .then(|| SourceId::parse(&ltc.read_source))
+                            .flatten(),
+                    );
+                    seen_ltc = Some(ltc);
                 }
 
                 // 3. Levels out (skip the idle no-sources steady state, but

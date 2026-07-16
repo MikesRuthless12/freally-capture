@@ -430,6 +430,10 @@ pub enum SourceSettings {
         show_dropped: bool,
         #[serde(default = "default_true")]
         show_bitrate: bool,
+        /// CAP-N47: the burn-in timecode line (the LTC reader's decode).
+        /// Defaults OFF — existing overlays keep their exact face.
+        #[serde(default)]
+        show_timecode: bool,
         /// System font family; `None` = the platform default face.
         #[serde(default)]
         font_family: Option<String>,

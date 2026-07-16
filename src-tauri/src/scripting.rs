@@ -68,6 +68,23 @@ fn load_script(app: &AppHandle, entry: &ScriptSettings) -> Result<Script, String
     Script::load(&source, command, log)
 }
 
+/// CAP-N45: events queued from elsewhere in the app (the post-record
+/// pipeline's LuaEvent step) for the scripting thread to deliver on its next
+/// pass (≤ 250 ms). Bounded — with no scripts loaded, queued events drain
+/// and go nowhere, honestly.
+static QUEUED_EVENTS: std::sync::Mutex<Vec<(String, Value)>> = std::sync::Mutex::new(Vec::new());
+
+/// Queue an event for every loaded script (delivered on the scripting
+/// thread's next pass). Callable from any thread.
+pub fn queue_event(name: &str, data: Value) {
+    let mut queued = QUEUED_EVENTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if queued.len() < 64 {
+        queued.push((name.to_owned(), data));
+    }
+}
+
 /// The scripting thread: reconcile loaded scripts against settings (~1 s)
 /// and deliver derived events on every coarse-state change (~4 Hz).
 pub fn spawn_manager(app: AppHandle) {
@@ -109,17 +126,26 @@ pub fn spawn_manager(app: AppHandle) {
                 // can't fire long-past transitions (e.g. yank the scene to
                 // "Live" mid-show because it saw a frozen pre-disable state).
                 let state = crate::remote_api::coarse_state(&app);
+                // Externally-queued events (CAP-N45) drain every pass —
+                // whether scripts are loaded or not, so the queue never grows.
+                let queued: Vec<(String, Value)> = std::mem::take(
+                    &mut *QUEUED_EVENTS
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                );
                 if !loaded.is_empty() {
+                    let mut events: Vec<(String, Value)> = Vec::new();
                     if let Some(prev) = &last_state {
                         if prev != &state {
-                            let mut events = derive_events(prev, &state);
+                            events = derive_events(prev, &state);
                             events.push(("state".to_owned(), state.clone()));
-                            for (event, data) in &events {
-                                for script in loaded.values() {
-                                    if let Err(err) = script.emit(event, data) {
-                                        eprintln!("script error: {err}");
-                                    }
-                                }
+                        }
+                    }
+                    events.extend(queued);
+                    for (event, data) in &events {
+                        for script in loaded.values() {
+                            if let Err(err) = script.emit(event, data) {
+                                eprintln!("script error: {err}");
                             }
                         }
                     }

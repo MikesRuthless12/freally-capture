@@ -55,12 +55,45 @@ pub struct AlarmDto {
     pub minutes_left: Option<u32>,
 }
 
+/// CAP-N44: the last active state per alarm kind, so an auto-marker fires
+/// only on the RISING edge. Most alarms already report once via `Sustained`,
+/// but LowDisk re-emits `active=true` on every forecast-minute change (to
+/// refresh the toast's "N min left"); without this guard that would flood the
+/// recording with duplicate "Alarm: low disk" markers.
+static ALARM_WAS_ACTIVE: [std::sync::atomic::AtomicBool; 5] =
+    [const { std::sync::atomic::AtomicBool::new(false) }; 5];
+
+fn alarm_index(kind: AlarmKind) -> usize {
+    match kind {
+        AlarmKind::SilentAudio => 0,
+        AlarmKind::Clipping => 1,
+        AlarmKind::Black => 2,
+        AlarmKind::Frozen => 3,
+        AlarmKind::LowDisk => 4,
+    }
+}
+
 pub(crate) fn emit_alarm<R: Runtime>(
     app: &AppHandle<R>,
     kind: AlarmKind,
     active: bool,
     minutes_left: Option<u32>,
 ) {
+    // CAP-N44: an alarm RAISING marks the moment in the recording (clears
+    // don't — the raise is the moment worth finding in the edit). Fire only
+    // on the false→true edge so a re-asserted alarm doesn't stack markers.
+    let was_active =
+        ALARM_WAS_ACTIVE[alarm_index(kind)].swap(active, std::sync::atomic::Ordering::Relaxed);
+    if active && !was_active {
+        let label = match kind {
+            AlarmKind::SilentAudio => "Alarm: silent audio",
+            AlarmKind::Clipping => "Alarm: clipping",
+            AlarmKind::Black => "Alarm: black frame",
+            AlarmKind::Frozen => "Alarm: frozen frame",
+            AlarmKind::LowDisk => "Alarm: low disk",
+        };
+        crate::recording::add_auto_marker(app, label);
+    }
     let _ = app.emit(
         "alarm",
         AlarmDto {
