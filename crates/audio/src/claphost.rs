@@ -72,7 +72,7 @@ fn search_dirs(subdir: &str, unix_lib: &str, home_dir: &str, env_override: &str)
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = unix_lib;
+        let _ = (unix_lib, home_dir);
         dirs.push(PathBuf::from(format!("/Library/Audio/Plug-Ins/{subdir}")));
         if let Some(home) = &home {
             dirs.push(home.join(format!("Library/Audio/Plug-Ins/{subdir}")));
