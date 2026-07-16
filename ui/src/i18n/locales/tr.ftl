@@ -465,6 +465,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = İzleme
 mixer-monitor-device-aria = İzleme çıkış aygıtı
 mixer-default-output = Varsayılan çıkış
+mixer-routing = Yönlendirme
+mixer-routing-title = Ses çıkışı yönlendirme
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Ses yönlendirme
+routing-intro = Şeritleri iz bus'larına atayın, ardından herhangi bir bus'ı fiziksel bir çıkışa gönderin — bir donanım kaydediciye besleme, başka bir odadaki hoparlörler ya da boş bir izde kulaklık cue'su. İzleme kendi aygıtını korur; bu yönlendirmeler bunun üzerine eklenir, dolayısıyla hiçbiri ayarlanmazsa miks değişmez.
+routing-sends-title = İz göndermeleri
+routing-no-strips = Bu sahnede ses kaynağı yok.
+routing-source = Kaynak
+routing-track = İz { $n }
+routing-send-aria = { $source } kaynağını İz { $n }'e gönder
+routing-outputs-title = Fiziksel çıkışlar
+routing-master = Master
+routing-off = Kapalı
+routing-default-output = Varsayılan çıkış
+routing-device-aria = { $bus } için çıkış aygıtı
+routing-trim-aria = { $bus } için çıkış trim
+routing-trim-db = { $db } dB
+routing-muted = Sessiz
+routing-device-error = Aygıt kullanılamıyor
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Ducking
+mixer-ducking-title = Ducking matrisi
+ducking-title = Ducking matrisi
+ducking-intro = Herhangi bir kaynak diğerlerini duck edebilir. Tetik (satır) konuştuğunda bir hücre hedefi (sütun) kısar — derinliğini, eşiğini ve zamanlamasını ayarlamak için bir hücre seçin. Her çift kendi ducking'idir, böylece bir kanal aynı anda birden fazla tetik tarafından duck edilebilir.
+ducking-need-two = Aralarında ducking yapmak için en az iki ses kaynağı ekleyin.
+ducking-trigger-target = Tetik ↓ / Hedef →
+ducking-cell-aria = { $trigger }, { $target } sesini kısıyor
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Kaldır
+ducking-amount = Miktar
+ducking-threshold = Eşik
+ducking-attack = Atak
+ducking-release = Bırakma
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Ses düzeyi normalleştirme
+loudness-intro = Programı bir tepe tavanıyla birlikte ses düzeyi hedefine doğru yavaşça yönlendirir; böylece yayınınız ve kayıtlarınız tutarlı bir seviyeye oturur. Yavaş ve nazik — yönlendirir, asla pompalamaz.
+loudness-enable = Programı hedefe yönlendir
+loudness-target = Hedef
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Tepe tavanı (dBFS)
+loudness-note = −14 LUFS YouTube tarzı oynatmaya uygundur; −16 yaygın bir yayın hedefidir; −23 ise EBU R128 yayıncılığıdır. Kayıt sonrası Normalleştir eyleminde de aynı hedef kullanılır.
+loudness-on = LUFS { $target }
+loudness-off = Norm. kapalı
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Ses panosu
+mixer-soundboard-title = Ses panosu
+soundboard-title = Ses panosu
+soundboard-add-pad = + Pad
+soundboard-stop-all = Tümünü durdur
+soundboard-edit = Düzenle
+soundboard-empty = Henüz pad yok — bir tane ekleyin ve yerel bir ses klibi atayın.
+soundboard-new-pad = Yeni pad
+soundboard-no-clip = Klip yok
+soundboard-audio-files = Ses dosyaları
+soundboard-name = Ad
+soundboard-choose-clip = Klip seç…
+soundboard-gain = Kazanç
+soundboard-choke = Choke
+soundboard-choke-none = Yok
+soundboard-loop = Döngü
+soundboard-auto-duck = Otomatik ducking
+soundboard-tracks = İzler
+soundboard-hotkey = Kısayol
+soundboard-hotkey-placeholder = örn. Ctrl+Shift+1
+soundboard-remove = Kaldır
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Eklentiler
+mixer-plugins-title = Ses eklentileri (CLAP / VST3)
+plugins-title = Ses eklentileri
+plugins-scanning = Taranıyor…
+plugins-none = Standart klasörlerde CLAP veya VST3 eklentisi bulunamadı.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -550,6 +628,10 @@ channelstrip-solo-source = { $name } solo (PFL)
 channelstrip-pan-label = Denge (çift tıklama sıfırlar)
 channelstrip-pan-aria = { $name } dengesi
 channelstrip-mono-label = Monoya indir
+channelstrip-automix-label = Oto-miks (kazanç paylaşımı)
+channelstrip-automix-note = Kazanç paylaşımı: mikser tüm oto-miks şeritlerinin birleşik seviyesini sabit tutar ve onu o an konuşana devreder — çok mikrofonlu paneller ve podcast'ler için idealdir. Bir şerit ekleyene kadar kapalı.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Bu kaynak için yankısız bir dönüş üretir — kaynağın kendisi dışında programdaki herkes. Uzak bir konuk için kullanın, böylece kendi gecikmeli sesini duymaz.
 channelstrip-ptt-hotkey = Bas-konuş kısayolu (basılı tutulmadıkça sessiz)
 channelstrip-ptt-placeholder = örn. Ctrl+Shift+T veya F13
 channelstrip-ptt-aria = Bas-konuş kısayolu
@@ -784,7 +866,36 @@ audiofilters-name-limiter = Limitleyici
 audiofilters-name-eq = 3-Bant EQ
 audiofilters-name-denoise = Gürültü Azaltma
 audiofilters-name-ducking = Ducking
+audiofilters-name-parametric-eq = Parametrik EQ
+audiofilters-name-de-esser = De-esser
+audiofilters-name-rumble-guard = Gümbürtü filtresi
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Ön ayar
+audiofilters-voice-preset-pick = Ses ön ayarı…
+audiofilters-voice-broadcast = Yayın sesi
+audiofilters-voice-podcast = Podcast sesi
+audiofilters-voice-clean = Temiz ses
+audiofilters-voice-none = Zinciri temizle
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Tıslama frekansı (Hz)
+audiofilters-deesser-amount = Maks. azaltma (dB)
+audiofilters-rumble-freq = Düşük kesim (Hz)
 audiofilters-title = Ses filtreleri — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Canlı spektrumlu parametrik EQ tepki eğrisi
+eq-band-type = Tür
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Bant
+eq-remove-band = Bandı kaldır
+eq-type-bell = Bell
+eq-type-lowShelf = Low shelf
+eq-type-highShelf = High shelf
+eq-type-notch = Notch
+eq-type-highPass = Yüksek geçiren
+eq-type-lowPass = Alçak geçiren
 audiofilters-chain-header = Filtre zinciri (üst önce çalışır, fader'dan önce)
 audiofilters-add = + Filtre ekle
 audiofilters-add-menu = Bir ses filtresi ekle
@@ -1006,6 +1117,23 @@ recordings-cancel = İptal
 recordings-export-cancelled = Dışa aktarma iptal edildi.
 recordings-exported-to = { $path } konumuna dışa aktarıldı
 recordings-remuxed-to = { $path } konumuna yeniden paketlendi
+recordings-normalize = Normalleştir
+recordings-normalizing = Normalleştiriliyor…
+recordings-normalize-title = Ses düzeyini hedefe normalleştir (bir kopya yazar)
+recordings-normalized-to = { $path } konumuna normalleştirildi
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Yalnızca ses
+audiorec-format = Ses kaydı biçimi
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Sesi kaydet
+audiorec-stop = Durdur
+audiorec-pause = Duraklat
+audiorec-resume = Sürdür
+audiorec-recording = REC { $sec }s
+audiorec-saved = { $count } iz dosyası kaydedildi
 
 
 # --- OpenedFrec.tsx ---

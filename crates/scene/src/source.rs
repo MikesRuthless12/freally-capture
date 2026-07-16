@@ -20,6 +20,12 @@ impl SourceId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Parse a canonical UUID string into a source id (e.g. a CAP-N37 soundboard
+    /// pad id, whose ring key doubles as its transient engine source id).
+    pub fn parse(text: &str) -> Option<Self> {
+        Uuid::parse_str(text).ok().map(Self)
+    }
 }
 
 impl Default for SourceId {

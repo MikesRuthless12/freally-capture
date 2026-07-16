@@ -81,7 +81,8 @@ impl QuitConsequences {
 pub fn consequences<R: Runtime>(app: &AppHandle<R>) -> QuitConsequences {
     QuitConsequences {
         streaming: app.state::<crate::stream::StreamBridgeState>().is_live(),
-        recording: app.state::<crate::recording::RecordingState>().is_active(),
+        recording: app.state::<crate::recording::RecordingState>().is_active()
+            || app.state::<crate::audiorec::AudioRecState>().is_active(),
         replay: app.state::<crate::replay::ReplayState>().is_armed(),
     }
 }
@@ -143,6 +144,11 @@ pub fn shutdown_and_exit<R: Runtime>(app: AppHandle<R>) {
             }
             // 2. Finalize recordings — blocks until the muxer closes the
             //    file(s), so nothing is left truncated.
+            if app.state::<crate::audiorec::AudioRecState>().is_active() {
+                if let Err(err) = crate::audiorec::stop(&app) {
+                    eprintln!("shutdown: finalize audio recording: {err}");
+                }
+            }
             if app.state::<crate::recording::RecordingState>().is_active() {
                 if let Err(err) = crate::recording::stop(&app) {
                     eprintln!("shutdown: finalize recording: {err}");

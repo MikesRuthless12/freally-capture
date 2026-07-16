@@ -465,6 +465,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = Monitor
 mixer-monitor-device-aria = Perangkat output monitor
 mixer-default-output = Output default
+mixer-routing = Perutean
+mixer-routing-title = Perutean output audio
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = Perutean audio
+routing-intro = Tetapkan strip ke bus track, lalu kirim bus mana pun ke output fisik — feed untuk perekam hardware, speaker di ruangan lain, atau cue headphone di track cadangan. Monitor tetap memakai perangkatnya sendiri; rute ini ditambahkan di atasnya, jadi jika tidak ada yang diatur, mix tidak berubah.
+routing-sends-title = Send ke track
+routing-no-strips = Tidak ada sumber audio di scene ini.
+routing-source = Sumber
+routing-track = Track { $n }
+routing-send-aria = Kirim { $source } ke track { $n }
+routing-outputs-title = Output fisik
+routing-master = Master
+routing-off = Nonaktif
+routing-default-output = Output default
+routing-device-aria = Perangkat output untuk { $bus }
+routing-trim-aria = Trim output untuk { $bus }
+routing-trim-db = { $db } dB
+routing-muted = Dibisukan
+routing-device-error = Perangkat tidak tersedia
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = Ducking
+mixer-ducking-title = Matriks ducking
+ducking-title = Matriks ducking
+ducking-intro = Setiap sumber dapat men-duck sumber lainnya. Sebuah sel menurunkan target (kolom) setiap kali pemicu (baris) bersuara — pilih sel untuk mengatur kedalaman, ambang, dan pengaturan waktunya. Setiap pasangan adalah duck-nya sendiri, sehingga satu strip dapat di-duck oleh beberapa pemicu sekaligus.
+ducking-need-two = Tambahkan minimal dua sumber audio untuk melakukan ducking di antaranya.
+ducking-trigger-target = Pemicu ↓ / Target →
+ducking-cell-aria = { $trigger } men-duck { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = Keluarkan
+ducking-amount = Jumlah
+ducking-threshold = Ambang
+ducking-attack = Attack
+ducking-release = Release
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = Normalisasi loudness
+loudness-intro = Mengarahkan program secara perlahan menuju target loudness dengan batas puncak, agar streaming dan rekaman Anda berada pada level yang konsisten. Lambat dan lembut — mengarahkan, tidak pernah memompa.
+loudness-enable = Arahkan program ke target
+loudness-target = Target
+loudness-target-option = { $target } LUFS
+loudness-ceiling = Batas puncak (dBFS)
+loudness-note = −14 LUFS cocok untuk pemutaran gaya YouTube; −16 adalah target streaming yang umum; −23 adalah siaran EBU R128. Target yang sama digunakan oleh tindakan Normalisasi pascarekam.
+loudness-on = LUFS { $target }
+loudness-off = Norm. mati
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = Soundboard
+mixer-soundboard-title = Soundboard
+soundboard-title = Soundboard
+soundboard-add-pad = + Pad
+soundboard-stop-all = Hentikan semua
+soundboard-edit = Edit
+soundboard-empty = Belum ada pad — tambahkan satu dan tetapkan klip audio lokal.
+soundboard-new-pad = Pad baru
+soundboard-no-clip = Tanpa klip
+soundboard-audio-files = Berkas audio
+soundboard-name = Nama
+soundboard-choose-clip = Pilih klip…
+soundboard-gain = Gain
+soundboard-choke = Choke
+soundboard-choke-none = Tidak ada
+soundboard-loop = Ulangi
+soundboard-auto-duck = Auto-ducking
+soundboard-tracks = Track
+soundboard-hotkey = Hotkey
+soundboard-hotkey-placeholder = mis. Ctrl+Shift+1
+soundboard-remove = Hapus
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = Plugin
+mixer-plugins-title = Plugin audio (CLAP / VST3)
+plugins-title = Plugin audio
+plugins-scanning = Memindai…
+plugins-none = Tidak ada plugin CLAP atau VST3 yang ditemukan di folder standar.
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -550,6 +628,10 @@ channelstrip-solo-source = Solo { $name } (PFL)
 channelstrip-pan-label = Balance (klik dua kali untuk reset)
 channelstrip-pan-aria = Balance { $name }
 channelstrip-mono-label = Downmix ke mono
+channelstrip-automix-label = Auto-mix (berbagi gain)
+channelstrip-automix-note = Berbagi gain: mixer menjaga level gabungan semua strip auto-mix tetap stabil dan menyerahkannya kepada siapa pun yang sedang berbicara — ideal untuk panel multi-mik dan podcast. Mati sampai Anda menambahkan strip.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = Menghasilkan return bebas gema untuk sumber ini — semua orang di program kecuali sumber ini sendiri. Gunakan untuk tamu jarak jauh agar mereka tidak mendengar suara mereka sendiri yang tertunda.
 channelstrip-ptt-hotkey = Hotkey push-to-talk (senyap kecuali ditahan)
 channelstrip-ptt-placeholder = mis. Ctrl+Shift+T atau F13
 channelstrip-ptt-aria = Hotkey push-to-talk
@@ -784,7 +866,36 @@ audiofilters-name-limiter = Limiter
 audiofilters-name-eq = EQ 3-Band
 audiofilters-name-denoise = Denoise
 audiofilters-name-ducking = Ducking
+audiofilters-name-parametric-eq = EQ Parametrik
+audiofilters-name-de-esser = De-esser
+audiofilters-name-rumble-guard = Rumble Guard
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = Preset
+audiofilters-voice-preset-pick = Preset suara…
+audiofilters-voice-broadcast = Suara siaran
+audiofilters-voice-podcast = Suara podcast
+audiofilters-voice-clean = Suara bersih
+audiofilters-voice-none = Bersihkan rantai
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = Frekuensi sibilan (Hz)
+audiofilters-deesser-amount = Reduksi maks (dB)
+audiofilters-rumble-freq = Low-cut (Hz)
 audiofilters-title = Filter audio — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = Kurva respons EQ parametrik dengan spektrum langsung
+eq-band-type = Tipe
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + Band
+eq-remove-band = Hapus band
+eq-type-bell = Bell
+eq-type-lowShelf = Low shelf
+eq-type-highShelf = High shelf
+eq-type-notch = Notch
+eq-type-highPass = High-pass
+eq-type-lowPass = Low-pass
 audiofilters-chain-header = Rantai filter (atas jalan dulu, sebelum fader)
 audiofilters-add = + Tambah filter
 audiofilters-add-menu = Tambah filter audio
@@ -1006,6 +1117,23 @@ recordings-cancel = Batal
 recordings-export-cancelled = Ekspor dibatalkan.
 recordings-exported-to = Diekspor ke { $path }
 recordings-remuxed-to = Di-remux ke { $path }
+recordings-normalize = Normalisasi
+recordings-normalizing = Menormalisasi…
+recordings-normalize-title = Normalisasi loudness ke target (menulis salinan)
+recordings-normalized-to = Dinormalisasi ke { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = Hanya audio
+audiorec-format = Format rekaman audio
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = Rekam audio
+audiorec-stop = Hentikan
+audiorec-pause = Jeda
+audiorec-resume = Lanjutkan
+audiorec-recording = REC { $sec }s
+audiorec-saved = { $count } file trek disimpan
 
 
 # --- OpenedFrec.tsx ---

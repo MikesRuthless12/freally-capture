@@ -128,6 +128,63 @@ impl Biquad {
         self.set_coefficients(b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
     }
 
+    /// Recompute this section's notch coefficients in place (keeps state) — a
+    /// band-reject at `f0`, width set by `q`. The parametric EQ starts each band
+    /// from `from_coefficients` and shapes it with the `set_*` methods.
+    pub fn set_notch(&mut self, sample_rate: f32, f0: f32, q: f32) {
+        let w0 = 2.0 * std::f32::consts::PI * f0 / sample_rate;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        self.set_coefficients(
+            1.0 / a0,
+            -2.0 * cos / a0,
+            1.0 / a0,
+            -2.0 * cos / a0,
+            (1.0 - alpha) / a0,
+        );
+    }
+
+    /// RBJ high-pass (12 dB/oct, corner `f0`).
+    pub fn high_pass(sample_rate: f32, f0: f32, q: f32) -> Self {
+        let mut biquad = Self::from_coefficients(1.0, 0.0, 0.0, 0.0, 0.0);
+        biquad.set_high_pass(sample_rate, f0, q);
+        biquad
+    }
+
+    /// Recompute this section's high-pass coefficients in place (keeps state).
+    pub fn set_high_pass(&mut self, sample_rate: f32, f0: f32, q: f32) {
+        let w0 = 2.0 * std::f32::consts::PI * f0 / sample_rate;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        let b0 = (1.0 + cos) / 2.0;
+        self.set_coefficients(
+            b0 / a0,
+            -(1.0 + cos) / a0,
+            b0 / a0,
+            -2.0 * cos / a0,
+            (1.0 - alpha) / a0,
+        );
+    }
+
+    /// Recompute this section's low-pass coefficients in place (keeps state) —
+    /// a 12 dB/oct low-pass at corner `f0`.
+    pub fn set_low_pass(&mut self, sample_rate: f32, f0: f32, q: f32) {
+        let w0 = 2.0 * std::f32::consts::PI * f0 / sample_rate;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        let b0 = (1.0 - cos) / 2.0;
+        self.set_coefficients(
+            b0 / a0,
+            (1.0 - cos) / a0,
+            b0 / a0,
+            -2.0 * cos / a0,
+            (1.0 - alpha) / a0,
+        );
+    }
+
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.z1;

@@ -27,8 +27,9 @@ pub mod scene;
 pub mod source;
 
 pub use audio::{
-    AudioFilter, AudioFilterId, AudioFilterKind, AudioSettings, MonitorMode, MAX_SYNC_OFFSET_MS,
-    MAX_VOLUME_DB, MIN_VOLUME_DB, TRACK_COUNT,
+    AudioFilter, AudioFilterId, AudioFilterKind, AudioOutputRoute, AudioSettings, EqBand,
+    EqBandType, MonitorMode, OutputBus, MAX_SYNC_OFFSET_MS, MAX_VOLUME_DB, MIN_VOLUME_DB,
+    TRACK_COUNT,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
 pub use history::{History, HistoryState};
@@ -1958,6 +1959,30 @@ impl Collection {
     /// Set the mono downmix (CAP-M19).
     pub fn set_audio_mono(&mut self, id: SourceId, mono: bool) -> Result<(), SceneError> {
         self.audio_mut(id)?.mono = mono;
+        Ok(())
+    }
+
+    /// Toggle gain-sharing auto-mix participation (CAP-N32).
+    pub fn set_audio_automix(&mut self, id: SourceId, automix: bool) -> Result<(), SceneError> {
+        self.audio_mut(id)?.automix = automix;
+        Ok(())
+    }
+
+    /// Toggle per-guest mix-minus (CAP-N39): produce an N−1 return for this
+    /// source (everything minus itself), so a remote guest hears no echo.
+    pub fn set_audio_mix_minus(&mut self, id: SourceId, mix_minus: bool) -> Result<(), SceneError> {
+        self.audio_mut(id)?.mix_minus = mix_minus;
+        Ok(())
+    }
+
+    /// Replace a source's whole audio filter chain (CAP-N39 voice-chain
+    /// presets): each kind becomes a fresh enabled filter, in order.
+    pub fn set_audio_filters(
+        &mut self,
+        id: SourceId,
+        kinds: Vec<AudioFilterKind>,
+    ) -> Result<(), SceneError> {
+        self.audio_mut(id)?.filters = kinds.into_iter().map(AudioFilter::new).collect();
         Ok(())
     }
 

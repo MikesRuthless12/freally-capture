@@ -134,8 +134,11 @@ async function open(mode: ThemeMode) {
       onOpen={() => undefined}
     />,
   );
-  // The draft seeds from a fresh settingsGet(); wait for the panes to exist.
+  // The draft seeds from a fresh settingsGet() (async). Wait for a SEEDED
+  // General-pane control, not just the tab shell — otherwise a synchronous
+  // getByLabelText can race the seed and flake under full-suite load.
   await screen.findByRole("tab", { name: "General" });
+  await screen.findByLabelText("Show the stats dock");
   return { onSettingsSaved, onClose };
 }
 

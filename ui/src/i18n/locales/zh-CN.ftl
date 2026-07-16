@@ -459,6 +459,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = 监听
 mixer-monitor-device-aria = 监听输出设备
 mixer-default-output = 默认输出
+mixer-routing = 路由
+mixer-routing-title = 音频输出路由
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = 音频路由
+routing-intro = 将混音条分配到轨道总线，然后将任意总线发送到物理输出 — 例如馈送到硬件录音机、送到另一个房间的音箱，或在空闲轨道上做耳机监听。监听保留其自己的设备；这些路由是叠加上去的，因此未设置任何路由时混音保持不变。
+routing-sends-title = 轨道发送
+routing-no-strips = 此场景中没有音频源。
+routing-source = 源
+routing-track = 轨道 { $n }
+routing-send-aria = 将 { $source } 发送到轨道 { $n }
+routing-outputs-title = 物理输出
+routing-master = 主混音
+routing-off = 关闭
+routing-default-output = 默认输出
+routing-device-aria = { $bus } 的输出设备
+routing-trim-aria = { $bus } 的输出微调
+routing-trim-db = { $db } dB
+routing-muted = 已静音
+routing-device-error = 设备不可用
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = 音量闪避
+mixer-ducking-title = 闪避矩阵
+ducking-title = 闪避矩阵
+ducking-intro = 任何音源都可以闪避其他音源。每当触发源（行）发声时，单元格就会压低目标（列）——选择一个单元格即可设置其深度、阈值和时间。每一对都是独立的闪避，因此一个声道可以同时被多个触发源闪避。
+ducking-need-two = 至少添加两个音频源，才能在它们之间进行闪避。
+ducking-trigger-target = 触发源 ↓ / 目标 →
+ducking-cell-aria = { $trigger } 闪避 { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = 移除
+ducking-amount = 幅度
+ducking-threshold = 阈值
+ducking-attack = 启动时间
+ducking-release = 释放时间
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = 响度标准化
+loudness-intro = 在峰值上限的约束下，将节目缓缓引导至响度目标，让直播和录制稳定在一致的电平。缓慢而轻柔——只做引导，绝不泵动。
+loudness-enable = 将节目引导至目标
+loudness-target = 目标
+loudness-target-option = { $target } LUFS
+loudness-ceiling = 峰值上限（dBFS）
+loudness-note = −14 LUFS 适合 YouTube 风格的播放；−16 是常见的直播目标；−23 是 EBU R128 广播标准。录制后的标准化操作使用相同的目标。
+loudness-on = LUFS { $target }
+loudness-off = 标准化关闭
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = 音效板
+mixer-soundboard-title = 音效板
+soundboard-title = 音效板
+soundboard-add-pad = + 音垫
+soundboard-stop-all = 全部停止
+soundboard-edit = 编辑
+soundboard-empty = 还没有音垫 — 添加一个并指定本地音频片段。
+soundboard-new-pad = 新建音垫
+soundboard-no-clip = 无片段
+soundboard-audio-files = 音频文件
+soundboard-name = 名称
+soundboard-choose-clip = 选择片段…
+soundboard-gain = 增益
+soundboard-choke = 互斥组
+soundboard-choke-none = 无
+soundboard-loop = 循环
+soundboard-auto-duck = 自动闪避
+soundboard-tracks = 轨道
+soundboard-hotkey = 快捷键
+soundboard-hotkey-placeholder = 例如 Ctrl+Shift+1
+soundboard-remove = 移除
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = 插件
+mixer-plugins-title = 音频插件 (CLAP / VST3)
+plugins-title = 音频插件
+plugins-scanning = 扫描中…
+plugins-none = 在标准文件夹中未找到 CLAP 或 VST3 插件。
 
 # --- StatsDock.tsx (Panel title reuses `stats`) ---
 stats-fps = FPS
@@ -538,6 +616,10 @@ channelstrip-solo-source = 独听 { $name }（PFL）
 channelstrip-pan-label = 声像平衡（双击复位）
 channelstrip-pan-aria = { $name } 的声像平衡
 channelstrip-mono-label = 下混为单声道
+channelstrip-automix-label = 自动混音（增益共享）
+channelstrip-automix-note = 增益共享：混音器让所有自动混音条的合计电平保持稳定，并将其交给正在讲话的人 — 适合多麦克风的访谈和播客。在添加混音条之前保持关闭。
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = 为此来源生成无回声的返送 — 节目中除该来源本身之外的所有人。用于远程嘉宾，让他们不会听到自己延迟的声音。
 channelstrip-ptt-hotkey = 一键说话热键（不按住时静音）
 channelstrip-ptt-placeholder = 例如 Ctrl+Shift+T 或 F13
 channelstrip-ptt-aria = 一键说话热键
@@ -772,7 +854,36 @@ audiofilters-name-limiter = 限制器
 audiofilters-name-eq = 三段均衡器
 audiofilters-name-denoise = 降噪
 audiofilters-name-ducking = 音量闪避
+audiofilters-name-parametric-eq = 参数均衡器
+audiofilters-name-de-esser = 齿音消除
+audiofilters-name-rumble-guard = 低频消除
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = 预设
+audiofilters-voice-preset-pick = 人声预设…
+audiofilters-voice-broadcast = 广播人声
+audiofilters-voice-podcast = 播客人声
+audiofilters-voice-clean = 纯净人声
+audiofilters-voice-none = 清空链
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = 齿音频率 (Hz)
+audiofilters-deesser-amount = 最大衰减 (dB)
+audiofilters-rumble-freq = 低切 (Hz)
 audiofilters-title = 音频滤镜 — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = 参数均衡器频响曲线（含实时频谱）
+eq-band-type = 类型
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + 频段
+eq-remove-band = 移除频段
+eq-type-bell = 钟形
+eq-type-lowShelf = 低架
+eq-type-highShelf = 高架
+eq-type-notch = 陷波
+eq-type-highPass = 高通
+eq-type-lowPass = 低通
 audiofilters-chain-header = 滤镜链（顶部先运行，在推子之前）
 audiofilters-add = + 添加滤镜
 audiofilters-add-menu = 添加音频滤镜
@@ -989,6 +1100,23 @@ recordings-cancel = 取消
 recordings-export-cancelled = 导出已取消。
 recordings-exported-to = 已导出到 { $path }
 recordings-remuxed-to = 已重封装到 { $path }
+recordings-normalize = 标准化
+recordings-normalizing = 正在标准化…
+recordings-normalize-title = 将响度标准化到目标（写入一份副本）
+recordings-normalized-to = 已标准化到 { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = 仅音频
+audiorec-format = 音频录制格式
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = 录制音频
+audiorec-stop = 停止
+audiorec-pause = 暂停
+audiorec-resume = 恢复
+audiorec-recording = REC { $sec }秒
+audiorec-saved = 已保存 { $count } 个轨道文件
 
 
 # --- OpenedFrec.tsx ---

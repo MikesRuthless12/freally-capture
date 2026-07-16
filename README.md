@@ -172,7 +172,15 @@ cargo clippy --all-targets -- -D warnings    # lint (warnings = errors)
 cargo test                                   # tests (incl. compositor golden frames)
 ```
 
-These mirror exactly what CI runs (`.github/workflows/ci.yml`) on Windows, macOS, and Linux.
+```sh
+# One command that runs the WHOLE CI suite locally, before you push
+npm run ci:local                 # rustfmt · clippy · test · deny/audit · UI (prettier/eslint/i18n/
+                                 # theme/vitest/build) · Playwright e2e · Tauri debug compile
+npm run ci:local -- --no-e2e --no-tauri-build   # fast inner-loop subset
+```
+
+These mirror exactly what CI runs (`.github/workflows/ci.yml`) on Windows, macOS, and Linux — `npm run
+ci:local` runs every job in one pass and prints a pass/fail summary, so a green run means CI will be green.
 
 > **Windows release = GUI app, no console window.** `src-tauri/src/main.rs` keeps
 > `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` and the release job builds

@@ -77,7 +77,9 @@
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },
       "wix": {
-        "version": "0.240.0"
+        "version": "0.250.0",
+        "fragmentPaths": ["windows/desktop-shortcut.wxs"],
+        "componentGroupRefs": ["DesktopShortcutGroup"]
       },
       "nsis": {
         "installerIcon": "icons/icon.ico",

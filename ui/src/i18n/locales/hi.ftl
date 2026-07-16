@@ -456,6 +456,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = मॉनिटर
 mixer-monitor-device-aria = मॉनिटर आउटपुट डिवाइस
 mixer-default-output = डिफ़ॉल्ट आउटपुट
+mixer-routing = रूटिंग
+mixer-routing-title = ऑडियो आउटपुट रूटिंग
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = ऑडियो रूटिंग
+routing-intro = स्ट्रिप्स को ट्रैक बसों में असाइन करें, फिर किसी भी बस को किसी फिज़िकल आउटपुट पर भेजें — किसी हार्डवेयर रिकॉर्डर की फ़ीड, दूसरे कमरे के स्पीकर, या किसी खाली ट्रैक पर हेडफ़ोन क्यू। मॉनिटर अपना खुद का डिवाइस रखता है; ये रूट उसके ऊपर जोड़े जाते हैं, इसलिए कोई सेट न होने पर मिक्स अपरिवर्तित रहता है।
+routing-sends-title = ट्रैक सेंड
+routing-no-strips = इस सीन में कोई ऑडियो स्रोत नहीं है।
+routing-source = स्रोत
+routing-track = ट्रैक { $n }
+routing-send-aria = { $source } को ट्रैक { $n } पर भेजें
+routing-outputs-title = फिज़िकल आउटपुट
+routing-master = मास्टर
+routing-off = बंद
+routing-default-output = डिफ़ॉल्ट आउटपुट
+routing-device-aria = { $bus } के लिए आउटपुट डिवाइस
+routing-trim-aria = { $bus } के लिए आउटपुट ट्रिम
+routing-trim-db = { $db } dB
+routing-muted = म्यूट
+routing-device-error = डिवाइस उपलब्ध नहीं
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = डकिंग
+mixer-ducking-title = डकिंग मैट्रिक्स
+ducking-title = डकिंग मैट्रिक्स
+ducking-intro = कोई भी स्रोत किसी भी अन्य को डक कर सकता है। जब भी ट्रिगर (पंक्ति) बोलता है, सेल लक्ष्य (कॉलम) को दबा देती है — गहराई, थ्रेशोल्ड और टाइमिंग सेट करने के लिए कोई सेल चुनें। हर जोड़ी अपनी अलग डक होती है, इसलिए एक स्ट्रिप को एक साथ कई ट्रिगर द्वारा डक किया जा सकता है।
+ducking-need-two = उनके बीच डक करने के लिए कम से कम दो ऑडियो स्रोत जोड़ें।
+ducking-trigger-target = ट्रिगर ↓ / लक्ष्य →
+ducking-cell-aria = { $trigger } { $target } को डक करता है
+ducking-pair = { $trigger } → { $target }
+ducking-remove = हटाएँ
+ducking-amount = मात्रा
+ducking-threshold = थ्रेशोल्ड
+ducking-attack = अटैक
+ducking-release = रिलीज़
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = लाउडनेस सामान्यीकरण
+loudness-intro = प्रोग्राम को पीक सीलिंग के साथ लाउडनेस लक्ष्य की ओर धीरे-धीरे ले जाता है, ताकि आपकी स्ट्रीम और रिकॉर्डिंग एक समान स्तर पर पहुँचें। धीमा और सौम्य — यह दिशा देता है, कभी पंप नहीं करता।
+loudness-enable = प्रोग्राम को लक्ष्य तक ले जाएँ
+loudness-target = लक्ष्य
+loudness-target-option = { $target } LUFS
+loudness-ceiling = पीक सीलिंग (dBFS)
+loudness-note = −14 LUFS YouTube-शैली प्लेबैक के लिए उपयुक्त है; −16 एक सामान्य स्ट्रीमिंग लक्ष्य है; −23 EBU R128 प्रसारण है। यही लक्ष्य रिकॉर्ड के बाद वाली सामान्यीकरण क्रिया द्वारा उपयोग किया जाता है।
+loudness-on = LUFS { $target }
+loudness-off = सामान्यीकरण बंद
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = साउंडबोर्ड
+mixer-soundboard-title = साउंडबोर्ड
+soundboard-title = साउंडबोर्ड
+soundboard-add-pad = + पैड
+soundboard-stop-all = सभी रोकें
+soundboard-edit = संपादित करें
+soundboard-empty = अभी कोई पैड नहीं — एक जोड़ें और उसे एक स्थानीय ऑडियो क्लिप असाइन करें।
+soundboard-new-pad = नया पैड
+soundboard-no-clip = कोई क्लिप नहीं
+soundboard-audio-files = ऑडियो फ़ाइलें
+soundboard-name = नाम
+soundboard-choose-clip = क्लिप चुनें…
+soundboard-gain = गेन
+soundboard-choke = चोक
+soundboard-choke-none = कोई नहीं
+soundboard-loop = लूप
+soundboard-auto-duck = ऑटो-डकिंग
+soundboard-tracks = ट्रैक
+soundboard-hotkey = हॉटकी
+soundboard-hotkey-placeholder = जैसे Ctrl+Shift+1
+soundboard-remove = हटाएँ
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = प्लगइन
+mixer-plugins-title = ऑडियो प्लगइन (CLAP / VST3)
+plugins-title = ऑडियो प्लगइन
+plugins-scanning = स्कैन हो रहा है…
+plugins-none = मानक फ़ोल्डरों में कोई CLAP या VST3 प्लगइन नहीं मिला।
 
 # --- StatsDock.tsx ---
 stats-fps = FPS
@@ -534,6 +612,10 @@ channelstrip-solo-source = { $name } सोलो (PFL)
 channelstrip-pan-label = बैलेंस (डबल-क्लिक से रीसेट)
 channelstrip-pan-aria = { $name } का बैलेंस
 channelstrip-mono-label = मोनो में डाउनमिक्स
+channelstrip-automix-label = ऑटो-मिक्स (गेन-शेयरिंग)
+channelstrip-automix-note = गेन-शेयरिंग: मिक्सर सभी ऑटो-मिक्स स्ट्रिप के संयुक्त स्तर को स्थिर रखता है और उसे उसी को सौंपता है जो बोल रहा हो — मल्टी-माइक पैनल और पॉडकास्ट के लिए आदर्श। जब तक आप कोई स्ट्रिप न जोड़ें, तब तक बंद।
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = इस सोर्स के लिए एक इको-मुक्त रिटर्न बनाता है — प्रोग्राम में सभी, सिवाय इसी सोर्स के। इसे किसी रिमोट गेस्ट के लिए इस्तेमाल करें ताकि उन्हें अपनी ही विलंबित आवाज़ न सुनाई दे।
 channelstrip-ptt-hotkey = Push-to-talk हॉटकी (दबाए रखने तक मौन)
 channelstrip-ptt-placeholder = जैसे Ctrl+Shift+T या F13
 channelstrip-ptt-aria = Push-to-talk हॉटकी
@@ -763,7 +845,36 @@ audiofilters-name-limiter = लिमिटर
 audiofilters-name-eq = 3-बैंड EQ
 audiofilters-name-denoise = डीनॉइज़
 audiofilters-name-ducking = डकिंग
+audiofilters-name-parametric-eq = पैरामीट्रिक EQ
+audiofilters-name-de-esser = डी-एसर
+audiofilters-name-rumble-guard = रंबल गार्ड
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = प्रीसेट
+audiofilters-voice-preset-pick = वॉइस प्रीसेट…
+audiofilters-voice-broadcast = ब्रॉडकास्ट वॉइस
+audiofilters-voice-podcast = पॉडकास्ट वॉइस
+audiofilters-voice-clean = क्लीन वॉइस
+audiofilters-voice-none = चेन साफ़ करें
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = सिबिलेंस फ़्रीक्वेंसी (Hz)
+audiofilters-deesser-amount = अधिकतम कटौती (dB)
+audiofilters-rumble-freq = लो-कट (Hz)
 audiofilters-title = ऑडियो फ़िल्टर — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = लाइव स्पेक्ट्रम के साथ पैरामीट्रिक EQ रिस्पॉन्स कर्व
+eq-band-type = प्रकार
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + बैंड
+eq-remove-band = बैंड हटाएं
+eq-type-bell = बेल
+eq-type-lowShelf = लो शेल्फ
+eq-type-highShelf = हाई शेल्फ
+eq-type-notch = नॉच
+eq-type-highPass = हाई-पास
+eq-type-lowPass = लो-पास
 audiofilters-chain-header = फ़िल्टर चेन (ऊपर वाला पहले चलता है, फ़ेडर से पहले)
 audiofilters-add = + फ़िल्टर जोड़ें
 audiofilters-add-menu = एक ऑडियो फ़िल्टर जोड़ें
@@ -974,6 +1085,23 @@ recordings-cancel = रद्द करें
 recordings-export-cancelled = एक्सपोर्ट रद्द किया गया।
 recordings-exported-to = { $path } में एक्सपोर्ट किया गया
 recordings-remuxed-to = { $path } में remux किया गया
+recordings-normalize = सामान्यीकृत करें
+recordings-normalizing = सामान्यीकृत किया जा रहा है…
+recordings-normalize-title = लाउडनेस को लक्ष्य तक सामान्यीकृत करें (एक प्रति लिखता है)
+recordings-normalized-to = { $path } में सामान्यीकृत किया गया
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = केवल ऑडियो
+audiorec-format = ऑडियो रिकॉर्डिंग प्रारूप
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = ऑडियो रिकॉर्ड करें
+audiorec-stop = रोकें
+audiorec-pause = ठहराएं
+audiorec-resume = फिर से शुरू करें
+audiorec-recording = REC { $sec }s
+audiorec-saved = { $count } ट्रैक फ़ाइल सहेजी गईं
 
 # --- OpenedFrec.tsx ---
 openfrec-title = .frec रिकॉर्डिंग खोलें

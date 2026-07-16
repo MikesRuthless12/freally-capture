@@ -96,6 +96,12 @@ directly and are remembered in your local settings so they can be reapplied when
 that camera is reconnected. A **text source bound to a file** reads only the local
 file you point it at, and only to display its contents on your canvas.
 
+**Audio plugin discovery** (CLAP / VST3), when you open it, lists the plugins in
+your standard plugin folders on **your machine only** — the plugin names never
+leave your device, and nothing is fetched or run during the scan. **Audio-only
+recording** writes per-track files to the recording folder you choose, exactly
+like a normal recording, and is never transmitted anywhere.
+
 ## The remote-control API
 The optional WebSocket remote-control API is **off by default**. When you enable
 it, it binds to your own machine (loopback by default; LAN only if you explicitly

@@ -98,11 +98,56 @@ export type AccessibilitySettings = {
 /** Audio Mixer strip orientation. */
 export type MixerLayout = "horizontal" | "vertical";
 
+/** Which mixer bus a CAP-N30 physical-output route carries (flattened onto the
+ *  route object, so a route is `{ bus: "master", … }` or
+ *  `{ bus: "track", index, … }`). */
+export type OutputBus = { bus: "master" } | { bus: "track"; index: number };
+
+/** One CAP-N30 physical-output route: a program bus → an output device with a
+ *  trim. `deviceId` "" = the OS default output. */
+export type AudioOutputRoute = OutputBus & {
+  deviceId: string;
+  /** Output trim in dB (−60..=6); the floor is silence, 0 passes through. */
+  gainDb: number;
+};
+
+/** CAP-N34 loudness normalization (the live program rider). */
+export type LoudnessSettings = {
+  enabled: boolean;
+  /** Integrated-loudness target, LUFS (−14 / −16 / −23). */
+  targetLufs: number;
+  /** Peak ceiling, dBFS. */
+  ceilingDb: number;
+};
+
+/** One CAP-N37 soundboard pad. */
+export type SoundboardPad = {
+  id: string;
+  name: string;
+  path: string;
+  hotkey?: string | null;
+  gainDb: number;
+  /** Track bitmask (bit 0 = track 1). */
+  tracks: number;
+  /** Choke group 1–8 (0 = none). */
+  chokeGroup: number;
+  looping: boolean;
+  autoDuck: boolean;
+};
+
+export type SoundboardSettings = { pads: SoundboardPad[] };
+
 export type Settings = {
   language: string;
   showStatsDock: boolean;
   /** The audio monitor output device name (null/"" = the OS default). */
   monitorDevice: string | null;
+  /** CAP-N30 program-bus output routes: master / track buses → devices. */
+  audioOutputs?: AudioOutputRoute[];
+  /** CAP-N34 loudness normalization (the live rider). */
+  loudness?: LoudnessSettings;
+  /** CAP-N37 soundboard pads. */
+  soundboard?: SoundboardSettings;
   /** Audio Mixer strip orientation. */
   mixerLayout: MixerLayout;
   /** Appearance: palette + custom accent (Phase 9). */
@@ -645,8 +690,18 @@ export type RateControl = {
 export type EncPreset = "quality" | "balanced" | "performance";
 
 /** Recording configuration (mirrors `RecordingSettings` in settings.rs). */
+/** CAP-N38 audio-only recording format. */
+export type AudioRecFormat = "wav" | "flac" | "opus";
+
+/** CAP-N38 audio-only recording status (polled). */
+export type AudioRecStatus =
+  | { state: "idle" }
+  | { state: "recording"; durationSec: number; path: string; tracks: number; paused: boolean };
+
 export type RecordingSettings = {
   container: Container;
+  /** CAP-N38 audio-only recording format (WAV owned; FLAC/Opus via ffmpeg). */
+  audioFormat?: AudioRecFormat;
   /** ffmpeg encoder id, or "auto" = best detected H.264 encoder. */
   encoderId: string;
   rateControl: RateControl;
@@ -1200,6 +1255,20 @@ export type CalibrationResult = {
   error?: CalibrationFailure;
 };
 
+/** CAP-N35 parametric-EQ band shape. */
+export type EqBandType = "bell" | "lowShelf" | "highShelf" | "notch" | "highPass" | "lowPass";
+
+/** One parametric-EQ band (CAP-N35). `gainDb` applies to bell + shelf only. */
+export type EqBand = {
+  type: EqBandType;
+  /** Center / corner frequency, 20..=20000 Hz. */
+  freqHz: number;
+  /** Gain for bell + shelf bands, −30..=30 dB. */
+  gainDb: number;
+  /** Resonance / width, 0.1..=18. */
+  q: number;
+};
+
 /** One audio filter's parameters (serde tag = `type`; owned classic DSP). */
 export type AudioFilterKind =
   | { type: "gain"; db: number }
@@ -1229,7 +1298,10 @@ export type AudioFilterKind =
       amountDb: number;
       attackMs: number;
       releaseMs: number;
-    };
+    }
+  | { type: "parametricEq"; bands: EqBand[] }
+  | { type: "deEsser"; freqHz: number; thresholdDb: number; amountDb: number }
+  | { type: "rumbleGuard"; freqHz: number };
 
 export type AudioFilterTypeName = AudioFilterKind["type"];
 
@@ -1255,6 +1327,10 @@ export type AudioSettings = {
   solo: boolean;
   /** Mono downmix before the balance (CAP-M19). */
   mono: boolean;
+  /** Join the gain-sharing auto-mixer (CAP-N32). Off by default. */
+  automix?: boolean;
+  /** Produce an N−1 mix-minus return for this source (CAP-N39). Off by default. */
+  mixMinus?: boolean;
   syncOffsetMs: number;
   /** Hotkey accelerator: silent unless held. */
   pushToTalk?: string | null;
@@ -1334,6 +1410,13 @@ export type AudioLevelsPayload = {
   master: { peak: [number, number]; rms: [number, number] };
   lufs: { momentary?: number; shortTerm?: number };
   monitorError?: string;
+  /** CAP-N30 program-bus routes that could not open their device. */
+  outputErrors?: { bus: string; message: string }[];
+  /** CAP-N35 live spectrum of the armed source (a parametric-EQ editor open). */
+  spectrum?: { source: string; magnitudes: number[] };
+  /** Per-filter live meters (linear in/out peaks) for the strip whose filter
+   *  editor is open — the plugin meters. */
+  filterMeters?: { source: string; meters: { id: string; inPeak: number; outPeak: number }[] };
   /** Capture samples dropped across sources (ring overflows). */
   dropped: number;
 };

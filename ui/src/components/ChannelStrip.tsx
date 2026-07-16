@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import {
+  studioSetAudioAutomix,
+  studioSetAudioMixMinus,
   studioSetAudioMono,
   studioSetAudioMonitor,
   studioSetAudioMuted,
@@ -591,6 +593,32 @@ export function AdvancedAudioFields({
           }
         />
         {t("channelstrip-mono-label")}
+      </label>
+      <label
+        className="flex items-center gap-1.5 text-[11px] text-havoc-muted"
+        title={t("channelstrip-automix-note")}
+      >
+        <input
+          type="checkbox"
+          checked={audio.automix ?? false}
+          onChange={(event) =>
+            studioSetAudioAutomix(source.id, event.target.checked).catch(fail("automix"))
+          }
+        />
+        {t("channelstrip-automix-label")}
+      </label>
+      <label
+        className="flex items-center gap-1.5 text-[11px] text-havoc-muted"
+        title={t("channelstrip-mix-minus-note")}
+      >
+        <input
+          type="checkbox"
+          checked={audio.mixMinus ?? false}
+          onChange={(event) =>
+            studioSetAudioMixMinus(source.id, event.target.checked).catch(fail("mix-minus"))
+          }
+        />
+        {t("channelstrip-mix-minus-label")}
       </label>
       <NumberField
         label={t("channelstrip-sync-offset", { max: MAX_SYNC_OFFSET_MS })}

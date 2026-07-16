@@ -6,6 +6,7 @@
 pub mod denoise;
 pub mod dynamics;
 pub mod eq;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -144,6 +145,23 @@ pub fn build_filter(kind: &AudioFilterKind, sample_rate: f32) -> Box<dyn FilterP
             amount_db.clamp(0.0, 60.0),
             attack_ms.clamp(1.0, 1_000.0),
             release_ms.clamp(1.0, 5_000.0),
+        )),
+        AudioFilterKind::ParametricEq { bands } => {
+            Box::new(eq::ParametricEq::new(sample_rate, bands))
+        }
+        AudioFilterKind::DeEsser {
+            freq_hz,
+            threshold_db,
+            amount_db,
+        } => Box::new(voice::DeEsser::new(
+            sample_rate,
+            freq_hz.clamp(3_000.0, 12_000.0),
+            threshold_db.clamp(-96.0, 0.0),
+            amount_db.clamp(0.0, 24.0),
+        )),
+        AudioFilterKind::RumbleGuard { freq_hz } => Box::new(voice::RumbleGuard::new(
+            sample_rate,
+            freq_hz.clamp(20.0, 300.0),
         )),
     }
 }

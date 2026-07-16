@@ -456,6 +456,84 @@ mixer-lufs-short = S { $value }
 mixer-monitor-label = المراقبة
 mixer-monitor-device-aria = جهاز خرج المراقبة
 mixer-default-output = الخرج الافتراضي
+mixer-routing = التوجيه
+mixer-routing-title = توجيه خرج الصوت
+
+# --- RoutingMatrixDialog.tsx (CAP-N30) ---
+routing-title = توجيه الصوت
+routing-intro = عيّن الشرائط إلى باصات المسارات، ثم أرسِل أي باص إلى مخرج فيزيائي — تغذية لمسجّل عتادي، أو سماعات في غرفة أخرى، أو استماع بسماعة الرأس على مسار احتياطي. تحتفظ المراقبة بجهازها الخاص؛ وتُضاف هذه المسارات فوق ذلك، لذا لا يتغيّر المزيج عند عدم ضبط أي منها.
+routing-sends-title = الإرسال إلى المسارات
+routing-no-strips = لا توجد مصادر صوت في هذا المشهد.
+routing-source = المصدر
+routing-track = مسار { $n }
+routing-send-aria = إرسال { $source } إلى المسار { $n }
+routing-outputs-title = المخارج الفيزيائية
+routing-master = الرئيسي
+routing-off = إيقاف
+routing-default-output = الخرج الافتراضي
+routing-device-aria = جهاز خرج لـ { $bus }
+routing-trim-aria = تريم خرج { $bus }
+routing-trim-db = { $db } dB
+routing-muted = مكتوم
+routing-device-error = الجهاز غير متاح
+
+# --- DuckingMatrixDialog.tsx (CAP-N31) ---
+mixer-ducking = الخفض التلقائي
+mixer-ducking-title = مصفوفة الخفض
+ducking-title = مصفوفة الخفض
+ducking-intro = يمكن لأي مصدر أن يخفض أي مصادر أخرى. تخفض الخلية الهدف (العمود) كلما تحدّث المُشغِّل (الصف) — اختر خلية لضبط عمقها وعتبتها وتوقيتها. كل زوج هو خفض مستقل بذاته، لذا يمكن خفض قناة واحدة بواسطة عدة مُشغِّلات في آنٍ واحد.
+ducking-need-two = أضِف مصدرَي صوت على الأقل لتطبيق الخفض بينهما.
+ducking-trigger-target = المُشغِّل ↓ / الهدف →
+ducking-cell-aria = { $trigger } يخفض { $target }
+ducking-pair = { $trigger } → { $target }
+ducking-remove = إزالة
+ducking-amount = المقدار
+ducking-threshold = العتبة
+ducking-attack = الهجوم
+ducking-release = التحرير
+ducking-unit-db = dB
+ducking-unit-ms = ms
+
+# --- Loudness normalization (CAP-N34) ---
+loudness-title = تطبيع الجهارة
+loudness-intro = يوجّه البرنامج تدريجيًّا نحو هدف جهارة مع سقف للذروة، حتى يصل بثّك وتسجيلاتك إلى مستوى ثابت. بطيء ولطيف — يوجّه ولا ينبض أبدًا.
+loudness-enable = توجيه البرنامج نحو الهدف
+loudness-target = الهدف
+loudness-target-option = { $target } LUFS
+loudness-ceiling = سقف الذروة (dBFS)
+loudness-note = −14 LUFS تناسب التشغيل بنمط YouTube؛ −16 هدف بثّ شائع؛ −23 هي بثّ EBU R128. ويُستخدَم الهدف نفسه في إجراء التطبيع بعد التسجيل.
+loudness-on = LUFS { $target }
+loudness-off = التطبيع متوقف
+
+# --- SoundboardDialog.tsx (CAP-N37) ---
+mixer-soundboard = لوحة الأصوات
+mixer-soundboard-title = لوحة الأصوات
+soundboard-title = لوحة الأصوات
+soundboard-add-pad = + باد
+soundboard-stop-all = إيقاف الكل
+soundboard-edit = تحرير
+soundboard-empty = لا توجد بادات بعد — أضف واحدة وعيّن مقطعًا صوتيًا محليًا.
+soundboard-new-pad = باد جديد
+soundboard-no-clip = لا يوجد مقطع
+soundboard-audio-files = ملفات صوتية
+soundboard-name = الاسم
+soundboard-choose-clip = اختر مقطعًا…
+soundboard-gain = كسب
+soundboard-choke = تشوك
+soundboard-choke-none = بلا
+soundboard-loop = تكرار
+soundboard-auto-duck = خفض تلقائي
+soundboard-tracks = المسارات
+soundboard-hotkey = اختصار
+soundboard-hotkey-placeholder = مثال Ctrl+Shift+1
+soundboard-remove = إزالة
+
+# --- PluginsDialog.tsx (CAP-N33) ---
+mixer-plugins = الإضافات
+mixer-plugins-title = إضافات الصوت (CLAP / VST3)
+plugins-title = إضافات الصوت
+plugins-scanning = جارٍ الفحص…
+plugins-none = لم يتم العثور على إضافات CLAP أو VST3 في المجلدات القياسية.
 
 # --- StatsDock.tsx ---
 stats-fps = FPS
@@ -534,6 +612,10 @@ channelstrip-solo-source = سولو { $name } (PFL)
 channelstrip-pan-label = التوازن (نقرة مزدوجة للتصفير)
 channelstrip-pan-aria = توازن { $name }
 channelstrip-mono-label = دمج إلى أحادي
+channelstrip-automix-label = مزج تلقائي (مشاركة الكسب)
+channelstrip-automix-note = مشاركة الكسب: يُبقي المازج المستوى الإجمالي لجميع شرائح المزج التلقائي ثابتًا ويمرّره إلى من يتحدث — مثالي للجلسات متعددة الميكروفونات والبودكاست. مُعطّل حتى تُضيف شريحة.
+channelstrip-mix-minus-label = Mix-minus (N−1)
+channelstrip-mix-minus-note = يُنتج عودة خالية من الصدى لهذا المصدر — الجميع في البرنامج باستثناء هذا المصدر نفسه. استخدمه لضيف عن بُعد كي لا يسمع صوته المتأخّر.
 channelstrip-ptt-hotkey = اختصار الضغط للتحدث (صامت ما لم يُضغَط)
 channelstrip-ptt-placeholder = مثال Ctrl+Shift+T أو F13
 channelstrip-ptt-aria = اختصار الضغط للتحدث
@@ -763,7 +845,36 @@ audiofilters-name-limiter = مُحدِّد
 audiofilters-name-eq = مُعادِل ثلاثي النطاقات
 audiofilters-name-denoise = إزالة الضوضاء
 audiofilters-name-ducking = خفض تلقائي
+audiofilters-name-parametric-eq = مُعادِل بارامتري
+audiofilters-name-de-esser = مزيل الصفير
+audiofilters-name-rumble-guard = حاجز الهدير
+# --- Voice-chain presets (CAP-N39) ---
+audiofilters-voice-preset = إعداد مسبق
+audiofilters-voice-preset-pick = إعداد صوت مسبق…
+audiofilters-voice-broadcast = صوت البث
+audiofilters-voice-podcast = صوت البودكاست
+audiofilters-voice-clean = صوت نظيف
+audiofilters-voice-none = مسح السلسلة
+# --- De-esser + rumble guard params (CAP-N36) ---
+audiofilters-deesser-freq = تردد الصفير (Hz)
+audiofilters-deesser-amount = أقصى خفض (dB)
+audiofilters-rumble-freq = قطع الترددات المنخفضة (Hz)
 audiofilters-title = فلاتر الصوت — { $name }
+
+# --- ParametricEqEditor.tsx (CAP-N35) ---
+eq-graph-aria = منحنى استجابة المُعادِل البارامتري مع طيف مباشر
+eq-band-type = النوع
+eq-freq = Hz
+eq-gain = dB
+eq-q = Q
+eq-add-band = + نطاق
+eq-remove-band = إزالة النطاق
+eq-type-bell = جرس
+eq-type-lowShelf = رف منخفض
+eq-type-highShelf = رف مرتفع
+eq-type-notch = نوتش
+eq-type-highPass = تمرير عالٍ
+eq-type-lowPass = تمرير منخفض
 audiofilters-chain-header = سلسلة الفلاتر (الأعلى يعمل أولًا، قبل المُنزلق)
 audiofilters-add = + إضافة فلتر
 audiofilters-add-menu = إضافة فلتر صوت
@@ -974,6 +1085,23 @@ recordings-cancel = إلغاء
 recordings-export-cancelled = أُلغي التصدير.
 recordings-exported-to = صُدِّر إلى { $path }
 recordings-remuxed-to = أُعيد تغليفه إلى { $path }
+recordings-normalize = تطبيع
+recordings-normalizing = جارٍ التطبيع…
+recordings-normalize-title = تطبيع الجهارة إلى الهدف (يكتب نسخة)
+recordings-normalized-to = تم التطبيع إلى { $path }
+
+# --- Audio-only recording (CAP-N38) ---
+audiorec-title = الصوت فقط
+audiorec-format = تنسيق تسجيل الصوت
+audiorec-format-wav = WAV
+audiorec-format-flac = FLAC
+audiorec-format-opus = Opus
+audiorec-start = تسجيل الصوت
+audiorec-stop = إيقاف
+audiorec-pause = إيقاف مؤقت
+audiorec-resume = استئناف
+audiorec-recording = REC { $sec }s
+audiorec-saved = تم حفظ { $count } ملف مسار
 
 # --- OpenedFrec.tsx ---
 openfrec-title = فتح تسجيل .frec

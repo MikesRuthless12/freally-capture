@@ -57,6 +57,14 @@ remediate before any public disclosure.
   push-to-mute hotkeys** are parsed as accelerators and **validated before** they enter the model or are
   registered — a global shortcut only mutes/unmutes a source (`tauri-plugin-global-shortcut`), never runs
   code or reads files, and registration failures (e.g. Wayland) are surfaced honestly, never fatal.
+- **Audio Production Depth (0.500.0) surface:** the new **output routing** (bus → extra output device)
+  keeps audio on your machine — device ids are length/shape-validated. **Audio-only recording** writes
+  per-track files to the recording folder like any recording. **Plugin discovery** (CLAP / VST3) is
+  **local-directory enumeration only, opt-in** — it lists plugins found in the standard folders and
+  **never loads or executes a plugin binary during a scan** (crash-isolated live hosting is a separate,
+  not-yet-shipped step); no network, no auto-run. FLAC/Opus/loudness-normalize run through the same
+  **labeled, hash-verified ffmpeg component** as every other wire-codec path, invoked by direct exec
+  (argv, no shell) so a file path can't inject a command.
 - **Stream keys / service credentials:** stored **locally** in your profile (the OS config dir), masked
   in the UI, and sent **only** to the streaming service you are broadcasting to. They are never
   transmitted anywhere else and never logged.
@@ -107,8 +115,10 @@ remediate before any public disclosure.
   argv entries, and encoder ids are **shape-validated** (`[A-Za-z0-9_-]`) before reaching `-c:v`. Child
   processes run with **hard timeouts + drained pipes** and, on Windows, **no console window**. Recording
   audio tracks ride **loopback-only (`127.0.0.1`) sockets** that accept **exactly one** connection then
-  close. The **remux** and **recordings-list** actions are **confined to the recordings folder** (a
-  canonicalized parent-directory check) so the webview command surface cannot reach arbitrary files.
+  close. The **remux, normalize, export, and recordings-list** actions are **confined to the recordings
+  folder** (a canonicalized parent-directory check) so the webview command surface cannot reach arbitrary
+  files, and every one now **rejects a network (UNC/`\\host\share`) path before it is resolved** — so a
+  hostile path can't trigger an SMB/NTLM handshake that would leak a credential hash.
 - **Third-party components** (see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) carry their own
   advisories; `cargo audit` and `cargo deny` run in CI on every push, and documented-ignore entries in
   `deny.toml` are limited to unmaintained-class advisories with no reachable vulnerability.

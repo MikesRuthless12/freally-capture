@@ -1,46 +1,53 @@
-//! Optional VST2/3 audio plugins (Phase 8, TASK-804) — **scoped, not shipped.**
+//! Optional VST audio plugins — the honest seam for the VST host path.
 //!
-//! VST hosting is deliberately deferred, and this module is the honest seam that
-//! says why rather than a fake toggle:
+//! **Licensing update (Steinberg, 29 Oct 2025):** the **VST 3.8 SDK is now
+//! MIT-licensed** (previously dual GPLv3-or-proprietary). That removes the old
+//! licensing blocker entirely — **VST3 is now a permissively-licensed, $0-clean
+//! host path, on the same footing as CLAP** (see [`crate::claphost`]). So the
+//! reason VST hosting isn't live yet is **not** licensing; it is the same work
+//! CLAP needs: a **crash-isolated host process** that loads and runs each
+//! plugin (so a bad plugin can't take down the mix) with its own GUI window.
+//! That integration is in progress; this module is the honest interface until
+//! it lands, not a fake toggle.
 //!
-//! - **VST2** — Steinberg withdrew the VST2 SDK and no longer licenses it;
-//!   shipping a VST2 host means redistributing an SDK we cannot legally obtain.
-//! - **VST3** — dual-licensed GPLv3 *or* Steinberg's proprietary license.
-//!   GPLv3 is incompatible with this project's proprietary distribution, and the
-//!   proprietary route requires signing Steinberg's agreement — a licensing
-//!   cost, exactly the kind the charter's "$0, nothing shipped we can't license"
-//!   rule declines.
+//! - **VST3** — MIT since the VST 3.8 SDK (2025-10-29). Hostable with no
+//!   licensing cost; pending the crash-isolated host integration.
+//! - **VST2** — Steinberg withdrew the legacy VST2 SDK and no longer
+//!   distributes it, so a fresh VST2 host can't obtain the SDK. VST3 is the
+//!   path forward.
 //!
-//! So VST stays **behind this interface + flag**, always reporting unavailable
-//! with the honest reason, and pointing at the owned alternative: Freally
-//! Capture already ships a full classic-DSP filter set (spectral denoise, noise
-//! gate, compressor, limiter, 3-band EQ, gain, sidechain ducking) that covers
-//! the common plugin use cases with zero licensing entanglement. If a
-//! permissively-licensed host path appears, it slots in behind this same type.
+//! Meanwhile Freally Capture ships a full owned classic-DSP filter set
+//! (spectral denoise, gate, compressor, limiter, parametric EQ, de-esser,
+//! rumble guard, sidechain ducking) that covers the common plugin needs with
+//! nothing to install and no licensing entanglement.
 
-/// Why VST hosting is unavailable — surfaced verbatim in the UI so the boundary
-/// is never a silent no-op.
+/// The honest status of the VST host path — surfaced verbatim in the UI so the
+/// boundary is never a silent no-op.
 pub const VST_STATUS: &str =
-    "VST2/3 plugins are not available: the VST2 SDK is no longer licensed \
-     by Steinberg, and VST3 is GPLv3-or-proprietary — both conflict with a $0, \
-     no-extra-license build. Use the built-in filters (denoise, gate, \
-     compressor, limiter, EQ, gain, ducking), which need no plugin and stay on \
+    "VST3 is now MIT-licensed (Steinberg's VST 3.8 SDK, October 2025), so it's a \
+     free, $0-clean plugin path like CLAP — no licensing blocker. Live hosting \
+     runs each plugin in a separate, crash-isolated process (so a bad plugin \
+     can't take down the mix) with its own GUI; that host-process integration is \
+     in progress. Legacy VST2 stays unavailable — Steinberg withdrew its SDK. \
+     Meanwhile the built-in filters (denoise, gate, compressor, limiter, \
+     parametric EQ, de-esser, rumble guard, ducking) need no plugin and stay on \
      this machine.";
 
-/// The VST support state. Only one variant today; kept as an enum so a future
-/// permissively-licensed host lights up without changing callers.
+/// The VST support state. Only one variant today; kept as an enum so the host
+/// integration lights it up without changing callers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VstSupport {
-    /// Hosting is unavailable for a licensing reason (the string is `VST_STATUS`).
+    /// Hosting isn't wired yet (the string is `VST_STATUS`) — pending the
+    /// crash-isolated host process, **not** a licensing block anymore.
     Unavailable(&'static str),
 }
 
-/// The current VST support — always `Unavailable` with the honest reason.
+/// The current VST support — `Unavailable` until the host process is wired.
 pub fn support() -> VstSupport {
     VstSupport::Unavailable(VST_STATUS)
 }
 
-/// Whether any VST hosting is available (always false today; the honest flag).
+/// Whether any VST hosting is available (false until the host lands).
 pub fn is_available() -> bool {
     !matches!(support(), VstSupport::Unavailable(_))
 }
@@ -50,12 +57,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vst_is_unavailable_with_an_honest_reason() {
+    fn vst_status_reflects_the_mit_relicense() {
         assert!(!is_available());
         let VstSupport::Unavailable(reason) = support();
-        assert!(reason.contains("VST"));
-        assert!(reason.contains("license") || reason.contains("licensed"));
-        // Points at the shipped alternative rather than dead-ending.
+        assert!(reason.contains("VST3"));
+        // The current, correct reason: MIT-licensed now, host integration pending.
+        assert!(reason.contains("MIT"));
+        assert!(reason.to_lowercase().contains("crash-isolated"));
+        // Still points at the shipped owned alternative rather than dead-ending.
         assert!(reason.to_lowercase().contains("filter"));
     }
 }
