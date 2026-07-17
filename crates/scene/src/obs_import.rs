@@ -362,6 +362,10 @@ impl PoolBuilder {
             id: crate::ItemId::new(),
             source: source_id,
             visible: get_bool(obs, "visible").unwrap_or(true),
+            // OBS has no per-output flags on scene items; imports land fully
+            // visible on every output (CAP-N53 defaults).
+            on_stream: true,
+            on_record: true,
             locked: get_bool(obs, "locked").unwrap_or(false),
             blend: blend_mode(get_str(obs, "blend_type")),
             transform,

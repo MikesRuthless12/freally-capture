@@ -84,15 +84,20 @@ pub(crate) fn emit_alarm<R: Runtime>(
     // on the false→true edge so a re-asserted alarm doesn't stack markers.
     let was_active =
         ALARM_WAS_ACTIVE[alarm_index(kind)].swap(active, std::sync::atomic::Ordering::Relaxed);
-    if active && !was_active {
+    if active != was_active {
         let label = match kind {
-            AlarmKind::SilentAudio => "Alarm: silent audio",
-            AlarmKind::Clipping => "Alarm: clipping",
-            AlarmKind::Black => "Alarm: black frame",
-            AlarmKind::Frozen => "Alarm: frozen frame",
-            AlarmKind::LowDisk => "Alarm: low disk",
+            AlarmKind::SilentAudio => "silent audio",
+            AlarmKind::Clipping => "clipping",
+            AlarmKind::Black => "black frame",
+            AlarmKind::Frozen => "frozen frame",
+            AlarmKind::LowDisk => "low disk",
         };
-        crate::recording::add_auto_marker(app, label);
+        if active {
+            crate::recording::add_auto_marker(app, &format!("Alarm: {label}"));
+        }
+        // CAP-N50: both edges land on the forensic timeline — the raise AND
+        // the clear, so the graph shows how long each alarm actually held.
+        crate::forensic::note(app, if active { "alarm" } else { "alarm-clear" }, label);
     }
     let _ = app.emit(
         "alarm",

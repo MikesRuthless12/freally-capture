@@ -53,6 +53,10 @@ pub(crate) enum PassKind {
     Scroll,
     Crop,
     Flip,
+    /// "Star Wars" plane (Mike, 2026-07-17): tilt-away + far-edge fade.
+    Perspective,
+    /// Looping fade (Mike, 2026-07-17): a CPU-phased alpha multiply.
+    Fade,
     /// Blur family (CAP-N27): motion, spin, zoom, and mosaic.
     DirectionalBlur,
     RadialBlur,
@@ -391,6 +395,56 @@ pub(crate) fn plan_filter(
             uniform.p0 = [offset_u, offset_v, 0.0, 0.0];
             Some(vec![PassPlan {
                 kind: PassKind::Scroll,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::Perspective { tilt, fade } => {
+            let tilt = tilt.clamp(0.0, 80.0);
+            if tilt < 0.5 {
+                return None;
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [tilt.to_radians(), fade.clamp(0.0, 1.0), 0.0, 0.0];
+            Some(vec![PassPlan {
+                kind: PassKind::Perspective,
+                uniform,
+                resource: None,
+                out: in_size,
+            }])
+        }
+        FilterKind::FadeLoop {
+            fade_in_s,
+            visible_s,
+            fade_out_s,
+            hidden_s,
+        } => {
+            let fade_in = fade_in_s.clamp(0.0, 600.0);
+            let visible = visible_s.clamp(0.0, 3600.0);
+            let fade_out = fade_out_s.clamp(0.0, 600.0);
+            let hidden = hidden_s.clamp(0.0, 3600.0);
+            let cycle = fade_in + visible + fade_out + hidden;
+            if cycle < 1e-3 {
+                return None;
+            }
+            let t = time_seconds.rem_euclid(cycle);
+            let alpha = if t < fade_in {
+                t / fade_in.max(1e-3)
+            } else if t < fade_in + visible {
+                1.0
+            } else if t < fade_in + visible + fade_out {
+                1.0 - (t - fade_in - visible) / fade_out.max(1e-3)
+            } else {
+                0.0
+            };
+            if alpha >= 0.999 {
+                return None; // fully visible this tick — nothing to multiply
+            }
+            let mut uniform = FilterUniform::zero().with_texel(in_size);
+            uniform.p0 = [alpha.clamp(0.0, 1.0), 0.0, 0.0, 0.0];
+            Some(vec![PassPlan {
+                kind: PassKind::Fade,
                 uniform,
                 resource: None,
                 out: in_size,
@@ -804,7 +858,9 @@ impl FilterEngine {
             push_constant_ranges: &[],
         });
 
-        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 16] = [
+        let entries: [(PassKind, &str, &wgpu::PipelineLayout); 18] = [
+            (PassKind::Perspective, "fs_perspective", &basic_layout),
+            (PassKind::Fade, "fs_fade", &basic_layout),
             (PassKind::ChromaKey, "fs_chroma_key", &basic_layout),
             (PassKind::ColorKey, "fs_color_key", &basic_layout),
             (PassKind::LumaKey, "fs_luma_key", &basic_layout),
@@ -1440,6 +1496,58 @@ mod tests {
             out[0].abs() < 1e-3 && (out[1] - 1.0).abs() < 1e-3 && out[2].abs() < 1e-3,
             "red → green, got {out:?}"
         );
+    }
+
+    #[test]
+    fn fade_loop_phases_and_zero_effect_plans_are_honest() {
+        let id = FilterId::new();
+        let empty = no_resources();
+        // Zero tilt / a zero-length cycle contribute nothing.
+        assert!(plan_filter(
+            &FilterKind::Perspective {
+                tilt: 0.0,
+                fade: 1.0
+            },
+            id,
+            (64, 64),
+            0.0,
+            &empty
+        )
+        .is_none());
+        assert!(plan_filter(
+            &FilterKind::FadeLoop {
+                fade_in_s: 0.0,
+                visible_s: 0.0,
+                fade_out_s: 0.0,
+                hidden_s: 0.0
+            },
+            id,
+            (64, 64),
+            3.0,
+            &empty
+        )
+        .is_none());
+        // The 1s/1s/1s/1s loop: alpha by phase, wrapping forever.
+        let fade = |t: f32| -> Option<f32> {
+            plan_filter(
+                &FilterKind::FadeLoop {
+                    fade_in_s: 1.0,
+                    visible_s: 1.0,
+                    fade_out_s: 1.0,
+                    hidden_s: 1.0,
+                },
+                id,
+                (64, 64),
+                t,
+                &empty,
+            )
+            .map(|passes| passes[0].uniform.p0[0])
+        };
+        assert!(fade(1.5).is_none(), "fully visible needs no pass");
+        assert_eq!(fade(0.5), Some(0.5), "mid fade-in");
+        assert_eq!(fade(2.5), Some(0.5), "mid fade-out");
+        assert_eq!(fade(3.5), Some(0.0), "held hidden");
+        assert_eq!(fade(4.5), Some(0.5), "the cycle wraps");
     }
 
     #[test]

@@ -24,6 +24,7 @@ import {
   studioZoomFollow,
   studioZoomGet,
   studioSetFocus,
+  studioSetItemOutputVisible,
   studioSetGroupVisible,
   studioUngroup,
   videoDeviceFormats,
@@ -695,6 +696,44 @@ export function SourcesRail({
                         HDR
                       </button>
                     )}
+                  {/* CAP-N53 per-output visibility: hover toggles that stay
+                      pinned (struck-through, amber) while an output is off,
+                      so a stream-only / recording-only item reads at a
+                      glance. Master eye stays the overall switch. One config
+                      per output — the two interlock (each toggle passes the
+                      other's current value through). */}
+                  {(
+                    [
+                      { key: "stream", caption: "LIVE", on: item.onStream ?? true },
+                      { key: "record", caption: "REC", on: item.onRecord ?? true },
+                    ] as const
+                  ).map(({ key, caption, on }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        if (!scene) return;
+                        studioSetItemOutputVisible(
+                          scene.id,
+                          item.id,
+                          key === "stream" ? !on : (item.onStream ?? true),
+                          key === "record" ? !on : (item.onRecord ?? true),
+                        ).catch((err) => console.error("output visibility failed:", err));
+                      }}
+                      title={on ? t(`sources-${key}-hide`) : t(`sources-${key}-show`)}
+                      aria-label={t(`sources-${key}-${on ? "hide" : "show"}-item`, {
+                        name: source?.name ?? t("sources-fallback-name"),
+                      })}
+                      aria-pressed={on}
+                      className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold ${
+                        on
+                          ? "hidden text-havoc-muted hover:text-havoc-text group-hover:inline-block"
+                          : "inline-block text-amber-300 line-through"
+                      }`}
+                    >
+                      {caption}
+                    </button>
+                  ))}
                   <span className="hidden shrink-0 items-center group-hover:flex">
                     <button
                       type="button"

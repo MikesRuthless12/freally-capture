@@ -482,6 +482,18 @@ pub struct SceneItem {
     pub source: SourceId,
     #[serde(default = "default_visible")]
     pub visible: bool,
+    /// Per-output visibility (CAP-N53): whether this item is composed into
+    /// the live outputs (stream lanes, incl. the virtual camera and Freally
+    /// Link). Master `visible` still gates everything; this only *further*
+    /// hides the item from that output. The operator surfaces (preview,
+    /// projectors, multiview) always show the full program.
+    #[serde(default = "default_visible")]
+    pub on_stream: bool,
+    /// Per-output visibility (CAP-N53): whether this item is composed into
+    /// the local-disk outputs (the recorder — program/vertical/alpha lanes —
+    /// and the replay buffer). See `on_stream`.
+    #[serde(default = "default_visible")]
+    pub on_record: bool,
     #[serde(default)]
     pub locked: bool,
     #[serde(default)]
@@ -527,6 +539,8 @@ impl SceneItem {
             id: ItemId::new(),
             source,
             visible: true,
+            on_stream: true,
+            on_record: true,
             locked: false,
             blend: BlendMode::Normal,
             transform: Transform::default(),

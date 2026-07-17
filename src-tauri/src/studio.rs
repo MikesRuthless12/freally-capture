@@ -3437,88 +3437,97 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         compositor.freeze_items(&frozen_items);
         let frozen_ids: Vec<ItemId> = frozen_items.iter().map(|(id, _)| *id).collect();
         compositor.retain_frozen(&frozen_ids);
-        let compose_result = match &transition_pack {
-            Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
-                // The audience sees the outgoing scene until the cut point,
-                // the new program after — the stinger video covers the swap.
-                let shown = if pack.progress < pack.cut {
-                    &pack.from_scene
-                } else {
-                    &scene
-                };
-                compositor.render_scene_with_stinger(
-                    shown,
-                    time,
-                    pack.stinger_frame.as_ref(),
-                    pack.matte,
-                )
-            }
-            Some(pack) if pack.kind == fcap_scene::TransitionKind::Move => {
-                // CAP-N20: matched items morph between the two layouts.
-                // CAP-N21: eased so the motion accelerates in and settles out.
-                compositor.render_move(&pack.from_scene, &scene, ease_in_out(pack.progress), time)
-            }
-            Some(pack) => compositor.render_transition(
-                &pack.from_scene,
-                &scene,
-                pack.kind,
-                // CAP-N21: ease the blend (linear progress still drives cut /
-                // completion timing; only the visible curve is eased).
-                ease_in_out(pack.progress),
-                time,
-            ),
-            None => compositor.render(&scene, time),
-        };
-        if let Err(err) = compose_result {
-            eprintln!("studio: compose failed: {err}");
-        }
-        composed_this_second += 1;
-
-        // -- 6r. Floating reactions (TASK-614): baked INTO the program ----------
-        // Drawn after the compose (and any transition/stinger), before the
-        // native present + readback — so preview, recording, and stream all
-        // carry the exact same floating emoji.
-        {
+        // -- 6r. Floating reactions (TASK-614): computed ONCE per tick ----------
+        // (particle state advances once), sprites uploaded up front; the draws
+        // are baked into the program by every `bake` below, so preview,
+        // recording, and stream all carry the exact same floating emoji.
+        let reaction_draws = {
             let pending = app.state::<crate::reactions::ReactionState>().drain();
             crate::reactions::spawn(&mut reaction_particles, pending, time, &mut reaction_rng);
             let draws = crate::reactions::step(&mut reaction_particles, time, canvas);
-            if !draws.is_empty() {
-                for draw in &draws {
-                    if !compositor.has_reaction_sprite(&draw.sprite) {
-                        let style = fcap_sources::text::TextStyle {
-                            text: draw.sprite.clone(),
-                            font_family: Some(EMOJI_FONT.to_string()),
-                            size_px: 96.0,
-                            color: crate::reactions::tint_of(&draw.sprite),
-                            ..Default::default()
-                        };
-                        match fcap_sources::text::render_text(&style) {
-                            Ok(frame) => {
-                                if let Err(err) =
-                                    compositor.set_reaction_sprite(&draw.sprite, &frame)
-                                {
-                                    eprintln!("studio: reaction sprite upload failed: {err}");
-                                }
+            for draw in &draws {
+                if !compositor.has_reaction_sprite(&draw.sprite) {
+                    let style = fcap_sources::text::TextStyle {
+                        text: draw.sprite.clone(),
+                        font_family: Some(EMOJI_FONT.to_string()),
+                        size_px: 96.0,
+                        color: crate::reactions::tint_of(&draw.sprite),
+                        ..Default::default()
+                    };
+                    match fcap_sources::text::render_text(&style) {
+                        Ok(frame) => {
+                            if let Err(err) = compositor.set_reaction_sprite(&draw.sprite, &frame) {
+                                eprintln!("studio: reaction sprite upload failed: {err}");
                             }
-                            Err(err) => {
-                                eprintln!("studio: reaction sprite render failed: {err}")
-                            }
+                        }
+                        Err(err) => {
+                            eprintln!("studio: reaction sprite render failed: {err}")
                         }
                     }
                 }
-                if let Err(err) = compositor.render_reactions(&draws) {
+            }
+            draws
+        };
+
+        // One full bake of the program: the compose (with any transition or
+        // stinger), then the floating reactions, then the downstream keyers
+        // (CAP-N24) — persistent overlays composited over the finished
+        // program, above every scene, surviving cuts. The CAP-N53 per-output
+        // variants below re-run this with `set_output_hidden` armed, so a
+        // stream-only / recording-only frame still carries transitions,
+        // reactions, and keyers.
+        let bake = |compositor: &mut fcap_compositor::Compositor| {
+            let compose_result = match &transition_pack {
+                Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
+                    // The audience sees the outgoing scene until the cut point,
+                    // the new program after — the stinger video covers the swap.
+                    let shown = if pack.progress < pack.cut {
+                        &pack.from_scene
+                    } else {
+                        &scene
+                    };
+                    compositor.render_scene_with_stinger(
+                        shown,
+                        time,
+                        pack.stinger_frame.as_ref(),
+                        pack.matte,
+                    )
+                }
+                Some(pack) if pack.kind == fcap_scene::TransitionKind::Move => {
+                    // CAP-N20: matched items morph between the two layouts.
+                    // CAP-N21: eased so the motion accelerates in and settles out.
+                    compositor.render_move(
+                        &pack.from_scene,
+                        &scene,
+                        ease_in_out(pack.progress),
+                        time,
+                    )
+                }
+                Some(pack) => compositor.render_transition(
+                    &pack.from_scene,
+                    &scene,
+                    pack.kind,
+                    // CAP-N21: ease the blend (linear progress still drives cut /
+                    // completion timing; only the visible curve is eased).
+                    ease_in_out(pack.progress),
+                    time,
+                ),
+                None => compositor.render(&scene, time),
+            };
+            if let Err(err) = compose_result {
+                eprintln!("studio: compose failed: {err}");
+            }
+            if !reaction_draws.is_empty() {
+                if let Err(err) = compositor.render_reactions(&reaction_draws) {
                     eprintln!("studio: reactions pass failed: {err}");
                 }
             }
-        }
-
-        // -- 6c. Downstream keyers (CAP-N24) ------------------------------------
-        // Persistent overlays composited over the finished program — above every
-        // scene, surviving cuts — before the native present + readback, so
-        // preview, recording, stream, and multiview all carry them.
-        if let Err(err) = compositor.render_downstream(&downstream_draws) {
-            eprintln!("studio: downstream keyer pass failed: {err}");
-        }
+            if let Err(err) = compositor.render_downstream(&downstream_draws) {
+                eprintln!("studio: downstream keyer pass failed: {err}");
+            }
+        };
+        bake(&mut compositor);
+        composed_this_second += 1;
 
         // -- 6a. Native preview surface (no readback — the "OBS feel") -----------
         if !native_disabled {
@@ -3596,7 +3605,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
 
         // The recorder, the live stream and the replay buffer want the
         // full-res program frame every tick while their sessions run; the
-        // preview JPEG keeps its ~30 fps cadence. One readback serves all.
+        // preview JPEG keeps its ~30 fps cadence. One readback serves all —
+        // except an output whose CAP-N53 variant is armed, which gets its own
+        // bake + readback below (live outputs = stream lanes + Freally Link;
+        // local-disk outputs = recorder + replay buffer).
         let recording = app.state::<crate::recording::RecordingState>();
         let streaming = app.state::<crate::stream::StreamBridgeState>();
         let replaying = app.state::<crate::replay::ReplayState>();
@@ -3611,21 +3623,62 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // link thread JPEG-encodes on its own time — this hands it an Arc.
         let link_due = linking.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
-        if (record_due && !record_alpha) || stream_due || replay_due || link_due || preview_due {
+
+        // CAP-N53: which composed items are flagged off each output this tick
+        // (master-hidden / group-hidden items are already skipped, so a flag
+        // on one never forces a variant). Non-empty set = that output gets its
+        // own program bake below; empty = the shared frame serves it. Only the
+        // per-output-visibility consumers care, so the whole walk is skipped
+        // when none is live — the preview always shows the full program.
+        let (stream_hidden, record_hidden) = if record_due || stream_due || replay_due || link_due {
+            let mut stream_hidden: HashSet<ItemId> = HashSet::new();
+            let mut record_hidden: HashSet<ItemId> = HashSet::new();
+            let relevant = std::iter::once(&scene)
+                .chain(transition_pack.as_ref().map(|pack| &pack.from_scene))
+                .chain(
+                    vertical_pack
+                        .as_ref()
+                        .map(|(vertical_scene, _, _)| vertical_scene),
+                )
+                .chain(scene_pool.iter());
+            for shown_scene in relevant {
+                for item in &shown_scene.items {
+                    if !item.visible || shown_scene.group_hides(item.id) {
+                        continue;
+                    }
+                    if !item.on_stream {
+                        stream_hidden.insert(item.id);
+                    }
+                    if !item.on_record {
+                        record_hidden.insert(item.id);
+                    }
+                }
+            }
+            (stream_hidden, record_hidden)
+        } else {
+            (HashSet::new(), HashSet::new())
+        };
+        let stream_split = !stream_hidden.is_empty();
+        let record_split = !record_hidden.is_empty();
+        let record_shared = record_due && !record_alpha && !record_split;
+        let stream_shared = stream_due && !stream_split;
+        let replay_shared = replay_due && !record_split;
+        let link_shared = link_due && !stream_split;
+        if record_shared || stream_shared || replay_shared || link_shared || preview_due {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
                     let data = Arc::new(frame.data);
-                    if record_due && !record_alpha {
+                    if record_shared {
                         recording.push_video(Arc::clone(&data));
                     }
-                    if stream_due {
+                    if stream_shared {
                         streaming.push_video(Arc::clone(&data));
                     }
-                    if replay_due {
+                    if replay_shared {
                         replaying.push_video(Arc::clone(&data));
                     }
-                    if link_due {
+                    if link_shared {
                         linking.push_video(Arc::clone(&data), frame_w, frame_h);
                     }
                     // CAP-M10: black/frozen watch over THIS readback (never
@@ -3664,10 +3717,53 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
         }
 
+        // -- 5a-N53. Per-output variants (CAP-N53): an output with flagged
+        //    items gets its own full bake (transitions, reactions, and
+        //    downstream keyers included) + readback. The native preview
+        //    already presented the FULL program above, so the operator keeps
+        //    seeing every item. The program texture is re-baked from scratch
+        //    next tick, so leaving a variant in it here is safe — nothing
+        //    else reads it out-of-band.
+        if stream_split && (stream_due || link_due) {
+            compositor.set_output_hidden(stream_hidden.clone());
+            bake(&mut compositor);
+            match compositor.read_program() {
+                Ok(frame) => {
+                    let (frame_w, frame_h) = (frame.width, frame.height);
+                    let data = Arc::new(frame.data);
+                    if stream_due {
+                        streaming.push_video(Arc::clone(&data));
+                    }
+                    if link_due {
+                        linking.push_video(Arc::clone(&data), frame_w, frame_h);
+                    }
+                }
+                Err(err) => eprintln!("studio: stream-variant readback failed: {err}"),
+            }
+        }
+        if record_split && ((record_due && !record_alpha) || replay_due) {
+            compositor.set_output_hidden(record_hidden.clone());
+            bake(&mut compositor);
+            match compositor.read_program() {
+                Ok(frame) => {
+                    let data = Arc::new(frame.data);
+                    if record_due && !record_alpha {
+                        recording.push_video(Arc::clone(&data));
+                    }
+                    if replay_due {
+                        replaying.push_video(Arc::clone(&data));
+                    }
+                }
+                Err(err) => eprintln!("studio: record-variant readback failed: {err}"),
+            }
+        }
+
         // -- 5a-alpha. The CAP-N42 alpha recording: the same scene composed
         //    over a TRANSPARENT clear, feeding ONLY the recorder. The shared
-        //    program (preview/stream/replay) stays opaque above.
+        //    program (preview/stream/replay) stays opaque above. Recording-
+        //    hidden items (CAP-N53) stay out of the alpha master too.
         if record_alpha {
+            compositor.set_output_hidden(record_hidden.clone());
             match compositor.render_iso_view(&scene, started_at.elapsed().as_secs_f32(), true) {
                 Ok(frame) => recording.push_video(Arc::new(frame.data)),
                 Err(err) => {
@@ -3680,6 +3776,10 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         } else if alpha_error_logged {
             alpha_error_logged = false;
         }
+        // CAP-N53: variants done — every later render this tick (Studio-Mode
+        // preview pane, vertical canvas fast path, ISO lanes, projectors,
+        // multiview, workbench) composes the full program again.
+        compositor.set_output_hidden(HashSet::new());
 
         // -- CAP-N43/N44: scene-switch reactions — cut the frec lanes to a
         //    new part and/or drop a typed auto-marker when the program scene
@@ -3743,25 +3843,72 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             Some((vertical_scene, _, _)) => {
                 let vertical_record = recording.wants_vertical_frames();
                 let vertical_stream = streaming.wants_vertical_frames();
-                if vertical_record || vertical_stream || preview_due {
-                    match compositor
-                        .render_vertical(vertical_scene, started_at.elapsed().as_secs_f32())
-                    {
-                        Ok(frame) => {
-                            composed_vertical_this_second += 1;
-                            let (frame_w, frame_h) = (frame.width, frame.height);
-                            let data = Arc::new(frame.data);
-                            if vertical_record {
-                                recording.push_video_vertical(Arc::clone(&data));
+                let vertical_time = started_at.elapsed().as_secs_f32();
+                if !stream_split && !record_split {
+                    // Fast path (no CAP-N53 flags in play): one render serves
+                    // the recorder lane, the stream lane, and the dialog
+                    // preview — exactly the pre-N53 behavior.
+                    if vertical_record || vertical_stream || preview_due {
+                        match compositor.render_vertical(vertical_scene, vertical_time) {
+                            Ok(frame) => {
+                                composed_vertical_this_second += 1;
+                                let (frame_w, frame_h) = (frame.width, frame.height);
+                                let data = Arc::new(frame.data);
+                                if vertical_record {
+                                    recording.push_video_vertical(Arc::clone(&data));
+                                }
+                                if vertical_stream {
+                                    streaming.push_video_vertical(Arc::clone(&data));
+                                }
+                                if preview_due {
+                                    let jpeg = encode_program_jpeg(
+                                        frame_w,
+                                        frame_h,
+                                        &data,
+                                        PREVIEW_MAX_WIDTH,
+                                        PREVIEW_MAX_HEIGHT,
+                                        PREVIEW_JPEG_QUALITY,
+                                    );
+                                    preview.publish_vertical_preview(jpeg);
+                                    vertical_preview_live = true;
+                                }
                             }
-                            if vertical_stream {
-                                streaming.push_video_vertical(Arc::clone(&data));
+                            Err(err) => eprintln!("studio: vertical compose failed: {err}"),
+                        }
+                    }
+                } else if vertical_record || vertical_stream || preview_due {
+                    // CAP-N53 variants: each consumer composes with its own
+                    // hidden set; the dialog preview stays the full canvas.
+                    let mut rendered_any = false;
+                    if vertical_stream {
+                        compositor.set_output_hidden(stream_hidden.clone());
+                        match compositor.render_vertical(vertical_scene, vertical_time) {
+                            Ok(frame) => {
+                                rendered_any = true;
+                                streaming.push_video_vertical(Arc::new(frame.data));
                             }
-                            if preview_due {
+                            Err(err) => eprintln!("studio: vertical compose failed: {err}"),
+                        }
+                    }
+                    if vertical_record {
+                        compositor.set_output_hidden(record_hidden.clone());
+                        match compositor.render_vertical(vertical_scene, vertical_time) {
+                            Ok(frame) => {
+                                rendered_any = true;
+                                recording.push_video_vertical(Arc::new(frame.data));
+                            }
+                            Err(err) => eprintln!("studio: vertical compose failed: {err}"),
+                        }
+                    }
+                    if preview_due {
+                        compositor.set_output_hidden(HashSet::new());
+                        match compositor.render_vertical(vertical_scene, vertical_time) {
+                            Ok(frame) => {
+                                rendered_any = true;
                                 let jpeg = encode_program_jpeg(
-                                    frame_w,
-                                    frame_h,
-                                    &data,
+                                    frame.width,
+                                    frame.height,
+                                    &frame.data,
                                     PREVIEW_MAX_WIDTH,
                                     PREVIEW_MAX_HEIGHT,
                                     PREVIEW_JPEG_QUALITY,
@@ -3769,9 +3916,15 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                                 preview.publish_vertical_preview(jpeg);
                                 vertical_preview_live = true;
                             }
+                            Err(err) => eprintln!("studio: vertical compose failed: {err}"),
                         }
-                        Err(err) => eprintln!("studio: vertical compose failed: {err}"),
                     }
+                    // One vertical program frame per tick, however many
+                    // variants composed it — the fps stat counts ticks.
+                    if rendered_any {
+                        composed_vertical_this_second += 1;
+                    }
+                    compositor.set_output_hidden(HashSet::new());
                 }
             }
             None if vertical_preview_live => {
@@ -3904,7 +4057,17 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // -- 5f. Still-frame grab (CAP-M08) -------------------------------------
         if let Some((job, path)) = &still_job {
             let result = match job {
-                StillJob::Program => compositor.read_program(),
+                StillJob::Program => {
+                    // CAP-N53: a split tick (above) left a per-output VARIANT
+                    // in the program texture. `output_hidden` is cleared by
+                    // now, so re-bake the full program before the readback —
+                    // a saved still must match the operator's program view,
+                    // not the stream-only / recording-only frame.
+                    if stream_split || record_split {
+                        bake(&mut compositor);
+                    }
+                    compositor.read_program()
+                }
                 StillJob::Source(source, filters) => match compositor.source_size(*source) {
                     Some((sw, sh)) => {
                         let scene = workbench_scene(*source, filters.clone(), sw, sh, canvas);

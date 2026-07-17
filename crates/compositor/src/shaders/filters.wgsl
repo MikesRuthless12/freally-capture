@@ -249,6 +249,35 @@ fn fs_scroll(in: VsOut) -> @location(0) vec4<f32> {
     return textureSample(t_in, s_repeat, in.uv + f.p0.xy);
 }
 
+// -- Perspective ("Star Wars" plane) ----------------------------------------------
+// p0 = (tilt_radians, far_fade, 0, 0). The item leans away around its bottom
+// edge (bottom near, top far) via the inverse pinhole mapping; the screen
+// height is chosen so the far edge lands exactly at v = 0, and pixels off the
+// plane's trapezoid go transparent. `far_fade` dims alpha toward the far edge.
+@fragment
+fn fs_perspective(in: VsOut) -> @location(0) vec4<f32> {
+    let ct = cos(f.p0.x);
+    let st = sin(f.p0.x);
+    let sy = ct / (1.0 + st);
+    let ys = (1.0 - in.uv.y) * sy;
+    let yp = ys / (ct - ys * st); // 0 at the near edge → 1 at the far edge
+    let k = 1.0 + yp * st;        // the perspective divisor
+    let u = (in.uv.x - 0.5) * k + 0.5;
+    let v = 1.0 - yp;
+    let color = textureSample(t_in, s_clamp, vec2<f32>(clamp(u, 0.0, 1.0), v));
+    let inside = step(0.0, u) * step(u, 1.0);
+    let dim = 1.0 - f.p0.y * yp;
+    return vec4<f32>(color.rgb, color.a * inside * dim);
+}
+
+// -- Fade loop --------------------------------------------------------------------
+// p0 = (alpha, 0, 0, 0) — the loop's phase is computed on the CPU each tick.
+@fragment
+fn fs_fade(in: VsOut) -> @location(0) vec4<f32> {
+    let color = textureSample(t_in, s_clamp, in.uv);
+    return vec4<f32>(color.rgb, color.a * f.p0.x);
+}
+
 // -- Crop ------------------------------------------------------------------------
 // p0 = the source window as UVs (u0, v0, u1, v1); the pass target is already
 // the cropped size, so this is a remapped blit.

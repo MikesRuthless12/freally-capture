@@ -15,6 +15,7 @@ mod audio;
 mod audiorec;
 mod autoconfig;
 mod automation;
+mod benchmark;
 mod bezier_mask;
 mod bugreport;
 mod buildinfo;
@@ -26,6 +27,7 @@ mod docks;
 mod eula;
 mod events;
 mod filename;
+mod forensic;
 mod hotkey_audit;
 mod hotkeys;
 mod link;
@@ -43,6 +45,7 @@ mod recording;
 mod remote;
 mod remote_api;
 mod replay;
+mod report;
 mod rundown;
 mod salvage;
 mod scripting;
@@ -165,6 +168,8 @@ fn main() {
         .manage(shutdown::QuitState::new(shutdown::mark_session_start()))
         .manage(salvage::SalvageState::default())
         .manage(stream::StreamBridgeState::new())
+        .manage(forensic::ForensicState::default())
+        .manage(benchmark::BenchmarkState::default())
         .manage(replay::ReplayState::new())
         .manage(reactions::ReactionState::new())
         .manage(events::RuntimeStats::default())
@@ -292,6 +297,7 @@ fn main() {
             commands::studio::studio_reorder_item,
             commands::studio::studio_set_item_transform,
             commands::studio::studio_set_item_visible,
+            commands::studio::studio_set_item_output_visible,
             commands::studio::studio_set_item_locked,
             commands::studio::studio_set_item_blend,
             commands::studio::studio_set_item_scaling,
@@ -350,8 +356,13 @@ fn main() {
             remote::remote_guest_push_audio,
             remote::remote_pending_invite,
             stream::stream_start,
+            stream::stream_start_rehearsal,
             stream::stream_stop,
             stream::stream_status,
+            forensic::forensic_timeline,
+            benchmark::benchmark_start,
+            benchmark::benchmark_cancel,
+            benchmark::benchmark_status,
             replay::replay_arm,
             replay::replay_disarm,
             replay::replay_save,
@@ -523,6 +534,9 @@ fn main() {
             recording::spawn_status_thread(app.handle().clone());
             // The stream's ~1 Hz status/elapsed events (Phase 5).
             stream::spawn_status_thread(app.handle().clone());
+            // CAP-N50: the forensic session recorder (1 Hz sampler; opens
+            // and closes with streaming/recording, keeps the last session).
+            forensic::spawn_forensic_thread(app.handle().clone());
             replay::spawn_status_thread(app.handle().clone());
             // Global action hotkeys: record / go live / transition (Phase 5).
             hotkeys::spawn_reconcile_thread(app.handle().clone());

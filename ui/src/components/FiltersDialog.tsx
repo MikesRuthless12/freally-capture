@@ -66,6 +66,8 @@ const FILTER_NAME_KEYS: Record<FilterTypeName, string> = {
   mask: "filters-name-mask",
   sharpen: "filters-name-sharpen",
   scroll: "filters-name-scroll",
+  perspective: "filters-name-perspective",
+  fadeLoop: "filters-name-fade-loop",
   crop: "filters-name-crop",
   flip: "filters-name-flip",
   directionalBlur: "filters-name-directional-blur",
@@ -147,6 +149,8 @@ const FILTER_DEFAULTS: Record<FilterTypeName, FilterKind> = {
   mask: { type: "mask", path: "", mode: "alpha", invert: false },
   sharpen: { type: "sharpen", amount: 0.25 },
   scroll: { type: "scroll", speedX: 50, speedY: 0 },
+  perspective: { type: "perspective", tilt: 55, fade: 0.35 },
+  fadeLoop: { type: "fadeLoop", fadeInS: 1, visibleS: 4, fadeOutS: 1, hiddenS: 4 },
   crop: { type: "crop", left: 0, top: 0, right: 0, bottom: 0 },
   flip: { type: "flip", horizontal: true, vertical: false },
   directionalBlur: { type: "directionalBlur", radius: 8, angle: 0 },
@@ -1026,6 +1030,64 @@ function FilterParams({
             max={500}
             step={1}
             onChange={(speedY) => onChange({ ...filter, speedY })}
+          />
+        </div>
+      );
+    case "perspective":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label={t("filters-tilt")}
+            value={filter.tilt}
+            min={0}
+            max={80}
+            step={1}
+            onChange={(tilt) => onChange({ ...filter, tilt })}
+          />
+          <Slider
+            label={t("filters-far-fade")}
+            value={filter.fade}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(fade) => onChange({ ...filter, fade })}
+          />
+        </div>
+      );
+    case "fadeLoop":
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <Slider
+            label={t("filters-fade-in-s")}
+            value={filter.fadeInS}
+            min={0}
+            max={10}
+            step={0.1}
+            onChange={(fadeInS) => onChange({ ...filter, fadeInS })}
+          />
+          <Slider
+            label={t("filters-visible-s")}
+            value={filter.visibleS}
+            min={0}
+            max={60}
+            step={0.5}
+            onChange={(visibleS) => onChange({ ...filter, visibleS })}
+          />
+          <Slider
+            label={t("filters-fade-out-s")}
+            value={filter.fadeOutS}
+            min={0}
+            max={10}
+            step={0.1}
+            onChange={(fadeOutS) => onChange({ ...filter, fadeOutS })}
+          />
+          <Slider
+            label={t("filters-hidden-s")}
+            value={filter.hiddenS}
+            min={0}
+            max={60}
+            step={0.5}
+            onChange={(hiddenS) => onChange({ ...filter, hiddenS })}
           />
         </div>
       );

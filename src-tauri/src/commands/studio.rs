@@ -396,6 +396,23 @@ pub fn studio_set_item_visible(
     })
 }
 
+/// Per-output visibility (CAP-N53): compose the item into the live outputs
+/// (`on_stream`) / the local-disk outputs (`on_record`). Master visibility
+/// (the eye toggle) is a separate flag and stays untouched.
+#[tauri::command]
+pub fn studio_set_item_output_visible(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    item_id: ItemId,
+    on_stream: bool,
+    on_record: bool,
+) -> Result<(), String> {
+    state.mutate_tracked(&app, "toggleOutputVisibility", None, |collection| {
+        collection.set_item_output_visible(scene_id, item_id, on_stream, on_record)
+    })
+}
+
 #[tauri::command]
 pub fn studio_set_item_locked(
     app: AppHandle,

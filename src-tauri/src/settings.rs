@@ -981,6 +981,12 @@ pub struct StreamSettings {
     /// CAP-M09: the pre-flight checklist refuses "Go Live anyway" until
     /// every blocking item is green.
     pub preflight_hold: bool,
+    /// CAP-N48: the rehearsal network simulator — applies ONLY to dry-run
+    /// (CAP-N49) lanes, never to a real broadcast.
+    pub simulator: SimulatorSettings,
+    /// CAP-N51: write a local HTML + Markdown session report next to the
+    /// recording when the session ends. Off by default; local only.
+    pub session_report: bool,
 }
 
 impl Default for StreamSettings {
@@ -989,7 +995,62 @@ impl Default for StreamSettings {
             targets: vec![StreamTargetSettings::default()],
             auto_record: false,
             preflight_hold: false,
+            simulator: SimulatorSettings::default(),
+            session_report: false,
         }
+    }
+}
+
+/// CAP-N48: how a rehearsal's loopback sinks shape the uplink. `profile`
+/// picks a preset ("off" | "hotelWifi" | "mobileHotspot" | "custom"); the
+/// numeric fields apply only to "custom". By construction this can only
+/// ever degrade a CAP-N49 dry run — real streams never see it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SimulatorSettings {
+    pub profile: String,
+    /// Uplink cap in kbps; 0 = uncapped.
+    pub bandwidth_kbps: u32,
+    pub latency_ms: u32,
+    pub jitter_ms: u32,
+    /// Sever the connection every ~this many seconds; 0 = never.
+    pub outage_every_s: u32,
+    pub outage_len_s: u32,
+}
+
+impl Default for SimulatorSettings {
+    fn default() -> Self {
+        Self {
+            profile: "off".to_string(),
+            bandwidth_kbps: 2_500,
+            latency_ms: 80,
+            jitter_ms: 60,
+            outage_every_s: 90,
+            outage_len_s: 6,
+        }
+    }
+}
+
+impl SimulatorSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !matches!(
+            self.profile.as_str(),
+            "off" | "hotelWifi" | "mobileHotspot" | "custom"
+        ) {
+            return Err(
+                "simulator profile must be off, hotelWifi, mobileHotspot, or custom".into(),
+            );
+        }
+        if self.bandwidth_kbps > 100_000 {
+            return Err("simulator bandwidth must be at most 100000 kbps".into());
+        }
+        if self.latency_ms > 2_000 || self.jitter_ms > 1_000 {
+            return Err("simulator latency must be ≤ 2000 ms and jitter ≤ 1000 ms".into());
+        }
+        if self.outage_every_s > 3_600 || self.outage_len_s > 120 {
+            return Err("simulator outages must be ≤ 3600 s apart and ≤ 120 s long".into());
+        }
+        Ok(())
     }
 }
 
@@ -1001,6 +1062,8 @@ struct StreamSettingsWire {
     targets: Option<Vec<StreamTargetSettings>>,
     auto_record: bool,
     preflight_hold: bool,
+    simulator: SimulatorSettings,
+    session_report: bool,
     // The 0.70.0 flat single-target fields.
     service: fcap_stream::StreamService,
     ingest_url: String,
@@ -1020,6 +1083,8 @@ impl Default for StreamSettingsWire {
             targets: None,
             auto_record: false,
             preflight_hold: false,
+            simulator: SimulatorSettings::default(),
+            session_report: false,
             service: target.service,
             ingest_url: target.ingest_url,
             stream_key: target.stream_key,
@@ -1057,6 +1122,8 @@ impl From<StreamSettingsWire> for StreamSettings {
             targets,
             auto_record: wire.auto_record,
             preflight_hold: wire.preflight_hold,
+            simulator: wire.simulator,
+            session_report: wire.session_report,
         }
     }
 }
@@ -1076,6 +1143,7 @@ impl StreamSettings {
         for target in &self.targets {
             target.validate()?;
         }
+        self.simulator.validate()?;
         Ok(())
     }
 }
@@ -2165,6 +2233,15 @@ mod tests {
                 ],
                 auto_record: true,
                 preflight_hold: true,
+                simulator: SimulatorSettings {
+                    profile: "custom".to_owned(),
+                    bandwidth_kbps: 1_800,
+                    latency_ms: 120,
+                    jitter_ms: 45,
+                    outage_every_s: 60,
+                    outage_len_s: 8,
+                },
+                session_report: true,
             },
             replay: ReplaySettings {
                 seconds: 60,

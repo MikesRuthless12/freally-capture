@@ -18,6 +18,7 @@ import { TRACK_COUNT } from "../api/types";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
+import { BenchmarkWizard } from "./BenchmarkWizard";
 
 const selectClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -774,6 +775,8 @@ export function SettingsOutput({
   const t = useT();
   const [draft, setDraft] = useState<RecordingSettings | null>(settings?.recording ?? null);
   const [error, setError] = useState<string | null>(null);
+  // CAP-N52: the measured encoder benchmark, behind an explicit button.
+  const [benchOpen, setBenchOpen] = useState(false);
 
   if (!settings || !draft) {
     return (
@@ -810,6 +813,13 @@ export function SettingsOutput({
         <div className="flex justify-end gap-2">
           <button
             type="button"
+            onClick={() => setBenchOpen(true)}
+            className="mr-auto rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          >
+            {t("bench-open")}
+          </button>
+          <button
+            type="button"
             onClick={onClose}
             className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-havoc-muted hover:text-havoc-text"
           >
@@ -823,6 +833,18 @@ export function SettingsOutput({
             {t("settings-save")}
           </button>
         </div>
+        {benchOpen && (
+          <BenchmarkWizard
+            settings={settings}
+            onSaved={(next) => {
+              // The wizard applied measured settings — refresh the draft so
+              // this dialog's Save can't clobber them with stale values.
+              setDraft(next.recording);
+              onSaved(next);
+            }}
+            onClose={() => setBenchOpen(false)}
+          />
+        )}
       </div>
     </PickerShell>
   );

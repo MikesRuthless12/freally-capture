@@ -16,21 +16,25 @@
 #![forbid(unsafe_code)]
 
 pub mod multistream;
+pub mod rehearsal;
 pub mod remote;
 pub mod replay;
 pub mod rtmp;
 pub mod session;
+pub mod shaper;
 pub mod vcam;
 
 pub use multistream::{
     group_members, LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle,
     MultiSession,
 };
+pub use rehearsal::RehearsalSink;
 pub use rtmp::{StreamProtocol, StreamService, StreamTarget, TargetError};
 pub use session::{
     backoff, SinkDeath, SinkFactory, StreamHandle, StreamSession, StreamSpec, StreamState,
     StreamStatus, MAX_RECONNECT_ATTEMPTS,
 };
+pub use shaper::ShapeProfile;
 
 /// This crate's version (inherited from the workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

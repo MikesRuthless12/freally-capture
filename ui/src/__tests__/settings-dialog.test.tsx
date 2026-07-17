@@ -88,7 +88,20 @@ const settings = (mode: ThemeMode): Settings => ({
     pipeline: [],
   },
   remote: { turnUrl: "", turnUsername: "", turnCredential: "" },
-  stream: { targets: [], autoRecord: false, preflightHold: false },
+  stream: {
+    targets: [],
+    autoRecord: false,
+    preflightHold: false,
+    simulator: {
+      profile: "off",
+      bandwidthKbps: 2500,
+      latencyMs: 80,
+      jitterMs: 60,
+      outageEveryS: 90,
+      outageLenS: 6,
+    },
+    sessionReport: false,
+  },
   replay: { seconds: 30, bitrateKbps: 6000, audioBitrateKbps: 160, fps: 60, track: 1 },
   transition: {
     kind: "fade",

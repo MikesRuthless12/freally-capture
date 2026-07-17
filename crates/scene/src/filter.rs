@@ -246,6 +246,34 @@ pub enum FilterKind {
         #[serde(default = "default_pixelate_size")]
         size: f32,
     },
+    /// "Star Wars" perspective (Mike, 2026-07-17): the item drawn as a flat
+    /// plane tilted away from the viewer — bottom edge near, top edge far —
+    /// with an optional fade toward the far edge. Works on any source (text,
+    /// captures, cameras); chain a looping [`FilterKind::Scroll`] before it
+    /// for the full opening-crawl ad loop.
+    Perspective {
+        /// Lean-away angle in degrees, 0..=80 (0 = off; ~55 = the classic
+        /// crawl look).
+        #[serde(default = "default_perspective_tilt")]
+        tilt: f32,
+        /// How much the far (top) edge fades out, 0..=1 (0 keeps a tilted
+        /// capture fully readable).
+        #[serde(default = "default_perspective_fade")]
+        fade: f32,
+    },
+    /// Looping fade (Mike, 2026-07-17): fade in → hold visible → fade out →
+    /// hold hidden, repeating forever — an ad/text item that re-announces
+    /// itself without anyone touching it. All durations in seconds.
+    FadeLoop {
+        #[serde(default = "default_fade_edge")]
+        fade_in_s: f32,
+        #[serde(default = "default_fade_hold")]
+        visible_s: f32,
+        #[serde(default = "default_fade_edge")]
+        fade_out_s: f32,
+        #[serde(default = "default_fade_hold")]
+        hidden_s: f32,
+    },
     /// Freeze-frame (CAP-N25): while enabled, the source holds its last frame.
     /// Applied at the source-frame stage — the engine simply stops uploading new
     /// frames for the source, so program, preview, record, and stream all hold
@@ -279,6 +307,22 @@ fn default_feather() -> f32 {
     0.03
 }
 
+fn default_perspective_tilt() -> f32 {
+    55.0
+}
+
+fn default_perspective_fade() -> f32 {
+    0.35
+}
+
+fn default_fade_edge() -> f32 {
+    1.0
+}
+
+fn default_fade_hold() -> f32 {
+    4.0
+}
+
 impl Rgba {
     fn default_key() -> Self {
         // Standard green-screen green.
@@ -306,6 +350,8 @@ impl FilterKind {
             FilterKind::RadialBlur { .. } => "radialBlur",
             FilterKind::ZoomBlur { .. } => "zoomBlur",
             FilterKind::Pixelate { .. } => "pixelate",
+            FilterKind::Perspective { .. } => "perspective",
+            FilterKind::FadeLoop { .. } => "fadeLoop",
             FilterKind::Freeze => "freeze",
             FilterKind::UserShader { .. } => "userShader",
             FilterKind::BezierMask { .. } => "bezierMask",
@@ -331,6 +377,8 @@ impl FilterKind {
             FilterKind::RadialBlur { .. } => "Radial Blur",
             FilterKind::ZoomBlur { .. } => "Zoom Blur",
             FilterKind::Pixelate { .. } => "Pixelate",
+            FilterKind::Perspective { .. } => "Perspective",
+            FilterKind::FadeLoop { .. } => "Fade Loop",
             FilterKind::Freeze => "Freeze",
             FilterKind::UserShader { .. } => "Shader",
             FilterKind::BezierMask { .. } => "Bezier Mask",

@@ -11,7 +11,7 @@
 //! padded strides; both go straight into a texture of the matching format
 //! (no CPU swizzle on the hot path).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 use std::time::Instant;
 
@@ -221,6 +221,11 @@ pub struct Compositor {
     /// each tick while an item reveals. Absent = fully opaque (the default), so
     /// scenes with no reveal render pixel-identically.
     item_opacity: HashMap<ItemId, f32>,
+    /// Per-output visibility (CAP-N53): items skipped by the render in flight.
+    /// The studio sets this only around a stream-only / recording-only variant
+    /// render and clears it straight after — empty (the default) composes the
+    /// full program, pixel-identically to before the feature.
+    output_hidden: HashSet<ItemId>,
 
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
@@ -542,6 +547,7 @@ impl Compositor {
             scene_pool: Vec::new(),
             lenses: HashMap::new(),
             item_opacity: HashMap::new(),
+            output_hidden: HashSet::new(),
             scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
@@ -1052,15 +1058,16 @@ impl Compositor {
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
 
         // Topmost visible item per source in each scene (last wins = on top).
+        // A CAP-N53 output-hidden item is invisible to the whole morph.
         let mut from_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
         for item in &from.items {
-            if item.visible {
+            if item.visible && !self.output_hidden.contains(&item.id) {
                 from_by_source.insert(item.source, item);
             }
         }
         let mut to_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
         for item in &to.items {
-            if item.visible {
+            if item.visible && !self.output_hidden.contains(&item.id) {
                 to_by_source.insert(item.source, item);
             }
         }
@@ -1070,7 +1077,10 @@ impl Compositor {
         // only items fading in.
         let mut jobs: Vec<(SourceId, BlendMode, ItemUniform)> = Vec::new();
         for item in &from.items {
-            if !item.visible || to_by_source.contains_key(&item.source) {
+            if !item.visible
+                || self.output_hidden.contains(&item.id)
+                || to_by_source.contains_key(&item.source)
+            {
                 continue;
             }
             if let Some(job) = self.move_job(item, &item.transform, 1.0 - p, canvas) {
@@ -1078,7 +1088,7 @@ impl Compositor {
             }
         }
         for item in &to.items {
-            if !item.visible {
+            if !item.visible || self.output_hidden.contains(&item.id) {
                 continue;
             }
             let (transform, opacity) = match from_by_source.get(&item.source) {
@@ -2152,6 +2162,15 @@ impl Compositor {
         self.item_opacity = opacities;
     }
 
+    /// Per-output visibility (CAP-N53): skip these items in every compose
+    /// until cleared. The studio brackets exactly one variant render with a
+    /// set + clear, so the operator surfaces (preview, projectors, multiview,
+    /// workbench) — rendered outside the bracket — always show the full
+    /// program.
+    pub fn set_output_hidden(&mut self, hidden: HashSet<ItemId>) {
+        self.output_hidden = hidden;
+    }
+
     pub fn set_scene_pool(&mut self, scenes: Vec<Scene>, refs: HashMap<SourceId, SceneId>) {
         self.scene_pool = scenes;
         self.scene_refs = refs;
@@ -2176,6 +2195,7 @@ impl Compositor {
             .items
             .iter()
             .filter(|item| item.visible && !scene.group_hides(item.id))
+            .filter(|item| !self.output_hidden.contains(&item.id))
             .filter_map(|item| {
                 self.scene_refs
                     .get(&item.source)
@@ -2282,11 +2302,15 @@ impl Compositor {
         let mut chain_passes: Vec<ChainPass> = Vec::new();
         let mut live_chains: Vec<ItemId> = Vec::new();
 
-        for item in scene
+        // Collected up front so the CAP-N53 output-hidden borrow ends before
+        // the loop body mutates `self` (filter pipelines, chain caches).
+        let shown: Vec<&SceneItem> = scene
             .items
             .iter()
             .filter(|item| item.visible && !scene.group_hides(item.id))
-        {
+            .filter(|item| !self.output_hidden.contains(&item.id))
+            .collect();
+        for item in shown {
             let Some(slot) = self.sources.get(&item.source) else {
                 continue; // no frame yet
             };

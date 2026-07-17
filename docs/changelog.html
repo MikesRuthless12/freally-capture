@@ -24,8 +24,40 @@
     </header>
 
     <main>
-      <!-- 0.600.0 — recording & replay depth, Phase 5 -->
+      <!-- 0.700.0 — streaming reliability & insight, Phase 6 -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.700.0</span>
+            <span class="date">Jul 17, 2026 · Streaming reliability &amp; insight</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.700.0">Download</a>
+        </div>
+
+        <h2>0.700.0 — Streaming reliability &amp; insight (Phase 6)</h2>
+        <p class="summary">
+          Rehearse, measure, explain. Phase 6 is about knowing your show will hold up before you go
+          live, and understanding what happened after: run the whole pipeline against a private local
+          sink with a simulated bad network, benchmark what your machine can actually sustain, watch a
+          recorded timeline of every render/encode/reconnect event, and get a written report when the
+          stream ends — plus flag any source as stream-only or recording-only. Everything is off or
+          neutral by default, and nothing here adds a network call — the dry run and benchmark are
+          fully local, and the network simulator only ever degrades the rehearsal's own loopback
+          sinks, never a real broadcast.
+        </p>
+        <ul class="features">
+          <li><strong>Network condition simulator</strong> — a rehearsal-only shaper: deterministic bandwidth caps, added latency/jitter, and scheduled outages applied to the dry-run sinks, so you can drill reconnects, multistream lane isolation, and bitrate choices against a thin, flapping uplink. "Hotel Wi-Fi" and mobile-hotspot presets plus a fully custom profile; by construction it can never touch a real Go Live.</li>
+          <li><strong>Dry-run mode / "Go Live (rehearsal)"</strong> — run the whole live pipeline (compositor, encoder, mux, and the real reconnect logic) against an owned loopback sink with the real stats dock, LIVE-state UI, and alarms, with <em>zero bytes leaving the machine</em>. A distinct violet Rehearse button, a REHEARSAL badge on every live surface, and a state banner make it impossible to confuse with a real broadcast; stream keys are never even read.</li>
+          <li><strong>Dropped-frame forensic timeline</strong> — a session-long recorded timeline correlating render time, encoder queue depth, per-target bitrate and drops, reconnects, scene switches, markers, and alarms on one zoomable graph. The stats dock shows now; this explains the whole session, sampled off the render loop so the 60 fps compose path gains no work.</li>
+          <li><strong>Stream session report</strong> — on session end, an optional local HTML + Markdown report (uptime, average and peak bitrate per target, down-time percentage, reconnect log, markers, alarms, recording paths) written next to the recording. Local only, shareable by you alone; off by default.</li>
+          <li><strong>Encoder benchmark wizard</strong> — a guided, fully-offline benchmark that actually runs short encode ladders (every detected encoder × preset × resolution × fps) on your machine, measures achieved fps and headroom, and recommends canvas/encoder/bitrate settings — with one-click apply. Failures are listed, never hidden. Refused while live or recording so it never steals the encoder mid-show.</li>
+          <li><strong>Per-output source visibility</strong> — flag any scene item as visible on the stream but not in the recording, or vice-versa, within a single canvas — keep alerts and chat on the live feed while the VOD stays clean. Hover LIVE / REC toggles on each source row; your preview, projectors, and multiview always show the full program.</li>
+          <li><strong>Looping text &amp; advertising effects</strong> — three item filters for unattended promo loops: a <strong>Perspective</strong> filter that tilts any source (text, cameras, captures) away as a flat plane with an optional far-edge fade — chain it after the endless Scroll filter for a full "Star Wars" opening-crawl — and a <strong>Fade Loop</strong> filter that fades an item in, holds, fades out, and holds hidden on a repeating cycle. All time-driven, so an ad runs itself.</li>
+        </ul>
+      </article>
+
+      <!-- 0.600.0 — recording & replay depth, Phase 5 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.600.0</span>

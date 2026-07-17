@@ -886,9 +886,12 @@ pub fn tee_safe(url: &str) -> bool {
     !url.contains(['|', '[', ']', '\'', '\\'])
 }
 
-/// The output format a publish URL's scheme implies.
+/// The output format a publish URL's scheme implies. `tcp://` is the
+/// CAP-N49 rehearsal lane — MPEG-TS to the app's own loopback sink (the
+/// same payload format SRT carries), so a dry run exercises the real
+/// encoder + mux + socket path with zero bytes leaving the machine.
 fn url_format(url: &str) -> &'static str {
-    if url.starts_with("srt://") {
+    if url.starts_with("srt://") || url.starts_with("tcp://") {
         "mpegts"
     } else if url.starts_with("http://") || url.starts_with("https://") {
         "whip"
@@ -1080,9 +1083,15 @@ impl FfmpegSink {
             return Err("a stream needs at least one publish URL".to_string());
         }
         for url in &plan.urls {
+            // `tcp://` is CAP-N49's rehearsal lane and stays loopback-only:
+            // a dry run must not be able to point raw TCP at the internet.
+            if url.starts_with("tcp://") && !url.starts_with("tcp://127.0.0.1:") {
+                return Err("a tcp:// rehearsal sink must be 127.0.0.1".to_string());
+            }
             if !(url.starts_with("rtmp://")
                 || url.starts_with("rtmps://")
                 || url.starts_with("srt://")
+                || url.starts_with("tcp://")
                 || url.starts_with("http://")
                 || url.starts_with("https://"))
             {

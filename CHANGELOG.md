@@ -15,6 +15,58 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.700.0] — 2026-07-17 (Streaming Reliability & Insight — Phase 6)
+
+> *Rehearse, measure, explain.* Phase 6 is about knowing your show will hold up before you go live,
+> and understanding what happened after. You can now run the entire pipeline against a private local
+> sink with a simulated bad network, benchmark what your machine can actually sustain, watch a
+> recorded timeline of every render/encode/reconnect event, and get a written report when the stream
+> ends — plus flag any source as stream-only or recording-only. Everything is off/neutral by default,
+> and nothing here adds a network call: the dry run and the benchmark are fully local, and the network
+> simulator only ever degrades the rehearsal's own loopback sinks — never a real broadcast.
+
+### Added
+
+- **Network condition simulator (CAP-N48)** — a rehearsal-only network shaper: deterministic
+  token-bucket bandwidth caps, added latency/jitter, and scheduled outages, applied to the dry-run
+  sinks so you can drill reconnect behavior, multistream lane isolation, and bitrate choices against
+  a thin, flapping uplink before show day. Presets for "hotel Wi-Fi" and a mobile hotspot, plus a
+  fully custom profile. Deterministic (same drill every run) and, by construction, incapable of
+  touching a real Go Live.
+- **Dry-run mode / "Go Live (rehearsal)" (CAP-N49)** — run the whole live pipeline — compositor,
+  encoder, mux, and the real reconnect logic — against an owned loopback sink with the real stats
+  dock, LIVE-state UI, and alarms, so the entire show rehearses with **zero bytes leaving the
+  machine**. A distinct violet Rehearse button, a REHEARSAL badge on every live surface, and a state
+  banner make it impossible to confuse a rehearsal with a real broadcast; stream keys are never even
+  read, so a pre-show dry run works before the keys exist.
+- **Dropped-frame forensic timeline (CAP-N50)** — a session-long recorded timeline that correlates
+  render time, encoder queue depth, per-target bitrate and drops, reconnects, scene switches,
+  markers, and alarms on one zoomable graph — the answer to "what happened at minute 43?" after the
+  fact. The stats dock shows *now*; this records and explains the whole session, sampled off the
+  render loop so the 60 fps compose path gains no work.
+- **Stream session report (CAP-N51)** — on session end, an optional local HTML + Markdown report
+  written next to the recording: uptime, average and peak bitrate per target, down-time percentage,
+  the reconnect log, markers, alarms, and recording paths. Local only, shareable by you alone; off by
+  default.
+- **Encoder benchmark wizard (CAP-N52)** — a guided, fully-offline benchmark that actually *runs*
+  short encode ladders (every detected encoder × preset × resolution × fps) on your machine, measures
+  achieved fps and headroom, and recommends canvas/encoder/bitrate settings from the measurements —
+  with one-click apply. Failures are listed, never hidden, so an encoder your machine offers but can't
+  sustain is documented rather than silently dropped. Distinct from the first-run wizard, which only
+  probes capabilities and applies heuristics; this measures. Refused while live or recording so it
+  never steals the encoder mid-show.
+- **Per-output source visibility (CAP-N53)** — flag any scene item as visible on the stream but not
+  in the recording, or vice-versa, within a single canvas — keep alerts and chat on the live feed
+  while the VOD recording stays clean. Hover **LIVE** / **REC** toggles on each source row; the master
+  eye toggle still governs everything, and the operator's preview, projectors, and multiview always
+  show the full program.
+- **Looping text & advertising effects (Text FX)** — three new item filters aimed at unattended
+  promo/ad loops: a **Perspective** filter that tilts any source (text, cameras, captures) away from
+  the viewer as a flat plane with an optional far-edge fade — chain it after the existing endless
+  **Scroll** filter for a full "Star Wars" opening-crawl — and a **Fade Loop** filter that fades an
+  item in, holds, fades out, and holds hidden on a repeating cycle. All time-driven, so an ad runs
+  itself.
+
 ## [0.600.0] — 2026-07-16 (Recording & Replay Depth — Phase 5)
 
 > *Everything around the file.* Phase 5 builds out what happens to a recording before, during, and

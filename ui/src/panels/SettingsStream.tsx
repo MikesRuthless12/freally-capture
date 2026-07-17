@@ -4,6 +4,7 @@ import { encodersList, settingsSet } from "../api/commands";
 import type {
   EncoderDesc,
   Settings,
+  SimulatorSettings,
   StreamService,
   StreamSettings,
   StreamTargetSettings,
@@ -75,6 +76,10 @@ export function StreamSettingsBody({
       ...stream,
       targets: stream.targets.map((target, at) => (at === index ? { ...target, ...part } : target)),
     });
+
+  // CAP-N48: patch one simulator field (the five custom controls all share it).
+  const patchSim = (part: Partial<SimulatorSettings>) =>
+    onChange({ ...stream, simulator: { ...stream.simulator, ...part } });
 
   const addTarget = () => onChange({ ...stream, targets: [...stream.targets, defaultTarget()] });
 
@@ -292,6 +297,86 @@ export function StreamSettingsBody({
         />
         {t("stream-auto-record")}
       </label>
+
+      <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+        <input
+          type="checkbox"
+          checked={stream.sessionReport}
+          onChange={(event) => onChange({ ...stream, sessionReport: event.target.checked })}
+        />
+        {t("stream-session-report")}
+      </label>
+
+      {/* CAP-N48: the rehearsal network simulator — violet like everything
+          rehearsal-only, and framed honestly: it shapes ONLY the dry-run
+          loopback sinks, never a real broadcast. */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/5 p-2">
+        <span className="text-[11px] font-semibold text-violet-300">
+          {t("stream-simulator-title")}
+        </span>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("stream-simulator-note")}
+        </p>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("stream-simulator-profile")}
+          <select
+            value={stream.simulator.profile}
+            onChange={(event) =>
+              patchSim({ profile: event.target.value as SimulatorSettings["profile"] })
+            }
+            className={inputClass}
+          >
+            <option value="off">{t("stream-simulator-off")}</option>
+            <option value="hotelWifi">{t("stream-simulator-hotel-wifi")}</option>
+            <option value="mobileHotspot">{t("stream-simulator-mobile-hotspot")}</option>
+            <option value="custom">{t("stream-simulator-custom")}</option>
+          </select>
+        </label>
+        {stream.simulator.profile === "custom" && (
+          <div className="grid grid-cols-2 gap-2">
+            <NumberField
+              label={t("stream-simulator-bandwidth")}
+              value={stream.simulator.bandwidthKbps}
+              min={0}
+              max={100000}
+              step={100}
+              onCommit={(value) => patchSim({ bandwidthKbps: Math.round(value) })}
+            />
+            <NumberField
+              label={t("stream-simulator-latency")}
+              value={stream.simulator.latencyMs}
+              min={0}
+              max={2000}
+              step={10}
+              onCommit={(value) => patchSim({ latencyMs: Math.round(value) })}
+            />
+            <NumberField
+              label={t("stream-simulator-jitter")}
+              value={stream.simulator.jitterMs}
+              min={0}
+              max={1000}
+              step={10}
+              onCommit={(value) => patchSim({ jitterMs: Math.round(value) })}
+            />
+            <NumberField
+              label={t("stream-simulator-outage-every")}
+              value={stream.simulator.outageEveryS}
+              min={0}
+              max={3600}
+              step={5}
+              onCommit={(value) => patchSim({ outageEveryS: Math.round(value) })}
+            />
+            <NumberField
+              label={t("stream-simulator-outage-len")}
+              value={stream.simulator.outageLenS}
+              min={0}
+              max={120}
+              step={1}
+              onCommit={(value) => patchSim({ outageLenS: Math.round(value) })}
+            />
+          </div>
+        )}
+      </div>
 
       <p className="m-0 text-[10px] leading-snug text-havoc-muted">
         {t("stream-ffmpeg-note-before")}{" "}
