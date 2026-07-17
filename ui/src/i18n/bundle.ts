@@ -13,13 +13,42 @@ const SOURCES = import.meta.glob("./locales/*.ftl", {
   eager: true,
 }) as Record<string, string>;
 
-function sourceFor(code: LocaleCode): string {
-  const text = SOURCES[`./locales/${code}.ftl`];
-  if (text === undefined) {
-    // A locale in LOCALES with no .ftl is a build-time mistake, not a runtime one.
-    throw new Error(`i18n: no catalog for "${code}" — expected ui/src/i18n/locales/${code}.ftl`);
-  }
+/**
+ * The "Central inside" panel's fcp-* catalogs, vendored from the
+ * freally-central submodule and loaded into OUR bundles — the panel never owns
+ * an i18n runtime, it renders through this app's `t`.
+ */
+const PANEL_SOURCES = import.meta.glob(
+  "../../../vendor/freally-central/ui/src/panel/locales/*.ftl",
+  {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  },
+) as Record<string, string>;
+
+// A missing catalog is a build-time mistake (or an un-initialized submodule),
+// not a runtime one — fail loudly with the actionable hint.
+function ftlSource(sources: Record<string, string>, path: string, hint: string): string {
+  const text = sources[path];
+  if (text === undefined) throw new Error(hint);
   return text;
+}
+
+function sourceFor(code: LocaleCode): string {
+  return ftlSource(
+    SOURCES,
+    `./locales/${code}.ftl`,
+    `i18n: no catalog for "${code}" — expected ui/src/i18n/locales/${code}.ftl`,
+  );
+}
+
+function panelSourceFor(code: LocaleCode): string {
+  return ftlSource(
+    PANEL_SOURCES,
+    `../../../vendor/freally-central/ui/src/panel/locales/${code}.ftl`,
+    `i18n: no Central-panel catalog for "${code}" — run \`git submodule update --init\``,
+  );
 }
 
 /**
@@ -37,8 +66,10 @@ function buildBundle(code: LocaleCode): FluentBundle {
 
   if (code !== SOURCE_LOCALE) {
     bundle.addResource(new FluentResource(sourceFor(SOURCE_LOCALE)));
+    bundle.addResource(new FluentResource(panelSourceFor(SOURCE_LOCALE)));
   }
   bundle.addResource(new FluentResource(sourceFor(code)), { allowOverrides: true });
+  bundle.addResource(new FluentResource(panelSourceFor(code)), { allowOverrides: true });
   return bundle;
 }
 

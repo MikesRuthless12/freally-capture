@@ -41,6 +41,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Install Linux prerequisites
         if: matrix.os == 'ubuntu-latest'
         uses: ./.github/actions/linux-deps

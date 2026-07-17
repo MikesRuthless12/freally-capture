@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src ipc: http://ipc.localhost preview: http://preview.localhost wss://0.peerjs.com https://0.peerjs.com"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://mikesruthless12.github.io; media-src 'self' blob:; connect-src ipc: http://ipc.localhost preview: http://preview.localhost wss://0.peerjs.com https://0.peerjs.com https://api.github.com https://mikesruthless12.github.io"
     }
   },
   "plugins": {

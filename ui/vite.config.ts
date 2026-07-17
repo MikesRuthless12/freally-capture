@@ -1,4 +1,6 @@
 /// <reference types="vitest/config" />
+import { fileURLToPath, URL } from "node:url";
+
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -6,6 +8,15 @@ import { defineConfig } from "vite";
 // The dev port is fixed — tauri.conf.json's build.devUrl points at it.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      // "Central inside" (More Freally apps): the panel is vendored source from
+      // the freally-central submodule — same pinned commit as the Rust engine.
+      "@freally/central-panel": fileURLToPath(
+        new URL("../vendor/freally-central/ui/src/panel", import.meta.url),
+      ),
+    },
+  },
   // Keep Rust/Tauri compiler output visible alongside Vite's.
   clearScreen: false,
   server: {
