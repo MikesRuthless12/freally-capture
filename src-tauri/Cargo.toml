@@ -42,6 +42,10 @@ fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
 fcap-script = { path = "../crates/script" }
 fcap-preview = { path = "../crates/preview" }
+# The "Central inside" panel's engine (detect/download/install/launch), shared
+# verbatim with Freally Central via the vendor/freally-central submodule — the
+# same pinned commit supplies the panel UI the webview embeds.
+freally-central-engine = { path = "../vendor/freally-central/crates/freally-central-engine" }
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-dialog = "2"

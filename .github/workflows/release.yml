@@ -63,6 +63,7 @@ jobs:
           # A workflow_dispatch dry-run builds the requested ref; tag pushes
           # build the tag itself (the default).
           ref: ${{ inputs.tag || github.ref }}
+          submodules: true
 
       - name: Install Linux prerequisites
         if: matrix.target.os == 'ubuntu-latest'
@@ -234,6 +235,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          submodules: true
 
       - uses: actions/download-artifact@v4
         with:

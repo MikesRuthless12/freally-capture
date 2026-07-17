@@ -27,6 +27,7 @@ import { WhatsNewDialog } from "./WhatsNew";
 import { AboutDialog } from "./About";
 import { SettingsDialog } from "./Settings";
 import { ModelsDialog } from "./Models";
+import { MoreAppsDialog } from "./MoreApps";
 import { OpenedFrecDialog } from "./OpenedFrec";
 import { RecordingsDialog } from "./Recordings";
 import { AutomationDialog } from "./AutomationDialog";
@@ -66,7 +67,8 @@ export type ControlsDialogKind =
   | "updates"
   | "whatsnew"
   | "settings"
-  | "about";
+  | "about"
+  | "moreapps";
 
 /** The Controls dock: recording (P4); Go Live / Virtual Camera land in 0.70. */
 export function ControlsDock({
@@ -444,6 +446,7 @@ export function ControlsDock({
       {dialog === "about" && (
         <AboutDialog onClose={() => setDialog(null)} onCheckUpdates={() => setDialog("updates")} />
       )}
+      {dialog === "moreapps" && <MoreAppsDialog onClose={() => setDialog(null)} />}
       {openedFrec && <OpenedFrecDialog path={openedFrec} onClose={() => setOpenedFrec(null)} />}
       {dialog === "workspace" && (
         <WorkspaceDialog onClose={() => setDialog(null)} onSettingsSaved={onSettingsSaved} />

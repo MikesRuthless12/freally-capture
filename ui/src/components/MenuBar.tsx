@@ -517,6 +517,13 @@ export function MenuBar({
             label: t("menu-help-about"),
             onSelect: () => onOpenControls("about"),
           },
+          sep,
+          {
+            kind: "item",
+            id: "more-apps",
+            label: t("menu-help-more-apps"),
+            onSelect: () => onOpenControls("moreapps"),
+          },
         ],
       },
     ];

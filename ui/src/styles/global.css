@@ -10,6 +10,34 @@
   --color-havoc-muted: #8b8b93;
 }
 
+/*
+ * "Central inside" (More Freally apps): the vendored Central panel reads only
+ * --fcp-* variables (see vendor/freally-central/ui/src/panel/panel.css), so
+ * mapping them onto the havoc tokens makes it follow this app's theme — the
+ * light/custom themes override --color-havoc-* at runtime and flow through.
+ * Borders derive from the text colour so they flip with the theme too.
+ */
+:root {
+  --fcp-bg: var(--color-havoc-bg);
+  --fcp-panel: var(--color-havoc-panel);
+  --fcp-card: var(--color-havoc-panel);
+  --fcp-card-hover: color-mix(in srgb, var(--color-havoc-panel) 88%, white);
+  --fcp-text: var(--color-havoc-text);
+  --fcp-muted: var(--color-havoc-muted);
+  --fcp-border: color-mix(in srgb, var(--color-havoc-text) 12%, transparent);
+  --fcp-border-strong: color-mix(in srgb, var(--color-havoc-text) 20%, transparent);
+  --fcp-accent-1: var(--color-havoc-accent);
+  --fcp-accent-2: var(--color-havoc-accent-2);
+  --fcp-accent: var(--color-havoc-accent);
+}
+
+/* Status colours legible on the light theme (dark defaults otherwise). */
+:root[data-theme="light"] {
+  --fcp-ok: #17915f;
+  --fcp-warn: #b7791f;
+  --fcp-err: #c0392b;
+}
+
 html,
 body,
 #root {
