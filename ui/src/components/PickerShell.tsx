@@ -46,7 +46,9 @@ export function PickerShell({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      // A layered modal above this shell (e.g. the Central panel's changelog
+      // viewer) claims Escape and marks it consumed — only the topmost closes.
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

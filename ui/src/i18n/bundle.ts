@@ -27,24 +27,28 @@ const PANEL_SOURCES = import.meta.glob(
   },
 ) as Record<string, string>;
 
-function sourceFor(code: LocaleCode): string {
-  const text = SOURCES[`./locales/${code}.ftl`];
-  if (text === undefined) {
-    // A locale in LOCALES with no .ftl is a build-time mistake, not a runtime one.
-    throw new Error(`i18n: no catalog for "${code}" — expected ui/src/i18n/locales/${code}.ftl`);
-  }
+// A missing catalog is a build-time mistake (or an un-initialized submodule),
+// not a runtime one — fail loudly with the actionable hint.
+function ftlSource(sources: Record<string, string>, path: string, hint: string): string {
+  const text = sources[path];
+  if (text === undefined) throw new Error(hint);
   return text;
 }
 
+function sourceFor(code: LocaleCode): string {
+  return ftlSource(
+    SOURCES,
+    `./locales/${code}.ftl`,
+    `i18n: no catalog for "${code}" — expected ui/src/i18n/locales/${code}.ftl`,
+  );
+}
+
 function panelSourceFor(code: LocaleCode): string {
-  const text = PANEL_SOURCES[`../../../vendor/freally-central/ui/src/panel/locales/${code}.ftl`];
-  if (text === undefined) {
-    // Missing panel catalogs mean the submodule isn't checked out.
-    throw new Error(
-      `i18n: no Central-panel catalog for "${code}" — run \`git submodule update --init\``,
-    );
-  }
-  return text;
+  return ftlSource(
+    PANEL_SOURCES,
+    `../../../vendor/freally-central/ui/src/panel/locales/${code}.ftl`,
+    `i18n: no Central-panel catalog for "${code}" — run \`git submodule update --init\``,
+  );
 }
 
 /**
