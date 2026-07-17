@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { onEncoderFallback, onStats, onStream } from "../api/events";
 import type { EncoderFallback, StatsPayload, StreamStatus } from "../api/types";
 import { EmptyHint, Panel } from "../components/Panel";
+import { TimelineDialog } from "../components/TimelineDialog";
 import { useT } from "../i18n/t";
 import { formatBytes, formatDuration } from "../lib/format";
 
@@ -32,6 +33,8 @@ export function StatsDock() {
   // Encoder failover note (CAP-M12): sticky for the session — the operator
   // must be able to see AFTER the show why quality/CPU changed mid-way.
   const [fallback, setFallback] = useState<EncoderFallback | null>(null);
+  // CAP-N50: the session-timeline dialog.
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -105,6 +108,14 @@ export function StatsDock() {
           <Stat label={t("stats-vertical-fps")} value={(stats?.verticalFps ?? 0).toFixed(0)} />
         )}
       </div>
+      {stream?.rehearsal === true && targets.length > 0 && (
+        <p
+          role="status"
+          className="m-0 mt-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-2.5 py-1.5 text-[11px] text-violet-300"
+        >
+          {t("stats-rehearsal-note")}
+        </p>
+      )}
       {targets.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1" aria-label={t("stats-targets-label")}>
           {targets.map((target) => (
@@ -144,6 +155,16 @@ export function StatsDock() {
           <EmptyHint>{t("stats-starting")}</EmptyHint>
         </div>
       )}
+      {/* CAP-N50: the recorded, correlated session timeline (the dock shows
+          now; the timeline explains the whole session afterwards). */}
+      <button
+        type="button"
+        onClick={() => setTimelineOpen(true)}
+        className="mt-2 self-start rounded-md border border-white/10 px-2 py-1 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+      >
+        {t("stats-timeline-open")}
+      </button>
+      {timelineOpen && <TimelineDialog onClose={() => setTimelineOpen(false)} />}
     </Panel>
   );
 }

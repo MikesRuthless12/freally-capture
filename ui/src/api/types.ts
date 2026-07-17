@@ -648,6 +648,24 @@ export type StreamSettings = {
   autoRecord: boolean;
   /** CAP-M09: refuse "Go Live anyway" until every blocking item is green. */
   preflightHold: boolean;
+  /** CAP-N48: the rehearsal network simulator — shapes ONLY dry-run lanes. */
+  simulator: SimulatorSettings;
+  /** CAP-N51: write a local HTML+MD session report next to the recording
+   * when the session ends. Off by default; local only. */
+  sessionReport: boolean;
+};
+
+/** CAP-N48: how a rehearsal's loopback sinks shape the uplink. The numeric
+ * fields apply only to the "custom" profile. */
+export type SimulatorSettings = {
+  profile: "off" | "hotelWifi" | "mobileHotspot" | "custom";
+  /** Uplink cap in kbps; 0 = uncapped. */
+  bandwidthKbps: number;
+  latencyMs: number;
+  jitterMs: number;
+  /** Sever the connection every ~this many seconds; 0 = never. */
+  outageEveryS: number;
+  outageLenS: number;
 };
 
 /** One target's slice of the `stream` event payload. */
@@ -675,8 +693,103 @@ export type StreamStatus = {
   framesDropped: number;
   /** The enabled services, joined (e.g. "Twitch + YouTube"). */
   service: string;
+  /** CAP-N49: this session is a dry run against the owned loopback sinks —
+   * badge every LIVE surface so a rehearsal can never read as a broadcast.
+   * Absent = false (the backend always sends it). */
+  rehearsal?: boolean;
+  /** CAP-N48: the armed simulator profile id while a shaped rehearsal runs. */
+  simulator?: "hotelWifi" | "mobileHotspot" | "custom";
   /** Per-target health + bitrate (empty when idle). */
   targets: StreamTargetStatus[];
+};
+
+/** CAP-N52: one measured rung of the encoder benchmark ladder. */
+export type BenchResult = {
+  encoderId: string;
+  encoderLabel: string;
+  hardware: boolean;
+  preset: EncPreset;
+  width: number;
+  height: number;
+  fps: number;
+  achievedFps?: number;
+  /** Achieved ÷ target fps — >1 = faster than realtime. */
+  headroom?: number;
+  /** The documented gap: offered here but failed, and why. */
+  error?: string;
+};
+
+/** CAP-N52: what the measured ladder recommends. */
+export type BenchRecommendation = {
+  encoderId: string;
+  encoderLabel: string;
+  preset: EncPreset;
+  width: number;
+  height: number;
+  fps: number;
+  bitrateKbps: number;
+  headroom: number;
+};
+
+/** CAP-N52: the `benchmark` event payload / `benchmark_status` result. */
+export type BenchProgress = {
+  running: boolean;
+  total: number;
+  results: BenchResult[];
+  recommendation?: BenchRecommendation;
+};
+
+/** CAP-N50: one 1 Hz sample of the forensic session timeline. */
+export type ForensicSample = {
+  tMs: number;
+  fps: number;
+  renderUs: number;
+  dropped: number;
+  /** Encoder queue depth: frames the recorder's CFR clock is behind. */
+  framesBehind: number;
+  targets: ForensicTargetSample[];
+};
+
+export type ForensicTargetSample = {
+  id: number;
+  label: string;
+  state: "live" | "reconnecting" | "failed" | "ended";
+  kbps: number;
+  reconnects: number;
+  framesDropped: number;
+};
+
+/** CAP-N50: one discrete moment on the timeline. */
+export type ForensicEvent = {
+  tMs: number;
+  kind:
+    | "scene"
+    | "alarm"
+    | "alarm-clear"
+    | "fallback"
+    | "reconnect"
+    | "target"
+    | "recording"
+    | "stream"
+    | "marker";
+  label: string;
+};
+
+/** CAP-N50: a recorded session (running or last-closed). */
+export type ForensicSession = {
+  startedUnixMs: number;
+  rehearsal: boolean;
+  simulator?: string;
+  samples: ForensicSample[];
+  events: ForensicEvent[];
+  /** Every recording file the session produced. */
+  recordingPaths: string[];
+  endedTMs?: number | null;
+};
+
+export type TimelineStatus = {
+  active: boolean;
+  session?: ForensicSession;
 };
 
 /** Remote Guests networking — the user's own **opt-in** TURN relay (never
@@ -1533,6 +1646,11 @@ export type FilterKind =
   | { type: "renderDelay"; delayMs: number }
   | { type: "sharpen"; amount: number }
   | { type: "scroll"; speedX: number; speedY: number }
+  /** "Star Wars" plane: tilt-away in degrees + far-edge fade 0..1. Chain a
+   * looping Scroll before it for the full opening-crawl ad loop. */
+  | { type: "perspective"; tilt: number; fade: number }
+  /** Looping fade: in → visible → out → hidden (seconds), forever. */
+  | { type: "fadeLoop"; fadeInS: number; visibleS: number; fadeOutS: number; hiddenS: number }
   | { type: "crop"; left: number; top: number; right: number; bottom: number }
   | { type: "flip"; horizontal: boolean; vertical: boolean }
   | { type: "directionalBlur"; radius: number; angle: number }
@@ -1579,6 +1697,12 @@ export type SceneItem = {
   id: ItemId;
   source: SourceId;
   visible: boolean;
+  /** Per-output visibility (CAP-N53): composed into the live outputs (stream
+   * lanes incl. virtual camera + Freally Link); absent = true. */
+  onStream?: boolean;
+  /** Per-output visibility (CAP-N53): composed into the local-disk outputs
+   * (recorder + replay buffer); absent = true. */
+  onRecord?: boolean;
   locked: boolean;
   blend: BlendMode;
   transform: Transform;

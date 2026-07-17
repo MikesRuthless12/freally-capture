@@ -398,6 +398,13 @@ pub(crate) fn announce_fallback<R: Runtime>(
             .unwrap_or_else(|| id.to_string())
     };
     println!("{scope}: encoder failover {from} → {to}");
+    // CAP-N50: a failover is exactly the kind of moment a post-show
+    // timeline must explain.
+    crate::forensic::note(
+        app,
+        "fallback",
+        &format!("{scope}: {} → {}", label(from), label(to)),
+    );
     let _ = app.emit(
         "encoder-fallback",
         serde_json::json!({
@@ -995,7 +1002,7 @@ pub fn add_marker<R: Runtime>(app: &AppHandle<R>) -> Result<u32, String> {
         }
         active.handle.duration().as_millis() as u64
     };
-    let count = {
+    let (count, label) = {
         let mut markers = state
             .markers
             .lock()
@@ -1009,9 +1016,11 @@ pub fn add_marker<R: Runtime>(app: &AppHandle<R>) -> Result<u32, String> {
             .filter(|(_, label)| label.starts_with("Marker "))
             .count();
         let label = format!("Marker {}{}", manual + 1, ltc_suffix(app));
-        markers.push((position_ms, label));
-        markers.len() as u32
+        markers.push((position_ms, label.clone()));
+        (markers.len() as u32, label)
     };
+    // CAP-N50/N51: markers land on the forensic timeline + session report.
+    crate::forensic::note(app, "marker", &label);
     // CAP-N43: a marker can also cut a new part (frec lanes only).
     if state.split_on_marker.load(Ordering::Relaxed) {
         state.request_split_all();
@@ -1055,6 +1064,8 @@ pub fn add_auto_marker<R: Runtime>(app: &AppHandle<R>, label: &str) {
         markers.push((position_ms, clean.clone()));
         markers.len() as u32
     };
+    // CAP-N50/N51: auto-markers land on the forensic timeline + report too.
+    crate::forensic::note(app, "marker", &clean);
     emit_status(app);
     println!("recording: auto-marker {count} \u{201c}{clean}\u{201d} at {position_ms} ms");
 }

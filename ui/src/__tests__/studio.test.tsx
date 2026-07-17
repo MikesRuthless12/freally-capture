@@ -198,12 +198,29 @@ describe("the studio UI", () => {
 
   it("toggles item visibility", async () => {
     render(<App />);
-    const eye = await screen.findByRole("button", { name: /hide face cam/i });
+    // Exact match: the CAP-N53 per-output toggles are "… on stream" /
+    // "… in recording" and must not be caught here.
+    const eye = await screen.findByRole("button", { name: /^hide face cam$/i });
     act(() => eye.click());
     await waitFor(() => {
       const call = invokeCalls.find((c) => c.cmd === "studio_set_item_visible");
       expect(call?.args).toMatchObject({ itemId: "item-cam", visible: false });
     });
+  });
+
+  it("flags an item stream-hidden without touching the master eye (CAP-N53)", async () => {
+    render(<App />);
+    const live = await screen.findByRole("button", { name: /^hide face cam on stream$/i });
+    act(() => live.click());
+    await waitFor(() => {
+      const call = invokeCalls.find((c) => c.cmd === "studio_set_item_output_visible");
+      expect(call?.args).toMatchObject({
+        itemId: "item-cam",
+        onStream: false,
+        onRecord: true,
+      });
+    });
+    expect(invokeCalls.find((c) => c.cmd === "studio_set_item_visible")).toBeUndefined();
   });
 
   it("drives undo and redo from the keyboard (CAP-M01)", async () => {

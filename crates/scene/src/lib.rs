@@ -1754,6 +1754,24 @@ impl Collection {
         Ok(())
     }
 
+    /// Per-output visibility (CAP-N53): whether the item is composed into the
+    /// live outputs (`on_stream`) and the local-disk outputs (`on_record`).
+    /// Master `visible` is untouched — the operator surfaces always show the
+    /// full program, so unlike [`set_item_visible`] there is no linked-audio
+    /// side effect (audio routing stays a track concern).
+    pub fn set_item_output_visible(
+        &mut self,
+        scene_id: SceneId,
+        item_id: ItemId,
+        on_stream: bool,
+        on_record: bool,
+    ) -> Result<(), SceneError> {
+        let item = self.item_mut(scene_id, item_id)?;
+        item.on_stream = on_stream;
+        item.on_record = on_record;
+        Ok(())
+    }
+
     /// Pixel-perfect scaling (CAP-N70): how the item's pixels reach the
     /// canvas (smooth / nearest / integer-snapped nearest / sharp-bilinear).
     pub fn set_item_scaling(
@@ -2456,9 +2474,53 @@ mod tests {
         original
             .set_item_scaling(scene, item, ScaleMode::Integer)
             .expect("scaling");
+        // Per-output visibility (CAP-N53): a non-default flag rides along.
+        original
+            .set_item_output_visible(scene, item, false, true)
+            .expect("output visibility");
         let json = serde_json::to_string_pretty(&original).expect("serialize");
         let restored: Collection = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, restored, "the model must round-trip losslessly");
+    }
+
+    #[test]
+    fn output_visibility_defaults_on_and_never_touches_master_visible() {
+        // A pre-CAP-N53 item (no onStream/onRecord in the JSON) loads fully
+        // visible on every output.
+        let json = r#"{"source": "5f0c9dd0-7c6e-4b57-9a2e-0d38f4f4a001"}"#;
+        let legacy: SceneItem = serde_json::from_str(json).expect("legacy item");
+        assert!(legacy.on_stream, "absent onStream must default true");
+        assert!(legacy.on_record, "absent onRecord must default true");
+
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (_source, item) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Chat",
+                    SourceSettings::Color {
+                        color: Rgba::WHITE,
+                        width: 64,
+                        height: 64,
+                    },
+                ),
+            )
+            .expect("add item");
+        collection
+            .set_item_output_visible(scene, item, true, false)
+            .expect("set output visibility");
+        let placed = collection.scenes[0].items.last().expect("item placed");
+        assert!(placed.on_stream);
+        assert!(!placed.on_record);
+        assert!(
+            placed.visible,
+            "output flags must not clobber the master eye toggle"
+        );
+        // Unknown ids still error like the sibling setters.
+        assert!(collection
+            .set_item_output_visible(scene, ItemId::new(), true, true)
+            .is_err());
     }
 
     #[test]

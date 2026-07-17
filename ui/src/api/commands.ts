@@ -55,7 +55,9 @@ import type {
   SourceSettings,
   StillTarget,
   PipelineJob,
+  BenchProgress,
   StreamStatus,
+  TimelineStatus,
   StudioDto,
   Transform,
   TransitionKind,
@@ -90,6 +92,30 @@ export function remotePendingInvite(): Promise<string | null> {
 /** Go Live with the configured target (Settings → Stream). */
 export function streamStart(): Promise<void> {
   return invoke("stream_start");
+}
+
+/** CAP-N49: Go Live (rehearsal) — the full pipeline to the owned loopback
+ * sinks; zero bytes leave the machine. */
+export function streamStartRehearsal(): Promise<void> {
+  return invoke("stream_start_rehearsal");
+}
+
+/** CAP-N50: the forensic session timeline (running, or the last one). */
+export function forensicTimeline(): Promise<TimelineStatus> {
+  return invoke("forensic_timeline");
+}
+
+/** CAP-N52: run the measured encoder ladder (refused while on air). */
+export function benchmarkStart(): Promise<void> {
+  return invoke("benchmark_start");
+}
+
+export function benchmarkCancel(): Promise<void> {
+  return invoke("benchmark_cancel");
+}
+
+export function benchmarkStatus(): Promise<BenchProgress> {
+  return invoke("benchmark_status");
 }
 
 /** The pre-flight disk item (CAP-M09): whole minutes of recording left at
@@ -484,6 +510,16 @@ export function studioSetItemVisible(
   visible: boolean,
 ): Promise<void> {
   return invoke("studio_set_item_visible", { sceneId, itemId, visible });
+}
+
+/** Per-output visibility (CAP-N53): stream-only / recording-only items. */
+export function studioSetItemOutputVisible(
+  sceneId: SceneId,
+  itemId: ItemId,
+  onStream: boolean,
+  onRecord: boolean,
+): Promise<void> {
+  return invoke("studio_set_item_output_visible", { sceneId, itemId, onStream, onRecord });
 }
 
 export function studioSetItemLocked(

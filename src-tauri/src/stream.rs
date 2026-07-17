@@ -26,7 +26,7 @@ use fcap_encode::{
 };
 use fcap_stream::{
     LaneCells, LaneIo, LaneMaker, MemberSpec, MemberStatus, MultiHandle, MultiSession,
-    StreamProtocol, StreamState, StreamTarget,
+    RehearsalSink, ShapeProfile, StreamProtocol, StreamState, StreamTarget,
 };
 
 use crate::audio::AudioRuntime;
@@ -38,6 +38,16 @@ struct ActiveStream {
     session: Option<MultiSession>,
     handle: MultiHandle,
     services: String,
+    /// CAP-N49: this session is a dry run — every lane publishes to one of
+    /// the owned loopback sinks below and nothing leaves the machine.
+    rehearsal: bool,
+    /// CAP-N48: the armed simulator profile id ("hotelWifi" | ...) while a
+    /// shaped rehearsal runs — `None` on a real Go Live or a calm dry run.
+    simulator: Option<String>,
+    /// The rehearsal lanes' loopback sink servers (empty on a real Go
+    /// Live). Held purely for the session's lifetime — dropping this
+    /// stream drops them, which stops their drain threads.
+    _rehearsal_sinks: Vec<RehearsalSink>,
 }
 
 /// Managed Tauri state: the (single) live multistream.
@@ -159,6 +169,8 @@ impl StreamBridgeState {
                     reconnects,
                     frames_dropped,
                     service: active.services.clone(),
+                    rehearsal: active.rehearsal,
+                    simulator: active.simulator.clone(),
                     targets,
                 }
             }
@@ -253,6 +265,14 @@ pub struct StreamDto {
     pub frames_dropped: u64,
     /// The enabled services, joined (e.g. "Twitch + YouTube").
     pub service: String,
+    /// CAP-N49: this session is a dry run against the owned loopback sinks —
+    /// the UI badges every LIVE surface so a rehearsal can never read as a
+    /// real broadcast (and vice versa).
+    pub rehearsal: bool,
+    /// CAP-N48: the armed simulator profile id while a shaped rehearsal
+    /// runs (absent otherwise) — the UI shows which drill is in effect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simulator: Option<String>,
     /// Per-target health + bitrate (empty when idle).
     pub targets: Vec<StreamTargetDto>,
 }
@@ -266,6 +286,8 @@ impl StreamDto {
             reconnects: 0,
             frames_dropped: 0,
             service: String::new(),
+            rehearsal: false,
+            simulator: None,
             targets: Vec::new(),
         }
     }
@@ -340,6 +362,18 @@ struct TargetPlan {
 /// Go Live: validate every enabled target, build the multistream engine
 /// (shared encodes where settings match), tap the mixer once.
 pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    start_with(app, false)
+}
+
+/// CAP-N49 "Go Live (rehearsal)": the identical pipeline — encoders, mux,
+/// lanes, supervisor reconnect logic, stats, alarms — but every lane
+/// publishes MPEG-TS to an owned loopback sink, so zero bytes leave the
+/// machine. Stream keys and ingest URLs are never touched.
+pub fn start_rehearsal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    start_with(app, true)
+}
+
+fn start_with<R: Runtime>(app: &AppHandle<R>, rehearsal: bool) -> Result<(), String> {
     let state = app.state::<StreamBridgeState>();
     if state.starting.swap(true, Ordering::SeqCst) {
         return Err("a stream is already starting".to_string());
@@ -356,8 +390,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // green — enforce it HERE, where every path (button, hotkey, remote
     // API) converges. Missing keys and unusable encoders already hard-fail
     // below; errored sources and low disk are the two blockers nothing
-    // else would catch.
-    if settings.preflight_hold {
+    // else would catch. A CAP-N49 rehearsal is EXEMPT: a dry run is exactly
+    // how the operator shakes out an errored source or low disk before the
+    // show, so the hold must never refuse it.
+    if settings.preflight_hold && !rehearsal {
         let errored = app.state::<crate::events::RuntimeStats>().errored_sources();
         if errored > 0 {
             return Err(format!(
@@ -387,11 +423,14 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     })?;
 
     // SRT/WHIP ride the installed ffmpeg's own capabilities — probe them
-    // honestly instead of failing with a cryptic spawn error.
+    // honestly instead of failing with a cryptic spawn error. A rehearsal
+    // publishes MPEG-TS over loopback TCP for every lane, so it needs
+    // neither protocol even when the targets normally use them.
     let needs = |protocol: StreamProtocol| {
-        enabled
-            .iter()
-            .any(|(_, target)| target.service.protocol() == protocol)
+        !rehearsal
+            && enabled
+                .iter()
+                .any(|(_, target)| target.service.protocol() == protocol)
     };
     if needs(StreamProtocol::Srt) || needs(StreamProtocol::Whip) {
         let support = fcap_encode::stream_support(&ready);
@@ -421,16 +460,58 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .vertical
         .map(|vertical| (vertical.width, vertical.height));
 
+    // CAP-N48: the rehearsal network simulator. By construction it can only
+    // shape the owned loopback sinks a dry run publishes to — a real Go
+    // Live never touches this path, so a show can never be degraded by a
+    // forgotten simulator toggle.
+    let simulator: Option<ShapeProfile> = if rehearsal {
+        let sim = &settings.simulator;
+        match sim.profile.as_str() {
+            "hotelWifi" => Some(ShapeProfile::hotel_wifi()),
+            "mobileHotspot" => Some(ShapeProfile::mobile_hotspot()),
+            "custom" => Some(ShapeProfile {
+                bandwidth_kbps: sim.bandwidth_kbps,
+                latency_ms: sim.latency_ms,
+                jitter_ms: sim.jitter_ms,
+                outage_every_s: sim.outage_every_s,
+                outage_len_s: sim.outage_len_s,
+                seed: 0x4841_564f_4333,
+            })
+            .filter(ShapeProfile::is_active),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let simulator_profile = simulator
+        .is_some()
+        .then(|| settings.simulator.profile.clone());
+
+    // CAP-N49: each rehearsal lane gets its OWN loopback sink server, so
+    // multistream lane isolation drills for real (kill one sink, the others
+    // keep publishing). Started before the plans so a bind failure aborts
+    // cleanly; held in ActiveStream for the session's lifetime.
+    let mut rehearsal_sinks: Vec<RehearsalSink> = Vec::new();
     let mut plans: Vec<TargetPlan> = Vec::new();
     for (id, target_settings) in &enabled {
-        let target = StreamTarget {
-            service: target_settings.service,
-            ingest_url: target_settings.ingest_url.clone(),
-            key: target_settings.stream_key.clone(),
+        let url = if rehearsal {
+            let sink = RehearsalSink::start_shaped(simulator)
+                .map_err(|err| format!("could not start a rehearsal sink: {err}"))?;
+            let url = sink.url();
+            rehearsal_sinks.push(sink);
+            url
+        } else {
+            let target = StreamTarget {
+                service: target_settings.service,
+                ingest_url: target_settings.ingest_url.clone(),
+                key: target_settings.stream_key.clone(),
+            };
+            // The one place a key is consulted — a rehearsal never reads it,
+            // so a dry run works before the keys exist.
+            target
+                .publish_url()
+                .map_err(|err| format!("{}: {err}", target_settings.service.label()))?
         };
-        let url = target
-            .publish_url()
-            .map_err(|err| format!("{}: {err}", target_settings.service.label()))?;
         let encoder_id = resolve_stream_encoder(app, &target_settings.encoder_id)
             .map_err(|err| format!("{}: {err}", target_settings.service.label()))?;
         let protocol = target_settings.service.protocol();
@@ -462,7 +543,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             scale: (target_settings.output_width > 0 && target_settings.output_height > 0)
                 .then_some((target_settings.output_width, target_settings.output_height)),
             protocol,
-            auth: (protocol == StreamProtocol::Whip
+            // A rehearsal lane never carries the WHIP bearer — no header,
+            // no secret, no network.
+            auth: (!rehearsal
+                && protocol == StreamProtocol::Whip
                 && !target_settings.stream_key.trim().is_empty())
             .then(|| target_settings.stream_key.trim().to_string()),
         });
@@ -655,6 +739,9 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         session: Some(session),
         handle,
         services: services.clone(),
+        rehearsal,
+        simulator: simulator_profile,
+        _rehearsal_sinks: rehearsal_sinks,
     });
     state
         .wants_main
@@ -668,11 +755,19 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     state.active.store(true, Ordering::Relaxed);
     emit_status(app);
-    println!("stream: live → {services}");
+    if rehearsal {
+        println!("stream: REHEARSAL (loopback, nothing sent) → {services}");
+    } else {
+        println!("stream: live → {services}");
+    }
 
     // TASK-508: optionally bring the local recording up with the stream —
-    // best-effort, and its failure never stops the stream.
-    if settings.auto_record
+    // best-effort, and its failure never stops the stream. NEVER on a
+    // CAP-N49 rehearsal: a dry run is "nothing leaves the machine and
+    // nothing lands on disk", so auto-record must not silently write a real
+    // recording file for every rehearsal.
+    if !rehearsal
+        && settings.auto_record
         && !app
             .state::<crate::recording::RecordingState>()
             .wants_frames()
@@ -728,6 +823,15 @@ pub async fn stream_start<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || start(&app))
         .await
         .map_err(|err| format!("stream start task failed: {err}"))?
+}
+
+/// CAP-N49: Go Live (rehearsal) — the full pipeline against the owned
+/// loopback sinks; zero bytes leave the machine.
+#[tauri::command]
+pub async fn stream_start_rehearsal<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || start_rehearsal(&app))
+        .await
+        .map_err(|err| format!("rehearsal start task failed: {err}"))?
 }
 
 /// End the stream. Off the UI thread — the lane joins flush the RTMP

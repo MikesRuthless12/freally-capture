@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod benchmark;
 pub mod cef;
 pub mod decode;
 pub mod encoder;
@@ -32,6 +33,10 @@ pub mod trim;
 pub mod verify;
 pub mod wav;
 
+// `BenchCase`/`Recommendation` stay reachable via `benchmark::` for anyone
+// who names them; only the pieces a consumer actually uses are surfaced at
+// the crate root.
+pub use benchmark::{ladder, recommend, run_case, BenchResult};
 pub use encoder::{catalog_for, Catalog, EncoderDesc, EncoderEngine, VideoCodec};
 pub use export::{export_frec, ExportProgress};
 pub use failover::{classify_fault, Blame, FailoverDecision, FailoverLadder};

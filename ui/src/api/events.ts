@@ -9,6 +9,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Alarm,
   AudioLevelsPayload,
+  BenchProgress,
   CefStatus,
   EncoderFallback,
   ExportStatus,
@@ -38,6 +39,11 @@ export function onRemoteInvite(handler: (url: string) => void): Promise<Unlisten
 /** Subscribe to live-stream status (~1 Hz while a session runs). */
 export function onStream(handler: (status: StreamStatus) => void): Promise<UnlistenFn> {
   return listen<StreamStatus>("stream", (event) => handler(event.payload));
+}
+
+/** CAP-N52: subscribe to encoder-benchmark progress (one push per case). */
+export function onBenchmark(handler: (progress: BenchProgress) => void): Promise<UnlistenFn> {
+  return listen<BenchProgress>("benchmark", (event) => handler(event.payload));
 }
 
 /** Subscribe to replay-buffer status (~1 Hz while armed). */

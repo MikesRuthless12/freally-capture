@@ -31,4 +31,12 @@ describe("studio shell", () => {
     }
     expect(screen.getByRole("button", { name: /start recording/i })).toBeInTheDocument();
   });
+
+  it("offers Go Live (rehearsal) beside Go Live with an honest tooltip (CAP-N49)", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: /go live/i });
+    const rehearse = screen.getByRole("button", { name: /^rehearse$/i });
+    // The tooltip must say nothing is sent — the whole point of a dry run.
+    expect(rehearse).toHaveAttribute("title", expect.stringMatching(/nothing is sent/i));
+  });
 });

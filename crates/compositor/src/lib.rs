@@ -51,7 +51,8 @@ mod tests {
     use super::*;
     use fcap_capture::{Frame, PixelFormat};
     use fcap_scene::{
-        BlendMode, Collection, Rgba, Source, SourceId, SourceSettings, StingerMatte, Transform,
+        BlendMode, Collection, ItemId, Rgba, SceneId, Source, SourceId, SourceSettings,
+        StingerMatte, Transform,
     };
     use std::time::Instant;
 
@@ -219,6 +220,66 @@ mod tests {
             .set_item_scaling(scene, item, mode)
             .expect("set scaling");
         collection
+    }
+
+    // -- CAP-N53 per-output visibility golden --------------------------------
+
+    #[test]
+    fn output_hidden_items_skip_the_variant_render_and_return_on_clear() {
+        let Some(mut comp) = compositor(4, 4) else {
+            return;
+        };
+        let (white, red) = (SourceId::new(), SourceId::new());
+        comp.upload_frame(
+            white,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [255, 255, 255, 255]),
+        )
+        .expect("upload white");
+        comp.upload_frame(
+            red,
+            &solid_frame(4, 4, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+        // A white base with a red overlay covering it.
+        let mut collection = scene_with_item((4, 4), white, centered((4, 4)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let mut overlay = Source::new(
+            "overlay",
+            SourceSettings::Color {
+                color: Rgba::WHITE,
+                width: 4,
+                height: 4,
+            },
+        );
+        overlay.id = red;
+        collection.sources.push(overlay);
+        let overlay_item = collection
+            .add_item_with_existing_source(scene, red)
+            .expect("add overlay");
+        collection
+            .set_item_transform(scene, overlay_item, centered((4, 4)))
+            .expect("overlay transform");
+
+        // Full program: the overlay is on top.
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let program = comp.read_program().expect("readback");
+        assert_eq!(pixel(&program, 2, 2), [255, 0, 0, 255]);
+
+        // The stream-only/recording-only variant renders without it...
+        comp.set_output_hidden(std::collections::HashSet::from([overlay_item]));
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let variant = comp.read_program().expect("readback");
+        assert_eq!(
+            pixel(&variant, 2, 2),
+            [255, 255, 255, 255],
+            "an output-hidden item must not be composed"
+        );
+
+        // ...and clearing the set restores the full program exactly.
+        comp.set_output_hidden(std::collections::HashSet::new());
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        let restored = comp.read_program().expect("readback");
+        assert_eq!(pixel(&restored, 2, 2), [255, 0, 0, 255]);
     }
 
     // -- CAP-N70 per-scaler goldens (the 0.200.0 close-out owed these) -------
@@ -1452,6 +1513,115 @@ mod tests {
             [255, 255, 255, 255],
             "white wrapped around"
         );
+    }
+
+    /// Green base + a white overlay item — the probe pair for the Mike-FX
+    /// goldens (Perspective / Fade Loop): where the overlay thins or fades,
+    /// the green base shows through.
+    fn green_base_white_overlay(comp: &mut Compositor) -> (Collection, SceneId, ItemId) {
+        let (base, plane) = (SourceId::new(), SourceId::new());
+        comp.upload_frame(
+            base,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [0, 255, 0, 255]),
+        )
+        .expect("upload base");
+        comp.upload_frame(
+            plane,
+            &solid_frame(8, 8, PixelFormat::Rgba8, [255, 255, 255, 255]),
+        )
+        .expect("upload overlay");
+        let mut collection = scene_with_item((8, 8), base, centered((8, 8)), BlendMode::Normal);
+        let scene = collection.active_scene;
+        let mut source = Source::new(
+            "overlay",
+            SourceSettings::Color {
+                color: Rgba::WHITE,
+                width: 8,
+                height: 8,
+            },
+        );
+        source.id = plane;
+        collection.sources.push(source);
+        let item = collection
+            .add_item_with_existing_source(scene, plane)
+            .expect("add overlay");
+        collection
+            .set_item_transform(scene, item, centered((8, 8)))
+            .expect("transform");
+        (collection, scene, item)
+    }
+
+    #[test]
+    fn perspective_tilts_the_plane_and_fades_the_far_edge() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let (collection, scene, item) = green_base_white_overlay(&mut comp);
+        let mut render_with = |tilt: f32, fade: f32| {
+            let mut tilted = collection.clone();
+            tilted
+                .add_filter(scene, item, FilterKind::Perspective { tilt, fade })
+                .expect("add filter");
+            comp.render(tilted.active_scene(), 0.0).expect("render");
+            comp.read_program().expect("readback")
+        };
+        // Tilted, no fade: the near (bottom) edge keeps its full width...
+        let tilted = render_with(55.0, 0.0);
+        assert_eq!(
+            pixel(&tilted, 1, 7),
+            [255, 255, 255, 255],
+            "the near edge stays full width"
+        );
+        // ...the far corners fall off the narrowed plane (base shows)...
+        assert_eq!(
+            pixel(&tilted, 0, 0),
+            [0, 255, 0, 255],
+            "the far corner is off the plane"
+        );
+        // ...and the far middle is still the readable plane (Mike's capture
+        // tilt: no forced fade).
+        assert_eq!(
+            pixel(&tilted, 4, 0),
+            [255, 255, 255, 255],
+            "the far middle stays readable"
+        );
+        // With full fade the far middle dims into the base.
+        let faded = render_with(55.0, 1.0);
+        let px = pixel(&faded, 4, 0);
+        assert!(px[0] < 120, "the far edge should fade out, got {px:?}");
+    }
+
+    #[test]
+    fn fade_loop_cycles_between_visible_and_hidden_forever() {
+        let Some(mut comp) = compositor(8, 8) else {
+            return;
+        };
+        let (mut collection, scene, item) = green_base_white_overlay(&mut comp);
+        collection
+            .add_filter(
+                scene,
+                item,
+                FilterKind::FadeLoop {
+                    fade_in_s: 1.0,
+                    visible_s: 1.0,
+                    fade_out_s: 1.0,
+                    hidden_s: 1.0,
+                },
+            )
+            .expect("add filter");
+        let mut at = |t: f32| {
+            comp.render(collection.active_scene(), t).expect("render");
+            comp.read_program().expect("readback")
+        };
+        assert_eq!(pixel(&at(1.5), 4, 4), [255, 255, 255, 255], "held visible");
+        assert_eq!(pixel(&at(3.5), 4, 4), [0, 255, 0, 255], "held hidden");
+        let mid = pixel(&at(0.5), 4, 4);
+        assert!(
+            mid[0] > 100 && mid[0] < 155,
+            "mid fade-in should blend, got {mid:?}"
+        );
+        // The whole point: the cycle repeats unattended (t = 4.5 ≡ 0.5).
+        assert_eq!(mid, pixel(&at(4.5), 4, 4), "the loop repeats exactly");
     }
 
     /// A 4×4 frame: top half white, bottom half black — the vertical probe.
