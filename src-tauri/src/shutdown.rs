@@ -89,8 +89,7 @@ pub fn consequences<R: Runtime>(app: &AppHandle<R>) -> QuitConsequences {
 
 /// The session marker, beside `settings.json`/`workspace.json`.
 fn marker_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-        .map(|dirs| dirs.config_dir().join("session-running"))
+    crate::paths::config_dir().map(|dir| dir.join("session-running"))
 }
 
 /// Create this session's marker; returns whether the previous session's was

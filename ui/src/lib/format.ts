@@ -4,8 +4,11 @@
  * source of truth — no drifting per-panel copies).
  */
 
-/** Bytes → a compact size (binary units): GB at or above a gigabyte, else MB. */
+/** Bytes → a compact size (binary units): B / KB below a megabyte, then MB, then
+ * GB at or above a gigabyte. */
 export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} KB`;
   const gb = bytes / 1024 ** 3;
   if (gb >= 1) return `${gb.toFixed(gb >= 100 ? 0 : gb >= 10 ? 1 : 2)} GB`;
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;

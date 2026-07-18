@@ -90,8 +90,7 @@ const EXIT_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 const EXIT_WAIT_TRIES: u32 = 40; // ≤ 10 s, then relaunch anyway
 
 fn crash_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-        .map(|dirs| dirs.data_dir().join("crash-reports"))
+    crate::paths::data_dir().map(|dir| dir.join("crash-reports"))
 }
 
 /// Redact the OS user's home path + username from `text` so a report carries

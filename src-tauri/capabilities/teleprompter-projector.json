@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "teleprompter-projector",
+  "description": "The teleprompter projector window (CAP-N58). Unlike the chrome-free compositor projectors (which only fetch the preview:// slot), this window needs IPC: it reads the shared teleprompter state (initial `teleprompter_get` snapshot + live `teleprompter` events) so it actually shows the scrolling text, and it closes itself on Esc. Without a capability all of that IPC is denied — the window renders blank and cannot be dismissed.",
+  "windows": ["projector-teleprompter"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}

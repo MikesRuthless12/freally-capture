@@ -146,10 +146,8 @@ pub fn settings_complete_onboarding(store: State<'_, SettingsStore>) -> Result<(
 pub fn reveal_app_folder(store: State<'_, SettingsStore>, kind: String) -> Result<(), String> {
     let dir = match kind.as_str() {
         "recordings" => crate::recording::recordings_folder(&store.get().recording),
-        "settings" => directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-            .ok_or_else(|| "no config directory on this system".to_owned())?
-            .config_dir()
-            .to_path_buf(),
+        "settings" => crate::paths::config_dir()
+            .ok_or_else(|| "no config directory on this system".to_owned())?,
         _ => return Err("unknown app folder".to_owned()),
     };
     // The recordings folder is user/profile-settable and could be a UNC path;

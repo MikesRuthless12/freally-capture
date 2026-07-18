@@ -34,8 +34,7 @@ struct InProgress {
 }
 
 fn sidecar_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-        .map(|dirs| dirs.config_dir().join("recording-in-progress.json"))
+    crate::paths::config_dir().map(|dir| dir.join("recording-in-progress.json"))
 }
 
 /// Record the session's outputs (recording start; wire containers only).

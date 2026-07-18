@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod diff;
 pub mod filter;
 pub mod history;
 pub mod obs_import;
@@ -30,6 +31,10 @@ pub use audio::{
     AudioFilter, AudioFilterId, AudioFilterKind, AudioOutputRoute, AudioSettings, EqBand,
     EqBandType, MonitorMode, OutputBus, MAX_SYNC_OFFSET_MS, MAX_VOLUME_DB, MIN_VOLUME_DB,
     TRACK_COUNT,
+};
+pub use diff::{
+    diff_collections, merge_selected, ChangeKind, CollectionDiff, ItemChange, SceneChange,
+    SourceChange,
 };
 pub use filter::{Filter, FilterId, FilterKind, MaskMode};
 pub use history::{History, HistoryState};

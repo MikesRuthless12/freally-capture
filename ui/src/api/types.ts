@@ -63,11 +63,23 @@ export type AutoConfig = {
 /** Which palette the UI paints with (mirrors `ThemeMode` in settings.rs). */
 export type ThemeMode = "dark" | "light" | "custom";
 
+/** A full authored palette (CAP-N65) — mirrors `CustomPalette` in settings.rs. */
+export type CustomPalette = {
+  bg: string;
+  panel: string;
+  accent: string;
+  accent2: string;
+  text: string;
+  muted: string;
+};
+
 /** Appearance (mirrors `ThemeSettings` in settings.rs). */
 export type ThemeSettings = {
   mode: ThemeMode;
   /** `#rrggbb` — Rust's `validate()` rejects anything else. */
   accent: string;
+  /** CAP-N65: a full authored palette, applied when `mode` is `custom`. */
+  palette?: CustomPalette;
 };
 
 /** Preview alignment aids (CAP-M04) — mirrors `AlignmentSettings` in settings.rs. */

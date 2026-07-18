@@ -15,6 +15,63 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.900.0] — 2026-07-18 (Studio Management & Workflow — Phase 8)
+
+> *Own your studio.* Phase 8 makes a whole layout portable and shareable, adds version control for
+> your scenes, puts your most-used actions one tap away, and opens up full theming and a USB-stick
+> portable mode. Everything is strictly local — no new dependencies and no new network calls.
+
+### Added
+
+- **Scene-collection pack — export/import (CAP-N60)** — bundle a whole layout (the scene graph plus
+  its local assets: images, media, LUTs, masks, fonts) into a single portable `.fcappack` and share
+  it as one file. Import relinks assets on the target machine; URL/UNC paths are recorded as *external*
+  and never statted; fonts are flagged for attribution. No marketplace, no server.
+- **Scene-collection diff & merge (CAP-N61)** — compare the active collection against another
+  collection, a `.fcappack`, or a snapshot; see added / removed / changed scenes, sources, and
+  per-item transform / filters / visibility; then **cherry-pick** exactly which changes to merge in (a
+  picked scene brings the sources it uses). Reconcile two versions without a cloud.
+- **Named version snapshots (CAP-N62)** — one-click named checkpoints of the active collection with a
+  browsable timeline, restore, and a diff view (reusing the compare tool). Intentional history beside
+  autosave and undo; capped at 50 with disclosed disk usage, and a "before restore" checkpoint so a
+  restore is never one-way.
+- **Portable mode (CAP-N63)** — drop a `freally-portable.txt` marker next to the executable and all
+  app data (settings, profiles, collections) lives under the exe's folder — run the whole studio from
+  a USB stick without touching the host OS profile. Settings → About shows the portable status and the
+  data location.
+- **One-file backup & restore (CAP-N64)** — export everything (settings, profiles, scene collections)
+  to a single versioned `.fcapbackup`, and restore it selectively here or on a new machine (a
+  migration flow). Secrets — stream keys, passwords — are always stripped from a backup; server-owned
+  fields (EULA, onboarding, camera profiles) are preserved on restore.
+- **Theme editor (CAP-N65)** — a visual editor over the CSS-variable theme: author the full six-colour
+  palette with live **WCAG contrast** warnings, and export/import shareable `.fctheme` files.
+- **Dock layout presets (CAP-N66)** — save named view layouts (stats-dock visibility + mixer
+  orientation) and switch between them.
+- **Settings search & recently-changed (CAP-N67)** — a search field over the Settings modal (every
+  category keyword-indexed, jump-to) plus a per-category "changed since opened" marker.
+- **Quick-actions grid (CAP-N68)** — a customizable Stream-Deck-style button board (scenes, commands,
+  macros, soundboard pads) with per-button colour and pages; command buttons fire the same allowlisted
+  studio actions as hotkeys and the LAN panel, and the grid config is **shared with the CAP-N06 LAN
+  panel**.
+
+### Fixed
+
+- **Teleprompter projector** — "Open projector" opened a blank window that could not be closed (it was
+  borderless with no titlebar, and its IPC was unauthorized). It now opens as a normal, closable
+  window that shows the scrolling script; **Esc** closes it. **File → Exit** now quits reliably too
+  (the main window was missing the window-close permission).
+- **Teleprompter dialog** — a **Stop** button (pause + rewind to the top) so a short script no longer
+  looks blank after Play and the text can be re-read and re-edited.
+- **Sources panel** — the per-source remove and reorder controls were hover-only and could be clipped
+  off the rail; each source now has an always-visible **top control strip** (LIVE/REC · lock · reorder
+  · filters · properties · clone · remove).
+
+### Notes
+
+- **No new dependencies** (the `zip` crate was already vendored) and **no new network calls**: the
+  pack / backup / snapshot / theme features are strictly local files; the quick-actions LAN sharing
+  rides the existing opt-in CAP-N06 web panel. `wix.version` bumped 0.253.0 → 0.254.0 (MSI minor cap).
+
 ## [0.800.0] — 2026-07-17 (Remote Guests & Show Production — Phase 7)
 
 > *From "guests connect" to "a produced show."* Phase 7 turns the remote-guest session into a

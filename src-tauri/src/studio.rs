@@ -434,8 +434,7 @@ impl StudioState {
     /// Load the *active* collection (per `workspace.json`) — so a scene-
     /// collection switch survives a restart — or start fresh.
     pub fn load_default() -> Self {
-        let config_dir = directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-            .map(|dirs| dirs.config_dir().to_path_buf());
+        let config_dir = crate::paths::config_dir();
         let path = config_dir
             .as_ref()
             .map(|dir| collection_file(dir, &active_collection_name(dir)));
@@ -1134,6 +1133,36 @@ impl StudioState {
         }
     }
 
+    /// The active collection's on-disk path, if one is bound. Used by the backup
+    /// restore to tell whether it just overwrote the file the studio is editing.
+    pub fn active_path(&self) -> Option<PathBuf> {
+        self.lock().path.clone()
+    }
+
+    /// Reload the active collection from its file on disk, dropping the in-memory
+    /// copy, its dirty state, and its undo history. Used after a backup restore
+    /// overwrote the active file: without this the autosave would clobber the
+    /// restored scenes straight back to the old in-memory ones. Mirrors the load
+    /// half of [`Self::switch_collection_file`] (same file, no save-first).
+    pub fn reload_active<R: Runtime>(&self, app: &AppHandle<R>) {
+        let dto = {
+            let mut core = self.lock();
+            let Some(path) = core.path.clone() else {
+                return;
+            };
+            core.collection = read_collection(&path);
+            core.dirty_since = None;
+            core.preview_scene = None;
+            core.transition = None;
+            core.retry_nonces.clear();
+            // A different document loaded — undo must not cross the boundary.
+            core.undo.clear();
+            core.revision += 1;
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
+    }
+
     /// Scene-collection switching (TASK-506): save the current scenes to
     /// `save_as` (migrating them into the collections dir on first use),
     /// then either keep them as a duplicate under `load` (create) or load
@@ -1288,7 +1317,7 @@ fn active_collection_name(config_dir: &std::path::Path) -> String {
         .unwrap_or_else(|| crate::profiles::DEFAULT_NAME.to_string())
 }
 
-fn read_collection(path: &std::path::Path) -> Collection {
+pub(crate) fn read_collection(path: &std::path::Path) -> Collection {
     match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<Collection>(&text) {
             Ok(mut collection) => {

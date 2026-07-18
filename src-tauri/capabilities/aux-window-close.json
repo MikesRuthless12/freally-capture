@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "aux-window-close",
+  "description": "Every auxiliary window (compositor projectors `projector-*`, the multiview window, and the teleprompter projector) may close itself. `core:window:allow-close` is NOT part of `core:default`, so without this an Esc/keyboard close on a borderless/fullscreen aux window is denied and the window becomes a trap. This grants only the self-close permission — the chrome-free projectors still use `preview://` fetch, not IPC.",
+  "windows": ["projector-*", "multiview"],
+  "permissions": ["core:window:allow-close"]
+}

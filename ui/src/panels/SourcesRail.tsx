@@ -410,416 +410,422 @@ export function SourcesRail({
             return (
               <li key={item.id}>
                 <div
-                  className={`group flex items-center gap-1 rounded-lg border px-1.5 py-1.5 ${
+                  className={`group flex flex-col-reverse gap-1 rounded-lg border px-1.5 py-1.5 ${
                     isSelected
                       ? "border-havoc-accent/50 bg-havoc-accent/10"
                       : "border-white/10 bg-white/[0.02]"
                   }`}
                 >
-                  {groupPick !== null && (
-                    <input
-                      type="checkbox"
-                      checked={groupPick.includes(item.id)}
-                      disabled={Boolean(itemGroup)}
-                      title={
-                        itemGroup
-                          ? t("sources-already-in-group", { name: itemGroup.name })
-                          : t("sources-pick-for-new-group")
-                      }
-                      aria-label={t("sources-pick-item-for-group", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      onChange={(event) =>
-                        setGroupPick((picked) =>
-                          picked === null
-                            ? picked
-                            : event.target.checked
-                              ? [...picked, item.id]
-                              : picked.filter((id) => id !== item.id),
-                        )
-                      }
-                    />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onSetVisible(item.id, !item.visible)}
-                    title={item.visible ? t("sources-hide") : t("sources-show")}
-                    aria-label={
-                      item.visible
-                        ? t("sources-hide-item", {
-                            name: source?.name ?? t("sources-fallback-name"),
-                          })
-                        : t("sources-show-item", {
-                            name: source?.name ?? t("sources-fallback-name"),
-                          })
-                    }
-                    aria-pressed={item.visible}
-                    className={`shrink-0 rounded px-1 text-xs ${
-                      item.visible ? "text-havoc-text" : "text-havoc-muted opacity-50"
-                    }`}
-                  >
-                    {item.visible ? "👁" : "–"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={Boolean(item.backdrop)}
-                    onClick={() => {
-                      if (!scene) return;
-                      studioSetFocus(scene.id, isFocused ? null : item.id).catch((err) =>
-                        console.error("focus toggle failed:", err),
-                      );
-                    }}
-                    title={
-                      item.backdrop
-                        ? t("sources-backdrop-pinned")
-                        : isFocused
-                          ? t("sources-unfocus-title")
-                          : t("sources-focus-title")
-                    }
-                    aria-label={
-                      isFocused
-                        ? t("sources-unfocus-item", {
-                            name: source?.name ?? t("sources-fallback-name"),
-                          })
-                        : t("sources-focus-item", {
-                            name: source?.name ?? t("sources-fallback-name"),
-                          })
-                    }
-                    aria-pressed={isFocused}
-                    className={`shrink-0 rounded px-1 text-xs ${
-                      isFocused
-                        ? "text-havoc-accent"
-                        : "text-havoc-muted opacity-60 hover:opacity-100"
-                    }`}
-                  >
-                    ⛶
-                  </button>
-                  {!audioOnly && !item.backdrop && (
+                  <div className="flex min-w-0 items-center gap-1">
+                    {groupPick !== null && (
+                      <input
+                        type="checkbox"
+                        checked={groupPick.includes(item.id)}
+                        disabled={Boolean(itemGroup)}
+                        title={
+                          itemGroup
+                            ? t("sources-already-in-group", { name: itemGroup.name })
+                            : t("sources-pick-for-new-group")
+                        }
+                        aria-label={t("sources-pick-item-for-group", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        onChange={(event) =>
+                          setGroupPick((picked) =>
+                            picked === null
+                              ? picked
+                              : event.target.checked
+                                ? [...picked, item.id]
+                                : picked.filter((id) => id !== item.id),
+                          )
+                        }
+                      />
+                    )}
                     <button
                       type="button"
+                      onClick={() => onSetVisible(item.id, !item.visible)}
+                      title={item.visible ? t("sources-hide") : t("sources-show")}
+                      aria-label={
+                        item.visible
+                          ? t("sources-hide-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                          : t("sources-show-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                      }
+                      aria-pressed={item.visible}
+                      className={`shrink-0 rounded px-1 text-xs ${
+                        item.visible ? "text-havoc-text" : "text-havoc-muted opacity-50"
+                      }`}
+                    >
+                      {item.visible ? "👁" : "–"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(item.backdrop)}
                       onClick={() => {
                         if (!scene) return;
-                        studioSetCenterView(scene.id, item.id).catch((err) =>
-                          console.error("center view failed:", err),
+                        studioSetFocus(scene.id, isFocused ? null : item.id).catch((err) =>
+                          console.error("focus toggle failed:", err),
                         );
                       }}
-                      title={t("sources-center-title")}
-                      aria-label={t("sources-center-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
-                    >
-                      ◉
-                    </button>
-                  )}
-                  {(source?.kind === "display" || source?.kind === "window") && !item.backdrop && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !zoomFollow[item.id];
-                        setZoomFollow((state) => ({ ...state, [item.id]: next }));
-                        studioZoomFollow(item.id, next).catch((err) =>
-                          console.error("zoom follow failed:", err),
-                        );
-                      }}
-                      title={t("sources-follow-title")}
-                      aria-label={t("sources-follow-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      aria-pressed={Boolean(zoomFollow[item.id])}
+                      title={
+                        item.backdrop
+                          ? t("sources-backdrop-pinned")
+                          : isFocused
+                            ? t("sources-unfocus-title")
+                            : t("sources-focus-title")
+                      }
+                      aria-label={
+                        isFocused
+                          ? t("sources-unfocus-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                          : t("sources-focus-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })
+                      }
+                      aria-pressed={isFocused}
                       className={`shrink-0 rounded px-1 text-xs ${
-                        zoomFollow[item.id]
+                        isFocused
                           ? "text-havoc-accent"
                           : "text-havoc-muted opacity-60 hover:opacity-100"
                       }`}
                     >
-                      🎯
+                      ⛶
                     </button>
-                  )}
-                  {isRenaming ? (
-                    <input
-                      autoFocus
-                      value={renaming.draft}
-                      onChange={(event) =>
-                        setRenaming({ source: item.source, draft: event.target.value })
-                      }
-                      onBlur={commitRename}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") commitRename();
-                        if (event.key === "Escape") setRenaming(null);
-                      }}
-                      aria-label={t("sources-rename-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="min-w-0 flex-1 rounded border border-havoc-accent/50 bg-transparent px-1 text-xs text-havoc-text outline-none"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onSelect(item.id)}
-                      onDoubleClick={() =>
-                        source && setRenaming({ source: source.id, draft: source.name })
-                      }
-                      title={source?.name}
-                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-havoc-text"
-                    >
-                      <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
-                        {t(KIND_BADGE[source?.kind ?? ""] ?? "sources-kind-unknown")}
-                      </span>
-                      {itemGroup && (
-                        <span
-                          title={t("sources-in-group", { name: itemGroup.name })}
-                          className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
-                        >
-                          ⊞
-                        </span>
-                      )}
-                      {item.backdrop && (
-                        <span
-                          title={t("sources-backdrop-badge")}
-                          className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
-                        >
-                          🖼
-                        </span>
-                      )}
-                      <span className="truncate">
-                        {source?.name ?? t("sources-missing-source")}
-                      </span>
-                    </button>
-                  )}
-                  {status && status.state === "error" ? (
-                    <span className="flex shrink-0 items-center gap-1">
+                    {!audioOnly && !item.backdrop && (
                       <button
                         type="button"
-                        onClick={() =>
-                          studioRetrySource(item.source).catch((err) =>
-                            console.error("source retry failed:", err),
-                          )
-                        }
-                        title={t("sources-retry-error", {
-                          message: status.errorMessage ?? t("sources-fallback-error"),
-                        })}
-                        aria-label={t("sources-retry-item", {
+                        onClick={() => {
+                          if (!scene) return;
+                          studioSetCenterView(scene.id, item.id).catch((err) =>
+                            console.error("center view failed:", err),
+                          );
+                        }}
+                        title={t("sources-center-title")}
+                        aria-label={t("sources-center-item", {
                           name: source?.name ?? t("sources-fallback-name"),
                         })}
-                        className="flex items-center gap-1 rounded px-1 text-[10px] text-red-400 hover:text-red-300"
+                        className="shrink-0 rounded px-1 text-xs text-havoc-muted opacity-60 hover:opacity-100"
                       >
-                        <span
-                          aria-label={t("sources-status-error")}
-                          className="h-1.5 w-1.5 rounded-full bg-red-400"
-                        />
-                        ↻
+                        ◉
                       </button>
-                      {status.errorCode === "permission" && os === "macos" && (
+                    )}
+                    {(source?.kind === "display" || source?.kind === "window") &&
+                      !item.backdrop && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !zoomFollow[item.id];
+                            setZoomFollow((state) => ({ ...state, [item.id]: next }));
+                            studioZoomFollow(item.id, next).catch((err) =>
+                              console.error("zoom follow failed:", err),
+                            );
+                          }}
+                          title={t("sources-follow-title")}
+                          aria-label={t("sources-follow-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })}
+                          aria-pressed={Boolean(zoomFollow[item.id])}
+                          className={`shrink-0 rounded px-1 text-xs ${
+                            zoomFollow[item.id]
+                              ? "text-havoc-accent"
+                              : "text-havoc-muted opacity-60 hover:opacity-100"
+                          }`}
+                        >
+                          🎯
+                        </button>
+                      )}
+                    {isRenaming ? (
+                      <input
+                        autoFocus
+                        value={renaming.draft}
+                        onChange={(event) =>
+                          setRenaming({ source: item.source, draft: event.target.value })
+                        }
+                        onBlur={commitRename}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") commitRename();
+                          if (event.key === "Escape") setRenaming(null);
+                        }}
+                        aria-label={t("sources-rename-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="min-w-0 flex-1 rounded border border-havoc-accent/50 bg-transparent px-1 text-xs text-havoc-text outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onSelect(item.id)}
+                        onDoubleClick={() =>
+                          source && setRenaming({ source: source.id, draft: source.name })
+                        }
+                        title={source?.name}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-havoc-text"
+                      >
+                        <span className="rounded bg-white/10 px-1 py-px text-[9px] text-havoc-muted uppercase">
+                          {t(KIND_BADGE[source?.kind ?? ""] ?? "sources-kind-unknown")}
+                        </span>
+                        {itemGroup && (
+                          <span
+                            title={t("sources-in-group", { name: itemGroup.name })}
+                            className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
+                          >
+                            ⊞
+                          </span>
+                        )}
+                        {item.backdrop && (
+                          <span
+                            title={t("sources-backdrop-badge")}
+                            className="rounded bg-havoc-accent/15 px-1 py-px text-[9px] text-havoc-accent"
+                          >
+                            🖼
+                          </span>
+                        )}
+                        <span className="truncate">
+                          {source?.name ?? t("sources-missing-source")}
+                        </span>
+                      </button>
+                    )}
+                    {status && status.state === "error" ? (
+                      <span className="flex shrink-0 items-center gap-1">
                         <button
                           type="button"
                           onClick={() =>
-                            void openPrivacySettings(
-                              source?.kind === "videoDevice" ? "camera" : "screenRecording",
+                            studioRetrySource(item.source).catch((err) =>
+                              console.error("source retry failed:", err),
                             )
                           }
-                          title={t("sources-open-privacy-title")}
-                          aria-label={t("sources-open-privacy-item", {
+                          title={t("sources-retry-error", {
+                            message: status.errorMessage ?? t("sources-fallback-error"),
+                          })}
+                          aria-label={t("sources-retry-item", {
                             name: source?.name ?? t("sources-fallback-name"),
                           })}
-                          className="rounded border border-red-400/40 px-1 text-[9px] text-red-300 hover:border-red-300"
+                          className="flex items-center gap-1 rounded px-1 text-[10px] text-red-400 hover:text-red-300"
                         >
-                          {t("sources-privacy-settings-button")}
+                          <span
+                            aria-label={t("sources-status-error")}
+                            className="h-1.5 w-1.5 rounded-full bg-red-400"
+                          />
+                          ↻
                         </button>
-                      )}
-                    </span>
-                  ) : status ? (
-                    <span
-                      title={
-                        status.state !== "live"
-                          ? t("sources-status-starting")
-                          : "width" in status && status.width
-                            ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
-                            : t("sources-status-live")
-                      }
-                      aria-label={t("sources-status-aria", { state: status.state })}
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        status.state === "live" ? "bg-emerald-400" : "bg-amber-300"
-                      }`}
-                    />
-                  ) : null}
-                  {source?.kind === "media" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !mediaPaused[item.source];
-                        setMediaPaused((prev) => ({ ...prev, [item.source]: next }));
-                        studioMediaSetPaused(item.source, next).catch((err) =>
-                          console.error("media pause failed:", err),
-                        );
-                      }}
-                      title={
-                        mediaPaused[item.source]
-                          ? t("sources-media-resume-title")
-                          : t("sources-media-pause-title")
-                      }
-                      aria-label={
-                        mediaPaused[item.source]
-                          ? t("sources-media-resume-item", {
-                              name: source?.name ?? t("sources-fallback-video"),
-                            })
-                          : t("sources-media-pause-item", {
-                              name: source?.name ?? t("sources-fallback-video"),
-                            })
-                      }
-                      aria-pressed={Boolean(mediaPaused[item.source])}
-                      className={`shrink-0 rounded px-1 text-[11px] ${
-                        mediaPaused[item.source]
-                          ? "text-amber-300"
-                          : "text-havoc-muted hover:text-havoc-text"
-                      }`}
-                    >
-                      {mediaPaused[item.source] ? "▶" : "⏸"}
-                    </button>
-                  )}
-                  {status != null &&
-                    "hdr" in status &&
-                    status.hdr === true &&
-                    source?.kind === "display" && (
+                        {status.errorCode === "permission" && os === "macos" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void openPrivacySettings(
+                                source?.kind === "videoDevice" ? "camera" : "screenRecording",
+                              )
+                            }
+                            title={t("sources-open-privacy-title")}
+                            aria-label={t("sources-open-privacy-item", {
+                              name: source?.name ?? t("sources-fallback-name"),
+                            })}
+                            className="rounded border border-red-400/40 px-1 text-[9px] text-red-300 hover:border-red-300"
+                          >
+                            {t("sources-privacy-settings-button")}
+                          </button>
+                        )}
+                      </span>
+                    ) : status ? (
+                      <span
+                        title={
+                          status.state !== "live"
+                            ? t("sources-status-starting")
+                            : "width" in status && status.width
+                              ? `${status.width}×${status.height}${status.fps ? ` @ ${status.fps}` : ""}`
+                              : t("sources-status-live")
+                        }
+                        aria-label={t("sources-status-aria", { state: status.state })}
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          status.state === "live" ? "bg-emerald-400" : "bg-amber-300"
+                        }`}
+                      />
+                    ) : null}
+                    {source?.kind === "media" && (
                       <button
                         type="button"
-                        onClick={() =>
-                          source.kind === "display" &&
-                          setHdrFor({ captureId: source.captureId, name: source.name })
+                        onClick={() => {
+                          const next = !mediaPaused[item.source];
+                          setMediaPaused((prev) => ({ ...prev, [item.source]: next }));
+                          studioMediaSetPaused(item.source, next).catch((err) =>
+                            console.error("media pause failed:", err),
+                          );
+                        }}
+                        title={
+                          mediaPaused[item.source]
+                            ? t("sources-media-resume-title")
+                            : t("sources-media-pause-title")
                         }
-                        title={t("sources-hdr-title")}
-                        aria-label={t("sources-hdr-item", {
-                          name: source?.name ?? t("sources-fallback-name"),
-                        })}
-                        className="shrink-0 rounded bg-amber-400/15 px-1 py-px text-[9px] font-semibold text-amber-300"
+                        aria-label={
+                          mediaPaused[item.source]
+                            ? t("sources-media-resume-item", {
+                                name: source?.name ?? t("sources-fallback-video"),
+                              })
+                            : t("sources-media-pause-item", {
+                                name: source?.name ?? t("sources-fallback-video"),
+                              })
+                        }
+                        aria-pressed={Boolean(mediaPaused[item.source])}
+                        className={`shrink-0 rounded px-1 text-[11px] ${
+                          mediaPaused[item.source]
+                            ? "text-amber-300"
+                            : "text-havoc-muted hover:text-havoc-text"
+                        }`}
                       >
-                        HDR
+                        {mediaPaused[item.source] ? "▶" : "⏸"}
                       </button>
                     )}
-                  {/* CAP-N53 per-output visibility: hover toggles that stay
-                      pinned (struck-through, amber) while an output is off,
-                      so a stream-only / recording-only item reads at a
-                      glance. Master eye stays the overall switch. One config
-                      per output — the two interlock (each toggle passes the
-                      other's current value through). */}
-                  {(
-                    [
-                      { key: "stream", caption: "LIVE", on: item.onStream ?? true },
-                      { key: "record", caption: "REC", on: item.onRecord ?? true },
-                    ] as const
-                  ).map(({ key, caption, on }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => {
-                        if (!scene) return;
-                        studioSetItemOutputVisible(
-                          scene.id,
-                          item.id,
-                          key === "stream" ? !on : (item.onStream ?? true),
-                          key === "record" ? !on : (item.onRecord ?? true),
-                        ).catch((err) => console.error("output visibility failed:", err));
-                      }}
-                      title={on ? t(`sources-${key}-hide`) : t(`sources-${key}-show`)}
-                      aria-label={t(`sources-${key}-${on ? "hide" : "show"}-item`, {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      aria-pressed={on}
-                      className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold ${
-                        on
-                          ? "hidden text-havoc-muted hover:text-havoc-text group-hover:inline-block"
-                          : "inline-block text-amber-300 line-through"
-                      }`}
-                    >
-                      {caption}
-                    </button>
-                  ))}
-                  <span className="hidden shrink-0 items-center group-hover:flex">
-                    <button
-                      type="button"
-                      onClick={() => onSetLocked(item.id, !item.locked)}
-                      title={item.locked ? t("sources-unlock") : t("sources-lock")}
-                      aria-label={
-                        item.locked
-                          ? t("sources-unlock-item", {
-                              name: source?.name ?? t("sources-fallback-name"),
-                            })
-                          : t("sources-lock-item", {
-                              name: source?.name ?? t("sources-fallback-name"),
-                            })
-                      }
-                      aria-pressed={item.locked}
-                      className={`rounded px-1 text-[10px] ${
-                        item.locked ? "text-amber-300" : "text-havoc-muted hover:text-havoc-text"
-                      }`}
-                    >
-                      {item.locked ? "🔒" : "🔓"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={modelIndex === items.length - 1 || Boolean(item.backdrop)}
-                      onClick={() => onMove(item.id, modelIndex + 1)}
-                      title={
-                        item.backdrop ? t("sources-backdrop-pinned") : t("sources-raise-title")
-                      }
-                      aria-label={t("sources-raise-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        modelIndex === 0 ||
-                        Boolean(item.backdrop) ||
-                        Boolean(items[modelIndex - 1]?.backdrop)
-                      }
-                      onClick={() => onMove(item.id, modelIndex - 1)}
-                      title={
-                        item.backdrop ? t("sources-backdrop-pinned") : t("sources-lower-title")
-                      }
-                      aria-label={t("sources-lower-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
-                    >
-                      ▼
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenFilters(item.id)}
-                      title={t("sources-filters-title")}
-                      aria-label={t("sources-filters-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
-                    >
-                      ƒ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenProperties(item.source)}
-                      title={t("sources-properties-title")}
-                      aria-label={t("sources-properties-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
-                    >
-                      ⚙
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onAddExisting(item.source)}
-                      title={t("sources-clone-title")}
-                      aria-label={t("sources-clone-item", {
-                        name: source?.name ?? t("sources-fallback-name"),
-                      })}
-                      className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
-                    >
-                      ⧉
-                    </button>
+                    {status != null &&
+                      "hdr" in status &&
+                      status.hdr === true &&
+                      source?.kind === "display" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            source.kind === "display" &&
+                            setHdrFor({ captureId: source.captureId, name: source.name })
+                          }
+                          title={t("sources-hdr-title")}
+                          aria-label={t("sources-hdr-item", {
+                            name: source?.name ?? t("sources-fallback-name"),
+                          })}
+                          className="shrink-0 rounded bg-amber-400/15 px-1 py-px text-[9px] font-semibold text-amber-300"
+                        >
+                          HDR
+                        </button>
+                      )}
+                  </div>
+                  {/* The action strip — rendered ON TOP of the source line
+                      (flex-col-reverse) like a window's control row: always
+                      visible, right-aligned, wraps if it ever runs out of
+                      width so nothing is ever clipped by the rail. */}
+                  <div className="flex flex-wrap items-center justify-end gap-0.5">
+                    {/* CAP-N53 per-output visibility: LIVE/REC toggles, struck
+                      through + amber while an output is off. */}
+                    {(
+                      [
+                        { key: "stream", caption: "LIVE", on: item.onStream ?? true },
+                        { key: "record", caption: "REC", on: item.onRecord ?? true },
+                      ] as const
+                    ).map(({ key, caption, on }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          if (!scene) return;
+                          studioSetItemOutputVisible(
+                            scene.id,
+                            item.id,
+                            key === "stream" ? !on : (item.onStream ?? true),
+                            key === "record" ? !on : (item.onRecord ?? true),
+                          ).catch((err) => console.error("output visibility failed:", err));
+                        }}
+                        title={on ? t(`sources-${key}-hide`) : t(`sources-${key}-show`)}
+                        aria-label={t(`sources-${key}-${on ? "hide" : "show"}-item`, {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        aria-pressed={on}
+                        className={`inline-block shrink-0 rounded px-1 py-px text-[9px] font-semibold ${
+                          on
+                            ? "text-havoc-muted hover:text-havoc-text"
+                            : "text-amber-300 line-through"
+                        }`}
+                      >
+                        {caption}
+                      </button>
+                    ))}
+                    <span className="flex shrink-0 items-center">
+                      <button
+                        type="button"
+                        onClick={() => onSetLocked(item.id, !item.locked)}
+                        title={item.locked ? t("sources-unlock") : t("sources-lock")}
+                        aria-label={
+                          item.locked
+                            ? t("sources-unlock-item", {
+                                name: source?.name ?? t("sources-fallback-name"),
+                              })
+                            : t("sources-lock-item", {
+                                name: source?.name ?? t("sources-fallback-name"),
+                              })
+                        }
+                        aria-pressed={item.locked}
+                        className={`rounded px-1 text-[10px] ${
+                          item.locked ? "text-amber-300" : "text-havoc-muted hover:text-havoc-text"
+                        }`}
+                      >
+                        {item.locked ? "🔒" : "🔓"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={modelIndex === items.length - 1 || Boolean(item.backdrop)}
+                        onClick={() => onMove(item.id, modelIndex + 1)}
+                        title={
+                          item.backdrop ? t("sources-backdrop-pinned") : t("sources-raise-title")
+                        }
+                        aria-label={t("sources-raise-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          modelIndex === 0 ||
+                          Boolean(item.backdrop) ||
+                          Boolean(items[modelIndex - 1]?.backdrop)
+                        }
+                        onClick={() => onMove(item.id, modelIndex - 1)}
+                        title={
+                          item.backdrop ? t("sources-backdrop-pinned") : t("sources-lower-title")
+                        }
+                        aria-label={t("sources-lower-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="rounded px-1 text-[10px] text-havoc-muted enabled:hover:text-havoc-text disabled:opacity-40"
+                      >
+                        ▼
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenFilters(item.id)}
+                        title={t("sources-filters-title")}
+                        aria-label={t("sources-filters-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
+                      >
+                        ƒ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenProperties(item.source)}
+                        title={t("sources-properties-title")}
+                        aria-label={t("sources-properties-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
+                      >
+                        ⚙
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onAddExisting(item.source)}
+                        title={t("sources-clone-title")}
+                        aria-label={t("sources-clone-item", {
+                          name: source?.name ?? t("sources-fallback-name"),
+                        })}
+                        className="rounded px-1 text-[10px] text-havoc-muted hover:text-havoc-text"
+                      >
+                        ⧉
+                      </button>
+                    </span>
+                    {/* Remove — last in the top action strip. */}
                     <button
                       type="button"
                       onClick={() => onRemove(item.id)}
@@ -827,11 +833,11 @@ export function SourcesRail({
                       aria-label={t("sources-remove-item", {
                         name: source?.name ?? t("sources-fallback-name"),
                       })}
-                      className="rounded px-1 text-xs text-havoc-muted hover:text-red-400"
+                      className="shrink-0 rounded px-1 text-xs text-havoc-muted hover:text-red-400"
                     >
                       ×
                     </button>
-                  </span>
+                  </div>
                 </div>
               </li>
             );

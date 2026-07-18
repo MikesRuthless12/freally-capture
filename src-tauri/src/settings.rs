@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use fcap_encode::mux::{Container, EncPreset, RateControl, RcMode};
@@ -152,7 +151,31 @@ pub enum ThemeMode {
     Custom,
 }
 
-/// Appearance (TASK-906).
+/// A full authored palette (CAP-N65 theme editor): the six theme colours, all
+/// `#rrggbb`. Present only when the operator has built one; `None` keeps the
+/// accent-only Custom behaviour.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomPalette {
+    pub bg: String,
+    pub panel: String,
+    pub accent: String,
+    pub accent2: String,
+    pub text: String,
+    pub muted: String,
+}
+
+/// A `#rrggbb` guard — anything else could close a CSS declaration and inject a
+/// rule, so it never reaches a custom property.
+fn validate_hex(value: &str, label: &str) -> Result<(), String> {
+    let hex = value.strip_prefix('#').unwrap_or("");
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("{label} must be #rrggbb"));
+    }
+    Ok(())
+}
+
+/// Appearance (TASK-906 + CAP-N65).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ThemeSettings {
@@ -160,6 +183,9 @@ pub struct ThemeSettings {
     /// `#rrggbb`. Only read when `mode` is [`ThemeMode::Custom`], but persisted
     /// always, so switching to Custom and back does not lose the colour.
     pub accent: String,
+    /// CAP-N65: a full authored palette, applied when `mode` is `Custom`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub palette: Option<CustomPalette>,
 }
 
 impl Default for ThemeSettings {
@@ -168,17 +194,21 @@ impl Default for ThemeSettings {
             mode: ThemeMode::default(),
             // The Havoc accent, so `Custom` starts where `Dark` left off.
             accent: "#4a9eff".to_owned(),
+            palette: None,
         }
     }
 }
 
 impl ThemeSettings {
     pub fn validate(&self) -> Result<(), String> {
-        // The accent lands in a CSS custom property. Anything but a plain hex
-        // triple could close the declaration and inject a rule.
-        let hex = self.accent.strip_prefix('#').unwrap_or("");
-        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("the accent colour must be #rrggbb".to_owned());
+        validate_hex(&self.accent, "the accent colour")?;
+        if let Some(palette) = &self.palette {
+            validate_hex(&palette.bg, "the background colour")?;
+            validate_hex(&palette.panel, "the panel colour")?;
+            validate_hex(&palette.accent, "the accent colour")?;
+            validate_hex(&palette.accent2, "the second accent colour")?;
+            validate_hex(&palette.text, "the text colour")?;
+            validate_hex(&palette.muted, "the muted colour")?;
         }
         Ok(())
     }
@@ -1786,8 +1816,8 @@ impl SettingsStore {
     /// defaults on first run. With no resolvable home directory the store
     /// degrades to in-memory defaults instead of failing startup.
     pub fn load_default() -> Self {
-        match ProjectDirs::from("com", "Freally", "Freally Capture") {
-            Some(dirs) => Self::load_from(dirs.config_dir().join("settings.json")),
+        match crate::paths::config_dir() {
+            Some(dir) => Self::load_from(dir.join("settings.json")),
             None => {
                 eprintln!(
                     "settings: no home directory — running with in-memory defaults (nothing persists)"
@@ -2183,6 +2213,7 @@ mod tests {
             theme: ThemeSettings {
                 mode: ThemeMode::Custom,
                 accent: "#00d4ff".to_owned(),
+                palette: None,
             },
             alignment: AlignmentSettings {
                 smart_guides: false,
@@ -2953,6 +2984,7 @@ mod tests {
             theme: ThemeSettings {
                 mode: ThemeMode::Custom,
                 accent: "#00d4ff".to_owned(),
+                palette: None,
             },
             ..Settings::default()
         };
@@ -2973,6 +3005,7 @@ mod tests {
                 theme: ThemeSettings {
                     mode: ThemeMode::Custom,
                     accent: bad.to_owned(),
+                    palette: None,
                 },
                 ..Settings::default()
             };
