@@ -23,6 +23,7 @@ use fcap_scene::{
 
 use crate::filters::{FilterEngine, FilterResourceData, PassPlan};
 use crate::gpu::Gpu;
+use crate::telestrator::{tessellate, TeleStroke, TeleVertex};
 use crate::transform;
 use crate::CompositorError;
 
@@ -244,10 +245,31 @@ pub struct Compositor {
     /// Floating reactions (TASK-614): the sprite pass + its uploaded emoji
     /// sprites, built on first use.
     reactions: Option<ReactionRig>,
+    /// Telestrator (CAP-N57): the solid-color triangle pass + its growable
+    /// vertex buffer, built on first use. Draws live annotation over the program.
+    telestrator: Option<TelestratorRig>,
 
     /// CPU time spent encoding + submitting the last render.
     last_render_cpu_micros: u64,
 }
+
+/// The telestrator pass (CAP-N57): a single solid-colored triangle-list drawn
+/// straight-alpha over the composed program, from a vertex buffer grown to fit.
+struct TelestratorRig {
+    pipeline: wgpu::RenderPipeline,
+    vbuf: wgpu::Buffer,
+    /// Capacity, in vertices.
+    vbuf_cap: u64,
+    /// The last tessellated `(now_bits, stroke_count, canvas_w, canvas_h)` and
+    /// the vertex count uploaded for it — so the 2–4 identical bakes in one
+    /// studio tick tessellate + upload once and only re-draw thereafter. `now`
+    /// is captured once per tick, so it uniquely identifies the geometry.
+    last_key: Option<(u64, usize, u32, u32)>,
+    last_count: u32,
+}
+
+/// Initial telestrator vertex-buffer capacity (grows by powers of two).
+const INITIAL_TELE_VERTS: u64 = 4096;
 
 /// Everything one blended transition frame needs: the fullscreen pipeline,
 /// its 16-byte uniform, two canvas-sized scratch scenes (A = outgoing,
@@ -556,6 +578,7 @@ impl Compositor {
             transition_luma_epoch: 0,
             stinger: None,
             reactions: None,
+            telestrator: None,
             last_render_cpu_micros: 0,
         })
     }
@@ -1526,6 +1549,159 @@ impl Compositor {
         }
         self.gpu.queue.submit(Some(encoder.finish()));
         Ok(())
+    }
+
+    /// Composite the telestrator strokes (CAP-N57) over the finished program:
+    /// live free-hand annotation drawn straight-alpha on top, so — like
+    /// reactions and downstream keyers — the marks are baked into preview,
+    /// recording, and stream at the moment they were drawn. `now` is the
+    /// telestrator clock (seconds), used to fade timed strokes.
+    pub fn render_telestrator(
+        &mut self,
+        strokes: &[TeleStroke],
+        now: f64,
+    ) -> Result<(), CompositorError> {
+        if strokes.is_empty() {
+            return Ok(());
+        }
+        self.ensure_telestrator_rig();
+        // Cache the tessellation + upload on (now, count, canvas): the studio
+        // calls this up to 4× per tick (per-output splits) with identical
+        // inputs, so only the first bake of a tick does the CPU work; the rest
+        // re-draw the same vertex buffer.
+        let key = (
+            now.to_bits(),
+            strokes.len(),
+            self.canvas_width,
+            self.canvas_height,
+        );
+        let count = if self.telestrator.as_ref().expect("ensured above").last_key == Some(key) {
+            self.telestrator.as_ref().expect("ensured above").last_count
+        } else {
+            let verts = tessellate(strokes, now, self.canvas_width, self.canvas_height);
+            let count = verts.len() as u32;
+            if !verts.is_empty() {
+                let stride = std::mem::size_of::<TeleVertex>() as u64;
+                // Grow the vertex buffer to fit (powers of two — amortized).
+                if verts.len() as u64 > self.telestrator.as_ref().expect("ensured above").vbuf_cap {
+                    let cap = (verts.len() as u64).next_power_of_two();
+                    let vbuf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("fcap telestrator verts"),
+                        size: cap * stride,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    let rig = self.telestrator.as_mut().expect("ensured above");
+                    rig.vbuf = vbuf;
+                    rig.vbuf_cap = cap;
+                }
+                let rig = self.telestrator.as_ref().expect("ensured above");
+                self.gpu
+                    .queue
+                    .write_buffer(&rig.vbuf, 0, bytemuck::cast_slice(&verts));
+            }
+            let rig = self.telestrator.as_mut().expect("ensured above");
+            rig.last_key = Some(key);
+            rig.last_count = count;
+            count
+        };
+        if count == 0 {
+            return Ok(());
+        }
+
+        let rig = self.telestrator.as_ref().expect("ensured above");
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fcap telestrator"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fcap telestrator pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.program_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // over the composed program
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&rig.pipeline);
+            pass.set_vertex_buffer(0, rig.vbuf.slice(..));
+            pass.draw(0..count, 0..1);
+        }
+        self.gpu.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    fn ensure_telestrator_rig(&mut self) {
+        if self.telestrator.is_some() {
+            return;
+        }
+        let device = &self.gpu.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fcap telestrator shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/telestrator.wgsl").into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fcap telestrator layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+        const ATTRS: [wgpu::VertexAttribute; 2] =
+            wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
+        let vbuf_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<TeleVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &ATTRS,
+        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("fcap telestrator pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[vbuf_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: PROGRAM_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fcap telestrator verts"),
+            size: INITIAL_TELE_VERTS * std::mem::size_of::<TeleVertex>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.telestrator = Some(TelestratorRig {
+            pipeline,
+            vbuf,
+            vbuf_cap: INITIAL_TELE_VERTS,
+            last_key: None,
+            last_count: 0,
+        });
     }
 
     fn ensure_reaction_rig(&mut self) {

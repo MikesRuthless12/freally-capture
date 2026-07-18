@@ -26,6 +26,8 @@ const ACTION_LABELS: Record<string, string> = {
   playlistNext: "hotkey-audit-action-playlist-next",
   playlistPrevious: "hotkey-audit-action-playlist-previous",
   replayRoll: "hotkey-audit-action-replay-roll",
+  telestratorClear: "hotkey-audit-action-telestrator-clear",
+  teleprompterToggle: "hotkey-audit-action-teleprompter-toggle",
   pushToTalk: "hotkey-audit-action-ptt",
   pushToMute: "hotkey-audit-action-ptm",
 };
@@ -43,6 +45,8 @@ const FEATURE_LABELS: Record<string, string> = {
   splitTimer: "hotkey-audit-feature-split-timer",
   playlist: "hotkey-audit-feature-playlist",
   audio: "hotkey-audit-feature-audio",
+  telestrator: "hotkey-audit-feature-telestrator",
+  teleprompter: "hotkey-audit-feature-teleprompter",
 };
 
 /**

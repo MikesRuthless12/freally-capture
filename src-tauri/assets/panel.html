@@ -165,6 +165,69 @@
         background: #0b0e13;
         color: var(--muted);
       }
+      /* The teleprompter page (CAP-N58): a full-screen scrolling reader with a
+         control bar. Text animates locally; the buttons drive the shared scroll. */
+      body.prompter {
+        padding: 0;
+        overflow: hidden;
+        height: 100vh;
+      }
+      .prompter {
+        position: relative;
+        height: 100vh;
+        overflow: hidden;
+        background: #000;
+      }
+      .prompter.mirror .track {
+        transform-origin: center;
+      }
+      .prompter.mirror {
+        transform: scaleX(-1);
+      }
+      .prompter .track {
+        padding: 42vh 8% 60vh;
+        color: #fff;
+        font-weight: 500;
+        white-space: pre-wrap;
+        word-break: break-word;
+        will-change: transform;
+      }
+      .prompter .readline {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 42vh;
+        border-top: 1px solid rgba(74, 158, 255, 0.5);
+        pointer-events: none;
+      }
+      .pcontrols {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        gap: 0.4rem;
+        padding: 0.5rem;
+        background: rgba(11, 14, 19, 0.85);
+        border-top: 1px solid var(--line);
+      }
+      .pcontrols button {
+        flex: 1;
+        min-height: 3rem;
+      }
+      .pcontrols button.on {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .pempty {
+        display: flex;
+        height: 100vh;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        padding: 1.5rem;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -175,6 +238,7 @@
       const params = new URLSearchParams(location.search);
       const KEY = params.get("k") || "";
       const IS_TALLY = location.pathname.startsWith("/tally");
+      const IS_PROMPTER = location.pathname.startsWith("/teleprompter");
       // Which scene this tally box watches (?scene=Name). Absent = the
       // program as a whole (live/not).
       const WATCH = params.get("scene") || "";
@@ -269,6 +333,13 @@
           button.onclick = () => act(command, args);
           actionGrid.appendChild(button);
         }
+        // Open the teleprompter reader (CAP-N58) — the key rides the URL.
+        const prompter = document.createElement("button");
+        prompter.textContent = "Teleprompter";
+        prompter.onclick = () => {
+          location.href = api("/teleprompter");
+        };
+        actionGrid.appendChild(prompter);
 
         const mixer = document.getElementById("mixer");
         for (const source of sources) {
@@ -298,6 +369,94 @@
         }
       }
 
+      // -- Teleprompter page (CAP-N58) ------------------------------------
+      // The DOM is built once; polls only update the anchor + script, and a
+      // rAF loop animates the scroll so a 1 Hz poll stays perfectly smooth.
+      const LINE_HEIGHT = 1.5;
+      let promptBuilt = false;
+      let promptMirror = false;
+      let promptLastScript = null;
+      let promptAnchor = { offset: 0, t: performance.now(), playing: false, speed: 2, fontSize: 48 };
+
+      function buildPrompter() {
+        document.body.className = "prompter";
+        app.innerHTML = `
+          <div class="prompter" id="pwrap">
+            <div class="track" id="ptrack"></div>
+            <div class="readline"></div>
+          </div>
+          <div class="pcontrols">
+            <button id="p-top">⟲ Top</button>
+            <button id="p-slower">– Slower</button>
+            <button id="p-play">▶ Play</button>
+            <button id="p-faster">+ Faster</button>
+            <button id="p-mirror">Mirror</button>
+          </div>
+        `;
+        const tp = (a) => () => act("teleprompter", { action: a }, true);
+        document.getElementById("p-top").onclick = tp("top");
+        document.getElementById("p-slower").onclick = tp("slower");
+        document.getElementById("p-play").onclick = tp("toggle");
+        document.getElementById("p-faster").onclick = tp("faster");
+        document.getElementById("p-mirror").onclick = () => {
+          promptMirror = !promptMirror;
+          document.getElementById("pwrap").classList.toggle("mirror", promptMirror);
+          document.getElementById("p-mirror").classList.toggle("on", promptMirror);
+        };
+        promptBuilt = true;
+        ensurePrompterLoop();
+      }
+
+      function updatePrompter(tp) {
+        if (!promptBuilt) buildPrompter();
+        if (!tp) return;
+        const track = document.getElementById("ptrack");
+        if (tp.script !== promptLastScript) {
+          promptLastScript = tp.script;
+          if (tp.script && tp.script.trim()) {
+            track.textContent = tp.script;
+            track.style.display = "";
+          } else {
+            track.textContent = "No script — set one in the desktop teleprompter panel.";
+          }
+        }
+        track.style.fontSize = (tp.fontSize || 48) + "px";
+        track.style.lineHeight = LINE_HEIGHT;
+        promptAnchor = {
+          offset: tp.offset || 0,
+          t: performance.now(),
+          playing: !!tp.playing,
+          speed: tp.speed || 2,
+          fontSize: tp.fontSize || 48,
+        };
+        const play = document.getElementById("p-play");
+        if (play) {
+          play.textContent = tp.playing ? "⏸ Pause" : "▶ Play";
+          play.classList.toggle("on", !!tp.playing);
+        }
+        // A pause writes once and stops the loop; a play restarts it.
+        ensurePrompterLoop();
+      }
+
+      let promptRaf = 0;
+      function writePrompter() {
+        const a = promptAnchor;
+        const live = a.offset + (a.playing ? (a.speed * (performance.now() - a.t)) / 1000 : 0);
+        const track = document.getElementById("ptrack");
+        if (track) {
+          const lineHeightPx = (a.fontSize || 48) * LINE_HEIGHT;
+          track.style.transform = `translateY(${-live * lineHeightPx}px)`;
+        }
+      }
+      function stepPrompter() {
+        writePrompter();
+        // Keep animating only while playing; paused is a single static write.
+        promptRaf = promptAnchor.playing ? requestAnimationFrame(stepPrompter) : 0;
+      }
+      function ensurePrompterLoop() {
+        if (!promptRaf) stepPrompter();
+      }
+
       async function act(command, args, quiet) {
         try {
           error = "";
@@ -318,7 +477,8 @@
             return;
           }
           const state = await response.json();
-          if (IS_TALLY) renderTally(state);
+          if (IS_PROMPTER) updatePrompter(state.teleprompter);
+          else if (IS_TALLY) renderTally(state);
           else renderPanel(state);
         } catch {
           // The studio is restarting: keep the last render and retry.
@@ -326,8 +486,9 @@
       }
 
       refresh();
-      // Tally needs to be snappy; the control panel can be gentler.
-      setInterval(refresh, IS_TALLY ? 300 : 1000);
+      // Tally needs to be snappy; the control panel can be gentler. The
+      // teleprompter animates locally, so a mid-rate resync poll is plenty.
+      setInterval(refresh, IS_TALLY ? 300 : IS_PROMPTER ? 500 : 1000);
     </script>
   </body>
 </html>

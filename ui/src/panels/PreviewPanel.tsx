@@ -12,7 +12,25 @@ import {
   studioSetFocus,
   studioSetGuides,
   studioZoomScroll,
+  telestratorBeginStroke,
+  telestratorClear,
+  telestratorCommitStroke,
+  telestratorExtendStroke,
+  telestratorUndo,
+  type TelePointInput,
 } from "../api/commands";
+import {
+  strokeColor,
+  strokeFade,
+  strokeWidth,
+  telestratorGet,
+  telestratorSet,
+  telestratorSubscribe,
+  TELE_COLORS,
+  TELE_WIDTHS,
+  type TelestratorConfig,
+  type TeleToolKind,
+} from "../lib/telestrator";
 import type {
   AlignmentSettings,
   BackdropSplit,
@@ -371,6 +389,60 @@ export function PreviewPanel({
     [box, displayScale],
   );
 
+  // -- Telestrator (CAP-N57): draw over the program ---------------------------
+  // The config/armed state is a shared store; the marks stream to Rust and bake
+  // into the program (so they show through the native surface + the recording).
+  const tele = useSyncExternalStore(telestratorSubscribe, telestratorGet);
+  const teleDrawing = useRef(false);
+  const teleBuffer = useRef<TelePointInput[]>([]);
+  const teleRaf = useRef<number | null>(null);
+  // Serialize begin → extend → commit so the engine applies them in order: a
+  // mid-stroke extend must never land after the commit (which would drop the
+  // stroke's tail). Each step runs only after the previous IPC settles.
+  const teleChain = useRef<Promise<void>>(Promise.resolve());
+  const runTele = useCallback((fn: () => Promise<void>) => {
+    teleChain.current = teleChain.current
+      .catch(() => undefined)
+      .then(fn)
+      .catch(() => undefined);
+  }, []);
+
+  /** A pointer event as a canvas-normalized point (0..1) with pen pressure. */
+  const toNorm = useCallback(
+    (event: React.PointerEvent): TelePointInput => {
+      const p = toProgram(event);
+      return {
+        x: Math.min(1, Math.max(0, p.x / programW)),
+        y: Math.min(1, Math.max(0, p.y / programH)),
+        // A mouse reports 0.5 while pressed — only trust real pen pressure.
+        pressure: event.pointerType === "pen" ? event.pressure : 1,
+      };
+    },
+    [toProgram, programW, programH],
+  );
+
+  const flushTele = useCallback(() => {
+    teleRaf.current = null;
+    if (teleBuffer.current.length === 0) return;
+    const batch = teleBuffer.current;
+    teleBuffer.current = [];
+    runTele(() => telestratorExtendStroke(batch));
+  }, [runTele]);
+
+  // Cancel any in-flight stroke when drawing is disarmed or the panel unmounts.
+  useEffect(() => {
+    if (tele.armed) return;
+    if (teleDrawing.current) {
+      teleDrawing.current = false;
+      teleBuffer.current = [];
+      if (teleRaf.current !== null) {
+        cancelAnimationFrame(teleRaf.current);
+        teleRaf.current = null;
+      }
+      runTele(() => telestratorCommitStroke());
+    }
+  }, [tele.armed, runTele]);
+
   /**
    * The item's composed base size: the runtime-reported source resolution
    * with the item's enabled Crop filters folded in — the compositor draws
@@ -688,6 +760,24 @@ export function PreviewPanel({
 
   const beginDrag = (event: React.PointerEvent) => {
     if (!scene) return;
+
+    // Telestrator armed: the pointer draws on the program instead of selecting.
+    if (tele.armed && running) {
+      teleDrawing.current = true;
+      teleBuffer.current = [];
+      const begin = {
+        tool: tele.tool,
+        color: strokeColor(tele),
+        width: strokeWidth(tele),
+        fadeAfter: strokeFade(tele),
+        point: toNorm(event),
+      };
+      runTele(() => telestratorBeginStroke(begin));
+      (event.target as Element).setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
     const p = toProgram(event);
 
     // Shift-click toggles an item in/out of the multi-selection — handled first,
@@ -839,6 +929,11 @@ export function PreviewPanel({
   };
 
   const updateDrag = (event: React.PointerEvent) => {
+    if (teleDrawing.current) {
+      teleBuffer.current.push(toNorm(event));
+      if (teleRaf.current === null) teleRaf.current = requestAnimationFrame(flushTele);
+      return;
+    }
     const p = toProgram(event);
     const aux = auxRef.current;
     if (aux) {
@@ -873,6 +968,20 @@ export function PreviewPanel({
   };
 
   const endDrag = (event: React.PointerEvent) => {
+    if (teleDrawing.current) {
+      teleDrawing.current = false;
+      if (teleRaf.current !== null) {
+        cancelAnimationFrame(teleRaf.current);
+        teleRaf.current = null;
+      }
+      teleBuffer.current.push(toNorm(event));
+      const batch = teleBuffer.current;
+      teleBuffer.current = [];
+      // Ordered through the chain: this final extend lands before the commit.
+      runTele(() => telestratorExtendStroke(batch));
+      runTele(() => telestratorCommitStroke());
+      return;
+    }
     const aux = auxRef.current;
     if (aux) {
       finishAux(aux, toProgram(event), event.shiftKey);
@@ -896,7 +1005,7 @@ export function PreviewPanel({
   // within its region, mirrored here for smooth steps and clamped again
   // engine-side, so blank canvas can never show no matter what.
   const zoomAt = (event: React.WheelEvent) => {
-    if (!scene || dragRef.current) return;
+    if (!scene || dragRef.current || tele.armed) return;
     const p = toProgram(event);
     const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
     for (let index = scene.items.length - 1; index >= 0; index -= 1) {
@@ -955,7 +1064,7 @@ export function PreviewPanel({
   // Highlight Speaker, "click the slot": double-click an item to spotlight it
   // (fill the canvas); double-click it again — or empty space — to restore.
   const toggleFocusAt = (event: React.MouseEvent) => {
-    if (!scene) return;
+    if (!scene || tele.armed) return;
     const p = toProgram(event);
     for (let index = scene.items.length - 1; index >= 0; index -= 1) {
       const item = scene.items[index];
@@ -1093,7 +1202,7 @@ export function PreviewPanel({
                 top: box.top,
                 width: box.width,
                 height: box.height,
-                cursor: hoverCursor,
+                cursor: tele.armed ? "crosshair" : hoverCursor,
               }}
               onPointerDown={beginDrag}
               onPointerMove={updateDrag}
@@ -1296,6 +1405,7 @@ export function PreviewPanel({
             hasGuides={customGuides.length > 0}
             t={t}
           />
+          <TelestratorBar config={tele} t={t} />
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
             {program.width}×{program.height}
@@ -1512,6 +1622,171 @@ function GuideButtons({
           <line x1={2.5} y1={9.5} x2={9.5} y2={2.5} stroke="currentColor" strokeWidth={1.5} />
         </svg>
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Telestrator (CAP-N57): draw-on-program toolbar in the footer (outside the
+// native region, so it's never occluded by the native preview surface)
+// ---------------------------------------------------------------------------
+
+const TELE_TOOLS: TeleToolKind[] = ["pen", "highlight", "arrow", "ellipse"];
+
+/** A 12×12 pictogram per drawing tool. */
+function teleToolGlyph(tool: TeleToolKind) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+      {tool === "pen" && (
+        <line x1={2} y1={10} x2={10} y2={2} stroke="currentColor" strokeWidth={1.6} />
+      )}
+      {tool === "highlight" && (
+        <line x1={2} y1={9} x2={10} y2={3} stroke="currentColor" strokeWidth={3.5} opacity={0.6} />
+      )}
+      {tool === "arrow" && (
+        <>
+          <line x1={2} y1={10} x2={9} y2={3} stroke="currentColor" strokeWidth={1.6} />
+          <path d="M9 3 L6 3.5 M9 3 L8.5 6" stroke="currentColor" strokeWidth={1.6} fill="none" />
+        </>
+      )}
+      {tool === "ellipse" && (
+        <ellipse
+          cx={6}
+          cy={6}
+          rx={4.5}
+          ry={3.3}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.4}
+        />
+      )}
+    </svg>
+  );
+}
+
+/** The telestrator toolbar: a Draw toggle that reveals tool / color / width /
+ * whiteboard controls and undo + clear. Drives the shared config store; the
+ * strokes themselves are baked into the program engine-side. */
+function TelestratorBar({ config, t }: { config: TelestratorConfig; t: (key: string) => string }) {
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label={t("telestrator-group")}>
+      <button
+        type="button"
+        aria-pressed={config.armed}
+        title={t("telestrator-draw")}
+        aria-label={t("telestrator-draw")}
+        onClick={() => telestratorSet({ armed: !config.armed })}
+        className={`flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide ${
+          config.armed
+            ? "bg-havoc-accent/20 text-havoc-accent"
+            : "text-havoc-muted hover:text-havoc-text"
+        }`}
+      >
+        {teleToolGlyph("pen")}
+        {t("telestrator-draw")}
+      </button>
+      {config.armed && (
+        <>
+          <div className="mx-0.5 h-4 w-px bg-havoc-border" aria-hidden="true" />
+          {TELE_TOOLS.map((tool) => (
+            <button
+              key={tool}
+              type="button"
+              aria-pressed={config.tool === tool}
+              title={t(`telestrator-tool-${tool}`)}
+              aria-label={t(`telestrator-tool-${tool}`)}
+              onClick={() => telestratorSet({ tool })}
+              className={`flex h-5 w-5 items-center justify-center rounded ${
+                config.tool === tool
+                  ? "bg-havoc-accent/20 text-havoc-accent"
+                  : "text-havoc-muted hover:text-havoc-text"
+              }`}
+            >
+              {teleToolGlyph(tool)}
+            </button>
+          ))}
+          <div className="mx-0.5 h-4 w-px bg-havoc-border" aria-hidden="true" />
+          {TELE_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              aria-pressed={config.color === color}
+              title={t("telestrator-color")}
+              aria-label={t("telestrator-color")}
+              onClick={() => telestratorSet({ color })}
+              className={`h-4 w-4 rounded-full border ${
+                config.color === color ? "border-havoc-text" : "border-havoc-border"
+              }`}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+          <div className="mx-0.5 h-4 w-px bg-havoc-border" aria-hidden="true" />
+          {TELE_WIDTHS.map((width, index) => (
+            <button
+              key={width}
+              type="button"
+              aria-pressed={config.width === width}
+              title={t("telestrator-width")}
+              aria-label={t("telestrator-width")}
+              onClick={() => telestratorSet({ width })}
+              className={`flex h-5 w-5 items-center justify-center rounded ${
+                config.width === width
+                  ? "bg-havoc-accent/20 text-havoc-accent"
+                  : "text-havoc-muted hover:text-havoc-text"
+              }`}
+            >
+              <span
+                className="rounded-full bg-current"
+                style={{ width: 3 + index * 2, height: 3 + index * 2 }}
+                aria-hidden="true"
+              />
+            </button>
+          ))}
+          <div className="mx-0.5 h-4 w-px bg-havoc-border" aria-hidden="true" />
+          <button
+            type="button"
+            aria-pressed={config.whiteboard}
+            title={t("telestrator-whiteboard")}
+            aria-label={t("telestrator-whiteboard")}
+            onClick={() => telestratorSet({ whiteboard: !config.whiteboard })}
+            className={`flex h-5 items-center rounded px-1.5 text-[10px] font-medium ${
+              config.whiteboard
+                ? "bg-havoc-accent/20 text-havoc-accent"
+                : "text-havoc-muted hover:text-havoc-text"
+            }`}
+          >
+            {config.whiteboard ? t("telestrator-persist") : t("telestrator-fade")}
+          </button>
+          <button
+            type="button"
+            title={t("telestrator-undo")}
+            aria-label={t("telestrator-undo")}
+            onClick={() => void telestratorUndo().catch(() => undefined)}
+            className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted hover:text-havoc-text"
+          >
+            <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+              <path
+                d="M4 3 L1.5 5.5 L4 8 M1.5 5.5 H7.5 A3 3 0 0 1 7.5 11"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.4}
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title={t("telestrator-clear")}
+            aria-label={t("telestrator-clear")}
+            onClick={() => void telestratorClear().catch(() => undefined)}
+            className="flex h-5 w-5 items-center justify-center rounded text-havoc-muted hover:text-havoc-text"
+          >
+            <svg width={14} height={14} viewBox="0 0 12 12" aria-hidden="true">
+              <line x1={2.5} y1={2.5} x2={9.5} y2={9.5} stroke="currentColor" strokeWidth={1.6} />
+              <line x1={9.5} y1={2.5} x2={2.5} y2={9.5} stroke="currentColor" strokeWidth={1.6} />
+            </svg>
+          </button>
+        </>
+      )}
     </div>
   );
 }

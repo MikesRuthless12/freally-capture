@@ -451,6 +451,12 @@ export function MenuBar({
           },
           {
             kind: "item",
+            id: "teleprompter",
+            label: t("menu-tools-teleprompter"),
+            onSelect: () => onOpenControls("teleprompter"),
+          },
+          {
+            kind: "item",
             id: "downstream",
             label: t("menu-tools-downstream"),
             onSelect: () => onOpenApp("downstream"),

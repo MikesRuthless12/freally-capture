@@ -113,6 +113,16 @@ fn gather<R: Runtime>(app: &AppHandle<R>) -> Vec<RawBinding> {
         (&settings.playlist_next, "playlistNext", "playlist"),
         (&settings.playlist_previous, "playlistPrevious", "playlist"),
         (&settings.replay_roll, "replayRoll", "replay"),
+        (
+            &settings.telestrator_clear,
+            "telestratorClear",
+            "telestrator",
+        ),
+        (
+            &settings.teleprompter_toggle,
+            "teleprompterToggle",
+            "teleprompter",
+        ),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

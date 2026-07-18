@@ -124,6 +124,23 @@
           </button>
           <button type="button" class="join-btn secondary" id="leaveBtn" hidden>Leave</button>
         </div>
+        <div
+          id="greenBanner"
+          hidden
+          style="margin: 0.75rem 0; padding: 0.6rem 0.9rem; border-radius: 0.6rem; border: 1px solid #d9a441; background: rgba(217, 164, 65, 0.12); color: #f2cd82; font-size: 0.9rem"
+        >
+          You're in the <strong>green room</strong> — the host is checking your camera and mic.
+          You'll go on air shortly.
+        </div>
+        <div
+          id="cueBanner"
+          hidden
+          style="margin: 0.75rem 0; padding: 0.7rem 0.9rem; border-radius: 0.6rem; border: 1px solid #4a9eff; background: rgba(74, 158, 255, 0.15); color: #eaf2ff; font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 0.6rem"
+        >
+          <span style="font-size: 0.7rem; letter-spacing: 0.15em; color: #4a9eff">CUE</span>
+          <span id="cueText" style="flex: 1"></span>
+          <span id="cueCountdown" style="font-variant-numeric: tabular-nums; font-size: 1.4rem; color: #4a9eff"></span>
+        </div>
         <div class="join-videos" id="videos">
           <div>
             <video id="selfView" autoplay muted playsinline></video>
@@ -153,7 +170,7 @@
       // browser (TASK-R3's web join page — phone guests, no install). Speaks
       // the exact protocol the app's guest uses (ui/src/remote/spike.ts):
       //   * data channel "control" messages: {t:"host"|"self"|"allowCenter"|
-      //     "centerReq"|"bye"}
+      //     "centerReq"|"cue"|"greenRoom"|"bye"}
       //   * a media call carrying cam+mic; the host answers with talkback
       //   * an optional outbound screen-share call, metadata {kind:"screen"}
       //   * auto-rejoin with capped exponential backoff on an unexplained drop
@@ -169,6 +186,37 @@
 
       function setStatus(text) {
         statusEl.textContent = text;
+      }
+
+      // ---- Green room (CAP-N54) + cues (CAP-N55) --------------------------
+      function showGreenRoom(staged) {
+        $("greenBanner").hidden = !staged;
+      }
+
+      let cueTimer = null;
+      function showCue(text, seconds) {
+        if (cueTimer) window.clearInterval(cueTimer);
+        const banner = $("cueBanner");
+        $("cueText").textContent = String(text || "").slice(0, 200);
+        const countEl = $("cueCountdown");
+        banner.hidden = false;
+        const start = Date.now();
+        const linger = (typeof seconds === "number" ? seconds : 8) * 1000 + 2000;
+        const tick = () => {
+          if (typeof seconds === "number") {
+            const left = Math.max(0, Math.ceil(seconds - (Date.now() - start) / 1000));
+            countEl.textContent = left + "s";
+          } else {
+            countEl.textContent = "";
+          }
+          if (Date.now() - start > linger) {
+            window.clearInterval(cueTimer);
+            cueTimer = null;
+            banner.hidden = true;
+          }
+        };
+        tick();
+        cueTimer = window.setInterval(tick, 250);
       }
 
       // ---- Invite parsing (mirrors invite.ts) ------------------------------
@@ -403,6 +451,10 @@
               hostGate = !!msg.muted;
               renderMute();
               setStatus(hostGate ? "The host muted you." : "The host unmuted you.");
+            } else if (msg.t === "cue") {
+              showCue(msg.text, typeof msg.seconds === "number" ? msg.seconds : null);
+            } else if (msg.t === "greenRoom") {
+              showGreenRoom(!!msg.staged);
             } else if (msg.t === "bye") {
               session.byeReason = msg.reason;
             }

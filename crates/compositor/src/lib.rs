@@ -17,11 +17,15 @@ mod compositor;
 pub mod filters;
 mod gpu;
 mod native_preview;
+pub mod telestrator;
 pub mod transform;
 
 pub use compositor::{Compositor, DownstreamDraw, ProgramFrame, ReactionDraw, REACTION_POOL};
 pub use filters::{cube::parse_cube, effective_source_size, FilterResourceData};
 pub use native_preview::{NativePreview, PreviewOverlay};
+pub use telestrator::{
+    stroke_expired, TelePoint, TeleStroke, TeleTool, FADE_DURATION as TELESTRATOR_FADE_DURATION,
+};
 
 use thiserror::Error;
 
@@ -1128,6 +1132,79 @@ mod tests {
         comp.render(collection.active_scene(), 0.0).expect("render");
         comp.render_downstream(&[]).expect("no layers");
         assert_eq!(pixel(&comp.read_program().unwrap(), 4, 4), [255, 0, 0, 255]);
+    }
+
+    /// CAP-N57: a telestrator stroke is baked over the finished program — a
+    /// green horizontal pen line lands on the pixels it crosses, and an empty
+    /// stroke set leaves the program pixel-identical.
+    #[test]
+    fn telestrator_bakes_a_stroke_over_the_program() {
+        let Some(mut comp) = compositor(32, 32) else {
+            return;
+        };
+        let red = SourceId::new();
+        comp.upload_frame(
+            red,
+            &solid_frame(32, 32, PixelFormat::Rgba8, [255, 0, 0, 255]),
+        )
+        .expect("upload red");
+        let collection = scene_with_item((32, 32), red, centered((32, 32)), BlendMode::Normal);
+
+        // A thick opaque-green horizontal line across the vertical middle.
+        let stroke = TeleStroke {
+            tool: TeleTool::Pen,
+            color: [0.0, 1.0, 0.0, 1.0],
+            width: 0.15,
+            points: vec![
+                TelePoint {
+                    x: 0.1,
+                    y: 0.5,
+                    pressure: 1.0,
+                },
+                TelePoint {
+                    x: 0.9,
+                    y: 0.5,
+                    pressure: 1.0,
+                },
+            ],
+            fade_after: None,
+            born_seconds: 0.0,
+        };
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        comp.render_telestrator(std::slice::from_ref(&stroke), 0.0)
+            .expect("telestrator");
+        let out = comp.read_program().expect("readback");
+        let on_line = pixel(&out, 16, 16);
+        assert!(
+            on_line[1] > 200 && on_line[0] < 60,
+            "the stroke painted green on the line: {on_line:?}"
+        );
+        assert_eq!(
+            pixel(&out, 16, 0),
+            [255, 0, 0, 255],
+            "away from the stroke the program is untouched"
+        );
+
+        // No strokes → the program is exactly the composed red.
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        comp.render_telestrator(&[], 0.0).expect("no strokes");
+        assert_eq!(
+            pixel(&comp.read_program().unwrap(), 16, 16),
+            [255, 0, 0, 255]
+        );
+
+        // A fully-faded stroke also contributes nothing.
+        let faded = TeleStroke {
+            fade_after: Some(1.0),
+            ..stroke
+        };
+        comp.render(collection.active_scene(), 0.0).expect("render");
+        comp.render_telestrator(std::slice::from_ref(&faded), 100.0)
+            .expect("faded");
+        assert_eq!(
+            pixel(&comp.read_program().unwrap(), 16, 16),
+            [255, 0, 0, 255]
+        );
     }
 
     /// CAP-N25: freeze is per-item — freezing one item holds its snapshot while
