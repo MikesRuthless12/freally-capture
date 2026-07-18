@@ -50,6 +50,7 @@ import type {
   RecordingStatus,
   ReplayStatus,
   SceneId,
+  MixerLayout,
   Settings,
   SourceId,
   SourceSettings,
@@ -61,6 +62,7 @@ import type {
   StudioDto,
   TeleprompterState,
   Transform,
+  ThemeSettings,
   TransitionKind,
   TrimInfo,
   VerifyReport,
@@ -242,6 +244,257 @@ export type ImportReport = {
  * switch to it; resolves to the honest per-source report. */
 export function collectionImportObs(path: string): Promise<ImportReport> {
   return invoke<ImportReport>("collection_import_obs", { path });
+}
+
+/** The account of a `.fcappack` export (CAP-N60). Mirrors `PackExportReport`. */
+export type PackExportReport = {
+  path: string;
+  collectionName: string;
+  bundled: number;
+  external: number;
+  attribution: number;
+  totalBytes: number;
+};
+
+/** The account of a `.fcappack` import (CAP-N60). Mirrors `PackImportReport`. */
+export type PackImportReport = {
+  collectionName: string;
+  sceneCount: number;
+  sourceCount: number;
+  relinked: number;
+  external: number;
+  attribution: number;
+};
+
+/** Export the active scene collection to `dest` as a portable `.fcappack`
+ * (scene graph + bundled local assets). Nothing is sent anywhere. */
+export function packExport(dest: string): Promise<PackExportReport> {
+  return invoke<PackExportReport>("pack_export", { dest });
+}
+
+/** Import a `.fcappack` as a new collection (assets extracted + relinked) and
+ * switch to it; the outgoing collection is saved first. */
+export function packImport(path: string): Promise<PackImportReport> {
+  return invoke<PackImportReport>("pack_import", { path });
+}
+
+/** How an entity changed in a collection diff (CAP-N61). Mirrors `ChangeKind`. */
+export type ChangeKind = "added" | "removed" | "modified";
+
+/** One changed item within a modified scene. Mirrors `ItemChange`. */
+export type ItemChange = {
+  item: string;
+  sourceName: string;
+  kind: ChangeKind;
+  aspects: string[];
+};
+
+/** One changed scene. Mirrors `SceneChange`. */
+export type SceneChange = {
+  scene: string;
+  name: string;
+  kind: ChangeKind;
+  renamedFrom?: string;
+  reordered: boolean;
+  items: ItemChange[];
+};
+
+/** One changed source (the shared pool). Mirrors `SourceChange`. */
+export type SourceChange = {
+  source: string;
+  name: string;
+  kind: ChangeKind;
+  renamedFrom?: string;
+  aspects: string[];
+};
+
+/** The full comparison of one collection against another. Mirrors `CollectionDiff`. */
+export type CollectionDiff = {
+  sources: SourceChange[];
+  scenes: SceneChange[];
+  total: number;
+};
+
+/** What to compare the active collection against. Mirrors Rust `DiffTarget`. */
+export type DiffTarget =
+  | { kind: "collection"; name: string }
+  | { kind: "pack"; path: string }
+  | { kind: "snapshot"; id: string };
+
+/** Diff the active collection against `target` (a named collection or a pack). */
+export function collectionDiff(target: DiffTarget): Promise<CollectionDiff> {
+  return invoke<CollectionDiff>("collection_diff", { target });
+}
+
+/** Apply the selected scene/source changes from `target` onto the active
+ * collection; resolves to the diff that remains. */
+export function collectionMerge(
+  target: DiffTarget,
+  scenes: string[],
+  sources: string[],
+): Promise<CollectionDiff> {
+  return invoke<CollectionDiff>("collection_merge", { target, scenes, sources });
+}
+
+/** One row in the snapshot timeline (CAP-N62). Mirrors `SnapshotMeta`. */
+export type SnapshotMeta = {
+  id: string;
+  name: string;
+  created: string;
+  scenes: number;
+  sources: number;
+  bytes: number;
+};
+
+/** The snapshot timeline for the active collection. Mirrors `SnapshotList`. */
+export type SnapshotList = {
+  snapshots: SnapshotMeta[];
+  totalBytes: number;
+  cap: number;
+};
+
+/** Checkpoint the active collection under `name`. */
+export function snapshotCreate(name: string): Promise<SnapshotList> {
+  return invoke<SnapshotList>("snapshot_create", { name });
+}
+
+/** The snapshot timeline for the active collection (newest first). */
+export function snapshotList(): Promise<SnapshotList> {
+  return invoke<SnapshotList>("snapshot_list");
+}
+
+/** Restore a snapshot (the current state is checkpointed first). */
+export function snapshotRestore(id: string): Promise<SnapshotList> {
+  return invoke<SnapshotList>("snapshot_restore", { id });
+}
+
+/** Delete a snapshot. */
+export function snapshotDelete(id: string): Promise<SnapshotList> {
+  return invoke<SnapshotList>("snapshot_delete", { id });
+}
+
+/** Portable-mode status (CAP-N63). Mirrors Rust `PortableStatus`. */
+export type PortableStatus = {
+  portable: boolean;
+  marker: string;
+  configDir: string;
+  dataDir: string;
+};
+
+/** Whether the app is running portable (data under the exe folder) + where. */
+export function portableStatus(): Promise<PortableStatus> {
+  return invoke<PortableStatus>("portable_status");
+}
+
+/** A backup archive's self-description (CAP-N64). Mirrors `BackupManifest`. */
+export type BackupManifest = {
+  backupFormat: number;
+  appVersion: string;
+  created: string;
+  hasSettings: boolean;
+  collections: string[];
+  profiles: string[];
+  streamKeysIncluded: boolean;
+};
+
+/** The account of a backup export. Mirrors `BackupReport`. */
+export type BackupReport = {
+  path: string;
+  settings: boolean;
+  collections: number;
+  profiles: number;
+  totalBytes: number;
+};
+
+/** Which parts of a backup to restore. Mirrors `RestoreSelection`. */
+export type RestoreSelection = { settings: boolean; collections: boolean; profiles: boolean };
+
+/** The account of a restore. Mirrors `RestoreReport`. */
+export type RestoreReport = {
+  settings: boolean;
+  collections: number;
+  profiles: number;
+  restartRecommended: boolean;
+};
+
+/** Export the whole studio config to `dest` as a `.fcapbackup` (secrets stripped). */
+export function backupExport(dest: string): Promise<BackupReport> {
+  return invoke<BackupReport>("backup_export", { dest });
+}
+
+/** Read a backup's manifest (for the restore preview). */
+export function backupInspect(path: string): Promise<BackupManifest> {
+  return invoke<BackupManifest>("backup_inspect", { path });
+}
+
+/** Restore the selected parts of a backup onto this machine. */
+export function backupRestore(path: string, selection: RestoreSelection): Promise<RestoreReport> {
+  return invoke<RestoreReport>("backup_restore", { path, selection });
+}
+
+/** Export the current theme to `path` as a shareable `.fctheme` (CAP-N65). */
+export function themeExport(path: string, theme: ThemeSettings): Promise<void> {
+  return invoke("theme_export", { path, theme });
+}
+
+/** Read a `.fctheme` back (validated). */
+export function themeImport(path: string): Promise<ThemeSettings> {
+  return invoke<ThemeSettings>("theme_import", { path });
+}
+
+/** A saved dock/view layout (CAP-N66). Mirrors `DockPreset` in dockpreset.rs. */
+export type DockPreset = { name: string; showStatsDock: boolean; mixerLayout: MixerLayout };
+
+/** The saved dock layouts. */
+export function dockPresetsList(): Promise<DockPreset[]> {
+  return invoke<DockPreset[]>("dock_presets_list");
+}
+
+/** Save the current layout (stats-dock + mixer orientation) under `name`. */
+export function dockPresetSave(name: string): Promise<DockPreset[]> {
+  return invoke<DockPreset[]>("dock_preset_save", { name });
+}
+
+/** Apply a preset; resolves to the updated settings for the UI to adopt. */
+export function dockPresetApply(name: string): Promise<Settings> {
+  return invoke<Settings>("dock_preset_apply", { name });
+}
+
+/** Delete a preset. */
+export function dockPresetDelete(name: string): Promise<DockPreset[]> {
+  return invoke<DockPreset[]>("dock_preset_delete", { name });
+}
+
+/** What a quick-action button does (CAP-N68). Mirrors `QuickActionSpec`. */
+export type QuickActionSpec =
+  | { kind: "command"; command: string; params?: Record<string, unknown> }
+  | { kind: "soundboard"; pad: string };
+
+/** One quick-action button. Mirrors `QuickAction`. */
+export type QuickAction = { label: string; color: string; action: QuickActionSpec };
+
+/** A named page of buttons. Mirrors `QuickActionPage`. */
+export type QuickActionPage = { name: string; buttons: QuickAction[] };
+
+/** The quick-actions grid config (shared with the LAN panel). Mirrors `QuickActions`. */
+export type QuickActions = { pages: QuickActionPage[] };
+
+/** The saved quick-actions grid. */
+export function quickActionsGet(): Promise<QuickActions> {
+  return invoke<QuickActions>("quick_actions_get");
+}
+
+/** Replace the quick-actions grid. */
+export function quickActionsSet(config: QuickActions): Promise<void> {
+  return invoke("quick_actions_set", { config });
+}
+
+/** Fire an allowlisted studio command from a quick-action button. */
+export function quickActionDispatch(
+  command: string,
+  params: Record<string, unknown>,
+): Promise<unknown> {
+  return invoke("quick_action_dispatch", { command, params });
 }
 
 /** What references a file (CAP-M03). Mirrors `FileRefKind` in Rust. */

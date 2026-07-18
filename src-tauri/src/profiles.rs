@@ -66,8 +66,7 @@ pub struct WorkspaceState {
 
 impl WorkspaceState {
     pub fn load_default() -> Self {
-        let dir = directories::ProjectDirs::from("com", "Freally", "Freally Capture")
-            .map(|dirs| dirs.config_dir().to_path_buf());
+        let dir = crate::paths::config_dir();
         let current = dir
             .as_ref()
             .and_then(|dir| std::fs::read_to_string(dir.join("workspace.json")).ok())
@@ -93,7 +92,7 @@ impl WorkspaceState {
         }
     }
 
-    fn subdir(&self, kind: &str) -> Option<PathBuf> {
+    pub(crate) fn subdir(&self, kind: &str) -> Option<PathBuf> {
         let dir = self.dir.as_ref()?.join(kind);
         if let Err(err) = std::fs::create_dir_all(&dir) {
             eprintln!("workspace: could not create {}: {err}", dir.display());
@@ -102,7 +101,7 @@ impl WorkspaceState {
         Some(dir)
     }
 
-    fn base(&self) -> Result<&std::path::Path, String> {
+    pub(crate) fn base(&self) -> Result<&std::path::Path, String> {
         self.dir
             .as_deref()
             .ok_or_else(|| "no config directory".to_string())
@@ -111,6 +110,19 @@ impl WorkspaceState {
     /// The active profile's name — the `{profile}` filename token (CAP-M25).
     pub fn profile_name(&self) -> String {
         self.lock().profile.clone()
+    }
+
+    /// The active scene-collection name.
+    pub fn collection_name(&self) -> String {
+        self.lock().collection.clone()
+    }
+
+    /// Adopt `name` as the active collection and persist the choice. The caller
+    /// is responsible for having loaded/switched the collection itself (CAP-N60
+    /// pack import mirrors the OBS-import flow across module boundaries).
+    pub fn set_active_collection(&self, name: String) {
+        self.lock().collection = name;
+        self.save();
     }
 
     /// Replace the remembered open-projector list and persist it (CAP-M07
@@ -332,7 +344,7 @@ pub fn collection_switch<R: Runtime>(
 /// Turn an OBS collection name into a safe, unique collection name: keep only
 /// whitelisted characters, cap the stem so a ` N` suffix still fits, fall back
 /// to `"Imported"`, then bump a counter until it does not clash.
-fn make_import_name(base: &std::path::Path, raw: &str) -> String {
+pub(crate) fn make_import_name(base: &std::path::Path, raw: &str) -> String {
     let cleaned: String = raw
         .chars()
         .map(|c| {

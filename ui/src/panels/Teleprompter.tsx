@@ -206,6 +206,15 @@ export function TeleprompterDialog({ onClose }: { onClose: () => void }) {
   const control = (action: string, value?: number) =>
     void teleprompterControl(action, value).catch(() => undefined);
 
+  // Stop = halt the scroll AND rewind to the top, so the operator can re-read
+  // and re-edit the script. (Pause alone leaves a short script scrolled off the
+  // top, which looks blank and is why "there's no way to re-edit" — the text is
+  // still there, just scrolled past.)
+  const stop = () => {
+    if (state?.playing) control("toggle");
+    control("top");
+  };
+
   return (
     <PickerShell title={t("teleprompter-title")} onClose={onClose} wide>
       {!state ? (
@@ -224,7 +233,7 @@ export function TeleprompterDialog({ onClose }: { onClose: () => void }) {
               spellCheck={false}
               className="h-56 w-full resize-none rounded-md border border-havoc-border bg-havoc-panel p-2 font-mono text-xs text-havoc-text outline-none focus:border-havoc-accent/60"
             />
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-5 gap-1.5">
               <button type="button" className={ctrlButton} onClick={() => control("top")}>
                 ⟲ {t("teleprompter-top")}
               </button>
@@ -237,6 +246,9 @@ export function TeleprompterDialog({ onClose }: { onClose: () => void }) {
                 onClick={() => control("toggle")}
               >
                 {state.playing ? `⏸ ${t("teleprompter-pause")}` : `▶ ${t("teleprompter-play")}`}
+              </button>
+              <button type="button" className={ctrlButton} onClick={stop}>
+                ■ {t("teleprompter-stop")}
               </button>
               <button type="button" className={ctrlButton} onClick={() => control("faster")}>
                 + {t("teleprompter-faster")}
@@ -288,11 +300,16 @@ export function TeleprompterDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 className={ctrlButton}
                 onClick={() =>
+                  // A normal decorated, always-on-top window (not a borderless
+                  // "fullscreen" one): the borderless no-display window had no
+                  // titlebar X, no way to close, and could render blank. The
+                  // talent can maximize/move it to a second screen; Esc closes
+                  // it too (the projector's own key handler).
                   void auxWindowOpen(
                     "projector-teleprompter",
                     t("teleprompter-title"),
                     null,
-                    true,
+                    false,
                   ).catch(() => undefined)
                 }
               >

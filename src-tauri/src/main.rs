@@ -15,6 +15,7 @@ mod audio;
 mod audiorec;
 mod autoconfig;
 mod automation;
+mod backup;
 mod benchmark;
 mod bezier_mask;
 mod bugreport;
@@ -23,6 +24,7 @@ mod calibration;
 mod chords;
 mod commands;
 mod diagnostics;
+mod dockpreset;
 mod docks;
 mod eula;
 mod events;
@@ -31,15 +33,19 @@ mod forensic;
 mod hotkey_audit;
 mod hotkeys;
 mod link;
+mod merge;
 mod midi;
 mod native_preview;
 mod openfile;
 mod osc;
+mod pack;
+mod paths;
 mod pipeline;
 mod preview;
 mod profiles;
 mod projector;
 mod ptz;
+mod quickactions;
 mod reactions;
 mod recording;
 mod remote;
@@ -51,12 +57,14 @@ mod salvage;
 mod scripting;
 mod settings;
 mod shutdown;
+mod snapshot;
 mod soundboard;
 mod statshud;
 mod stream;
 mod studio;
 mod teleprompter;
 mod telestrator;
+mod theme;
 mod timers;
 mod webpanel;
 
@@ -67,6 +75,15 @@ use studio::StudioState;
 use tauri::{Emitter, Manager};
 
 fn main() {
+    // Portable mode (CAP-N63): decide ONCE, before any path is resolved, whether
+    // all app data lives next to the exe (a USB-stick studio) or in the OS user
+    // profile. Every config/data path downstream — including the crash-notice
+    // helper below — reads this decision.
+    paths::init();
+    if paths::is_portable() {
+        println!("portable: running self-contained from the executable's folder");
+    }
+
     // `--crash-notice <pid>`: we are the tiny helper a dying studio spawned, not
     // the studio. Show the native error window, relaunch if the user says yes,
     // and leave. Must come before everything else — the helper never builds a
@@ -393,6 +410,27 @@ fn main() {
             profiles::collection_create,
             profiles::collection_switch,
             profiles::collection_import_obs,
+            pack::pack_export,
+            pack::pack_import,
+            merge::collection_diff,
+            merge::collection_merge,
+            snapshot::snapshot_create,
+            snapshot::snapshot_list,
+            snapshot::snapshot_restore,
+            snapshot::snapshot_delete,
+            paths::portable_status,
+            backup::backup_export,
+            backup::backup_inspect,
+            backup::backup_restore,
+            theme::theme_export,
+            theme::theme_import,
+            dockpreset::dock_presets_list,
+            dockpreset::dock_preset_save,
+            dockpreset::dock_preset_apply,
+            dockpreset::dock_preset_delete,
+            quickactions::quick_actions_get,
+            quickactions::quick_actions_set,
+            quickactions::quick_action_dispatch,
             commands::audio::audio_input_devices,
             commands::audio::audio_output_devices,
             commands::audio::app_audio_apps,

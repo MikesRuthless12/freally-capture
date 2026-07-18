@@ -302,6 +302,10 @@
             <h1>Actions</h1>
             <div class="grid" id="actions"></div>
           </section>
+          <section id="quick-section" style="display:none">
+            <h1>Quick actions</h1>
+            <div class="grid" id="quick"></div>
+          </section>
           <section>
             <h1>Mixer</h1>
             <div id="mixer"></div>
@@ -340,6 +344,23 @@
           location.href = api("/teleprompter");
         };
         actionGrid.appendChild(prompter);
+
+        // CAP-N68: the shared quick-actions grid (first page; command buttons
+        // only — soundboard pads are desktop-only). Same quick-actions.json.
+        const qaPages = (state.quickActions && state.quickActions.pages) || [];
+        const qaButtons = (qaPages[0] && qaPages[0].buttons) || [];
+        const quickGrid = document.getElementById("quick");
+        for (const qb of qaButtons) {
+          if (!qb.action || qb.action.kind !== "command") continue;
+          const button = document.createElement("button");
+          button.textContent = qb.label;
+          if (qb.color) button.style.borderColor = qb.color;
+          button.onclick = () => act(qb.action.command, qb.action.params || {});
+          quickGrid.appendChild(button);
+        }
+        if (quickGrid.children.length > 0) {
+          document.getElementById("quick-section").style.display = "";
+        }
 
         const mixer = document.getElementById("mixer");
         for (const source of sources) {

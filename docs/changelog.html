@@ -24,8 +24,42 @@
     </header>
 
     <main>
-      <!-- 0.800.0 — remote guests & show production, Phase 7 -->
+      <!-- 0.900.0 — studio management & workflow, Phase 8 -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.900.0</span>
+            <span class="date">Jul 18, 2026 · Studio management &amp; workflow</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.900.0">Download</a>
+        </div>
+
+        <h2>0.900.0 — Studio management &amp; workflow (Phase 8)</h2>
+        <p class="summary">
+          Own your studio. Phase 8 makes a whole layout portable and shareable, adds version control for
+          your scenes, puts your most-used actions one tap away, and opens up full theming and a
+          USB-stick portable mode. Everything is strictly local — no new dependencies and no new
+          network calls; the pack, backup, snapshot, and theme features are plain local files, and the
+          quick-actions LAN sharing rides the existing opt-in web panel.
+        </p>
+        <ul class="features">
+          <li><strong>Scene-collection pack — export/import</strong> — bundle a whole layout (the scene graph plus its local assets: images, media, LUTs, masks, fonts) into a single portable <code>.fcappack</code> and share it as one file. Import relinks assets on the target machine; URL/UNC paths are recorded as external and never statted, and fonts are flagged for attribution. No marketplace, no server.</li>
+          <li><strong>Scene-collection diff &amp; merge</strong> — compare the active collection against another collection, a <code>.fcappack</code>, or a snapshot; see added / removed / changed scenes, sources, and per-item transform / filters / visibility; then cherry-pick exactly which changes to merge in (a picked scene brings the sources it uses). Reconcile two versions without a cloud.</li>
+          <li><strong>Named version snapshots</strong> — one-click named checkpoints of the active collection with a browsable timeline, restore, and a diff view (reusing the compare tool). Intentional history beside autosave and undo; capped at 50 with disclosed disk usage, and a "before restore" checkpoint so a restore is never one-way.</li>
+          <li><strong>Portable mode</strong> — drop a <code>freally-portable.txt</code> marker next to the executable and all app data (settings, profiles, collections) lives under the exe's folder — run the whole studio from a USB stick without touching the host OS profile. Settings → About shows the portable status and the data location.</li>
+          <li><strong>One-file backup &amp; restore</strong> — export everything (settings, profiles, scene collections) to a single versioned <code>.fcapbackup</code>, and restore it selectively here or on a new machine (a migration flow). Secrets — stream keys, passwords — are always stripped from a backup; server-owned fields (EULA, onboarding, camera profiles) are preserved on restore.</li>
+          <li><strong>Theme editor</strong> — a visual editor over the CSS-variable theme: author the full six-colour palette with live WCAG contrast warnings, and export/import shareable <code>.fctheme</code> files.</li>
+          <li><strong>Dock layout presets</strong> — save named view layouts (stats-dock visibility + mixer orientation) and switch between them.</li>
+          <li><strong>Settings search &amp; recently-changed</strong> — a search field over the Settings modal (every category keyword-indexed, jump-to) plus a per-category "changed since opened" marker.</li>
+          <li><strong>Quick-actions grid</strong> — a customizable Stream-Deck-style button board (scenes, commands, macros, soundboard pads) with per-button colour and pages; command buttons fire the same allowlisted studio actions as hotkeys and the LAN panel, and the grid config is shared with the CAP-N06 LAN panel.</li>
+          <li><strong>Fixed: teleprompter projector</strong> — "Open projector" opened a blank, borderless window that could not be closed (its IPC was unauthorized). It now opens as a normal, closable window that shows the scrolling script, and <kbd>Esc</kbd> closes it; File → Exit quits reliably too (the main window was missing the window-close permission).</li>
+          <li><strong>Fixed: teleprompter dialog</strong> — a Stop button (pause + rewind to the top) so a short script no longer looks blank after Play and the text can be re-read and re-edited.</li>
+          <li><strong>Fixed: sources panel</strong> — the per-source remove and reorder controls were hover-only and could be clipped off the rail; each source now has an always-visible top control strip (LIVE/REC · lock · reorder · filters · properties · clone · remove).</li>
+        </ul>
+      </article>
+
+      <!-- 0.800.0 — remote guests & show production, Phase 7 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.800.0</span>
@@ -956,28 +990,28 @@
             <span class="soon">Done — Jul 16, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.700.0</span>
+            <span class="badge">0.700.0</span>
             <div>
               <strong>Streaming reliability &amp; insight</strong>
               <p>A network-condition simulator for pre-show drills, a dry-run mode that keeps every byte on the machine, a dropped-frame forensic timeline, a post-show session report, an encoder benchmark wizard, and per-output source visibility (stream-only / recording-only items).</p>
             </div>
-            <span class="soon">Planned</span>
+            <span class="soon">Done — Jul 17, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.800.0</span>
+            <span class="badge">0.800.0</span>
             <div>
               <strong>Remote guests &amp; show production</strong>
               <p>A green room with private tech checks, a cue &amp; talk system over the existing P2P channels, a per-guest connection-quality dashboard, a telestrator, a teleprompter, and auto-grid guest layouts with nameplates.</p>
             </div>
-            <span class="soon">Planned</span>
+            <span class="soon">Done — Jul 17, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">0.900.0</span>
+            <span class="badge">0.900.0</span>
             <div>
               <strong>Studio management &amp; workflow</strong>
               <p>Scene-collection pack export/import, collection diff &amp; merge, named version snapshots, portable mode (run from a USB stick), one-file backup &amp; restore, a theme editor, dock layout presets, settings search, and a quick-actions grid dock.</p>
             </div>
-            <span class="soon">Planned</span>
+            <span class="soon">Done — Jul 18, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">1.0.0</span>

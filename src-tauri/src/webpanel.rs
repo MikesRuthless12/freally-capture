@@ -320,12 +320,20 @@ fn state_json(app: &AppHandle) -> Value {
     let teleprompter =
         serde_json::to_value(app.state::<crate::teleprompter::TeleprompterState>().dto())
             .unwrap_or(Value::Null);
+    // CAP-N68: the quick-actions grid config is shared with this LAN panel —
+    // the same `quick-actions.json` the desktop dock uses. Only Command buttons
+    // work here (soundboard pads are desktop-only, off the remote allowlist).
+    let quick_actions = crate::paths::config_dir()
+        .map(|dir| crate::quickactions::read(&dir))
+        .and_then(|config| serde_json::to_value(config).ok())
+        .unwrap_or(Value::Null);
     json!({
         "scenes": scenes,
         "sources": sources,
         "live": app.state::<crate::stream::StreamBridgeState>().wants_frames(),
         "recording": app.state::<crate::recording::RecordingState>().wants_frames(),
         "teleprompter": teleprompter,
+        "quickActions": quick_actions,
     })
 }
 

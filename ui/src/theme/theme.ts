@@ -14,13 +14,37 @@
 /** Mirrors `ThemeMode` in `src-tauri/src/settings.rs`. */
 export type ThemeMode = "dark" | "light" | "custom";
 
+/** A full authored palette (CAP-N65): the six theme colours. Mirrors
+ * `CustomPalette` in settings.rs. */
+export type CustomPalette = {
+  bg: string;
+  panel: string;
+  accent: string;
+  accent2: string;
+  text: string;
+  muted: string;
+};
+
 export type Theme = {
   mode: ThemeMode;
   /** `#rrggbb`. Rust's `validate()` rejects anything else. */
   accent: string;
+  /** CAP-N65: a full authored palette, applied when `mode` is `custom`. */
+  palette?: CustomPalette;
 };
 
 export const DEFAULT_THEME: Theme = { mode: "dark", accent: "#4a9eff" };
+
+/** The shipped dark palette (matches `global.css` @theme) — the editor's
+ * starting point when authoring a custom palette. */
+export const DARK_PALETTE: CustomPalette = {
+  bg: "#0a0a0b",
+  panel: "#1a1a1d",
+  accent: "#4a9eff",
+  accent2: "#00d4ff",
+  text: "#e8e8ea",
+  muted: "#8b8b93",
+};
 
 /** The variables `global.css` defines. Setting a subset is fine. */
 type Palette = Partial<{
@@ -66,6 +90,19 @@ function paletteFor(theme: Theme): Palette {
     case "light":
       return LIGHT;
     case "custom": {
+      // A full authored palette (CAP-N65) wins; otherwise fall back to the
+      // accent-only Custom (dark base + one chosen accent).
+      const p = theme.palette;
+      if (p && isFullPalette(p)) {
+        return {
+          "--color-havoc-bg": p.bg,
+          "--color-havoc-panel": p.panel,
+          "--color-havoc-accent": p.accent,
+          "--color-havoc-accent-2": p.accent2,
+          "--color-havoc-text": p.text,
+          "--color-havoc-muted": p.muted,
+        };
+      }
       if (!isHexColor(theme.accent)) return {};
       return {
         "--color-havoc-accent": theme.accent,
@@ -76,6 +113,28 @@ function paletteFor(theme: Theme): Palette {
     default:
       return {};
   }
+}
+
+/** Every colour in a custom palette is a valid hex triple. */
+export function isFullPalette(p: CustomPalette): boolean {
+  return [p.bg, p.panel, p.accent, p.accent2, p.text, p.muted].every(isHexColor);
+}
+
+/** WCAG relative luminance of a `#rrggbb` colour (0–1). */
+function luminance(hex: string): number {
+  const v = hex.replace("#", "");
+  const chan = [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  return 0.2126 * lin(chan[0]) + 0.7152 * lin(chan[1]) + 0.0722 * lin(chan[2]);
+}
+
+/** WCAG contrast ratio (1–21) between two `#rrggbb` colours. ≥4.5 passes AA for
+ * normal text; ≥3 for large text / UI components. */
+export function contrastRatio(a: string, b: string): number {
+  if (!isHexColor(a) || !isHexColor(b)) return 1;
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
 /** Every variable this module ever sets, so switching themes clears the last. */

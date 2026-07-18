@@ -457,6 +457,12 @@ export function MenuBar({
           },
           {
             kind: "item",
+            id: "quickActions",
+            label: t("menu-tools-quick-actions"),
+            onSelect: () => onOpenControls("quickActions"),
+          },
+          {
+            kind: "item",
             id: "downstream",
             label: t("menu-tools-downstream"),
             onSelect: () => onOpenApp("downstream"),
