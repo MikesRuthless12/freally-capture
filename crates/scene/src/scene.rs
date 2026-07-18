@@ -328,6 +328,47 @@ pub fn rects_overlap(a: NormRect, b: NormRect) -> bool {
     a.x + a.w > b.x && b.x + b.w > a.x && a.y + a.h > b.y && b.y + b.h > a.y
 }
 
+/// Margin around the auto-grid (CAP-N59) and the gap between its cells.
+const GRID_MARGIN: f32 = 0.02;
+const GRID_GAP: f32 = 0.015;
+/// The most participants an auto-grid arranges (CAP-N59's 1–9 gallery).
+pub const MAX_GRID: usize = 9;
+
+/// A reflowing 1–9 participant grid (CAP-N59): `n` equal, non-overlapping cells
+/// filling the canvas (inset by [`GRID_MARGIN`], separated by [`GRID_GAP`]).
+/// Columns = ⌈√n⌉; a short final row is centered. Deterministic and pure — the
+/// non-overlap invariant is unit-tested.
+pub fn grid_seats(n: usize) -> Vec<NormRect> {
+    let n = n.clamp(1, MAX_GRID);
+    let cols = (n as f32).sqrt().ceil() as usize;
+    let rows = n.div_ceil(cols);
+    let cell_w = (1.0 - 2.0 * GRID_MARGIN - (cols as f32 - 1.0) * GRID_GAP) / cols as f32;
+    let cell_h = (1.0 - 2.0 * GRID_MARGIN - (rows as f32 - 1.0) * GRID_GAP) / rows as f32;
+    let step_x = cell_w + GRID_GAP;
+    let step_y = cell_h + GRID_GAP;
+    let last_row_start = (rows - 1) * cols;
+    let last_row_count = n - last_row_start;
+    let mut seats = Vec::with_capacity(n);
+    for i in 0..n {
+        let row = i / cols;
+        let col = i % cols;
+        // Center a short final row so it sits under the middle of the grid.
+        let row_count = if row == rows - 1 {
+            last_row_count
+        } else {
+            cols
+        };
+        let row_offset = (cols - row_count) as f32 * step_x / 2.0;
+        seats.push(NormRect {
+            x: GRID_MARGIN + row_offset + col as f32 * step_x,
+            y: GRID_MARGIN + row as f32 * step_y,
+            w: cell_w.max(0.01),
+            h: cell_h.max(0.01),
+        });
+    }
+    seats
+}
+
 /// How Studio Mode commits Preview → Program. `Cut` is instant; the rest
 /// blend the two composed scenes on the GPU over a set duration. The Phase 6
 /// pack adds more built-in luma patterns, custom luma-wipe images, and the

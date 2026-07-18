@@ -75,6 +75,21 @@ fn same_seat(a: NormRect, b: NormRect) -> bool {
         && (a.h - b.h).abs() < EPS
 }
 
+/// Whether a normalized seat rect is well-formed and fully inside the canvas —
+/// the shared guard for untrusted slot input (`set_item_slot`, `apply_grid`).
+fn valid_seat(slot: &NormRect) -> bool {
+    slot.x.is_finite()
+        && slot.y.is_finite()
+        && slot.w.is_finite()
+        && slot.h.is_finite()
+        && slot.w > 0.0
+        && slot.h > 0.0
+        && slot.x >= 0.0
+        && slot.y >= 0.0
+        && slot.x + slot.w <= 1.0
+        && slot.y + slot.h <= 1.0
+}
+
 /// Why a mutation was refused. Every variant names the missing target — the
 /// collection is never left half-mutated on error.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -1368,16 +1383,7 @@ impl Collection {
         item_id: ItemId,
         slot: NormRect,
     ) -> Result<(), SceneError> {
-        let finite =
-            slot.x.is_finite() && slot.y.is_finite() && slot.w.is_finite() && slot.h.is_finite();
-        let inside = finite
-            && slot.w > 0.0
-            && slot.h > 0.0
-            && slot.x >= 0.0
-            && slot.y >= 0.0
-            && slot.x + slot.w <= 1.0
-            && slot.y + slot.h <= 1.0;
-        if !inside {
+        if !valid_seat(&slot) {
             return Err(SceneError::InvalidSlot);
         }
 
@@ -1441,6 +1447,36 @@ impl Collection {
         let item = self.item_mut(scene_id, item_id)?;
         item.pending_fit = true;
         item.pending_slot = Some(slot);
+        Ok(())
+    }
+
+    /// Seat several items into an auto-grid (CAP-N59): assign each its
+    /// pre-computed, non-overlapping [`scene::grid_seats`] rect directly (no
+    /// bump/center dance — the grid already guarantees no two seats collide).
+    /// Each rect is validated inside the canvas; the engine fits the item on
+    /// its next frame. The backdrop is skipped, and an item that no longer
+    /// exists (a guest can drop between the UI building the list and this
+    /// landing) is skipped rather than failing the whole reflow.
+    pub fn apply_grid(
+        &mut self,
+        scene_id: SceneId,
+        assignments: &[(ItemId, NormRect)],
+    ) -> Result<(), SceneError> {
+        for (_item_id, slot) in assignments {
+            if !valid_seat(slot) {
+                return Err(SceneError::InvalidSlot);
+            }
+        }
+        for (item_id, slot) in assignments {
+            let Ok(item) = self.item_mut(scene_id, *item_id) else {
+                continue;
+            };
+            if item.backdrop.is_some() {
+                continue;
+            }
+            item.pending_fit = true;
+            item.pending_slot = Some(*slot);
+        }
         Ok(())
     }
 
@@ -2115,6 +2151,31 @@ mod tests {
             3,
             "workspace version should be MAJOR.MINOR.PATCH"
         );
+    }
+
+    /// CAP-N59: the auto-grid produces exactly `n` cells for every 1–9, each
+    /// fully inside the canvas, and NO two ever overlap (the reflow invariant).
+    #[test]
+    fn grid_seats_never_overlap_for_one_to_nine() {
+        for n in 1..=scene::MAX_GRID {
+            let seats = scene::grid_seats(n);
+            assert_eq!(seats.len(), n, "n={n} yields n cells");
+            for (i, a) in seats.iter().enumerate() {
+                assert!(
+                    a.x >= 0.0 && a.y >= 0.0 && a.x + a.w <= 1.0 + 1e-3 && a.y + a.h <= 1.0 + 1e-3,
+                    "n={n} cell {i} stays inside the canvas: {a:?}"
+                );
+                assert!(a.w > 0.0 && a.h > 0.0, "n={n} cell {i} is non-empty");
+                for b in seats.iter().skip(i + 1) {
+                    assert!(
+                        !scene::rects_overlap(*a, *b),
+                        "n={n}: cells {a:?} and {b:?} overlap"
+                    );
+                }
+            }
+        }
+        // Over-cap requests clamp to the 9-cell gallery.
+        assert_eq!(scene::grid_seats(100).len(), scene::MAX_GRID);
     }
 
     /// A collection exercising every source kind, filter kind, and

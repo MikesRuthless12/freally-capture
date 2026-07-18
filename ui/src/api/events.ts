@@ -23,6 +23,7 @@ import type {
   StreamStatus,
   StudioDto,
   MidiControl,
+  TeleprompterState,
 } from "./types";
 
 /** Subscribe to the ~2 Hz `stats` event. Resolves to an unlisten function. */
@@ -138,4 +139,10 @@ export function onPipeline(handler: (jobs: PipelineJob[]) => void): Promise<Unli
 /** Subscribe to a .frec opened via the OS while the app is already running. */
 export function onOpenFrec(handler: (path: string) => void): Promise<UnlistenFn> {
   return listen<string>("open-frec", (event) => handler(event.payload));
+}
+
+/** CAP-N58: subscribe to teleprompter state changes (every control action), so
+ * every surface — dock, projector, LAN panel — resyncs and animates locally. */
+export function onTeleprompter(handler: (state: TeleprompterState) => void): Promise<UnlistenFn> {
+  return listen<TeleprompterState>("teleprompter", (event) => handler(event.payload));
 }

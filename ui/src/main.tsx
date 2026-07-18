@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import App from "./App";
 import { Projector } from "./panels/Projector";
+import { TeleprompterProjector } from "./panels/Teleprompter";
 import { MultiviewWindow } from "./panels/MultiviewWindow";
 import { initLocale } from "./i18n/t";
 import "./styles/global.css";
@@ -24,12 +25,23 @@ const label = (() => {
   }
 })();
 const isProjector = label.startsWith("projector-");
+// CAP-N58: the teleprompter projector renders the scrolling script (not a
+// compositor feed), so it takes its own branch.
+const isTeleprompter = label === "projector-teleprompter";
 // The multiview-on-display window (CAP-M07 extension) shares this bundle too.
 const isMultiview = label === "multiview";
 if (isProjector || isMultiview) initLocale("auto");
 
 createRoot(root).render(
   <StrictMode>
-    {isProjector ? <Projector label={label} /> : isMultiview ? <MultiviewWindow /> : <App />}
+    {isTeleprompter ? (
+      <TeleprompterProjector />
+    ) : isProjector ? (
+      <Projector label={label} />
+    ) : isMultiview ? (
+      <MultiviewWindow />
+    ) : (
+      <App />
+    )}
   </StrictMode>,
 );

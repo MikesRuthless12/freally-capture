@@ -35,6 +35,7 @@ import { MidiDialog } from "./MidiDialog";
 import { PtzDialog } from "./PtzDialog";
 import { RundownDialog } from "./RundownDialog";
 import { ScriptsDialog } from "./ScriptsDialog";
+import { TeleprompterDialog } from "./Teleprompter";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsPanel } from "./SettingsPanel";
 import { SettingsRemote } from "./SettingsRemote";
@@ -62,6 +63,7 @@ export type ControlsDialogKind =
   | "rundown"
   | "panel"
   | "ptz"
+  | "teleprompter"
   | "midi"
   | "bug"
   | "updates"
@@ -432,6 +434,7 @@ export function ControlsDock({
           onClose={() => setDialog(null)}
         />
       )}
+      {dialog === "teleprompter" && <TeleprompterDialog onClose={() => setDialog(null)} />}
       {dialog === "bug" && <BugReportDialog onClose={() => setDialog(null)} />}
       {dialog === "updates" && <UpdatesDialog onClose={() => setDialog(null)} />}
       {dialog === "whatsnew" && <WhatsNewDialog onClose={() => setDialog(null)} />}

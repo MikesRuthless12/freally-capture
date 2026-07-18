@@ -59,6 +59,7 @@ import type {
   StreamStatus,
   TimelineStatus,
   StudioDto,
+  TeleprompterState,
   Transform,
   TransitionKind,
   TrimInfo,
@@ -618,6 +619,15 @@ export function studioSetCenterView(sceneId: SceneId, itemId: ItemId | null): Pr
  */
 export function studioSetFocus(sceneId: SceneId, itemId: ItemId | null): Promise<void> {
   return invoke("studio_set_focus", { sceneId, itemId });
+}
+
+/** CAP-N59: reflow the given participants into an automatic 1–9 grid. Each
+ * name is published as `{{guestN}}` for title nameplates. */
+export function studioAutoGrid(
+  sceneId: SceneId,
+  participants: { itemId: ItemId; name: string }[],
+): Promise<void> {
+  return invoke("studio_auto_grid", { sceneId, participants });
 }
 
 /** Studio Mode on/off (on = a preview pane opens on the program scene). */
@@ -1539,4 +1549,83 @@ export function releaseNotes(): Promise<ReleaseNotes> {
 /** Dismiss + delete the pending crash report. */
 export function bugReportClearCrash(): Promise<void> {
   return invoke("bug_report_clear_crash");
+}
+
+// -- Telestrator (CAP-N57) ----------------------------------------------------
+
+/** One sampled pointer position for a telestrator stroke (canvas-normalized). */
+export type TelePointInput = { x: number; y: number; pressure?: number };
+
+/** The opening of a telestrator stroke: tool + style + first point. */
+export type TeleStrokeBegin = {
+  tool: "pen" | "highlight" | "arrow" | "ellipse";
+  /** RGBA, each channel 0..1. */
+  color: [number, number, number, number];
+  /** Line width as a fraction of the canvas height. */
+  width: number;
+  /** Seconds until the mark starts fading; null/omitted = persistent. */
+  fadeAfter?: number | null;
+  point: TelePointInput;
+};
+
+/** Start drawing a telestrator stroke (pointer down). */
+export function telestratorBeginStroke(stroke: TeleStrokeBegin): Promise<void> {
+  return invoke("telestrator_begin_stroke", { stroke });
+}
+
+/** Stream more sampled points into the in-progress stroke (pointer move). */
+export function telestratorExtendStroke(points: TelePointInput[]): Promise<void> {
+  return invoke("telestrator_extend_stroke", { points });
+}
+
+/** Finish the in-progress stroke (pointer up). */
+export function telestratorCommitStroke(): Promise<void> {
+  return invoke("telestrator_commit_stroke");
+}
+
+/** Discard the in-progress stroke (pointer cancel). */
+export function telestratorCancelStroke(): Promise<void> {
+  return invoke("telestrator_cancel_stroke");
+}
+
+/** Clear all telestrator marks. */
+export function telestratorClear(): Promise<void> {
+  return invoke("telestrator_clear");
+}
+
+/** Undo the last committed telestrator stroke. */
+export function telestratorUndo(): Promise<void> {
+  return invoke("telestrator_undo");
+}
+
+// -- Teleprompter (CAP-N58) ---------------------------------------------------
+
+/** The current teleprompter snapshot (a surface's initial read). */
+export function teleprompterGet(): Promise<TeleprompterState> {
+  return invoke<TeleprompterState>("teleprompter_get");
+}
+
+/** Replace the teleprompter script (rewinds to the top). */
+export function teleprompterSetScript(text: string): Promise<void> {
+  return invoke("teleprompter_set_script", { text });
+}
+
+/** Set the scroll speed (lines per second). */
+export function teleprompterSetSpeed(speed: number): Promise<void> {
+  return invoke("teleprompter_set_speed", { speed });
+}
+
+/** Set the reference font size (px). */
+export function teleprompterSetFont(size: number): Promise<void> {
+  return invoke("teleprompter_set_font", { size });
+}
+
+/** Mirror the text horizontally (beam-splitter glass). */
+export function teleprompterSetMirror(mirror: boolean): Promise<void> {
+  return invoke("teleprompter_set_mirror", { mirror });
+}
+
+/** Scroll control: play / pause / toggle / faster / slower / top / setSpeed. */
+export function teleprompterControl(action: string, value?: number): Promise<void> {
+  return invoke("teleprompter_control", { action, value });
 }

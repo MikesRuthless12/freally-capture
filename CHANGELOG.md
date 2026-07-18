@@ -15,6 +15,48 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.800.0] — 2026-07-17 (Remote Guests & Show Production — Phase 7)
+
+> *From "guests connect" to "a produced show."* Phase 7 turns the remote-guest session into a
+> multi-guest studio and adds the live-production layer on top: draw on the live program, run a
+> teleprompter, hold guests in a green room before they go on air, send them private cues, watch each
+> guest's connection quality, and reflow everyone into an automatic grid. The remote-guest transport
+> now admits **up to eight guests** (host + 8 = a 1–9 gallery). Everything rides the existing opt-in
+> P2P session — no new brokers, no server Mike runs, nothing that auto-connects — and every new
+> surface is off or unbound by default.
+
+### Added
+
+- **Telestrator — draw on the live program (CAP-N57)** — annotate the outgoing feed with pen,
+  highlighter, arrow, and ellipse tools, composited into the program so the marks land in the
+  recording and the stream at the moment you draw them (not just your preview). Marks fade after a set
+  time, or switch to whiteboard mode to keep them until you clear. Tablet-pressure aware; a clear
+  hotkey (unbound until you assign it). Drawn straight over the finished program, so it reaches every
+  output — including the CAP-N53 stream-only / recording-only variants.
+- **Teleprompter (CAP-N58)** — a smooth-scrolling script on three surfaces at once: an in-app panel,
+  a fullscreen projector for the talent (with mirror mode for beam-splitter glass), and a view on the
+  LAN touch panel. Plain-text or light-Markdown scripts, adjustable speed and font. Scroll control
+  from a hotkey, MIDI, OSC, or the LAN panel — the scroll offset is shared, so every surface stays in
+  step.
+- **Green room for remote guests (CAP-N54)** — new guests can land in a private holding state: you
+  see their camera and a cam/mic tech-check in a monitor, off-program, and seat them on air in one
+  click. Optional (off by default); the guest sees a "you're in the green room" banner on both the
+  desktop app and the web join page.
+- **Cue & talk system (CAP-N55)** — send a connected guest private text cues ("30 seconds", "wrap
+  up", "you're next", "speak up") over the existing P2P data channel. The guest sees the cue with a
+  live countdown on their join page or app — never in the program. No new network surface.
+- **Guest connection-quality dashboard (CAP-N56)** — a live per-guest QoS roll-up: round-trip time,
+  packet loss, received resolution and framerate, and jitter, with a green/amber/red badge and a
+  history sparkline, so "your connection is degrading" is visible before viewers notice.
+- **Auto-grid guest layouts (CAP-N59)** — arrange the seated guests into an automatic 1–9 grid that
+  reflows as guests join, leave, or are seated, with each seat's name published as a `{{guestN}}`
+  variable so a title source becomes an auto-updating nameplate. Non-overlapping by construction.
+- **Multi-guest remote sessions** — the opt-in remote-guest transport now admits **up to eight
+  guests** at once (previously one), each its own tile with its own mute gates, connection quality,
+  cue channel, and one-click seating. Still the same peer-to-peer session — media flows directly
+  between host and guests, no server, and nothing connects until you invite someone. Validated to the
+  four-guest performance budget; more guests depend on the host's bandwidth and CPU.
+
 ## [0.700.0] — 2026-07-17 (Streaming Reliability & Insight — Phase 6)
 
 > *Rehearse, measure, explain.* Phase 6 is about knowing your show will hold up before you go live,

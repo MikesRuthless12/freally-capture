@@ -8,7 +8,7 @@
 //! snake_case parameters, same as the Phase 1 commands.)
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 use fcap_scene::{
     BackdropSplit, BlendMode, Corner, DskId, FileRef, FileRefKind, Filter, FilterId, FilterKind,
@@ -509,6 +509,47 @@ pub fn studio_set_item_slot(
 ) -> Result<(), String> {
     state.mutate_tracked(&app, "moveToSeat", None, |collection| {
         collection.set_item_slot(scene_id, item_id, slot)
+    })
+}
+
+/// One participant of an auto-grid (CAP-N59): the guest's scene item + name.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridParticipant {
+    pub item_id: ItemId,
+    pub name: String,
+}
+
+/// Reflow the given participants into an automatic 1–9 grid (CAP-N59). The
+/// non-overlapping geometry is engine-side (`grid_seats`); each participant's
+/// name is exposed as the `{{guestN}}` variable, so a title source referencing
+/// it becomes an auto-updating nameplate (CAP-N16 wiring).
+#[tauri::command]
+pub fn studio_auto_grid(
+    app: AppHandle,
+    state: State<'_, StudioState>,
+    scene_id: SceneId,
+    participants: Vec<GridParticipant>,
+) -> Result<(), String> {
+    // Nameplates: publish each seat's name as {{guestN}} (CAP-N02 variable
+    // store → the studio loop feeds it to every title each revision). Blank the
+    // tail slots so a shrinking grid (5 guests → 2) never leaves a departed
+    // name ghosting in a title bound to {{guest3}}.
+    let automation = app.state::<crate::automation::AutomationState>();
+    for (index, participant) in participants.iter().enumerate() {
+        automation.set_variable(&format!("guest{}", index + 1), &participant.name);
+    }
+    for index in participants.len()..fcap_scene::scene::MAX_GRID {
+        automation.set_variable(&format!("guest{}", index + 1), "");
+    }
+    let seats = fcap_scene::scene::grid_seats(participants.len());
+    let assignments: Vec<(ItemId, NormRect)> = participants
+        .iter()
+        .zip(seats)
+        .map(|(participant, seat)| (participant.item_id, seat))
+        .collect();
+    state.mutate(&app, |collection| {
+        collection.apply_grid(scene_id, &assignments)
     })
 }
 

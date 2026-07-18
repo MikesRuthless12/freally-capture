@@ -29,6 +29,8 @@ const FIELDS: Array<[keyof HotkeySettings, string]> = [
   ["playlistNext", "hotkeys-playlist-next"],
   ["playlistPrevious", "hotkeys-playlist-previous"],
   ["replayRoll", "hotkeys-replay-roll"],
+  ["telestratorClear", "hotkeys-telestrator-clear"],
+  ["teleprompterToggle", "hotkeys-teleprompter-toggle"],
 ];
 
 /**

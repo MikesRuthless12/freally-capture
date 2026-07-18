@@ -132,6 +132,8 @@ const settings = (mode: ThemeMode): Settings => ({
     playlistNext: null,
     playlistPrevious: null,
     replayRoll: null,
+    telestratorClear: null,
+    teleprompterToggle: null,
   },
   panicSlate: { color: "#10141a", image: "" },
   remoteControl: { enabled: false, port: 4455, lan: false, password: "" },

@@ -625,6 +625,10 @@ pub struct HotkeySettings {
     pub playlist_previous: Option<String>,
     /// Roll every live Instant Replay source (CAP-N10).
     pub replay_roll: Option<String>,
+    /// Clear all telestrator marks (CAP-N57).
+    pub telestrator_clear: Option<String>,
+    /// Play / pause the teleprompter scroll (CAP-N58).
+    pub teleprompter_toggle: Option<String>,
 }
 
 impl HotkeySettings {
@@ -652,6 +656,8 @@ impl HotkeySettings {
             ("playlistNext", &self.playlist_next),
             ("playlistPrevious", &self.playlist_previous),
             ("replayRoll", &self.replay_roll),
+            ("telestratorClear", &self.telestrator_clear),
+            ("teleprompterToggle", &self.teleprompter_toggle),
         ] {
             let Some(key) = key else { continue };
             if key.trim().is_empty() {
@@ -691,6 +697,8 @@ impl HotkeySettings {
             &mut self.playlist_next,
             &mut self.playlist_previous,
             &mut self.replay_roll,
+            &mut self.telestrator_clear,
+            &mut self.teleprompter_toggle,
         ] {
             if let Some(key) = field {
                 if !key.trim().is_empty() && validate_accelerator(key).is_err() {
@@ -2272,6 +2280,8 @@ mod tests {
                 playlist_next: Some("Ctrl+Alt+Right".to_owned()),
                 playlist_previous: None,
                 replay_roll: Some("Ctrl+Shift+I".to_owned()),
+                telestrator_clear: Some("Ctrl+Shift+X".to_owned()),
+                teleprompter_toggle: Some("Ctrl+Shift+J".to_owned()),
             },
             panic_slate: PanicSlateSettings {
                 color: "#221100".to_owned(),

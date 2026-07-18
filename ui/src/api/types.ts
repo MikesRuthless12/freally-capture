@@ -505,6 +505,10 @@ export type HotkeySettings = {
   playlistPrevious: string | null;
   /** Roll every live Instant Replay source (CAP-N10). */
   replayRoll: string | null;
+  /** Clear all telestrator marks (CAP-N57). */
+  telestratorClear: string | null;
+  /** Play / pause the teleprompter scroll (CAP-N58). */
+  teleprompterToggle: string | null;
 };
 
 /** The panic button's privacy slate (CAP-M22). */
@@ -2023,3 +2027,16 @@ export type ExportStatus =
   | { state: "done"; path: string }
   | { state: "error"; message: string }
   | { state: "cancelled" };
+
+/** Teleprompter snapshot (CAP-N58) — mirrors Rust `TeleprompterDto`. Every
+ * surface renders this and animates the scroll locally between updates. */
+export type TeleprompterState = {
+  script: string;
+  speed: number;
+  /** Reference font size (px); each surface may scale from it. */
+  fontSize: number;
+  mirror: boolean;
+  /** Current scroll offset in lines (mapped to pixels per surface). */
+  offset: number;
+  playing: boolean;
+};

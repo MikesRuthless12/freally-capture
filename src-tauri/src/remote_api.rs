@@ -50,7 +50,7 @@ impl RemoteHandler for AppHandler {
 /// API **and** the automation engine (CAP-N01/N02) share. Anything not on
 /// this list is rejected by both, so automation can never reach a surface
 /// the remote API doesn't already expose (no file paths, no processes).
-pub const ALLOWED_COMMANDS: [&str; 18] = [
+pub const ALLOWED_COMMANDS: [&str; 19] = [
     "getStatus",
     "listScenes",
     "setProgramScene",
@@ -69,6 +69,7 @@ pub const ALLOWED_COMMANDS: [&str; 18] = [
     "setAudioVolume",
     "setFilterEnabled",
     "runMacro",
+    "teleprompter",
 ];
 
 /// Whether `command` is on the allowlist (the automation validator's gate).
@@ -210,6 +211,21 @@ pub(crate) fn dispatch(app: &AppHandle, command: &str, params: &Value) -> Result
                 .and_then(Value::as_str)
                 .ok_or("missing string param: name")?;
             crate::automation::run_macro_by_name(app, name);
+            Ok(Value::Null)
+        }
+        "teleprompter" => {
+            // CAP-N58: scroll control from MIDI/OSC/LAN panel/automation. The
+            // `action` is play/pause/toggle/faster/slower/top/setSpeed; the
+            // optional numeric `value` is the target speed for setSpeed.
+            let action = params
+                .get("action")
+                .and_then(Value::as_str)
+                .ok_or("missing string param: action")?;
+            let value = params
+                .get("value")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32);
+            crate::teleprompter::control(app, action, value)?;
             Ok(Value::Null)
         }
         other => Err(format!("unknown command: {other}")),

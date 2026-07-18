@@ -205,8 +205,8 @@ fn start(app: AppHandle, settings: &WebPanelSettings) -> Result<PanelServer, Str
     Ok(PanelServer { shutdown, port })
 }
 
-/// One request → one response. Deliberately tiny: three routes, a password on
-/// each, a size cap, and no path ever reaches the filesystem.
+/// One request → one response. Deliberately tiny: a handful of fixed routes, a
+/// password on each, a size cap, and no path ever reaches the filesystem.
 fn serve(mut stream: TcpStream, app: &AppHandle, password: &str) -> std::io::Result<()> {
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -241,7 +241,7 @@ fn serve(mut stream: TcpStream, app: &AppHandle, password: &str) -> std::io::Res
     let (status, content_type, payload) = match (method, path) {
         // The pages themselves are harmless without the key (they only show a
         // "wrong key" state), but gate them anyway: fewer moving parts.
-        ("GET", "/") | ("GET", "/tally") if authorized => {
+        ("GET", "/") | ("GET", "/tally") | ("GET", "/teleprompter") if authorized => {
             ("200 OK", "text/html; charset=utf-8", PANEL_HTML.to_owned())
         }
         ("GET", "/api/state") if authorized => {
@@ -315,11 +315,17 @@ fn state_json(app: &AppHandle) -> Value {
             })
         })
         .collect();
+    // CAP-N58: the teleprompter state, so the panel's /teleprompter view can
+    // render + animate the script and its control buttons drive the scroll.
+    let teleprompter =
+        serde_json::to_value(app.state::<crate::teleprompter::TeleprompterState>().dto())
+            .unwrap_or(Value::Null);
     json!({
         "scenes": scenes,
         "sources": sources,
         "live": app.state::<crate::stream::StreamBridgeState>().wants_frames(),
         "recording": app.state::<crate::recording::RecordingState>().wants_frames(),
+        "teleprompter": teleprompter,
     })
 }
 
@@ -403,10 +409,10 @@ mod tests {
     }
 
     #[test]
-    fn the_panel_serves_only_its_three_routes() {
+    fn the_panel_serves_only_its_fixed_routes() {
         // Any path outside the fixed set is a 404 — nothing maps to a file,
         // so there is no traversal surface at all.
-        for path in ["/", "/tally", "/api/state", "/api/command"] {
+        for path in ["/", "/tally", "/teleprompter", "/api/state", "/api/command"] {
             assert!(PANEL_ROUTES.contains(&path));
         }
         assert!(!PANEL_ROUTES.contains(&"/../settings.json"));
@@ -414,5 +420,5 @@ mod tests {
     }
 
     /// The complete route table (kept next to the matcher above).
-    const PANEL_ROUTES: [&str; 4] = ["/", "/tally", "/api/state", "/api/command"];
+    const PANEL_ROUTES: [&str; 5] = ["/", "/tally", "/teleprompter", "/api/state", "/api/command"];
 }

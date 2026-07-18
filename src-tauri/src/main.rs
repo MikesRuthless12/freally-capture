@@ -55,6 +55,8 @@ mod soundboard;
 mod statshud;
 mod stream;
 mod studio;
+mod teleprompter;
+mod telestrator;
 mod timers;
 mod webpanel;
 
@@ -172,6 +174,8 @@ fn main() {
         .manage(benchmark::BenchmarkState::default())
         .manage(replay::ReplayState::new())
         .manage(reactions::ReactionState::new())
+        .manage(telestrator::TelestratorState::new())
+        .manage(teleprompter::TeleprompterState::new())
         .manage(events::RuntimeStats::default())
         .manage(hotkeys::ActionHotkeys::default())
         .manage(profiles::WorkspaceState::load_default())
@@ -304,6 +308,7 @@ fn main() {
             commands::studio::studio_set_item_reveal,
             commands::studio::studio_apply_layout,
             commands::studio::studio_set_item_slot,
+            commands::studio::studio_auto_grid,
             commands::studio::studio_set_center_view,
             commands::studio::studio_set_focus,
             commands::studio::studio_create_group,
@@ -369,6 +374,18 @@ fn main() {
             replay::replay_status,
             replay::replay_roll_source,
             reactions::studio_send_reaction,
+            telestrator::telestrator_begin_stroke,
+            telestrator::telestrator_extend_stroke,
+            telestrator::telestrator_commit_stroke,
+            telestrator::telestrator_cancel_stroke,
+            telestrator::telestrator_clear,
+            telestrator::telestrator_undo,
+            teleprompter::teleprompter_get,
+            teleprompter::teleprompter_set_script,
+            teleprompter::teleprompter_set_speed,
+            teleprompter::teleprompter_set_font,
+            teleprompter::teleprompter_set_mirror,
+            teleprompter::teleprompter_control,
             profiles::profiles_list,
             profiles::profile_create,
             profiles::profile_switch,

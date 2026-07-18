@@ -39,5 +39,7 @@ export function normalizeHotkeys(draft: HotkeySettings): HotkeySettings {
     playlistNext: draft.playlistNext?.trim() || null,
     playlistPrevious: draft.playlistPrevious?.trim() || null,
     replayRoll: draft.replayRoll?.trim() || null,
+    telestratorClear: draft.telestratorClear?.trim() || null,
+    teleprompterToggle: draft.teleprompterToggle?.trim() || null,
   };
 }

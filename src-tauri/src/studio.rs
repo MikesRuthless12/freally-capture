@@ -3468,14 +3468,24 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             draws
         };
+        // -- 6t. Telestrator (CAP-N57): the live annotation set, snapshot ONCE
+        // per tick (faded strokes GC'd), baked over every `bake` below on its
+        // own clock — so preview, recording, and stream all carry the same
+        // marks at the moment they were drawn.
+        let (telestrator_strokes, telestrator_now) = {
+            let state = app.state::<crate::telestrator::TelestratorState>();
+            let now = state.now();
+            (state.snapshot(now), now)
+        };
 
         // One full bake of the program: the compose (with any transition or
         // stinger), then the floating reactions, then the downstream keyers
         // (CAP-N24) — persistent overlays composited over the finished
-        // program, above every scene, surviving cuts. The CAP-N53 per-output
-        // variants below re-run this with `set_output_hidden` armed, so a
-        // stream-only / recording-only frame still carries transitions,
-        // reactions, and keyers.
+        // program, above every scene, surviving cuts — then the telestrator
+        // annotation (CAP-N57). The CAP-N53 per-output variants below re-run
+        // this with `set_output_hidden` armed, so a stream-only /
+        // recording-only frame still carries transitions, reactions, keyers,
+        // and telestrator marks.
         let bake = |compositor: &mut fcap_compositor::Compositor| {
             let compose_result = match &transition_pack {
                 Some(pack) if pack.kind == fcap_scene::TransitionKind::Stinger => {
@@ -3524,6 +3534,13 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             }
             if let Err(err) = compositor.render_downstream(&downstream_draws) {
                 eprintln!("studio: downstream keyer pass failed: {err}");
+            }
+            if !telestrator_strokes.is_empty() {
+                if let Err(err) =
+                    compositor.render_telestrator(&telestrator_strokes, telestrator_now)
+                {
+                    eprintln!("studio: telestrator pass failed: {err}");
+                }
             }
         };
         bake(&mut compositor);

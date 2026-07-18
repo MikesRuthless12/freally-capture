@@ -63,6 +63,10 @@ pub enum HotkeyAction {
     PlaylistPrevious,
     /// Roll every live Instant Replay source (CAP-N10).
     ReplayRoll,
+    /// Clear all telestrator marks (CAP-N57).
+    TelestratorClear,
+    /// Play / pause the teleprompter scroll (CAP-N58).
+    TeleprompterToggle,
 }
 
 /// Live accelerator → action bindings + the OS-registered set. Managed state.
@@ -340,6 +344,16 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: HotkeyAction) {
                 eprintln!("hotkey: replay roll failed: {err}");
             }
         }
+        HotkeyAction::TelestratorClear => {
+            // The engine state is authoritative — clearing it wipes the marks
+            // from the program; a mid-draw stroke is dropped gracefully.
+            app.state::<crate::telestrator::TelestratorState>().clear();
+        }
+        HotkeyAction::TeleprompterToggle => {
+            if let Err(err) = crate::teleprompter::control(app, "toggle", None) {
+                eprintln!("hotkey: teleprompter toggle failed: {err}");
+            }
+        }
         HotkeyAction::RunMacro(name) => {
             crate::automation::run_macro_by_name(app, &name);
         }
@@ -383,6 +397,11 @@ fn reconcile<R: Runtime>(app: &AppHandle<R>, settings: &HotkeySettings, macros: 
         (&settings.playlist_next, HotkeyAction::PlaylistNext),
         (&settings.playlist_previous, HotkeyAction::PlaylistPrevious),
         (&settings.replay_roll, HotkeyAction::ReplayRoll),
+        (&settings.telestrator_clear, HotkeyAction::TelestratorClear),
+        (
+            &settings.teleprompter_toggle,
+            HotkeyAction::TeleprompterToggle,
+        ),
     ] {
         let Some(text) = key.as_ref().filter(|text| !text.trim().is_empty()) else {
             continue;

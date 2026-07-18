@@ -1,46 +1,87 @@
 /**
- * Remote Guests — the P2P session (transport spike + invites + two-gate mute).
+ * Remote Guests — the P2P session (multi-guest transport + invites + two-gate mute).
  *
  * PeerJS (vendored, no CDN) brokers a WebRTC session; media flows peer-to-peer.
- * The HOST answers a guest's call receive-only, adds a RemoteGuest source, and
- * pumps the remote video frames into the compositor and the remote mic into the
- * mixer. The GUEST shares their webcam + mic and calls the host.
+ * A HOST admits up to {@link MAX_GUESTS} guests: each opens a control channel +
+ * a media call, is bridged into the compositor (or held in the GREEN ROOM,
+ * CAP-N54), and appears as its own tile with its own mute gates, QoS
+ * (CAP-N56), and cue channel (CAP-N55). The GUEST shares its webcam + mic and
+ * calls one host.
  *
  * Session state lives in a small **store** here — not in any one component — so
- * the status + mute controls persist on the main UI even when the setup dialog
- * is closed. Components subscribe via `spikeSubscribe`.
+ * the status + per-guest controls persist on the main UI even when the setup
+ * dialog is closed. Components subscribe via `spikeSubscribe`.
  */
 import Peer, { type DataConnection, type MediaConnection } from "peerjs";
 import { invoke } from "@tauri-apps/api/core";
 
-import { settingsGet, studioAddItem, studioRemoveItem, studioSetCenterView } from "../api/commands";
+import {
+  settingsGet,
+  studioAddItem,
+  studioAutoGrid,
+  studioRemoveItem,
+  studioSetCenterView,
+} from "../api/commands";
 import type { ItemId, SceneId } from "../api/types";
 import { micConstraints, routeToOutput } from "./devices";
 import { inviteLink as buildInviteLink, joinTargetFromInput, mintInvite } from "./invite";
 import { GATES_CLEAR, type GateState, guestToggleSelf } from "./mute";
+import { type GuestQos, type QosPrev, sampleQos } from "./qos";
 
 /** Downscale bound for the spike's IPC frames (keeps a push ≤ ~0.9 MB). */
 const MAX_FRAME_WIDTH = 640;
 /** The mixer's ring rate. WebRTC audio is 48 kHz; we tap it at that rate. */
 const AUDIO_RATE = 48_000;
+/** How many guests one host admits — host + 8 = up to 9 tiles (CAP-N59's 1–9).
+ * Validated to the 4-guest DoD budget; higher counts depend on the host's
+ * bandwidth/CPU (honest platform limit). */
+export const MAX_GUESTS = 8;
+/** Per-guest QoS poll interval (CAP-N56). */
+const QOS_INTERVAL_MS = 1000;
 
 /** rVFC is not in every lib.dom yet — the narrow slice the pump needs. */
 type VideoWithRvfc = HTMLVideoElement & {
   requestVideoFrameCallback: (callback: () => void) => number;
 };
 
-/** A control message on the host↔guest data channel: the two mute gates,
- * the host's view-switching grant, a guest's center-view request, and the
- * deliberate-goodbye marker (so a kicked/ended guest doesn't auto-rejoin). */
+/** A control message on the host↔guest data channel: the two mute gates, the
+ * host's view-switching grant, a guest's center-view request, a private cue
+ * (CAP-N55), the green-room hold flag (CAP-N54), and the deliberate-goodbye
+ * marker (so a kicked/ended guest doesn't auto-rejoin). */
 type ControlMsg =
   | { t: "host"; muted: boolean }
   | { t: "self"; muted: boolean }
   | { t: "allowCenter"; allowed: boolean }
   | { t: "centerReq"; view: "guestCam" | "guestScreen" | "hostView" }
+  | { t: "cue"; text: string; seconds: number | null }
+  | { t: "greenRoom"; staged: boolean }
   | { t: "bye"; reason: "removed" | "banned" | "ended" };
 
 /** A bridged guest item: the scene item + the source its frames feed. */
 export type GuestItemRef = { sceneId: SceneId; itemId: ItemId; sourceId: string };
+
+/** A received cue on the guest side (CAP-N55): the text + optional countdown. */
+export type GuestCue = { text: string; seconds: number | null; at: number };
+
+/** The host's view of one connected guest (what the UI renders per tile). */
+export type GuestView = {
+  peerId: string;
+  label: string;
+  /** The two mute gates for this guest. */
+  gates: GateState;
+  /** Seated on program (bridged), or null while held in the green room. */
+  itemId: ItemId | null;
+  sceneId: SceneId | null;
+  /** CAP-N54: held off-program in the green room (tech-check only). */
+  greenRoom: boolean;
+  /** Whether this guest may switch the center view. */
+  allowCenter: boolean;
+  /** CAP-N56: live connection quality, or null before the first sample. */
+  qos: GuestQos | null;
+  status: string;
+  /** The guest's live cam stream — the green-room monitor renders it. */
+  stream: MediaStream | null;
+};
 
 /** The observable session state (what the UI renders). */
 export type SpikeState = {
@@ -51,15 +92,20 @@ export type SpikeState = {
   peerId: string | null;
   /** The minted invite link (host only; re-mints when the TTL changes). */
   invite: string | null;
-  /** Non-null once a peer connects (drives the mute controls). */
+  /** Host: every connected guest, in join order. */
+  guests: GuestView[];
+  /** CAP-N54: new guests land in the green room first when this is on (host). */
+  greenRoomDefault: boolean;
+  /** CAP-N59: keep the guest grid auto-arranged as guests join/leave (host). */
+  autoGridArmed: boolean;
+  /** Guest: this guest's own mute gates (null before connected). */
   gates: GateState | null;
-  /** Host: the guest's scene item — drives the position presets, and lets a
-   * rejoining guest reclaim the same seat + source (TASK-R11). */
-  guestItem: GuestItemRef | null;
-  /** Host: the guest's shared-screen item (present while they share). */
-  guestScreenItem: GuestItemRef | null;
-  /** Host: whether the guest may switch the center view. Guest: granted? */
+  /** Guest: whether the host granted center-view switching. */
   allowCenter: boolean;
+  /** Guest: a cue the host sent (CAP-N55), or null. */
+  cue: GuestCue | null;
+  /** Guest: held in the host's green room, not yet on program (CAP-N54). */
+  greenRoom: boolean;
   /** Whether THIS side is sharing its screen into the session. */
   sharingScreen: boolean;
   /** Guest: the host's shared screen (rendered by the session bar). */
@@ -73,16 +119,21 @@ export type SpikeState = {
   speakerId: string | null;
 };
 
+const GREEN_ROOM_KEY = "remote.greenRoomDefault";
+
 const IDLE: SpikeState = {
   active: false,
   role: null,
   status: "idle — nothing touches the network yet",
   peerId: null,
   invite: null,
+  guests: [],
+  greenRoomDefault: loadBool(GREEN_ROOM_KEY),
+  autoGridArmed: false,
   gates: null,
-  guestItem: null,
-  guestScreenItem: null,
   allowCenter: false,
+  cue: null,
+  greenRoom: false,
   sharingScreen: false,
   hostShare: null,
   joinPrefill: null,
@@ -95,6 +146,9 @@ const SPEAKER_KEY = "remote.speakerId";
 /** TASK-R11: the host's peer id persists so a relaunched host reclaims it —
  * the invite links guests already hold keep working. */
 const HOST_ID_KEY = "remote.hostPeerId";
+/** A guest's peer id persists too, so a rejoin reuses it — the host reclaims
+ * the same tile (no duplicate) and a ban's denylist stays effective. */
+const GUEST_ID_KEY = "remote.guestPeerId";
 
 function loadPref(key: string): string | null {
   try {
@@ -102,6 +156,10 @@ function loadPref(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+function loadBool(key: string): boolean {
+  return loadPref(key) === "1";
 }
 
 function savePref(key: string, value: string | null): void {
@@ -134,31 +192,59 @@ export function spikeGetState(): SpikeState {
   return state;
 }
 
+/** Per-guest connection resources (host side). */
+type GuestConn = {
+  peerId: string;
+  label: string;
+  data?: DataConnection;
+  call?: MediaConnection;
+  screenIn?: MediaConnection;
+  /** The guest's live cam stream (for the green-room monitor + the bridge). */
+  stream?: MediaStream;
+  gates: GateState;
+  guestItem: GuestItemRef | null;
+  guestScreenItem: GuestItemRef | null;
+  allowCenter: boolean;
+  greenRoom: boolean;
+  status: string;
+  qos: GuestQos | null;
+  /** The last QoS raw sample, for delta-based packet-loss (CAP-N56). */
+  qosPrev?: QosPrev;
+  qosTimer?: number;
+  /** Per-guest teardown (bridge, tapped tracks, timers). */
+  stops: Array<() => void>;
+};
+
 type LiveSession = {
   peer: Peer;
   stops: Array<() => void>;
   role: "host" | "guest";
-  gates: GateState;
   /** Host: the scene guests land in (needed to re-host after a ban). */
   sceneId?: SceneId;
   /** Host: the invite TTL the link is minted with (re-mints on change). */
   ttlMinutes?: number;
-  /** Host: the connected guest's peer id (the ban denylist key). */
-  guestPeer?: string;
+  /** Host: connected guests, keyed by peer id. */
+  guests: Map<string, GuestConn>;
+  /** Host: the shared talkback mic (answered into every guest call). */
+  micTrack?: MediaStreamTrack;
+  micStream?: MediaStream;
+  // -- guest-role fields --
   data?: DataConnection;
-  /** The media call (guest: outbound; host: the answered call). */
   call?: MediaConnection;
   /** Guest: the host's peer id (screen shares call back to it). */
   hostPeer?: string;
   /** Guest: the host said goodbye deliberately — do NOT auto-rejoin. */
   byeReason?: "removed" | "banned" | "ended";
-  /** An incoming shared-screen call (guest's screen / host's view). */
+  /** Guest: an incoming shared-screen call (the host's view). */
   screenIn?: MediaConnection;
-  /** This side's outgoing screen-share call + stream. */
-  screenOut?: MediaConnection;
+  /** This side's outgoing screen-share calls (host: one per guest; guest: one
+   * to the host) + the shared stream. */
+  screenOuts: MediaConnection[];
   screenStream?: MediaStream;
-  /** The outbound mic track — self-mute / live device switch touch it. */
-  micTrack?: MediaStreamTrack;
+  /** Guest: the outbound mic track — self-mute / live device switch touch it. */
+  guestMicTrack?: MediaStreamTrack;
+  /** Guest: this guest's own mute gates. */
+  gates?: GateState;
   /** Guest: the element the host's return audio plays through. */
   hostAudioEl?: HTMLAudioElement;
 };
@@ -166,8 +252,7 @@ let live: LiveSession | null = null;
 
 // TASK-R8: banned guest peer ids. Persisted so a ban survives a relaunch —
 // honest limitation: a guest who mints a fresh peer id needs a valid invite
-// link to rejoin, and a ban also rotates the host session id, so old links
-// die with it.
+// link to rejoin (multi-guest keeps the shared link so the other guests stay).
 const DENY_KEY = "remote.bannedPeers";
 
 function loadDenylist(): Set<string> {
@@ -189,8 +274,50 @@ function saveDenylist(): void {
   }
 }
 
+/** Publish the host's guest map into the observable state (one GuestView each). */
+function publishGuests(): void {
+  if (!live || live.role !== "host") return;
+  const guests: GuestView[] = [...live.guests.values()].map((conn) => ({
+    peerId: conn.peerId,
+    label: conn.label,
+    gates: conn.gates,
+    itemId: conn.guestItem?.itemId ?? null,
+    sceneId: conn.guestItem?.sceneId ?? null,
+    greenRoom: conn.greenRoom,
+    allowCenter: conn.allowCenter,
+    qos: conn.qos,
+    status: conn.status,
+    stream: conn.stream ?? null,
+  }));
+  setState({ guests });
+}
+
+/** Tear down one guest's resources (call, channel, bridge, QoS) without
+ * touching the store — the caller publishes. */
+function teardownGuest(conn: GuestConn): void {
+  if (conn.qosTimer) window.clearInterval(conn.qosTimer);
+  conn.stops.forEach((stop) => stop());
+  conn.stops = [];
+  conn.call?.close();
+  conn.data?.close();
+  conn.screenIn?.close();
+}
+
+/** Remove one guest's bridged scene items (seated cam + shared screen). */
+async function removeGuestItems(conn: GuestConn): Promise<void> {
+  for (const item of [conn.guestItem, conn.guestScreenItem]) {
+    if (item) await studioRemoveItem(item.sceneId, item.itemId).catch(() => undefined);
+  }
+  conn.guestItem = null;
+  conn.guestScreenItem = null;
+}
+
 /** Stop the live session's resources without touching the store. */
 function teardownLive(): void {
+  if (live?.role === "host") {
+    for (const conn of live.guests.values()) teardownGuest(conn);
+    live.guests.clear();
+  }
   live?.stops.forEach((stop) => stop());
   live?.data?.close();
   live?.peer.destroy();
@@ -231,23 +358,23 @@ function scheduleRejoin(hostPeerId: string): void {
 export function spikeStop(finalStatus?: string): void {
   cancelRejoin();
   if (live?.role === "host") {
-    // A courtesy goodbye so the guest's app ends cleanly instead of
+    // A courtesy goodbye so each guest's app ends cleanly instead of
     // auto-rejoining a dead session (best-effort — teardown proceeds).
-    try {
-      live.data?.send({ t: "bye", reason: "ended" } satisfies ControlMsg);
-    } catch {
-      // The channel may already be gone.
-    }
-    // A deliberate end removes the bridged items — nothing stays frozen in
-    // the scene (a mid-session DROP keeps them for the rejoin reclaim).
-    for (const item of [state.guestItem, state.guestScreenItem]) {
-      if (item) void studioRemoveItem(item.sceneId, item.itemId).catch(() => undefined);
+    for (const conn of live.guests.values()) {
+      try {
+        conn.data?.send({ t: "bye", reason: "ended" } satisfies ControlMsg);
+      } catch {
+        // The channel may already be gone.
+      }
+      // A deliberate end removes the bridged items — nothing stays in the scene.
+      void removeGuestItems(conn);
     }
   }
   teardownLive();
   // Device preferences + a pending deep-link invite survive the reset.
   state = {
     ...IDLE,
+    greenRoomDefault: state.greenRoomDefault,
     status: finalStatus ?? IDLE.status,
     joinPrefill: state.joinPrefill,
     micId: state.micId,
@@ -271,6 +398,12 @@ export function spikeJoinFromLink(raw: string): void {
   }
   setState({ joinPrefill: null });
   void spikeJoin(target.peerId).catch((err) => setState({ status: `join failed: ${err}` }));
+}
+
+/** CAP-N54: toggle whether new guests land in the green room first (host). */
+export function spikeSetGreenRoomDefault(on: boolean): void {
+  savePref(GREEN_ROOM_KEY, on ? "1" : null);
+  setState({ greenRoomDefault: on });
 }
 
 /**
@@ -318,10 +451,14 @@ function watchIce(call: MediaConnection): void {
   });
 }
 
-/** Host: wait for a guest; when media arrives, bridge video + audio in.
- * The session id persists across relaunches (TASK-R11): a restarted host
- * reclaims it so already-shared invite links keep working; a ban rotates it
- * (`freshId`) so the old links die. */
+// ===========================================================================
+// HOST
+// ===========================================================================
+
+/** Host: wait for guests; when media arrives, bridge each in (or hold it in
+ * the green room). The session id persists across relaunches (TASK-R11): a
+ * restarted host reclaims it so already-shared invite links keep working; a
+ * ban denylists the guest's id (the shared link stays live for the others). */
 export async function spikeHost(
   sceneId: SceneId,
   ttlMinutes: number,
@@ -334,7 +471,7 @@ export async function spikeHost(
     status: "connecting to the signaling broker…",
     peerId: null,
     invite: null,
-    gates: null,
+    guests: [],
   });
   if (opts.freshId) savePref(HOST_ID_KEY, null);
   const requestedId = loadPref(HOST_ID_KEY);
@@ -343,7 +480,8 @@ export async function spikeHost(
     peer,
     stops: [],
     role: "host",
-    gates: GATES_CLEAR,
+    guests: new Map(),
+    screenOuts: [],
     sceneId,
     ttlMinutes,
   };
@@ -353,14 +491,11 @@ export async function spikeHost(
     setState({
       peerId: id,
       invite: buildInviteLink(mintInvite(id, session.ttlMinutes ?? ttlMinutes, Date.now())),
-      status: "hosting — share the invite link; waiting for a guest…",
+      status: "hosting — share the invite link; waiting for guests…",
     });
   });
   peer.on("error", (err) => {
     if (err.type === "unavailable-id" && requestedId) {
-      // The broker still holds the previous session (e.g. after a crash).
-      // Retry the same id once — old invite links stay alive that way —
-      // then give up and mint a fresh identity.
       const attempt = opts.idAttempt ?? 0;
       if (attempt === 0) {
         setState({ status: "your previous session id is still held — retrying it…" });
@@ -378,78 +513,85 @@ export async function spikeHost(
     }
     setState({ status: `peer error: ${err.type}` });
   });
-  // Honest signaling status: a broker drop doesn't kill the P2P media, but
-  // new guests can't join until it comes back.
   peer.on("disconnected", () => {
     setState({ status: "signaling broker lost — reconnecting (media keeps flowing)…" });
     peer.reconnect();
   });
-  // The guest opens a control channel (mute state) alongside the media call.
+
+  // A guest opens a control channel (mute state) alongside the media call.
   peer.on("connection", (conn) => {
     if (DENYLIST.has(conn.peer)) {
       conn.close();
       setState({ status: "a banned guest tried to rejoin — refused." });
       return;
     }
-    // One guest at a time (the PoC transport): a second peer while the seat
-    // is taken is refused instead of silently hijacking the session state.
-    if (session.data && conn.peer !== session.guestPeer) {
+    let guest = session.guests.get(conn.peer);
+    if (!guest && session.guests.size >= MAX_GUESTS) {
       conn.close();
-      setState({ status: "another guest tried to join — sessions are 1:1 for now." });
+      setState({ status: `the room is full (${MAX_GUESTS} guests) — refused another join.` });
       return;
     }
-    session.data = conn;
-    session.guestPeer = conn.peer;
-    // Reveal the host mute control as soon as the guest connects — don't rely
-    // only on "open", which PeerJS can fire before this handler on the receiver.
-    setState({ gates: session.gates, status: "guest connected." });
+    if (!guest) {
+      guest = newGuest(session, conn.peer);
+      session.guests.set(conn.peer, guest);
+    }
+    guest.data = conn;
+    guest.status = "guest connected.";
     const sendHostGate = () =>
-      conn.send({ t: "host", muted: session.gates.hostGate } satisfies ControlMsg);
+      conn.send({ t: "host", muted: guest.gates.hostGate } satisfies ControlMsg);
     if (conn.open) sendHostGate();
     else conn.on("open", sendHostGate);
+    // Tell the guest it landed in the green room (its state was fixed in newGuest).
+    if (guest.greenRoom) {
+      const sendGreen = () => conn.send({ t: "greenRoom", staged: true } satisfies ControlMsg);
+      if (conn.open) sendGreen();
+      else conn.on("open", sendGreen);
+    }
     conn.on("data", (raw) => {
       const msg = raw as ControlMsg;
       if (msg?.t === "self") {
-        session.gates = { ...session.gates, selfGate: msg.muted };
-        setState({ gates: session.gates });
+        guest.gates = { ...guest.gates, selfGate: msg.muted };
+        publishGuests();
       } else if (msg?.t === "centerReq") {
-        applyGuestCenterRequest(msg.view);
+        applyGuestCenterRequest(guest, msg.view);
       }
     });
     conn.on("close", () => {
-      // The control channel is the liveness signal — honest drop reporting.
-      // Free the single guest seat (a rejoining guest arrives with a FRESH
-      // peer id) and revoke the per-guest view-switching grant.
-      session.data = undefined;
-      session.call = undefined;
-      session.guestPeer = undefined;
-      setState({
-        gates: null,
-        allowCenter: false,
-        status: "guest disconnected — they can rejoin with the same link while it's valid.",
-      });
+      // The control channel is the liveness signal. Only drop the guest if THIS
+      // connection is still its live one — a rejoin (same persisted id) replaces
+      // guest.data, and this stale close must not evict the reclaimed guest.
+      if (guest.data === conn) void dropGuest(session, conn.peer, "guest disconnected");
     });
+    publishGuests();
+    setState({ status: "guest connected." });
   });
+
   peer.on("call", (call) => {
     if (DENYLIST.has(call.peer)) {
       call.close();
       setState({ status: "a banned guest tried to call — refused." });
       return;
     }
+    let guest = session.guests.get(call.peer);
+    if (!guest && session.guests.size >= MAX_GUESTS) {
+      call.close();
+      return;
+    }
+    if (!guest) {
+      guest = newGuest(session, call.peer);
+      session.guests.set(call.peer, guest);
+    }
     const kind = (call.metadata as { kind?: string } | null)?.kind ?? "cam";
     if (kind === "screen") {
-      // The guest's shared screen — only from the CONNECTED guest.
-      if (call.peer !== session.guestPeer) {
-        call.close();
-        return;
-      }
-      session.screenIn = call;
+      guest.screenIn = call;
       call.answer();
       watchIce(call);
       let stopScreen: (() => void) | undefined;
       call.on("stream", (stream) => {
-        setState({ status: "guest screen arrived — bridging in…" });
-        addAndPump(stream, sceneId, session, { label: "Guest Screen", assign: "guestScreenItem" })
+        addAndPump(stream, sceneId, guest, {
+          label: `${guest.label} Screen`,
+          assign: "guestScreenItem",
+        })
           .then((stop) => {
             stopScreen = stop;
           })
@@ -457,61 +599,141 @@ export async function spikeHost(
       });
       call.on("close", () => {
         stopScreen?.();
-        const item = state.guestScreenItem;
-        if (item) void studioRemoveItem(item.sceneId, item.itemId).catch(() => undefined);
-        setState({ guestScreenItem: null, status: "the guest stopped sharing their screen." });
+        if (guest.guestScreenItem) {
+          void studioRemoveItem(guest.guestScreenItem.sceneId, guest.guestScreenItem.itemId).catch(
+            () => undefined,
+          );
+          guest.guestScreenItem = null;
+          publishGuests();
+        }
       });
       return;
     }
-    if (session.call && call.peer !== session.guestPeer) {
-      call.close();
-      setState({ status: "another guest tried to call — sessions are 1:1 for now." });
-      return;
-    }
-    session.call = call;
-    session.guestPeer = call.peer;
-    setState({ status: "guest calling — answering…" });
+    guest.call = call;
+    guest.status = "guest calling — answering…";
     watchIce(call);
     void answerWithTalkback(call, session);
+    startQos(guest);
     call.on("stream", (stream) => {
-      setState({ status: "guest media arrived — bridging in…" });
-      addAndPump(stream, sceneId, session).catch((err) =>
-        setState({ status: `bridge failed: ${err}` }),
-      );
+      guest.stream = stream;
+      if (guest.greenRoom) {
+        // CAP-N54: hold the stream in the green room; the host seats them.
+        guest.status = "in the green room — tech-check, then seat on air.";
+        publishGuests();
+      } else {
+        seatGuestStream(session, guest, stream);
+      }
     });
     call.on("error", (err) => setState({ status: `guest call error: ${err.type}` }));
-    call.on("close", () =>
-      setState({
-        gates: null,
-        status: "guest call closed — they can rejoin with the same link while it's valid.",
-      }),
-    );
+    publishGuests();
   });
 }
 
-/** Host: answer the guest's call WITH this machine's mic (return audio, so
- * the guest hears the host). Falls back to a receive-only answer when the mic
- * is unavailable — the session still works, just without talkback. */
+/** A fresh, unbridged guest record. Green-room state is fixed HERE so it holds
+ * whether the media `call` or the data `connection` event creates the guest
+ * first (CAP-N54 — otherwise a call-first guest would seat straight to air). */
+function newGuest(session: LiveSession, peerId: string): GuestConn {
+  const label = `Guest ${session.guests.size + 1}`;
+  return {
+    peerId,
+    label,
+    gates: GATES_CLEAR,
+    guestItem: null,
+    guestScreenItem: null,
+    allowCenter: false,
+    greenRoom: state.greenRoomDefault,
+    status: "connecting…",
+    qos: null,
+    stops: [],
+  };
+}
+
+/** Bridge a guest's cam stream into the compositor (seat them on program). */
+function seatGuestStream(session: LiveSession, guest: GuestConn, stream: MediaStream): void {
+  const sceneId = session.sceneId;
+  if (!sceneId) return;
+  guest.greenRoom = false;
+  addAndPump(stream, sceneId, guest, { label: guest.label, assign: "guestItem" })
+    .then(() => {
+      guest.status = `${guest.label} is live in the scene ✔`;
+      publishGuests();
+      if (state.autoGridArmed) void spikeAutoGrid();
+    })
+    .catch((err) => setState({ status: `bridge failed: ${err}` }));
+}
+
+/** CAP-N54: seat a green-roomed guest on air (one-click). */
+export function spikeSeatGuest(peerId: string): void {
+  const session = live;
+  if (!session || session.role !== "host") return;
+  const guest = session.guests.get(peerId);
+  if (!guest || !guest.greenRoom || !guest.stream) return;
+  guest.data?.send({ t: "greenRoom", staged: false } satisfies ControlMsg);
+  seatGuestStream(session, guest, guest.stream);
+}
+
+/** Remove one guest from the room (drop / moderation), freeing its tile. */
+async function dropGuest(session: LiveSession, peerId: string, why: string): Promise<void> {
+  const guest = session.guests.get(peerId);
+  if (!guest) return;
+  session.guests.delete(peerId);
+  teardownGuest(guest);
+  await removeGuestItems(guest);
+  publishGuests();
+  setState({ status: `${guest.label}: ${why}.` });
+  if (state.autoGridArmed) void spikeAutoGrid();
+}
+
+/** Host: answer a guest's call WITH this machine's mic (return audio, so the
+ * guest hears the host). One shared mic is answered into every guest call;
+ * falls back to a receive-only answer when the mic is unavailable. */
 async function answerWithTalkback(call: MediaConnection, session: LiveSession): Promise<void> {
   try {
-    const mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(state.micId) });
-    session.micTrack = mic.getAudioTracks()[0];
-    session.stops.push(() => mic.getTracks().forEach((track) => track.stop()));
-    call.answer(mic);
+    if (!session.micStream) {
+      session.micStream = await navigator.mediaDevices.getUserMedia({
+        audio: micConstraints(state.micId),
+      });
+      session.micTrack = session.micStream.getAudioTracks()[0];
+      const stream = session.micStream;
+      session.stops.push(() => stream.getTracks().forEach((track) => track.stop()));
+    }
+    call.answer(session.micStream);
   } catch {
     setState({ status: "mic unavailable — answering without talkback…" });
     call.answer();
   }
 }
 
+// -- QoS (CAP-N56) ----------------------------------------------------------
+
+/** Start the per-guest QoS poll on a connected call. */
+function startQos(guest: GuestConn): void {
+  if (guest.qosTimer) window.clearInterval(guest.qosTimer);
+  guest.qosTimer = window.setInterval(() => {
+    const pc = guest.call?.peerConnection;
+    if (!pc) return;
+    void pc
+      .getStats()
+      .then((stats) => {
+        const sample = sampleQos(stats, guest.qosPrev);
+        guest.qosPrev = sample.prev;
+        guest.qos = sample.qos;
+        publishGuests();
+      })
+      .catch(() => undefined);
+  }, QOS_INTERVAL_MS);
+}
+
+// ===========================================================================
+// GUEST
+// ===========================================================================
+
 /** Guest: share the webcam + mic and call the host's peer id. A dropped
- * session auto-rejoins with backoff (`rejoining`); the seat is reclaimed
- * host-side because the guest's item + source are reused. */
+ * session auto-rejoins with backoff (`rejoining`) as a fresh guest host-side. */
 export async function spikeJoin(
   hostPeerId: string,
   opts: { rejoining?: boolean } = {},
 ): Promise<void> {
-  // A rejoin attempt must keep its backoff count across the internal reset.
   const carried = opts.rejoining ? rejoin : null;
   spikeStop();
   rejoin = carried;
@@ -521,6 +743,8 @@ export async function spikeJoin(
     status: "requesting the webcam + mic…",
     peerId: null,
     gates: null,
+    cue: null,
+    greenRoom: false,
   });
   let stream: MediaStream;
   try {
@@ -536,13 +760,18 @@ export async function spikeJoin(
     setState({ status: `camera/mic blocked: ${err}` });
     return;
   }
-  const peer = await buildPeer();
+  // Persist the guest's own peer id (like the host's) so a rejoin reuses it:
+  // the host then reclaims the same tile/source instead of stacking a duplicate,
+  // and a ban's denylist actually catches a reconnection (TASK-R11 / R8).
+  const peer = await buildPeer(loadPref(GUEST_ID_KEY));
   const session: LiveSession = {
     peer,
     stops: [() => stream.getTracks().forEach((track) => track.stop())],
     role: "guest",
+    guests: new Map(),
+    screenOuts: [],
     gates: GATES_CLEAR,
-    micTrack: stream.getAudioTracks()[0],
+    guestMicTrack: stream.getAudioTracks()[0],
   };
   live = session;
   session.hostPeer = hostPeerId;
@@ -562,29 +791,32 @@ export async function spikeJoin(
       setState({ hostShare: null, status: "the host stopped sharing their view." }),
     );
   });
-  peer.on("open", () => {
+  peer.on("open", (id) => {
+    savePref(GUEST_ID_KEY, id);
     setState({ status: "calling the host…" });
     const conn = peer.connect(hostPeerId);
     session.data = conn;
     conn.on("open", () => {
       rejoin = null; // connected — the backoff cycle is over
-      setState({ gates: session.gates }); // reveal the guest mute button
+      setState({ gates: session.gates ?? GATES_CLEAR });
     });
     conn.on("data", (raw) => {
       const msg = raw as ControlMsg;
       if (msg?.t === "host") {
-        session.gates = { ...session.gates, hostGate: msg.muted };
+        session.gates = { ...(session.gates ?? GATES_CLEAR), hostGate: msg.muted };
         setState({ gates: session.gates });
       } else if (msg?.t === "allowCenter") {
         setState({ allowCenter: msg.allowed });
+      } else if (msg?.t === "cue") {
+        setState({ cue: { text: msg.text, seconds: msg.seconds, at: Date.now() } });
+      } else if (msg?.t === "greenRoom") {
+        setState({ greenRoom: msg.staged });
       } else if (msg?.t === "bye") {
         session.byeReason = msg.reason;
       }
     });
     conn.on("close", () => {
       if (live !== session) return; // an intentional Leave already handled it
-      // A deliberate goodbye (remove/ban/end) ends the session cleanly; only
-      // an unexplained drop auto-rejoins with backoff (TASK-R11).
       if (session.byeReason) {
         const message =
           session.byeReason === "removed"
@@ -601,7 +833,6 @@ export async function spikeJoin(
     const call = peer.call(hostPeerId, stream);
     session.call = call;
     watchIce(call);
-    // The host answers with their mic — play it through the chosen output.
     call.on("stream", (hostStream) => playHostAudio(hostStream, session));
     call.on("error", (err) => setState({ status: `call error: ${err.type}` }));
     setState({ status: "connected — sharing your webcam + mic. You can leave this open." });
@@ -611,7 +842,14 @@ export async function spikeJoin(
     peer.reconnect();
   });
   peer.on("error", (err) => {
-    // Mid-rejoin, "the host isn't there yet" just means try again later.
+    // The broker still holds our persisted id (e.g. after a crash) — drop it
+    // and rejoin with a fresh identity so a stale id can't wedge the guest.
+    if (err.type === "unavailable-id") {
+      savePref(GUEST_ID_KEY, null);
+      if (live === session) teardownLive();
+      window.setTimeout(() => void spikeJoin(hostPeerId, { rejoining: !!carried }), 0);
+      return;
+    }
     if (rejoin && (err.type === "peer-unavailable" || err.type === "network")) {
       if (live === session) teardownLive();
       scheduleRejoin(hostPeerId);
@@ -649,60 +887,43 @@ async function applySink(element: HTMLAudioElement, speakerId: string | null): P
   }
 }
 
+// ===========================================================================
+// Host moderation + per-guest controls
+// ===========================================================================
+
 /**
- * Host moderation (TASK-R8): remove the connected guest. The call + control
- * channel close (the guest's app sees an honest session end), the bridge
- * resources stop, and the guest's scene item frees its seat. With `ban`, the
- * guest's peer id is denylisted (persisted) AND the session id rotates — a
- * fresh Peer mints a fresh invite link, so the banned guest's old link is
- * dead. A plain remove keeps hosting on the same link.
+ * Host moderation (TASK-R8): remove one guest. The call + control channel close
+ * (the guest's app sees an honest session end), the bridge stops, and the
+ * guest's tile frees. With `ban`, the peer id is denylisted (persisted) so a
+ * reconnect is refused. If the banned guest was the ONLY one, the host session
+ * id also rotates (a fresh invite link — the old one dies), exactly as the
+ * single-guest ban did; with other guests still connected the shared link must
+ * stay live for them, so a banned guest who clears their id and reuses the link
+ * could rejoin as a new guest (an honest limit of a shared invite).
  */
-export async function spikeRemoveGuest(ban: boolean): Promise<void> {
+export async function spikeRemoveGuest(peerId: string, ban: boolean): Promise<void> {
   const session = live;
   if (!session || session.role !== "host") return;
-  if (ban && session.guestPeer) {
-    DENYLIST.add(session.guestPeer);
+  const guest = session.guests.get(peerId);
+  if (!guest) return;
+  if (ban) {
+    DENYLIST.add(peerId);
     saveDenylist();
   }
   // Deliberate goodbye first — the guest's app must end instead of treating
-  // the close as a drop and auto-rejoining two seconds later.
+  // the close as a drop and auto-rejoining.
   try {
-    session.data?.send({ t: "bye", reason: ban ? "banned" : "removed" } satisfies ControlMsg);
+    guest.data?.send({ t: "bye", reason: ban ? "banned" : "removed" } satisfies ControlMsg);
   } catch {
-    // The channel may already be dead — the close below still lands.
+    // The channel may already be dead — the drop below still lands.
   }
-  // Per-guest teardown; the hosting Peer itself stays up (unless banning).
-  session.call?.close();
-  session.data?.close();
-  session.screenIn?.close();
-  session.call = undefined;
-  session.data = undefined;
-  session.screenIn = undefined;
-  session.guestPeer = undefined;
-  session.gates = GATES_CLEAR;
-  session.stops.forEach((stop) => stop());
-  session.stops = [];
-  for (const item of [state.guestItem, state.guestScreenItem]) {
-    if (item) await studioRemoveItem(item.sceneId, item.itemId).catch(() => undefined);
-  }
-  if (ban) {
-    const sceneId = session.sceneId;
+  await dropGuest(session, peerId, ban ? "banned" : "removed");
+  // Kill the invite link on a ban when no one else is on it — a fresh host id
+  // invalidates every link a lone banned guest still holds.
+  if (ban && session.guests.size === 0 && session.sceneId) {
     const ttl = session.ttlMinutes ?? 30;
-    if (sceneId) {
-      // freshId: the id rotation IS the invalidation — the old link must die.
-      void spikeHost(sceneId, ttl, { freshId: true });
-      setState({ status: "guest banned — minting a fresh invite link (the old one is dead)…" });
-    } else {
-      spikeStop("guest banned — start hosting again for a fresh link.");
-    }
-  } else {
-    setState({
-      gates: null,
-      guestItem: null,
-      guestScreenItem: null,
-      allowCenter: false,
-      status: "guest removed — the invite link still works if you want them back.",
-    });
+    void spikeHost(session.sceneId, ttl, { freshId: true });
+    setState({ status: "guest banned — minting a fresh invite link (the old one is dead)…" });
   }
 }
 
@@ -716,13 +937,15 @@ export function spikeSetInviteTtl(ttlMinutes: number): void {
   }
 }
 
-/** Host action: set/clear the host gate for the connected guest. */
-export function spikeSetHostGate(muted: boolean): void {
+/** Host action: set/clear the host gate for one guest. */
+export function spikeSetHostGate(peerId: string, muted: boolean): void {
   const session = live;
   if (!session || session.role !== "host") return;
-  session.gates = { ...session.gates, hostGate: muted };
-  session.data?.send({ t: "host", muted } satisfies ControlMsg);
-  setState({ gates: session.gates });
+  const guest = session.guests.get(peerId);
+  if (!guest) return;
+  guest.gates = { ...guest.gates, hostGate: muted };
+  guest.data?.send({ t: "host", muted } satisfies ControlMsg);
+  publishGuests();
 }
 
 /** Guest action: toggle the self gate (no-op under a host mute), mute the mic
@@ -730,21 +953,24 @@ export function spikeSetHostGate(muted: boolean): void {
 export function spikeToggleSelfMute(): void {
   const session = live;
   if (!session || session.role !== "guest") return;
-  const next = guestToggleSelf(session.gates);
-  if (next === session.gates) return; // locked by the host gate
+  const gates = session.gates ?? GATES_CLEAR;
+  const next = guestToggleSelf(gates);
+  if (next === gates) return; // locked by the host gate
   session.gates = next;
-  if (session.micTrack) session.micTrack.enabled = !next.selfGate;
+  if (session.guestMicTrack) session.guestMicTrack.enabled = !next.selfGate;
   session.data?.send({ t: "self", muted: next.selfGate } satisfies ControlMsg);
   setState({ gates: session.gates });
 }
 
-/** Host: grant/revoke the guest's ability to switch the center view. The
- * authority stays host-side — requests are applied only while granted. */
-export function spikeSetAllowCenter(allowed: boolean): void {
+/** Host: grant/revoke one guest's ability to switch the center view. */
+export function spikeSetAllowCenter(peerId: string, allowed: boolean): void {
   const session = live;
   if (!session || session.role !== "host") return;
-  setState({ allowCenter: allowed });
-  session.data?.send({ t: "allowCenter", allowed } satisfies ControlMsg);
+  const guest = session.guests.get(peerId);
+  if (!guest) return;
+  guest.allowCenter = allowed;
+  guest.data?.send({ t: "allowCenter", allowed } satisfies ControlMsg);
+  publishGuests();
 }
 
 /** Guest: ask the host to switch the center view. */
@@ -754,25 +980,74 @@ export function spikeRequestCenter(view: "guestCam" | "guestScreen" | "hostView"
   session.data?.send({ t: "centerReq", view } satisfies ControlMsg);
 }
 
-/** Host: apply an allowed guest request — ignored unless the grant is on. */
-function applyGuestCenterRequest(view: "guestCam" | "guestScreen" | "hostView"): void {
-  if (!state.allowCenter) return;
+/** Host: apply an allowed guest request — ignored unless that guest's grant is on. */
+function applyGuestCenterRequest(
+  guest: GuestConn,
+  view: "guestCam" | "guestScreen" | "hostView",
+): void {
+  if (!guest.allowCenter) return;
   const fail = (err: unknown) => setState({ status: `center switch failed: ${err}` });
-  if (view === "guestCam" && state.guestItem) {
-    void studioSetCenterView(state.guestItem.sceneId, state.guestItem.itemId).catch(fail);
-  } else if (view === "guestScreen" && state.guestScreenItem) {
-    void studioSetCenterView(state.guestScreenItem.sceneId, state.guestScreenItem.itemId).catch(
+  if (view === "guestCam" && guest.guestItem) {
+    void studioSetCenterView(guest.guestItem.sceneId, guest.guestItem.itemId).catch(fail);
+  } else if (view === "guestScreen" && guest.guestScreenItem) {
+    void studioSetCenterView(guest.guestScreenItem.sceneId, guest.guestScreenItem.itemId).catch(
       fail,
     );
-  } else if (view === "hostView" && state.guestItem) {
-    void studioSetCenterView(state.guestItem.sceneId, null).catch(fail);
+  } else if (view === "hostView" && guest.guestItem) {
+    void studioSetCenterView(guest.guestItem.sceneId, null).catch(fail);
   }
 }
 
+// -- Cue & talk (CAP-N55) ---------------------------------------------------
+
+/** Send a private text cue to one guest (or every guest when `peerId` is
+ * null). Rides the existing P2P data channel — no new network surface. */
+export function spikeSendCue(peerId: string | null, text: string, seconds: number | null): void {
+  const session = live;
+  if (!session || session.role !== "host") return;
+  const msg: ControlMsg = { t: "cue", text, seconds };
+  const targets = peerId
+    ? [session.guests.get(peerId)].filter(Boolean)
+    : [...session.guests.values()];
+  for (const guest of targets) {
+    try {
+      guest?.data?.send(msg);
+    } catch {
+      // The channel may be momentarily gone — the cue is best-effort.
+    }
+  }
+}
+
+// -- Auto-grid (CAP-N59) ----------------------------------------------------
+
+/** Host: whether the grid re-arranges automatically on join/leave. */
+export function spikeSetAutoGrid(on: boolean): void {
+  setState({ autoGridArmed: on });
+  if (on) void spikeAutoGrid();
+}
+
+/** Host: arrange every seated guest into a reflowing grid (CAP-N59). The
+ * geometry + nameplates are engine-side; this just names the participants. */
+export async function spikeAutoGrid(): Promise<void> {
+  const session = live;
+  if (!session || session.role !== "host" || !session.sceneId) return;
+  const participants = [...session.guests.values()]
+    .filter((guest) => guest.guestItem && !guest.greenRoom)
+    .map((guest) => ({ itemId: guest.guestItem!.itemId, name: guest.label }));
+  if (participants.length === 0) return;
+  await studioAutoGrid(session.sceneId, participants).catch((err) =>
+    setState({ status: `auto-grid failed: ${err}` }),
+  );
+}
+
+// ===========================================================================
+// Screen share + device selection
+// ===========================================================================
+
 /**
- * Share this side's screen into the session (TASK-R6). Guest → the host gets
- * a "Guest Screen" source it can route into the center; host → the guest's
- * session bar shows the host's view. Passing `false` stops the share.
+ * Share this side's screen into the session (TASK-R6). Guest → the host gets a
+ * "Guest Screen" source; host → every guest's session bar shows the host's
+ * view. Passing `false` stops the share.
  */
 export async function spikeShareScreen(share: boolean): Promise<void> {
   const session = live;
@@ -780,13 +1055,20 @@ export async function spikeShareScreen(share: boolean): Promise<void> {
   if (!share) {
     session.screenStream?.getTracks().forEach((track) => track.stop());
     session.screenStream = undefined;
-    session.screenOut?.close();
-    session.screenOut = undefined;
+    // Close EVERY outgoing screen call (the host has one per guest) so each
+    // peer's `close` fires and the frozen last frame clears.
+    session.screenOuts.forEach((call) => call.close());
+    session.screenOuts = [];
     setState({ sharingScreen: false });
     return;
   }
-  const targetPeer = session.role === "host" ? session.guestPeer : session.hostPeer;
-  if (!targetPeer) {
+  const targets =
+    session.role === "host"
+      ? [...session.guests.keys()]
+      : session.hostPeer
+        ? [session.hostPeer]
+        : [];
+  if (targets.length === 0) {
     setState({ status: "no connected peer to share the screen with yet." });
     return;
   }
@@ -799,37 +1081,57 @@ export async function spikeShareScreen(share: boolean): Promise<void> {
   }
   session.screenStream = stream;
   session.stops.push(() => stream.getTracks().forEach((track) => track.stop()));
-  // The browser's own "stop sharing" bar must end the share honestly too.
   stream.getVideoTracks()[0]?.addEventListener("ended", () => void spikeShareScreen(false));
-  const call = session.peer.call(targetPeer, stream, {
-    metadata: { kind: session.role === "host" ? "hostScreen" : "screen" },
-  });
-  session.screenOut = call;
+  // The host calls every guest; a guest calls the one host. Track every call
+  // so a later Stop closes all of them.
+  const metadata = { kind: session.role === "host" ? "hostScreen" : "screen" };
+  session.screenOuts = targets.map((targetPeer) =>
+    session.peer.call(targetPeer, stream, { metadata }),
+  );
   setState({ sharingScreen: true, status: "sharing your screen into the session." });
 }
 
-/** Pick the microphone this machine sends into the session. Applies LIVE
- * when a call is up (RTCRtpSender.replaceTrack — no renegotiation), and to
- * every later session; the guest's mute state carries over to the new mic. */
+/** Pick the microphone this machine sends into the session. Applies LIVE to
+ * every active call (RTCRtpSender.replaceTrack — no renegotiation) and to
+ * every later session. */
 export async function spikeSetMic(deviceId: string | null): Promise<void> {
   savePref(MIC_KEY, deviceId);
   setState({ micId: deviceId });
   const session = live;
   if (!session) return;
-  const senders = session.call?.peerConnection?.getSenders() ?? [];
-  const sender = senders.find((candidate) => candidate.track?.kind === "audio");
-  if (!sender) {
-    if (session.call) setState({ status: "mic saved — it applies when the next call connects" });
-    return;
-  }
+  // The active calls whose audio sender should swap.
+  const calls: MediaConnection[] =
+    session.role === "host"
+      ? [...session.guests.values()]
+          .map((guest) => guest.call)
+          .filter((c): c is MediaConnection => !!c)
+      : session.call
+        ? [session.call]
+        : [];
+  if (calls.length === 0) return;
   try {
     const mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(deviceId) });
     const track = mic.getAudioTracks()[0];
     if (!track) return;
-    track.enabled = session.micTrack?.enabled ?? true; // keep the mute state
-    await sender.replaceTrack(track);
-    session.micTrack?.stop();
-    session.micTrack = track;
+    const keepEnabled =
+      session.role === "guest"
+        ? (session.guestMicTrack?.enabled ?? true)
+        : (session.micTrack?.enabled ?? true);
+    track.enabled = keepEnabled;
+    for (const call of calls) {
+      const sender = call.peerConnection?.getSenders().find((s) => s.track?.kind === "audio");
+      if (sender) await sender.replaceTrack(track);
+    }
+    if (session.role === "guest") {
+      session.guestMicTrack?.stop();
+      session.guestMicTrack = track;
+    } else {
+      session.micTrack?.stop();
+      session.micTrack = track;
+      // Refresh the cached talkback stream too, so a guest that joins AFTER
+      // the device switch is answered with the live mic, not the stopped track.
+      session.micStream = mic;
+    }
     session.stops.push(() => track.stop());
   } catch (err) {
     setState({ status: `couldn't switch the mic: ${err}` });
@@ -844,21 +1146,19 @@ export async function spikeSetSpeaker(deviceId: string | null): Promise<void> {
   if (element) await applySink(element, deviceId);
 }
 
-/** The webview → compositor bridge: rVFC → canvas → RGBA → raw-payload IPC.
- * Returns a stop() so one bridge (e.g. an unshared screen) can end without
- * tearing the session down. */
+// ===========================================================================
+// The webview → compositor bridge
+// ===========================================================================
+
+/** rVFC → canvas → RGBA → raw-payload IPC. Returns a stop() so one bridge (e.g.
+ * an unshared screen) can end without tearing the session down. */
 async function addAndPump(
   stream: MediaStream,
   sceneId: SceneId,
-  session: LiveSession,
-  target: { label: string; assign: "guestItem" | "guestScreenItem" } = {
-    label: "Remote Guest",
-    assign: "guestItem",
-  },
+  guest: GuestConn,
+  target: { label: string; assign: "guestItem" | "guestScreenItem" },
 ): Promise<() => void> {
-  // A returning guest reclaims their existing item — same seat, same source,
-  // same mixer strip (TASK-R11) — instead of stacking a duplicate.
-  const existing = target.assign === "guestItem" ? state.guestItem : state.guestScreenItem;
+  const existing = target.assign === "guestItem" ? guest.guestItem : guest.guestScreenItem;
   let ref: GuestItemRef;
   if (existing && existing.sceneId === sceneId) {
     ref = existing;
@@ -870,7 +1170,9 @@ async function addAndPump(
     );
     ref = { sceneId, itemId: added.itemId, sourceId: added.sourceId };
   }
-  setState({ [target.assign]: ref });
+  if (target.assign === "guestItem") guest.guestItem = ref;
+  else guest.guestScreenItem = ref;
+  publishGuests();
 
   const video = document.createElement("video") as VideoWithRvfc;
   video.muted = true;
@@ -886,15 +1188,16 @@ async function addAndPump(
   }
 
   let alive = true;
-  const stopAudio = pumpGuestAudio(stream, ref.sourceId, session);
+  const stopAudio = pumpGuestAudio(stream, ref.sourceId, guest);
   const stop = () => {
     alive = false;
     video.srcObject = null;
     stopAudio();
   };
-  session.stops.push(stop);
+  // Owned by the guest only — teardownGuest runs these; a stale copy in
+  // session.stops would double-fire stop()/close on full teardown.
+  guest.stops.push(stop);
 
-  let pushed = 0;
   const pump = () => {
     if (!alive) return;
     const videoWidth = video.videoWidth;
@@ -916,8 +1219,6 @@ async function addAndPump(
       }).catch(() => {
         // Dropped frame (e.g. the source is still starting) — latest-wins.
       });
-      pushed += 1;
-      if (pushed === 1) setState({ status: `${target.label} is live in the scene ✔` });
     }
     video.requestVideoFrameCallback(pump);
   };
@@ -927,14 +1228,13 @@ async function addAndPump(
 
 /**
  * Tap the guest's WebRTC mic and push interleaved-stereo 48 kHz f32 to the
- * mixer over IPC — the guest becomes a mixer strip.
+ * mixer over IPC — the guest becomes a mixer strip. The host gate is per-guest.
  *
  * Chromium quirk: a *remote* WebRTC audio track is silent through Web Audio
  * unless the stream is also attached to a media element (kept muted) to prime
- * the pipeline, and the AudioContext is resumed. The ScriptProcessor's output
- * is left silent, so this taps the audio without echoing out the host speakers.
+ * the pipeline, and the AudioContext is resumed.
  */
-function pumpGuestAudio(stream: MediaStream, sourceId: string, session: LiveSession): () => void {
+function pumpGuestAudio(stream: MediaStream, sourceId: string, guest: GuestConn): () => void {
   if (stream.getAudioTracks().length === 0) return () => {};
 
   const primer = document.createElement("audio");
@@ -950,9 +1250,8 @@ function pumpGuestAudio(stream: MediaStream, sourceId: string, session: LiveSess
   const source = ctx.createMediaStreamSource(stream);
   const processor = ctx.createScriptProcessor(4096, 1, 1);
   processor.onaudioprocess = (event) => {
-    // Host gate: drop the guest's audio when the host has muted them (the
-    // guest's own self-mute is already silenced at their mic via track.enabled).
-    if (session.gates.hostGate) return;
+    // Host gate: drop this guest's audio while the host has muted them.
+    if (guest.gates.hostGate) return;
     const input = event.inputBuffer;
     const left = input.getChannelData(0);
     const right = input.numberOfChannels > 1 ? input.getChannelData(1) : left;
