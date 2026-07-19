@@ -11,12 +11,10 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — 0.99.0 closed all 26 must-haves; the post-stable phases are landing
-> toward 1.0.0. 0.400.0 completes Phase 3 (Compositor & FX Depth) with the five deferred features: a
-> move (morph) transition, transition rules (per-pair matrix + per-item show/hide), a shader studio
-> for user WGSL effects, a freehand bezier mask with luma-wipe export, and track-matte stingers with
-> an optional program-audio duck — on top of 0.310.0's blur family, 3D transform, freeze-frame,
-> source clones, and downstream keyers.** The engine is
+> **Status: in development — 0.99.0 closed all 26 must-haves, and the post-stable phases have landed
+> through 0.900.0 (Studio Management & Workflow). 0.910.0 ships the Teleprompter Rework: a caesura
+> pause-chip editor, an optional start countdown, chars/sec-or-BPM pacing, per-OS read-aloud, a
+> stream-safe fullscreen projector, and 18-language ghost-text autocomplete.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
@@ -54,7 +52,7 @@ leaves your machine is the stream you chose to send.
 > (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
 > privately** and is not published here.
 > **Installers for every release are on the
-> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.200.0 is the
+> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.910.0 is the
 > latest.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
@@ -76,7 +74,7 @@ leaves your machine is the stream you chose to send.
 2. **Compose** — the owned real-time **wgpu** compositor composes every source into the program frame on the GPU, with **Studio Mode** (preview/program) so you stage changes before they go live.
 3. **Record** — multi-track, with your GPU's **hardware encoder** (NVENC/Quick Sync/AMF/VAAPI/VideoToolbox) + an **x264** fallback, to **mp4/mkv/mov/webm** — or in the **owned `freally-video`** codec for fully-lossless local capture, on up to **6 audio tracks**, with file splitting and a **separate-track local copy while streaming**.
 4. **Go live** — broadcast over **RTMP/RTMPS/SRT/WHIP** to **Twitch / YouTube / Kick / Facebook / Trovo / custom**, with auto-reconnect and a configurable stream delay — including **multistream** to several platforms **at once**, **direct from your machine** (no restream server).
-5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything (with a searchable **hotkey map** that flags conflicts), **profiles + scene collections**, and a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate).
+5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything (with a searchable **hotkey map** that flags conflicts), **profiles + scene collections**, a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate), and a **teleprompter** — an operator dock, a stream-safe **fullscreen projector**, and LAN control — with caesura **pause chips**, a **start countdown**, **chars/sec or BPM** pacing, per-OS **read-aloud**, and **18-language ghost-text autocomplete**.
 6. **Keep the show safe** — a **go-live pre-flight checklist**, always-on **safety alarms** (silent audio, clipping, a black/frozen picture, a low-disk forecast), a **source-health dashboard**, **mid-session encoder failover**, **crash-safe recording** with a next-launch repair, a **quit guard**, and a **panic button** that cuts to a privacy slate and hard-mutes everything.
 7. **Calibrate the chain** — built-in **test signals** (SMPTE bars, a calibration grid, a motion sweep, a 1 kHz lineup tone, an A/V flash+beep) and a guided **A/V sync calibration workbench** that measures your camera/mic offset and applies it; plus **deinterlacing** and cross-platform **camera controls** (exposure, white balance, focus, zoom) with per-device profiles that survive hotplug.
 8. **Extend it** — a password-protected **WebSocket remote-control API** (Stream Deck / Companion-style; **off by default**, loopback unless you opt into LAN), **browser docks** (chat popouts / alerts / web buttons as their own window), **sandboxed Lua scripting** (react to go-live/scene/recording events, drive the studio — no file or OS access), and a **plugin SDK** (add a source or filter without touching core). A **virtual camera** and a true **browser source** follow as their own signed-driver / on-demand-component milestones.
@@ -217,6 +215,7 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 ├── PRIVACY.md               # privacy policy (DRAFT)
 ├── EULA.md                  # end-user license agreement (DRAFT)
 ├── THIRD-PARTY-NOTICES.md   # bundled / downloaded / driven components
+├── THIRD-PARTY.md           # data + platform components (dictionaries, OS speech)
 ├── LICENSE                  # proprietary, source-available — All Rights Reserved
 ├── Cargo.toml               # Rust workspace (src-tauri + crates/*)
 ├── src-tauri/               # `freally-capture` app crate (Tauri v2)
@@ -231,9 +230,10 @@ A **Releases & Updates** web page lives in [`docs/`](docs/) (a static site). Pub
 
 The detailed build plan is maintained privately. Public release ladder:
 **0.10.0** (foundation — **done**) → **0.25** (capture core — **done**) → **0.40** (compositor +
-scenes/sources — **done**) → **0.55** (audio + recording — **done**) → **0.70 (studio MVP —
-single-target streaming + virtual cam)** → 0.85 (multistream/SRT/WHIP + scene/source/encoder depth) →
-**1.0.0**. Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
+scenes/sources — **done**) → **0.55** (audio + recording — **done**) → **0.70** (studio MVP — **done**)
+→ **0.85** (multistream/SRT/WHIP — **done**) → **0.95/0.96** (distribution + launch polish — **done**)
+→ **0.99** (all 26 must-haves — **done**) → **0.100.0–0.900.0** (post-stable CAP-N phases — **done**)
+→ **0.910.0** (teleprompter rework — **current**) → **1.0.0**. Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
 
 ---
 

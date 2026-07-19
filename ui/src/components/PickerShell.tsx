@@ -27,6 +27,7 @@ export function PickerShell({
   onRefresh,
   children,
   wide = false,
+  large = false,
   sidebar = false,
 }: {
   title: string;
@@ -35,6 +36,9 @@ export function PickerShell({
   onRefresh?: () => void;
   children: React.ReactNode;
   wide?: boolean;
+  /** A big editing shell (e.g. the teleprompter): tall + wide with a
+   * height-filling body, so long content has room to breathe. Overrides `wide`. */
+  large?: boolean;
   /** OBS-style two-pane layout (Settings): a fixed-height shell whose body
    * fills edge-to-edge with no padding or scroll of its own — the children
    * own the sidebar/pane split and each pane's scrolling. Overrides `wide`. */
@@ -69,7 +73,9 @@ export function PickerShell({
         className={`flex ${
           sidebar
             ? "h-[40rem] max-h-[85vh] w-[56rem]"
-            : `max-h-[80vh] ${wide ? "w-[34rem]" : "w-[26rem]"}`
+            : large
+              ? "h-[46rem] max-h-[90vh] w-[64rem]"
+              : `max-h-[80vh] ${wide ? "w-[34rem]" : "w-[26rem]"}`
         } max-w-full flex-col rounded-xl border border-white/10 bg-havoc-panel shadow-2xl`}
       >
         <header className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">

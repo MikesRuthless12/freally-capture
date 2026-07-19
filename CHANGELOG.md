@@ -15,6 +15,60 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
 > remaining themed phases land first.
 
+## [0.910.0] — 2026-07-19 (Teleprompter Rework)
+
+> *The prompter grows up.* A focused rework of the teleprompter shipped in 0.800.0: pauses become
+> real objects you can't fat-finger, the scroll can pace to a song's tempo, an optional pre-roll
+> counts the talent in, the projector hands the main window back to the operator, and the script can
+> read itself aloud or finish your words as you type. Everything new is local and off/neutral by
+> default — the autocomplete dictionaries are plain local data files (lazy-loaded, one language at a
+> time) and Read aloud speaks through the operating system's own voice engine; nothing is bundled and
+> nothing is fetched.
+
+### Added
+
+- **Caesura pause chips** — an inline pause written as ` -- ` (a beat) or ` --N ` (an N-second hold)
+  now renders in the script editor as a single atomic pill: the caret cannot land inside it, one
+  **Delete/Backspace** removes the whole token (never a stray dash), and copy/paste carries the
+  marker intact. A pause reads and edits as one object instead of four loose characters.
+- **Start countdown** — an optional **3-2-1** pre-roll before the scroll begins, shown on both the
+  operator preview and the talent projector, so the reader gets a beat to draw breath before the
+  text moves.
+- **BPM mode** — pace the scroll in **beats per minute (50–250)** instead of characters per second,
+  for reading lyrics in time with music. Switch modes freely; a change re-paces the running scroll
+  **live**.
+- **Real transport icons** — the projector and the operator panel now carry proper **SVG**
+  play / pause / stop / rewind / fast-forward / restart controls in place of the placeholder glyphs.
+- **Projector frees the main window** — opening the talent projector now **closes the operator
+  modal**, so you can run your livestream from the main window while the talent reads. With a start
+  countdown armed, the projector **auto-rewinds to the top, counts down, and plays from the top** on
+  open — one action puts the reader at zero and rolls.
+- **Read aloud** — preview a script through the operating system's **own speech synthesis** — Windows
+  **SAPI 5 / OneCore**, macOS **AVSpeechSynthesis**, and on Linux the Web Speech API or a
+  **`spd-say` / `espeak-ng`** fallback where installed. No TTS engine is bundled; the OS voice is
+  used as-is. See `THIRD-PARTY.md`.
+- **Ghost-text autocomplete** — light-grey word and phrase suggestions appear inline as you type and
+  are accepted with **Tab**. Each of the **18 app languages** has its own dictionary, lazy-loaded for
+  the language you're writing in only. Dictionary sources and their **CC-BY / permissive** licenses
+  (Tatoeba, SCOWL, Leipzig Corpora, OpenTaal, …) are listed in `THIRD-PARTY.md`.
+
+### Fixed
+
+- **Preview ↔ projector wrap matching** — lines now wrap at the identical points on the operator
+  preview and the fullscreen projector, so the line you cue is the line the talent reads. The
+  projector renders the script on a fixed-size stage that is CSS-scaled to the monitor, so a line
+  break can no longer land in a different place on the big screen.
+- **Seek-bar elapsed timer** — the elapsed-time readout no longer climbs **past** the total read
+  time; it clamps at the end instead of counting up forever once the script has fully scrolled.
+
+### Notes
+
+- **No new bundled runtime dependency and no new network call.** The autocomplete dictionaries are
+  local JSON data (one file per language, loaded on demand for the active language), and Read aloud
+  drives the speech engine already present on the machine — nothing is fetched at runtime. Data and
+  speech-engine attributions live in `THIRD-PARTY.md`. Every new control and mode is localized across
+  all 18 languages.
+
 ## [0.900.0] — 2026-07-18 (Studio Management & Workflow — Phase 8)
 
 > *Own your studio.* Phase 8 makes a whole layout portable and shareable, adds version control for

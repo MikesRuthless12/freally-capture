@@ -2051,4 +2051,10 @@ export type TeleprompterState = {
   /** Current scroll offset in lines (mapped to pixels per surface). */
   offset: number;
   playing: boolean;
+  /** Default pause (seconds) a bare ` -- ` caesura uses (operator-settable). */
+  caesuraSecs: number;
+  /** Start-countdown pre-roll (seconds) before scrolling; 0 = off (operator-settable). */
+  countdownSecs: number;
+  /** Seconds remaining in the current start countdown (0 when not counting). */
+  countdownRemaining: number;
 };

@@ -66,6 +66,7 @@ mod teleprompter;
 mod telestrator;
 mod theme;
 mod timers;
+mod tts;
 mod webpanel;
 
 use audio::{AudioRuntime, HotkeyRegistry};
@@ -402,7 +403,11 @@ fn main() {
             teleprompter::teleprompter_set_speed,
             teleprompter::teleprompter_set_font,
             teleprompter::teleprompter_set_mirror,
+            teleprompter::teleprompter_set_caesura,
+            teleprompter::teleprompter_set_countdown,
             teleprompter::teleprompter_control,
+            tts::tts_speak,
+            tts::tts_stop,
             profiles::profiles_list,
             profiles::profile_create,
             profiles::profile_switch,
