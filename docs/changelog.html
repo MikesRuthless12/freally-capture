@@ -24,8 +24,41 @@
     </header>
 
     <main>
-      <!-- 0.900.0 — studio management & workflow, Phase 8 -->
+      <!-- 0.910.0 — teleprompter rework -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">0.910.0</span>
+            <span class="date">Jul 19, 2026 · Teleprompter rework</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v0.910.0">Download</a>
+        </div>
+
+        <h2>0.910.0 — Teleprompter rework</h2>
+        <p class="summary">
+          The prompter grows up. A focused rework of the teleprompter shipped in 0.800.0: pauses
+          become real objects you can't fat-finger, the scroll can pace to a song's tempo, an optional
+          pre-roll counts the talent in, the projector hands the main window back to the operator, and
+          the script can read itself aloud or finish your words as you type. Everything new is local
+          and off or neutral by default — the autocomplete dictionaries are plain local data files
+          (lazy-loaded, one language at a time) and Read aloud speaks through the operating system's
+          own voice engine; nothing is bundled and nothing is fetched.
+        </p>
+        <ul class="features">
+          <li><strong>Caesura pause chips</strong> — an inline pause written as <code> -- </code> (a beat) or <code> --N </code> (an N-second hold) renders in the script editor as a single atomic pill: the caret cannot land inside it, one Delete/Backspace removes the whole token (never a stray dash), and copy/paste carries the marker intact. A pause reads and edits as one object instead of four loose characters.</li>
+          <li><strong>Start countdown</strong> — an optional 3-2-1 pre-roll before the scroll begins, shown on both the operator preview and the talent projector, so the reader gets a beat to draw breath before the text moves.</li>
+          <li><strong>BPM mode</strong> — pace the scroll in beats per minute (50–250) instead of characters per second, for reading lyrics in time with music. Switch modes freely; a change re-paces the running scroll live.</li>
+          <li><strong>Real transport icons</strong> — the projector and operator panel now carry proper SVG play / pause / stop / rewind / fast-forward / restart controls in place of the placeholder glyphs.</li>
+          <li><strong>Projector frees the main window</strong> — opening the talent projector now closes the operator modal, so you can run your livestream from the main window while the talent reads. With a start countdown armed, the projector auto-rewinds to the top, counts down, and plays from the top on open — one action puts the reader at zero and rolls.</li>
+          <li><strong>Read aloud</strong> — preview a script through the operating system's own speech synthesis: Windows SAPI 5 / OneCore, macOS AVSpeechSynthesis, and on Linux the Web Speech API or a <code>spd-say</code> / <code>espeak-ng</code> fallback where installed. No TTS engine is bundled; the OS voice is used as-is (see THIRD-PARTY.md).</li>
+          <li><strong>Ghost-text autocomplete</strong> — light-grey word and phrase suggestions appear inline as you type and are accepted with <kbd>Tab</kbd>. Each of the 18 app languages has its own dictionary, lazy-loaded for the language you're writing in only. Dictionary sources and their CC-BY / permissive licenses (Tatoeba, SCOWL, Leipzig Corpora, OpenTaal, …) are listed in THIRD-PARTY.md.</li>
+          <li><strong>Fixed: preview ↔ projector wrap matching</strong> — lines now wrap at the identical points on the operator preview and the fullscreen projector, so the line you cue is the line the talent reads. The projector renders the script on a fixed-size stage that is CSS-scaled to the monitor, so a line break can no longer land in a different place on the big screen.</li>
+          <li><strong>Fixed: seek-bar elapsed timer</strong> — the elapsed-time readout no longer climbs past the total read time; it clamps at the end instead of counting up forever once the script has fully scrolled.</li>
+        </ul>
+      </article>
+
+      <!-- 0.900.0 — studio management & workflow, Phase 8 -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.900.0</span>
@@ -1012,6 +1045,14 @@
               <p>Scene-collection pack export/import, collection diff &amp; merge, named version snapshots, portable mode (run from a USB stick), one-file backup &amp; restore, a theme editor, dock layout presets, settings search, and a quick-actions grid dock.</p>
             </div>
             <span class="soon">Done — Jul 18, 2026</span>
+          </li>
+          <li>
+            <span class="badge">0.910.0</span>
+            <div>
+              <strong>Teleprompter rework</strong>
+              <p>Caesura pause chips (atomic, un-splittable pause markers), a 3-2-1 start countdown on preview and projector, BPM scroll pacing for lyrics, real SVG transport icons, a projector that frees the main window (and auto-counts-in from the top), read-aloud through the OS speech engine, and ghost-text autocomplete with a per-language dictionary for all 18 languages — plus preview↔projector wrap matching and a seek-bar timer that no longer overruns.</p>
+            </div>
+            <span class="soon">Done — Jul 19, 2026</span>
           </li>
           <li>
             <span class="badge upcoming">1.0.0</span>

@@ -30,7 +30,11 @@ const isProjector = label.startsWith("projector-");
 const isTeleprompter = label === "projector-teleprompter";
 // The multiview-on-display window (CAP-M07 extension) shares this bundle too.
 const isMultiview = label === "multiview";
-if (isProjector || isMultiview) initLocale("auto");
+
+// The projector/multiview windows have no settings, so they follow the OS language.
+if (isProjector || isMultiview) {
+  initLocale("auto");
+}
 
 createRoot(root).render(
   <StrictMode>

@@ -1878,7 +1878,27 @@ export function teleprompterSetMirror(mirror: boolean): Promise<void> {
   return invoke("teleprompter_set_mirror", { mirror });
 }
 
+/** Set the default pause (seconds) a bare ` -- ` caesura uses (0.75–2). */
+export function teleprompterSetCaesura(secs: number): Promise<void> {
+  return invoke("teleprompter_set_caesura", { secs });
+}
+
+/** Set the start-countdown pre-roll (seconds) before scrolling; 0 disables it. */
+export function teleprompterSetCountdown(secs: number): Promise<void> {
+  return invoke("teleprompter_set_countdown", { secs });
+}
+
 /** Scroll control: play / pause / toggle / faster / slower / top / setSpeed. */
 export function teleprompterControl(action: string, value?: number): Promise<void> {
   return invoke("teleprompter_control", { action, value });
+}
+
+/** Native TTS fallback (Linux Speech Dispatcher/espeak) — Win/macOS use the WebView. */
+export function ttsSpeakNative(text: string, rate: number): Promise<void> {
+  return invoke("tts_speak", { text, rate });
+}
+
+/** Stop native TTS speech (Linux). */
+export function ttsStopNative(): Promise<void> {
+  return invoke("tts_stop");
 }

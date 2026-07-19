@@ -99,23 +99,31 @@ fn is_valid_label(label: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == ':')
 }
 
-/// Open (or focus) an auxiliary window on a chosen display (CAP-M07). `label`
-/// says what it shows (the frontend parses it — `projector-program`,
-/// `projector-preview`, `multiview`); `display` positions it on that monitor;
-/// `fullscreen` fullscreens it there, otherwise it floats always-on-top.
-#[tauri::command]
-pub fn aux_window_open(
-    app: AppHandle,
-    label: String,
-    title: String,
+/// Build (or focus) the aux window. **Synchronous builder body**, shared by the
+/// async command and `reopen_saved`.
+///
+/// ⚠️ Must NOT be called from a Tauri command running on the main thread while
+/// the event loop is pumping: building a webview that loads our app and issues an
+/// IPC call on mount (e.g. the teleprompter projector's `teleprompter_get`)
+/// deadlocks — the new webview's IPC cannot be serviced while the main thread is
+/// blocked inside `build()`, so the whole app freezes (blank windows, dead close
+/// button). The `#[tauri::command]` wrapper below is therefore `async` (Tauri
+/// runs it off the main thread, so `build()` marshals creation to the free main
+/// event loop and the initial IPC completes). `reopen_saved` calls this directly,
+/// but only from `.setup()` — before `app.run()` pumps — where window creation
+/// defers the webview load, exactly like the main window itself.
+fn open_or_focus_aux(
+    app: &AppHandle,
+    label: &str,
+    title: &str,
     display: Option<usize>,
     fullscreen: bool,
 ) -> Result<(), String> {
-    if !is_valid_label(&label) {
+    if !is_valid_label(label) {
         return Err("invalid window label".to_owned());
     }
-    if let Some(existing) = app.get_webview_window(&label) {
-        register_target(&app, &label);
+    if let Some(existing) = app.get_webview_window(label) {
+        register_target(app, label);
         let _ = existing.set_focus();
         return Ok(());
     }
@@ -125,7 +133,7 @@ pub fn aux_window_open(
     let monitors = main.available_monitors().map_err(|err| err.to_string())?;
 
     let title = if title.trim().is_empty() {
-        "Freally Capture".to_owned()
+        "Freally Capture"
     } else {
         title
     };
@@ -138,7 +146,7 @@ pub fn aux_window_open(
     // monitor-filling window is what OBS's "fullscreen projector" actually is,
     // triggers no DWM mode change, and stays escapable (Esc / Alt+F4 / the
     // taskbar all keep working — it is not always-on-top).
-    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title(title)
         .inner_size(960.0, 540.0)
         .decorations(!fullscreen)
@@ -158,8 +166,27 @@ pub fn aux_window_open(
             let _ = window.set_size(*monitor.size());
         }
     }
-    register_target(&app, &label);
+    register_target(app, label);
     Ok(())
+}
+
+/// Open (or focus) an auxiliary window on a chosen display (CAP-M07). `label`
+/// says what it shows (the frontend parses it — `projector-program`,
+/// `projector-preview`, `multiview`); `display` positions it on that monitor;
+/// `fullscreen` fullscreens it there, otherwise it floats always-on-top.
+///
+/// `async` so Tauri runs it off the main thread — see `open_or_focus_aux`: a
+/// synchronous (main-thread) command deadlocks building any window whose webview
+/// calls back into IPC on load (the teleprompter projector).
+#[tauri::command]
+pub async fn aux_window_open(
+    app: AppHandle,
+    label: String,
+    title: String,
+    display: Option<usize>,
+    fullscreen: bool,
+) -> Result<(), String> {
+    open_or_focus_aux(&app, &label, &title, display, fullscreen)
 }
 
 /// Reopen the projectors remembered from last session (CAP-M07 extension).
@@ -177,10 +204,10 @@ pub fn reopen_saved(app: &AppHandle) {
                 continue;
             }
         }
-        let _ = aux_window_open(
-            app.clone(),
-            saved.label,
-            saved.title,
+        let _ = open_or_focus_aux(
+            app,
+            &saved.label,
+            &saved.title,
             saved.display,
             saved.fullscreen,
         );
