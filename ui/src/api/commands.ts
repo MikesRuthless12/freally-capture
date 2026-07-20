@@ -23,6 +23,7 @@ import type {
   CameraControl,
   CaptureSource,
   CefStatus,
+  ChatLine,
   CornerSlot,
   CursorFxSetting,
   DisplayInfo,
@@ -211,6 +212,11 @@ export function collectionCreate(name: string): Promise<NamedList> {
 /** Switch scene collections (the active one saves first). */
 export function collectionSwitch(name: string): Promise<NamedList> {
   return invoke<NamedList>("collection_switch", { name });
+}
+
+/** Permanently delete every named scene collection except the active one. */
+export function collectionsClear(): Promise<NamedList> {
+  return invoke<NamedList>("collections_clear");
 }
 
 /** A caveat on one imported source (CAP-M02). Mirrors `ImportNote` in Rust. */
@@ -603,6 +609,26 @@ export function studioSelectScene(sceneId: SceneId): Promise<void> {
 
 export function studioReorderScene(sceneId: SceneId, toIndex: number): Promise<void> {
   return invoke("studio_reorder_scene", { sceneId, toIndex });
+}
+
+/** Clear the "Recent Scenes" quick-recall list (V1-B). */
+export function studioClearRecentScenes(): Promise<void> {
+  return invoke("studio_clear_recent_scenes");
+}
+
+/** V1-E: the newest chat lines across every running overlay (the picker). */
+export function chatRecent(count?: number): Promise<ChatLine[]> {
+  return invoke("chat_recent", { count });
+}
+
+/** V1-E: pin a message to the program's featured banner (null clears it). */
+export function chatFeature(message: ChatLine | null): Promise<void> {
+  return invoke("chat_feature", { message });
+}
+
+/** V1-E: the currently pinned featured-banner message, if any. */
+export function chatFeatured(): Promise<ChatLine | null> {
+  return invoke("chat_featured");
 }
 
 /** Add a brand-new source on top of a scene. */

@@ -63,6 +63,9 @@ pub struct VisualizerConfig {
     pub peak_hold: bool,
     /// Bar fall rate, dB/s — clamped to 6..=120.
     pub decay_db_per_s: f32,
+    /// V1-C: colour the bars/VU with the classic green→yellow→red level ramp
+    /// (and the scope in classic phosphor-green) instead of the flat `color`.
+    pub classic: bool,
 }
 
 /// Start the visualizer session thread.
@@ -82,6 +85,7 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
             let width = config.width;
             let height = config.height;
             let color = config.color;
+            let classic = config.classic;
             let period = Duration::from_micros(1_000_000 / u64::from(FPS));
             let dt = 1.0 / FPS as f32;
             // Bars state: heights + peak markers, both in dB.
@@ -121,6 +125,7 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
                             &heights01,
                             config.peak_hold.then_some(peaks01.as_slice()),
                             color,
+                            classic,
                         )
                     }
                     Style::Scope => {
@@ -130,7 +135,7 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
                             ring.latest(&mut scope_window);
                         }
                         downmix_mono(&scope_window, &mut scope_mono);
-                        draw_scope(width, height, &scope_mono, color)
+                        draw_scope(width, height, &scope_mono, color, classic)
                     }
                     Style::Vu => {
                         if stale {
@@ -146,7 +151,7 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
                             step_peak(marker, peak_db, dt);
                             shown[ch] = (level01(rms_db), level01(marker.0));
                         }
-                        draw_vu(width, height, &shown, config.peak_hold, color)
+                        draw_vu(width, height, &shown, config.peak_hold, color, classic)
                     }
                 };
                 sender.send(rgba_frame(width, height, frame));
@@ -285,6 +290,17 @@ fn lighten(color: [u8; 4]) -> [u8; 4] {
     ]
 }
 
+/// The classic meter ramp: green (quiet) → yellow → red (hot) for `t` in
+/// 0..=1 — the standard VU / spectrum-analyser colouring (V1-C).
+fn classic_level_color(t: f32) -> [u8; 4] {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.6 {
+        [(t / 0.6 * 255.0) as u8, 255, 0, 255] // green → yellow
+    } else {
+        [255, ((1.0 - (t - 0.6) / 0.4) * 255.0) as u8, 0, 255] // yellow → red
+    }
+}
+
 fn put(data: &mut [u8], width: u32, x: usize, y: usize, color: [u8; 4]) {
     let index = (y * width as usize + x) * 4;
     data[index..index + 4].copy_from_slice(&color);
@@ -299,11 +315,13 @@ fn draw_bars(
     heights01: &[f32],
     peaks01: Option<&[f32]>,
     color: [u8; 4],
+    classic: bool,
 ) -> Vec<u8> {
     let (w, h) = (width as usize, height as usize);
     let mut data = vec![0u8; w * h * 4];
     let bands = heights01.len().max(1);
     let tick = lighten(color);
+    let span = (h.max(2) - 1) as f32;
     for (band, level) in heights01.iter().enumerate() {
         let x0 = band * w / bands;
         let mut x1 = (band + 1) * w / bands;
@@ -312,8 +330,14 @@ fn draw_bars(
         }
         let filled = (level.clamp(0.0, 1.0) * h as f32).round() as usize;
         for y in h - filled..h {
+            // Classic mode ramps each bar green (bottom) → yellow → red (top).
+            let bar = if classic {
+                classic_level_color((h - 1).saturating_sub(y) as f32 / span)
+            } else {
+                color
+            };
             for x in x0..x1.min(w) {
-                put(&mut data, width, x, y, color);
+                put(&mut data, width, x, y, bar);
             }
         }
         if let Some(peaks) = peaks01 {
@@ -333,7 +357,9 @@ fn draw_bars(
 
 /// Oscilloscope: a faint center line and one min/max column per pixel of
 /// the mono window (two samples per column), on transparency.
-fn draw_scope(width: u32, height: u32, mono: &[f32], color: [u8; 4]) -> Vec<u8> {
+fn draw_scope(width: u32, height: u32, mono: &[f32], color: [u8; 4], classic: bool) -> Vec<u8> {
+    // Classic mode is the old phosphor-green scope.
+    let color = if classic { [0, 230, 90, 255] } else { color };
     let (w, h) = (width as usize, height as usize);
     let mut data = vec![0u8; w * h * 4];
     let center_color = [color[0], color[1], color[2], color[3] / 4];
@@ -367,24 +393,37 @@ fn draw_vu(
     shown: &[(f32, f32); 2],
     peak_hold: bool,
     color: [u8; 4],
+    classic: bool,
 ) -> Vec<u8> {
     let (w, h) = (width as usize, height as usize);
     let mut data = vec![0u8; w * h * 4];
     let track = [color[0], color[1], color[2], color[3] / 8];
     let tick = lighten(color);
     let lane_h = h / 4;
+    let span = w.max(1) as f32;
+    // Classic mode ramps the fill green (quiet) → red (hot) by level. The
+    // ramp only depends on x, so compute it once per column, not per pixel.
+    let fill_at: Vec<[u8; 4]> = (0..w)
+        .map(|x| {
+            if classic {
+                classic_level_color(x as f32 / span)
+            } else {
+                color
+            }
+        })
+        .collect();
     for (ch, (rms01, peak01)) in shown.iter().enumerate() {
         let y0 = if ch == 0 { h / 8 } else { h * 5 / 8 };
         let y1 = (y0 + lane_h).min(h);
         let filled = (rms01.clamp(0.0, 1.0) * w as f32).round() as usize;
         for y in y0..y1 {
-            for x in 0..w {
+            for (x, fill) in fill_at.iter().enumerate() {
                 put(
                     &mut data,
                     width,
                     x,
                     y,
-                    if x < filled { color } else { track },
+                    if x < filled { *fill } else { track },
                 );
             }
         }
@@ -470,7 +509,7 @@ mod tests {
 
     #[test]
     fn bars_fill_from_the_bottom_over_transparency() {
-        let data = draw_bars(8, 8, &[1.0, 0.0], None, [10, 20, 30, 255]);
+        let data = draw_bars(8, 8, &[1.0, 0.0], None, [10, 20, 30, 255], false);
         let pixel = |x: usize, y: usize| &data[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4];
         assert_eq!(pixel(0, 7), &[10, 20, 30, 255], "first bar bottom filled");
         assert_eq!(pixel(0, 0), &[10, 20, 30, 255], "full height");
@@ -482,7 +521,7 @@ mod tests {
     fn scope_of_silence_draws_only_the_center_line() {
         let width = 16usize;
         let mono = vec![0.0f32; width * 2];
-        let data = draw_scope(width as u32, 9, &mono, [255, 0, 0, 255]);
+        let data = draw_scope(width as u32, 9, &mono, [255, 0, 0, 255], false);
         let pixel = |x: usize, y: usize| &data[(y * width + x) * 4..(y * width + x) * 4 + 4];
         assert_eq!(pixel(3, 4), &[255, 0, 0, 255], "flat trace on the center");
         assert_eq!(pixel(3, 0)[3], 0, "top transparent");
@@ -491,14 +530,36 @@ mod tests {
 
     #[test]
     fn vu_fills_with_level_and_empties_in_silence() {
-        let loud = draw_vu(16, 16, &[(1.0, 0.0), (1.0, 0.0)], false, [0, 255, 0, 255]);
-        let quiet = draw_vu(16, 16, &[(0.0, 0.0), (0.0, 0.0)], false, [0, 255, 0, 255]);
+        let loud = draw_vu(
+            16,
+            16,
+            &[(1.0, 0.0), (1.0, 0.0)],
+            false,
+            [0, 255, 0, 255],
+            false,
+        );
+        let quiet = draw_vu(
+            16,
+            16,
+            &[(0.0, 0.0), (0.0, 0.0)],
+            false,
+            [0, 255, 0, 255],
+            false,
+        );
         let pixel = |data: &[u8], x: usize, y: usize| data[(y * 16 + x) * 4 + 3];
         assert_eq!(pixel(&loud, 15, 3), 255, "left lane full");
         assert!(
             pixel(&quiet, 15, 3) < 64,
             "silent lane shows only the track"
         );
+    }
+
+    #[test]
+    fn classic_bars_ramp_green_at_the_bottom_to_red_at_the_top() {
+        let data = draw_bars(4, 8, &[1.0], None, [10, 20, 30, 255], true);
+        let px = |x: usize, y: usize| &data[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4];
+        assert!(px(0, 7)[1] > px(0, 7)[0], "bottom is green");
+        assert!(px(0, 0)[0] > px(0, 0)[1], "top is red");
     }
 
     #[test]

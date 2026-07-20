@@ -15,7 +15,7 @@ const PROJECT_STARTED: &str = "2026-06-30";
 /// Filled in at the 1.0.0 cut, and not before. `None` renders as "not yet" —
 /// an About page claiming a stable release that has not happened is worse than
 /// one admitting it is pre-1.0.
-const FIRST_STABLE_RELEASED: Option<&str> = None;
+const FIRST_STABLE_RELEASED: Option<&str> = Some("2026-07-19");
 
 const HOMEPAGE: &str = "https://mikesruthless12.github.io/freally-capture/";
 

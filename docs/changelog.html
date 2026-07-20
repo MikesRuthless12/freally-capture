@@ -6,7 +6,7 @@
     <title>Freally Capture — Changelog</title>
     <meta
       name="description"
-      content="The Freally Capture changelog and roadmap to 1.0.0. Every release is downloadable; 1.0.0 ships when all 100 roadmap features are in."
+      content="The Freally Capture changelog. Every release is downloadable; 1.0.0 is the first stable — all 100 roadmap features are in."
     />
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
@@ -20,12 +20,43 @@
     <header class="hero">
       <img class="logo" src="freally-icon.png" alt="Freally Capture icon" width="288" height="288" />
       <h1>Changelog</h1>
-      <p class="sub">Every Freally Capture release lands here, downloadable per release. The roadmap below tracks the ladder to 1.0.0 — first stable when all 100 roadmap features are in.</p>
+      <p class="sub">Every Freally Capture release lands here, downloadable per release. 1.0.0 is the first stable — all 100 roadmap features are in.</p>
     </header>
 
     <main>
-      <!-- 0.910.0 — teleprompter rework -->
+      <!-- 1.0.0 — stable: stream-production overlays & launch polish -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">1.0.0</span>
+            <span class="date">Jul 19, 2026 · Stable</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v1.0.0">Download</a>
+        </div>
+
+        <h2>1.0.0 — Stable: stream-production overlays &amp; launch polish</h2>
+        <p class="summary">
+          The 1.0.0 stable. The counted 100-feature roadmap (26 must-haves + 74 nice-to-haves) was
+          completed at 0.900.0; this release ships the five launch-polish features parked for 1.0.0
+          — a pre-show countdown slate, a social bar, a featured chat banner, modal depth-of-field,
+          and scene-history hygiene — plus a round of playlist/audio fixes. Everything new ships off
+          or unbound by default, stays local, and adds no network call.
+        </p>
+        <ul class="features">
+          <li><strong>"Starting Soon" countdown slate</strong> — one click from Add Source: a full-canvas countdown that counts down TO a wall-clock time picked on a 12-hour clock picker (hours, 5-minute steps, AM/PM). At zero it flashes and holds — you clear it and cut to live by hand, never an auto-switch. Backdrops: gradient, solid, a still image (contain-fit, centred, never cropped), or a GIF/video as the scene's looping backdrop — with optional background music picked in the same dialog. Viewers of the stream/recording see it too.</li>
+          <li><strong>Background Music source</strong> — one or more audio files (mp3/wav/flac/…) as an invisible looping playlist with optional shuffle, heard in preview and captured to the recording/stream; adding it mutes a video backdrop's own audio so only one background sound ever plays.</li>
+          <li><strong>Social &amp; channels bar</strong> — a generated overlay listing your handles: bundled platform rows (YouTube, Twitch, Kick, X, Instagram, TikTok, Facebook, Discord) as brand-coloured badges, plus custom rows and an optional header.</li>
+          <li><strong>Featured chat message banner</strong> — pick any recent chat line from your running chat overlays and pin it to the program as a styled bottom banner; the colours persist, the pin clears on restart (by design) or with one click.</li>
+          <li><strong>Modal depth-of-field</strong> — every modal blurs and dims the studio behind it (theme-aware, honours reduced-motion); companion surfaces like the teleprompter stay unblurred so the operator can keep reading.</li>
+          <li><strong>Scene history hygiene</strong> — a Recent Scenes list with one-click Clear History, plus Scene Collection → Clear History to bulk-delete junk collections (the active one is never touched).</li>
+          <li><strong>Audio visualizer classic colours</strong> — an optional classic green→yellow→red broadcast ramp for the bars and VU meters (the oscilloscope goes phosphor green).</li>
+          <li><strong>Record a rehearsal</strong> — starting a rehearsal offers to also record it to a normal video file, so a dry run can become an edit-and-upload master without going live.</li>
+          <li><strong>Fixed: Media Playlist audio</strong> — playlists now get their own mixer strip (fade, mute, monitor); an audio-only playlist shows the current track's name on canvas, cleanly.</li>
+        </ul>
+      </article>
+
+      <!-- 0.910.0 — teleprompter rework -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.910.0</span>
@@ -1055,12 +1086,12 @@
             <span class="soon">Done — Jul 19, 2026</span>
           </li>
           <li>
-            <span class="badge upcoming">1.0.0</span>
+            <span class="badge">1.0.0</span>
             <div>
               <strong>First stable</strong>
-              <p>1.0.0 ships when all 100 roadmap features are in — the 26 must-haves (done at 0.99.0) plus the 74 nice-to-haves landing phase by phase above. The virtual camera, a true browser source, and game-capture GPU hooking remain their own milestones alongside the ladder.</p>
+              <p>All 100 roadmap features are in — the 26 must-haves (done at 0.99.0) plus the 74 nice-to-haves — capped with the launch polish: the Starting Soon countdown slate, background music, a social bar, a featured chat banner, modal depth-of-field, and scene-history hygiene. The virtual camera, a true browser source, and game-capture GPU hooking remain their own milestones beyond 1.0.0.</p>
             </div>
-            <span class="soon">Coming soon</span>
+            <span class="soon">Done — Jul 19, 2026</span>
           </li>
         </ol>
       </section>

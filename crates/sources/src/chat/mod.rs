@@ -58,6 +58,102 @@ pub(crate) struct ChatSink {
 
 /// How many lines the ring retains (display shows fewer).
 const RING_CAP: usize = 200;
+
+/// V1-E: a global, bounded feed of every sanitized chat line across ALL
+/// running overlays. The per-session ring stays private to its renderer;
+/// this is what the featured-banner picker lists. Same shape as the ring
+/// (`VecDeque::new` is const), so steady-state eviction is O(1).
+static FEED: Mutex<VecDeque<ChatMessage>> = Mutex::new(VecDeque::new());
+/// V1-E: the message pinned to the program's featured banner (None = off),
+/// plus a revision so the studio re-renders the banner only on change.
+static FEATURED: Mutex<Option<ChatMessage>> = Mutex::new(None);
+static FEATURED_REV: AtomicU64 = AtomicU64::new(0);
+
+/// The newest `count` chat lines across every running overlay — the
+/// featured-banner picker's feed (oldest→newest, like the overlay).
+pub fn recent_messages(count: usize) -> Vec<ChatMessage> {
+    let feed = FEED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    feed.iter()
+        .skip(feed.len().saturating_sub(count))
+        .cloned()
+        .collect()
+}
+
+/// Pin a message to the program's featured banner (`None` clears it).
+pub fn set_featured(message: Option<ChatMessage>) {
+    *FEATURED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = message;
+    FEATURED_REV.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The pinned message, if any (the program bake reads this per tick).
+pub fn featured() -> Option<ChatMessage> {
+    FEATURED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// Bumps on every pin/clear — lets the studio cache the rendered banner.
+pub fn featured_revision() -> u64 {
+    FEATURED_REV.load(Ordering::Relaxed)
+}
+
+/// Map a UI-supplied platform string back onto the static tags ingest uses
+/// (`ChatMessage.platform` is `&'static str`).
+pub fn intern_platform(platform: &str) -> &'static str {
+    match platform {
+        "youtube" => "youtube",
+        "twitch" => "twitch",
+        "kick" => "kick",
+        _ => "chat",
+    }
+}
+
+/// Ingest's sanitizer: control characters stripped, length-capped, trimmed.
+fn clean(s: &str, cap: usize) -> String {
+    s.chars()
+        .filter(|c| !c.is_control())
+        .take(cap)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// Build a [`ChatMessage`] from untrusted parts under ingest's OWN rules
+/// (the featured-banner command re-cleans UI echoes through this, so the
+/// caps and control-char policy live in exactly one place). `None` when the
+/// text sanitizes to nothing.
+pub fn sanitize_line(
+    platform: &str,
+    username: &str,
+    text: &str,
+    at_unix_ms: i64,
+) -> Option<ChatMessage> {
+    let text = clean(text, 200);
+    if text.is_empty() {
+        return None;
+    }
+    Some(ChatMessage {
+        platform: intern_platform(platform),
+        username: clean(username, 40),
+        text,
+        at_unix_ms,
+    })
+}
+
+/// The featured-message banner frame (delegates to the private renderer).
+pub fn render_featured_banner(
+    message: &ChatMessage,
+    width: u32,
+    bg: [u8; 4],
+    fg: [u8; 4],
+) -> Result<fcap_capture::Frame, String> {
+    render::render_featured_banner(message, width, bg, fg)
+}
 /// The renderer's minimum interval — a chat flood coalesces into at most
 /// ~4 redraws a second, never per-message work on the render path.
 const RENDER_TICK: Duration = Duration::from_millis(250);
@@ -73,32 +169,32 @@ impl ChatSink {
 
     /// Push one message (sanitized + bounded); floods drop the oldest.
     pub(crate) fn push(&self, platform: &'static str, username: &str, text: &str) {
-        let clean = |s: &str, cap: usize| -> String {
-            s.chars()
-                .filter(|c| !c.is_control())
-                .take(cap)
-                .collect::<String>()
-                .trim()
-                .to_string()
-        };
-        let username = clean(username, 40);
-        let text = clean(text, 200);
-        if text.is_empty() {
+        let Some(message) = sanitize_line(
+            platform,
+            username,
+            text,
+            chrono::Local::now().timestamp_millis(),
+        ) else {
             return;
-        }
+        };
         if let Some(tap) = &self.on_message {
-            tap(&text);
+            tap(&message.text);
+        }
+        // V1-E: mirror into the global picker feed (same bound, drop-oldest).
+        {
+            let mut feed = FEED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            feed.push_back(message.clone());
+            while feed.len() > RING_CAP {
+                feed.pop_front();
+            }
         }
         let mut ring = self
             .ring
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        ring.push_back(ChatMessage {
-            platform,
-            username,
-            text,
-            at_unix_ms: chrono::Local::now().timestamp_millis(),
-        });
+        ring.push_back(message);
         while ring.len() > RING_CAP {
             ring.pop_front();
         }
@@ -226,6 +322,26 @@ pub fn start_chat_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_global_feed_mirrors_pushes_and_featured_pins_bump_the_revision() {
+        let sink = ChatSink::new(None);
+        sink.push("twitch", "alpha", "feed me");
+        let recent = recent_messages(RING_CAP);
+        assert!(
+            recent.iter().any(|m| m.text == "feed me"),
+            "the picker feed sees every sanitized push"
+        );
+        let before = featured_revision();
+        set_featured(recent.last().cloned());
+        assert_eq!(
+            featured().expect("pinned").text,
+            recent.last().unwrap().text
+        );
+        set_featured(None);
+        assert!(featured().is_none(), "None clears the pin");
+        assert!(featured_revision() >= before + 2, "every pin/clear bumps");
+    }
 
     #[test]
     fn the_ring_drops_oldest_under_flood_and_never_grows() {

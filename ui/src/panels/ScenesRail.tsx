@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import {
   studioAddScene,
+  studioClearRecentScenes,
   studioMediaPaused,
   studioMediaSeek,
   studioMediaSetPaused,
@@ -26,21 +27,39 @@ type ScenesRailProps = {
   collection: Collection | null;
   /** Studio Mode: clicks target the preview pane; this scene shows green. */
   previewScene?: SceneId | null;
+  /** Recently-live scenes for quick recall (V1-B), most-recent first. */
+  recentScenes?: SceneId[];
 };
 
 const BACKDROP_IMAGE_EXTS = ["png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff"];
 const BACKDROP_MEDIA_EXTS = ["gif", "mp4", "mkv", "webm", "mov", "frec"];
-const BACKDROP_SPLITS: BackdropSplit[] = ["full", "left", "right", "top", "bottom"];
+const BACKDROP_SPLITS: BackdropSplit[] = ["full", "fit", "left", "right", "top", "bottom"];
 
 const fail = (what: string) => (err: unknown) => console.error(`${what} failed:`, err);
 
 /** The Scenes rail: create/rename/remove/reorder scenes; click = program
  * (or, in Studio Mode, the preview pane). */
-export function ScenesRail({ collection, previewScene }: ScenesRailProps) {
+export function ScenesRail({ collection, previewScene, recentScenes = [] }: ScenesRailProps) {
   const t = useT();
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const [backdropScene, setBackdropScene] = useState<SceneId | null>(null);
   const scenes = collection?.scenes ?? [];
+
+  /** Recent ids resolved to live scenes (Rust prunes deleted ones, but guard). */
+  const recent = recentScenes
+    .map((id) => scenes.find((scene) => scene.id === id))
+    .filter((scene): scene is Scene => scene != null);
+
+  const clearRecent = () => {
+    if (window.confirm(t("scenes-recent-clear-confirm"))) {
+      studioClearRecentScenes().catch(fail("recent clear"));
+    }
+  };
+
+  const recallScene = (id: SceneId) =>
+    (previewScene != null ? studioSetPreviewScene(id) : studioSelectScene(id)).catch(
+      fail("recent select"),
+    );
 
   const commitRename = () => {
     if (!renaming) return;
@@ -185,6 +204,41 @@ export function ScenesRail({ collection, previewScene }: ScenesRailProps) {
             );
           })}
         </ul>
+      )}
+      {recent.length > 0 && (
+        <div className="mt-3 border-t border-white/5 pt-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-havoc-muted">
+              {t("scenes-recent-title")}
+            </span>
+            <button
+              type="button"
+              onClick={clearRecent}
+              title={t("scenes-recent-clear")}
+              className="rounded px-1 text-[10px] text-havoc-muted hover:text-red-400"
+            >
+              {t("scenes-recent-clear")}
+            </button>
+          </div>
+          <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
+            {recent.map((scene) => (
+              <li key={scene.id}>
+                <button
+                  type="button"
+                  onClick={() => recallScene(scene.id)}
+                  title={
+                    previewScene != null
+                      ? t("scenes-preview", { name: scene.name })
+                      : t("scenes-switch-to", { name: scene.name })
+                  }
+                  className="max-w-[10rem] truncate rounded-md border border-white/10 bg-white/[0.02] px-2 py-0.5 text-[11px] text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+                >
+                  {scene.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {collection && backdropFor && (
         <BackdropDialog

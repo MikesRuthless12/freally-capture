@@ -258,8 +258,10 @@ pub fn preset_seats() -> [NormRect; 6] {
     ]
 }
 
-/// Where a scene's backdrop wallpaper sits: the whole canvas (cover-fit,
-/// overflow cropped — seamless edge-to-edge) or one half (the media
+/// Where a scene's backdrop wallpaper sits: the whole canvas cover-filled
+/// (`Full`, overflow cropped — seamless edge-to-edge), the whole canvas
+/// contain-fit (`Fit`, the WHOLE picture visible and centred, letterboxed —
+/// e.g. a "Starting Soon" video shown in full), or one half (the media
 /// fit-contained in that half so the whole picture stays visible — the
 /// critique layouts), leaving the other half to the capture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -267,6 +269,7 @@ pub fn preset_seats() -> [NormRect; 6] {
 pub enum BackdropSplit {
     #[default]
     Full,
+    Fit,
     Left,
     Right,
     Top,
@@ -277,7 +280,7 @@ impl BackdropSplit {
     /// The normalized canvas region this mode fills.
     pub fn region(self) -> NormRect {
         let (x, y, w, h) = match self {
-            BackdropSplit::Full => (0.0, 0.0, 1.0, 1.0),
+            BackdropSplit::Full | BackdropSplit::Fit => (0.0, 0.0, 1.0, 1.0),
             BackdropSplit::Left => (0.0, 0.0, 0.5, 1.0),
             BackdropSplit::Right => (0.5, 0.0, 0.5, 1.0),
             BackdropSplit::Top => (0.0, 0.0, 1.0, 0.5),
@@ -286,11 +289,11 @@ impl BackdropSplit {
         NormRect { x, y, w, h }
     }
 
-    /// The other half — where a split seats the capture. `None` for Full
-    /// (the capture re-fits to the whole canvas instead).
+    /// The other half — where a split seats the capture. `None` for the
+    /// full-canvas modes (the capture re-fits to the whole canvas instead).
     pub fn opposite(self) -> Option<NormRect> {
         match self {
-            BackdropSplit::Full => None,
+            BackdropSplit::Full | BackdropSplit::Fit => None,
             BackdropSplit::Left => Some(BackdropSplit::Right.region()),
             BackdropSplit::Right => Some(BackdropSplit::Left.region()),
             BackdropSplit::Top => Some(BackdropSplit::Bottom.region()),

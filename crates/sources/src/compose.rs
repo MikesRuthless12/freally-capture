@@ -63,6 +63,57 @@ pub(crate) fn dim(color: [u8; 4], factor: f32) -> [u8; 4] {
     ]
 }
 
+/// Overwrite the rounded rectangle `[x0, x1) × [y0, y1)` with `color` (a copy,
+/// not a blend: panels land on the clear canvas and badges are opaque).
+/// Pixels outside the corner arcs are left untouched, so the corners round.
+/// (Promoted from the social bar when the featured-chat banner needed the
+/// same primitive.)
+pub(crate) fn fill_round_rect(
+    buf: &mut [u8],
+    width: usize,
+    rect: (usize, usize, usize, usize),
+    radius: usize,
+    color: [u8; 4],
+) {
+    let (x0, y0, x1, y1) = rect;
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let r = radius.min((x1 - x0) / 2).min((y1 - y0) / 2);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if !inside_round(x, y, x0, y0, x1, y1, r) {
+                continue;
+            }
+            let dst = (y * width + x) * 4;
+            buf[dst..dst + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+/// Whether `(x, y)` lies within the rounded rectangle — always true away from
+/// the four corner quadrants, else inside the quarter-circle of radius `r`.
+fn inside_round(x: usize, y: usize, x0: usize, y0: usize, x1: usize, y1: usize, r: usize) -> bool {
+    if r == 0 {
+        return true;
+    }
+    let left = x < x0 + r;
+    let right = x + r >= x1;
+    let top = y < y0 + r;
+    let bottom = y + r >= y1;
+    // The centre cross (edges + interior) is always filled.
+    let (cx, cy) = match (left, right, top, bottom) {
+        (true, _, true, _) => (x0 + r, y0 + r),
+        (_, true, true, _) => ((x1 - 1).saturating_sub(r), y0 + r),
+        (true, _, _, true) => (x0 + r, (y1 - 1).saturating_sub(r)),
+        (_, true, _, true) => ((x1 - 1).saturating_sub(r), (y1 - 1).saturating_sub(r)),
+        _ => return true,
+    };
+    let dx = x as f32 - cx as f32;
+    let dy = y as f32 - cy as f32;
+    dx * dx + dy * dy <= (r as f32) * (r as f32)
+}
+
 /// Overwrite a rect with `color` (no blending — callers pre-clamp bounds).
 pub(crate) fn fill_rect(
     face: &mut [u8],

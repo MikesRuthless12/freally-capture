@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   captureStill,
   collectionSwitch,
+  collectionsClear,
   collectionsList,
   openExternal,
   profileSwitch,
@@ -36,6 +37,7 @@ export type AppMenuDialog =
   | "sourceHealth"
   | "avSync"
   | "hotkeyAudit"
+  | "featuredChat"
   | "missingFiles";
 
 type MenuBarProps = {
@@ -122,6 +124,11 @@ export function MenuBar({
   }, []);
 
   const menus = useMemo<MenuDef[]>(() => {
+    // Collections that Clear History would delete (everything but the active
+    // one) — computed once for the row's disabled state AND its action.
+    const clearableCollections = (collections?.names ?? []).filter(
+      (name) => name !== collections?.active,
+    );
     const stats: MenuEntry = {
       kind: "check",
       id: "stats",
@@ -381,6 +388,27 @@ export function MenuBar({
             label: t("menu-collection-missing"),
             onSelect: () => onOpenApp("missingFiles"),
           },
+          {
+            kind: "item",
+            id: "clear-history",
+            label: t("menu-collection-clear"),
+            disabled: clearableCollections.length === 0,
+            onSelect: () => {
+              if (clearableCollections.length === 0) return;
+              if (
+                window.confirm(
+                  t("menu-collection-clear-confirm", {
+                    names: clearableCollections.join(", "),
+                    active: collections?.active ?? "",
+                  }),
+                )
+              ) {
+                collectionsClear()
+                  .then((list) => setCollections(list))
+                  .catch(fail("collection clear"));
+              }
+            },
+          },
           ...(collectionRows.length ? [sep, ...collectionRows] : []),
           sep,
           { kind: "item", id: "rename", label: t("menu-rename"), disabled: true, onSelect: noop },
@@ -460,6 +488,12 @@ export function MenuBar({
             id: "quickActions",
             label: t("menu-tools-quick-actions"),
             onSelect: () => onOpenControls("quickActions"),
+          },
+          {
+            kind: "item",
+            id: "featuredChat",
+            label: t("menu-tools-featured-chat"),
+            onSelect: () => onOpenApp("featuredChat"),
           },
           {
             kind: "item",

@@ -377,6 +377,9 @@ pub struct Settings {
     /// and PRESERVED across `set()` like the tone-maps.
     #[serde(default)]
     pub cursor_fx: std::collections::HashMap<String, CursorFxSetting>,
+    /// V1-E: the featured chat banner's colors (the pin itself is transient).
+    #[serde(default)]
+    pub featured_banner: FeaturedBannerSetting,
     /// Automation: rules + macros (CAP-N01/N02). Every rule ships disabled;
     /// actions are limited to the remote-API allowlist by validation.
     #[serde(default)]
@@ -413,6 +416,44 @@ pub struct Settings {
 pub struct HdrToneMapSetting {
     pub operator: String,
     pub paper_white_nits: u32,
+}
+
+/// V1-E: the featured chat banner's persisted styling. The pinned message
+/// itself is transient (it lives in the chat module and clears on restart);
+/// only the colors the operator chose persist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FeaturedBannerSetting {
+    /// Banner fill, `#rrggbb`.
+    pub bg: String,
+    /// Banner text, `#rrggbb`.
+    pub text: String,
+}
+
+impl Default for FeaturedBannerSetting {
+    fn default() -> Self {
+        // The app's panel navy + white — readable over any program picture.
+        Self {
+            bg: "#101a2a".to_owned(),
+            text: "#ffffff".to_owned(),
+        }
+    }
+}
+
+impl FeaturedBannerSetting {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_hex(&self.bg, "featured-banner background")?;
+        validate_hex(&self.text, "featured-banner text")
+    }
+
+    /// `#rrggbb` → the renderer's RGBA (opaque), through the one shared hex
+    /// parser (cursorfx's, non-ASCII-hardened). Validation upstream makes
+    /// the parse infallible; a stray bad value just falls back to default.
+    pub fn rgba(hex: &str, fallback: [u8; 4]) -> [u8; 4] {
+        fcap_capture::cursorfx::parse_color(hex)
+            .map(|[r, g, b]| [r, g, b, 255])
+            .unwrap_or(fallback)
+    }
 }
 
 /// One capture's cursor effects (CAP-N19): halo, click ripples, keystroke
@@ -508,6 +549,7 @@ impl Default for Settings {
             camera_profiles: std::collections::HashMap::new(),
             hdr_tone_map: std::collections::HashMap::new(),
             cursor_fx: std::collections::HashMap::new(),
+            featured_banner: FeaturedBannerSetting::default(),
             automation: crate::automation::AutomationSettings::default(),
             rundown: crate::rundown::RundownSettings::default(),
             web_panel: crate::webpanel::WebPanelSettings::default(),
@@ -1786,6 +1828,8 @@ impl Settings {
             }
             fx.validate()?;
         }
+        // V1-E: the featured-banner colors stay `#rrggbb`.
+        self.featured_banner.validate()?;
         for (device, profile) in &self.camera_profiles {
             if device.len() > 256 || device.chars().any(char::is_control) {
                 return Err("invalid camera profile device id".to_owned());
@@ -2357,6 +2401,11 @@ mod tests {
                     keystrokes: true,
                 },
             )]),
+            // V1-E: non-default banner colors round-trip too.
+            featured_banner: FeaturedBannerSetting {
+                bg: "#123456".to_owned(),
+                text: "#fafafa".to_owned(),
+            },
             // Automation (CAP-N01/N02): a real macro + rule round-trips too.
             automation: crate::automation::AutomationSettings {
                 macros: vec![crate::automation::Macro {

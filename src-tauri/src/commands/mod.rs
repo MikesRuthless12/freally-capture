@@ -13,6 +13,7 @@ use fcap_sources::video_device;
 pub mod audio;
 pub mod calibration;
 pub mod cef;
+pub mod chat;
 pub mod recording;
 pub mod studio;
 

@@ -107,6 +107,45 @@ canvas:focus-visible {
 }
 
 /*
+ * Modal backdrop blur (V1-A). The shared modal shell (`PickerShell`) and the
+ * command palette's scrim frost whatever is behind the dialog so it reads as
+ * foreground. `-webkit-` is kept for the macOS/Linux webviews (WKWebView /
+ * WebKitGTK); WebView2 on Windows is Chromium and takes the unprefixed
+ * property. Stacked dialogs each carry their own scrim, so only content
+ * beneath the TOPMOST backdrop is blurred — a dialog layered above another
+ * stays crisp.
+ *
+ * Two accessibility opt-outs, both handled without touching the markup:
+ *   - reduced-motion is already near-zeroed above, so the fade-in of the blur
+ *     collapses for those users;
+ *   - `prefers-reduced-transparency` users want opaque surfaces, so the blur is
+ *     dropped entirely and the scrim alone carries the separation.
+ * Companion surfaces (the teleprompter editor) opt out of the blur in markup —
+ * see `PickerShell`'s `companion` prop.
+ */
+.modal-scrim-blur {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition:
+    -webkit-backdrop-filter 150ms ease,
+    backdrop-filter 150ms ease;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .modal-scrim-blur {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+/* Webviews with no backdrop-filter at all (older WebKitGTK): the blur is
+ * silently ignored, so deepen the plain dim to carry the modal separation
+ * the blur would have provided. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .modal-scrim-blur {
+    background-color: rgb(0 0 0 / 0.75);
+  }
+}
+
+/*
  * Light theme surface repair.
  *
  * Every panel, dock and dialog is drawn with translucent *white* over a near-

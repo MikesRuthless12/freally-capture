@@ -48,9 +48,10 @@ pub use scene::{
     SourceGroup, StingerMatte, Transform, TransitionKind,
 };
 pub use source::{
-    CountdownEnd, DeinterlaceMode, FieldOrder, FileBinding, IngestProtocol, InputLayout,
-    PlaylistEntry, ReplaySpeed, Rgba, Source, SourceId, SourceSettings, SplitComparison, TextAlign,
-    TimerMode, TitleAnimation, TitleLayer, VideoDeviceFormat, VisStyle, VisTargetKind,
+    CountdownEnd, CountdownSlate, DeinterlaceMode, FieldOrder, FileBinding, IngestProtocol,
+    InputLayout, PlaylistEntry, ReplaySpeed, Rgba, SocialPlatform, SocialRow, Source, SourceId,
+    SourceSettings, SplitComparison, TextAlign, TimerMode, TitleAnimation, TitleLayer,
+    VideoDeviceFormat, VisStyle, VisTargetKind,
 };
 
 use serde::{Deserialize, Serialize};
@@ -139,6 +140,11 @@ fn default_canvas_height() -> u32 {
 /// real adapter limit, which may be smaller).
 pub const MAX_CANVAS_DIMENSION: u32 = 16_384;
 
+/// How many recently-live scenes [`Collection::set_active_scene`] keeps for the
+/// "Recent Scenes" quick-recall list (V1-B), most-recent first. Session state,
+/// never persisted; the operator can also clear it by hand.
+pub const RECENT_SCENES_CAP: usize = 16;
+
 /// The root of the model: canvas size, the shared source pool, the scenes,
 /// and which scene is live. This is the project format on disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,6 +168,13 @@ pub struct Collection {
     /// only these — never a strip the operator muted by hand. Never persisted.
     #[serde(default, skip)]
     pub hidden_muted: std::collections::HashSet<SourceId>,
+    /// Recently-live scenes for the "Recent Scenes" quick-recall list (V1-B),
+    /// most-recent first and deduped, capped at [`RECENT_SCENES_CAP`]. Session
+    /// state: never written to disk and left out of the collection's own
+    /// serialization — the studio DTO carries it to the UI on its own, and it
+    /// starts empty whenever a different project is loaded.
+    #[serde(default, skip)]
+    pub recent_scenes: Vec<SceneId>,
     /// The optional second output canvas (Phase 6, TASK-604): e.g. a
     /// vertical 9:16 feed composed from any scene in the collection,
     /// recordable/streamable independently of the program canvas.
@@ -294,6 +307,7 @@ impl Collection {
             scenes: vec![scene],
             active_scene: active,
             hidden_muted: std::collections::HashSet::new(),
+            recent_scenes: Vec::new(),
             vertical: None,
             downstream: Vec::new(),
             transition_overrides: Vec::new(),
@@ -338,6 +352,8 @@ impl Collection {
         self.sources.retain(|source| {
             !matches!(&source.settings, SourceSettings::NestedScene { scene } if !scene_ids.contains(scene))
         });
+        // The recent-recall list only names scenes that still exist (V1-B).
+        self.recent_scenes.retain(|s| scene_ids.contains(s));
         // A hand-edited file could hold a nested-scene cycle the engine must
         // never walk: drop any nested source whose target reaches back to a
         // scene showing it.
@@ -477,6 +493,8 @@ impl Collection {
         // CAP-N21: drop any transition rule that referenced the removed scene.
         self.transition_overrides
             .retain(|rule| rule.from != id && rule.to != id);
+        // The recent-recall list must never offer a deleted scene (V1-B).
+        self.recent_scenes.retain(|&s| s != id);
         if self.active_scene == id {
             self.active_scene = self.scenes[index.min(self.scenes.len() - 1)].id;
         }
@@ -586,8 +604,34 @@ impl Collection {
         if self.scene(id).is_none() {
             return Err(SceneError::SceneNotFound);
         }
+        // Remember the scene we're leaving so it can be recalled from the
+        // "Recent Scenes" list (V1-B), and drop the scene we're arriving on —
+        // the list excludes the program scene (you're already on it), even
+        // when it was left earlier (A→B→A).
+        if self.active_scene != id {
+            self.push_recent_scene(self.active_scene);
+        }
+        self.recent_scenes.retain(|&s| s != id);
         self.active_scene = id;
         Ok(())
+    }
+
+    /// Move a scene to the front of the recent-recall list (deduped, capped).
+    fn push_recent_scene(&mut self, id: SceneId) {
+        self.recent_scenes.retain(|&s| s != id);
+        self.recent_scenes.insert(0, id);
+        self.recent_scenes.truncate(RECENT_SCENES_CAP);
+    }
+
+    /// The recently-live scenes, most-recent first (V1-B). Excludes the scene
+    /// currently on program (you're already on it).
+    pub fn recent_scenes(&self) -> &[SceneId] {
+        &self.recent_scenes
+    }
+
+    /// Empty the "Recent Scenes" quick-recall list (V1-B).
+    pub fn clear_recent_scenes(&mut self) {
+        self.recent_scenes.clear();
     }
 
     fn dedupe_scene_name(&self, base: &str) -> String {
@@ -2272,6 +2316,7 @@ mod tests {
                 color: Rgba::new(10, 220, 120, 255),
                 peak_hold: false,
                 decay: 24.0,
+                classic: true,
             },
             SourceSettings::SplitTimer {
                 path: "C:/runs/any-percent.lss".into(),
@@ -2304,6 +2349,7 @@ mod tests {
                 hold_last: true,
                 hw_decode: true,
                 now_playing_variable: "nowPlaying".into(),
+                hidden_face: true,
             },
             SourceSettings::ReplayPlayback {
                 seconds: 20,
@@ -2547,6 +2593,54 @@ mod tests {
         let json = serde_json::to_string_pretty(&original).expect("serialize");
         let restored: Collection = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(original, restored, "the model must round-trip losslessly");
+    }
+
+    #[test]
+    fn countdown_slate_round_trips_and_is_camel_case() {
+        // V1-C: a Timer with a message + a gradient slate serializes with a
+        // camelCase tagged background and round-trips losslessly.
+        let source = Source::new(
+            "Starting Soon",
+            SourceSettings::Timer {
+                mode: TimerMode::Countdown,
+                format: String::new(),
+                utc_offset_min: None,
+                countdown_ms: 5 * 60 * 1_000,
+                target: "20:00".to_string(),
+                end_action: CountdownEnd::Flash,
+                end_scene: None,
+                font_family: None,
+                font_file: None,
+                size_px: 200.0,
+                color: Rgba::WHITE,
+                message: "Starting Soon".to_string(),
+                slate: Some(Box::new(CountdownSlate::Gradient {
+                    from: Rgba::new(20, 20, 40, 255),
+                    to: Rgba::new(80, 20, 90, 255),
+                })),
+            },
+        );
+        let json = serde_json::to_value(&source.settings).expect("serialize");
+        assert_eq!(json["message"], "Starting Soon");
+        assert_eq!(json["slate"]["kind"], "gradient");
+        assert_eq!(json["slate"]["from"]["r"], 20);
+
+        let restored: SourceSettings = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(restored, source.settings);
+
+        // A legacy timer with neither field still parses (serde defaults),
+        // and its absent slate is omitted from the wire form.
+        let legacy: SourceSettings =
+            serde_json::from_str(r#"{"kind":"timer","mode":"stopwatch"}"#).expect("legacy timer");
+        assert!(matches!(
+            legacy,
+            SourceSettings::Timer {
+                slate: None,
+                ref message,
+                ..
+            } if message.is_empty()
+        ));
+        assert!(serde_json::to_value(&legacy).expect("serialize")["slate"].is_null());
     }
 
     #[test]
@@ -3232,6 +3326,101 @@ mod tests {
         let second = collection.add_scene("Second");
         collection.remove_scene(first).expect("remove active");
         assert_eq!(collection.active_scene, second);
+    }
+
+    #[test]
+    fn recent_scenes_records_the_scene_left_behind() {
+        let mut collection = Collection::new();
+        let a = collection.active_scene;
+        let b = collection.add_scene("B");
+        let c = collection.add_scene("C");
+        assert!(
+            collection.recent_scenes().is_empty(),
+            "empty before any switch"
+        );
+
+        collection.set_active_scene(b).expect("to b");
+        assert_eq!(collection.recent_scenes(), &[a]);
+        collection.set_active_scene(c).expect("to c");
+        assert_eq!(collection.recent_scenes(), &[b, a], "most-recent first");
+
+        // The live scene is never in its own recall list.
+        assert!(!collection.recent_scenes().contains(&c));
+    }
+
+    #[test]
+    fn recent_scenes_dedupes_and_reselecting_is_a_noop() {
+        let mut collection = Collection::new();
+        let a = collection.active_scene;
+        let b = collection.add_scene("B");
+        collection.set_active_scene(b).expect("to b");
+        collection.set_active_scene(a).expect("back to a");
+        collection.set_active_scene(b).expect("to b again");
+        // Only the just-left scene remains: the list never contains the scene
+        // now on program, even though it was left earlier (A→B→A→B).
+        assert_eq!(collection.recent_scenes(), &[a]);
+        assert!(
+            !collection.recent_scenes().contains(&b),
+            "live scene excluded"
+        );
+
+        // Re-selecting the already-live scene records nothing.
+        let before = collection.recent_scenes().to_vec();
+        collection.set_active_scene(b).expect("reselect live");
+        assert_eq!(collection.recent_scenes(), before.as_slice());
+    }
+
+    #[test]
+    fn recent_scenes_is_capped() {
+        let mut collection = Collection::new();
+        let ids: Vec<SceneId> = (0..RECENT_SCENES_CAP + 5)
+            .map(|i| collection.add_scene(&format!("S{i}")))
+            .collect();
+        for id in &ids {
+            collection.set_active_scene(*id).expect("switch");
+        }
+        assert_eq!(collection.recent_scenes().len(), RECENT_SCENES_CAP);
+    }
+
+    #[test]
+    fn removing_a_scene_drops_it_from_recent() {
+        let mut collection = Collection::new();
+        let a = collection.active_scene;
+        let b = collection.add_scene("B");
+        collection.set_active_scene(b).expect("to b"); // recent = [a]
+        collection.set_active_scene(a).expect("to a"); // recent = [b, a]
+        collection.remove_scene(b).expect("remove b");
+        assert!(
+            !collection.recent_scenes().contains(&b),
+            "deleted scene never recalled"
+        );
+    }
+
+    #[test]
+    fn clear_recent_scenes_empties_the_list() {
+        let mut collection = Collection::new();
+        let b = collection.add_scene("B");
+        collection.set_active_scene(b).expect("to b");
+        assert!(!collection.recent_scenes().is_empty());
+        collection.clear_recent_scenes();
+        assert!(collection.recent_scenes().is_empty());
+    }
+
+    #[test]
+    fn sanitize_prunes_a_dangling_recent_entry() {
+        let mut collection = Collection::new();
+        let b = collection.add_scene("B");
+        collection.set_active_scene(b).expect("to b"); // recent holds the old active
+                                                       // Forge a recent entry for a scene that doesn't exist.
+        collection.recent_scenes.push(SceneId::new());
+        collection.sanitize();
+        assert!(
+            collection
+                .recent_scenes()
+                .iter()
+                .all(|s| collection.scenes.iter().any(|sc| sc.id == *s)),
+            "recent only names live scenes after sanitize"
+        );
     }
 
     #[test]

@@ -1299,8 +1299,11 @@ impl Compositor {
         }
     }
 
-    /// Upload (or replace) one emoji sprite the reaction pass samples —
+    /// Upload (or replace) one named sprite the reaction pass samples —
     /// rasterized app-side (tight or padded rows, like any source frame).
+    /// Despite the name, the rig is a generic "named app-rendered sprite"
+    /// pass: emoji keys are single emoji, and the featured chat banner
+    /// (V1-E) rides it under a non-emoji key — keep new keys distinct.
     pub fn set_reaction_sprite(&mut self, key: &str, frame: &Frame) -> Result<(), CompositorError> {
         self.ensure_reaction_rig();
         if frame.width == 0 || frame.height == 0 || frame.stride < frame.width * 4 {

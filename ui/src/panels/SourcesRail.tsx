@@ -12,8 +12,12 @@ import {
   openPrivacySettings,
   settingsGet,
   settingsSet,
+  studioAddItem,
   studioApplyLayout,
   studioCreateGroup,
+  studioSetAudioMonitor,
+  studioSetAudioMuted,
+  studioSetBackdropSplit,
   studioMediaPaused,
   studioMediaSetPaused,
   studioRenameSource,
@@ -26,6 +30,7 @@ import {
   studioSetFocus,
   studioSetItemOutputVisible,
   studioSetGroupVisible,
+  studioSetSceneBackdrop,
   studioUngroup,
   videoDeviceFormats,
   videoDevicesList,
@@ -41,6 +46,7 @@ import type {
   GameCaptureStatus,
   InputLayout,
   ItemId,
+  CountdownSlate,
   LinkPeer,
   ProgramStatus,
   Scene,
@@ -59,14 +65,25 @@ import type {
 } from "../api/types";
 import { CORNERS, kindHasAudio } from "../api/types";
 import { useT } from "../i18n/t";
+import { ClockSelect } from "../components/ClockSelect";
 import { EmptyHint, Panel } from "../components/Panel";
 import { LanIngestFields, type LanIngestValue } from "../components/LanIngestFields";
 import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { QrSvg } from "../components/QrSvg";
+import { SocialBarFields, type SocialBarValue } from "../components/SocialBarFields";
 import { hexToRgba } from "../lib/color";
 import { LAN_DEFAULT_PORTS, lanPassphraseUsable } from "../lib/lanIngest";
-import { INPUT_LAYOUTS, REPLAY_SPEEDS, VIS_STYLES } from "../lib/sourceOptions";
+import {
+  AUDIO_EXTS,
+  INPUT_LAYOUTS,
+  newSocialRow,
+  REPLAY_SPEEDS,
+  SLATE_GRADIENT_FROM,
+  SLATE_GRADIENT_TO,
+  SLATE_SOLID,
+  VIS_STYLES,
+} from "../lib/sourceOptions";
 import { titleTextLayer } from "../lib/titleLayers";
 import { parseVisTarget } from "../lib/visTarget";
 import { useDismiss } from "../lib/useDismiss";
@@ -121,9 +138,11 @@ type PickerMode =
   | "audioInput"
   | "audioOutput"
   | "appAudio"
+  | "backgroundMusic"
   | "gameCapture"
   | "testSignal"
   | "timer"
+  | "startingSoon"
   | "systemStats"
   | "audioVisualizer"
   | "splitTimer"
@@ -132,6 +151,7 @@ type PickerMode =
   | "replayPlayback"
   | "lanIngest"
   | "title"
+  | "socialBar"
   | "freallyLink"
   | "existing";
 
@@ -167,6 +187,7 @@ const KIND_BADGE: Record<string, string> = {
   replayPlayback: "sources-badge-replay",
   lanIngest: "sources-badge-lan-ingest",
   title: "sources-badge-title",
+  socialBar: "sources-badge-social",
   freallyLink: "sources-badge-link",
 };
 
@@ -186,7 +207,9 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["color", "sources-add-color"],
   ["text", "sources-add-text"],
   ["title", "sources-add-title"],
+  ["socialBar", "sources-add-social-bar"],
   ["timer", "sources-add-timer"],
+  ["startingSoon", "sources-add-starting-soon"],
   ["systemStats", "sources-add-system-stats"],
   ["audioVisualizer", "sources-add-visualizer"],
   ["splitTimer", "sources-add-split-timer"],
@@ -198,6 +221,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["audioInput", "sources-add-audio-input"],
   ["audioOutput", "sources-add-audio-output"],
   ["appAudio", "sources-add-app-audio"],
+  ["backgroundMusic", "sources-add-background-music"],
   ["existing", "sources-add-existing"],
 ];
 
@@ -896,6 +920,14 @@ export function SourcesRail({
         <TestSignalForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "timer" ? (
         <TimerForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "startingSoon" ? (
+        <StartingSoonForm
+          onClose={() => setPicker(null)}
+          onPick={pick}
+          sceneId={scene?.id ?? null}
+        />
+      ) : picker === "backgroundMusic" ? (
+        <BackgroundMusicForm onClose={() => setPicker(null)} scene={scene} />
       ) : picker === "systemStats" ? (
         <SystemStatsForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "audioVisualizer" ? (
@@ -910,6 +942,8 @@ export function SourcesRail({
         <SplitTimerForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "title" ? (
         <TitleForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "socialBar" ? (
+        <SocialBarForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "inputOverlay" ? (
         <InputOverlayForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "playlist" ? (
@@ -2398,6 +2432,8 @@ function PlaylistForm({
               holdLast,
               hwDecode: true,
               nowPlayingVariable: "",
+              // A manual Media Playlist shows its track-list on the canvas.
+              hiddenFace: false,
             })
           }
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
@@ -2607,6 +2643,45 @@ function TitleForm({
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
           {t("sources-title-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/**
+ * V1-D: the Social & Channels bar — a generated on-canvas panel listing a
+ * creator's social handles (a brand-coloured badge + platform name + handle
+ * per row). Fully local: nothing is fetched, no logos are embedded, no files
+ * are read. Ships empty-ish (one blank YouTube row) so it draws nothing until
+ * the user types a handle; every field stays editable afterwards in Properties.
+ */
+function SocialBarForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [value, setValue] = useState<SocialBarValue>({
+    header: t("sources-social-default-header"),
+    rows: [newSocialRow()],
+    fontFamily: null,
+    sizePx: 32,
+    color: { r: 255, g: 255, b: 255, a: 255 },
+    background: { r: 10, g: 10, b: 15, a: 184 },
+  });
+  return (
+    <PickerShell title={t("sources-social-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <SocialBarFields value={value} onChange={setValue} />
+        <button
+          type="button"
+          onClick={() => onPick({ kind: "socialBar", ...value })}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-social-add")}
         </button>
       </div>
     </PickerShell>
@@ -3162,11 +3237,359 @@ function TimerForm({
               fontFile: null,
               sizePx: 96,
               color: { r: 255, g: 255, b: 255, a: 255 },
+              message: "",
+              slate: null,
             })
           }
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
           {t("sources-timer-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** Add looping background music: an invisible (no on-canvas card),
+ * optionally shuffled audio Playlist, auto-set to Monitor and Output so it
+ * is heard in preview AND captured to the recording/stream. `muteSource`
+ * (the scene's video backdrop, when present) is muted so only one
+ * background sound ever plays. Failure logs, never throws. */
+function addBackgroundMusic(
+  sceneId: SceneId,
+  paths: string[],
+  name: string,
+  options?: { shuffle?: boolean; muteSource?: SourceId | null },
+): Promise<void> {
+  return studioAddItem(
+    sceneId,
+    {
+      kind: "playlist",
+      items: paths.map((path) => ({ path, in: 0, out: 0, cues: [] })),
+      loop: true,
+      shuffle: options?.shuffle ?? false,
+      holdLast: false,
+      hwDecode: true,
+      nowPlayingVariable: "",
+      hiddenFace: true,
+    },
+    name,
+  )
+    .then((added) => studioSetAudioMonitor(added.sourceId, "monitorAndOutput"))
+    .then(() => (options?.muteSource ? studioSetAudioMuted(options.muteSource, true) : undefined))
+    .catch((err: unknown) => console.error("add background music failed:", err));
+}
+
+/** V1-C: a one-click "Starting Soon" pre-show slate — a full-canvas countdown
+ * (a message above a big number) that flashes red and holds at zero, so the
+ * host clears it and cuts to live by hand. It is a countdown Timer in slate
+ * mode; every field stays editable afterwards in Properties. */
+function StartingSoonForm({
+  onClose,
+  onPick,
+  sceneId,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+  /** The active scene — a GIF/video background is set as its looping Backdrop. */
+  sceneId: SceneId | null;
+}) {
+  const t = useT();
+  const [message, setMessage] = useState(t("sources-starting-soon-default"));
+  // Count down TO a wall-clock time (e.g. 8:00 PM) — the Timer's `target`,
+  // edited on the shared 12-hour ClockSelect (default noon).
+  const [target, setTarget] = useState("12:00");
+  const [background, setBackground] = useState<"gradient" | "solid" | "file" | "transparent">(
+    "gradient",
+  );
+  const [filePath, setFilePath] = useState("");
+  const [musicPath, setMusicPath] = useState("");
+
+  // A GIF/video can't be painted into the static slate face — it rides the
+  // scene's (looping) Backdrop instead, with the slate left transparent.
+  const isAnimated = (path: string) => /\.(gif|mp4|mkv|webm|mov|frec)$/i.test(path);
+
+  const chooseMusic = async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: t("sources-starting-soon-music"),
+            extensions: AUDIO_EXTS,
+          },
+        ],
+      });
+      if (typeof picked === "string") setMusicPath(picked);
+    } catch (err) {
+      console.error("music pick failed:", err);
+    }
+  };
+
+  const chooseFile = async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: t("backdrop-filter-all"),
+            extensions: [
+              "png",
+              "jpg",
+              "jpeg",
+              "bmp",
+              "webp",
+              "tif",
+              "tiff",
+              "gif",
+              "mp4",
+              "mkv",
+              "webm",
+              "mov",
+              "frec",
+            ],
+          },
+        ],
+      });
+      if (typeof picked === "string") setFilePath(picked);
+    } catch (err) {
+      // Cancelled, or the file went away between the dialog and here — no throw.
+      console.error("background file pick failed:", err);
+    }
+  };
+
+  const slateFor = (): CountdownSlate => {
+    if (background === "solid") return { kind: "solid", color: SLATE_SOLID };
+    if (background === "transparent") return { kind: "transparent" };
+    if (background === "file")
+      // A still image embeds; a GIF/video shows through a transparent slate (it
+      // rides the scene Backdrop set on Add).
+      return filePath && !isAnimated(filePath)
+        ? { kind: "image", path: filePath }
+        : { kind: "transparent" };
+    return { kind: "gradient", from: SLATE_GRADIENT_FROM, to: SLATE_GRADIENT_TO };
+  };
+
+  const add = () => {
+    const settings: SourceSettings = {
+      kind: "timer",
+      mode: "countdown",
+      format: "",
+      utcOffsetMin: null,
+      countdownMs: 5 * 60 * 1000,
+      target,
+      endAction: "flash",
+      endScene: null,
+      fontFamily: null,
+      fontFile: null,
+      sizePx: 200,
+      color: { r: 255, g: 255, b: 255, a: 255 },
+      message,
+      slate: slateFor(),
+    };
+    // Optional background music through the shared helper (invisible looping
+    // playlist, monitored). The backdrop added below starts muted server-side,
+    // so no extra mute is needed here.
+    if (musicPath.trim() && sceneId) {
+      void addBackgroundMusic(sceneId, [musicPath.trim()], t("sources-starting-soon-music-name"));
+    }
+    // A GIF/video background rides the scene Backdrop, contain-fit ("fit") so the
+    // WHOLE thing shows, centred. A bad path just skips the backdrop — no crash.
+    if (background === "file" && filePath && isAnimated(filePath) && sceneId) {
+      studioSetSceneBackdrop(sceneId, filePath)
+        .then(() => studioSetBackdropSplit(sceneId, "fit"))
+        .catch((err: unknown) => console.error("set backdrop failed:", err))
+        .finally(() => onPick(settings, t("sources-starting-soon-title")));
+    } else {
+      onPick(settings, t("sources-starting-soon-title"));
+    }
+  };
+
+  return (
+    <PickerShell title={t("sources-starting-soon-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-starting-soon-message")}
+          <input
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-starting-soon-start-at")}
+          <ClockSelect
+            value={target}
+            onChange={setTarget}
+            selectClass="flex-1 rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+          {t("sources-starting-soon-background")}
+          <select
+            value={background}
+            onChange={(event) => setBackground(event.target.value as typeof background)}
+            className="rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text"
+          >
+            <option value="gradient">{t("sources-slate-gradient")}</option>
+            <option value="solid">{t("sources-slate-solid")}</option>
+            <option value="file">{t("sources-slate-file")}</option>
+            <option value="transparent">{t("sources-slate-transparent")}</option>
+          </select>
+        </label>
+        {background === "file" && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void chooseFile()}
+              className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2.5 py-1 text-[11px] text-havoc-text hover:bg-havoc-accent/25"
+            >
+              {t("sources-slate-browse")}
+            </button>
+            <span className="min-w-0 flex-1 truncate text-[10px] text-havoc-muted" title={filePath}>
+              {filePath || t("backdrop-none")}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void chooseMusic()}
+            className="shrink-0 rounded-md border border-white/10 px-2.5 py-1 text-[11px] text-havoc-muted hover:text-havoc-text"
+          >
+            {t("sources-starting-soon-music")}
+          </button>
+          <span className="min-w-0 flex-1 truncate text-[10px] text-havoc-muted" title={musicPath}>
+            {musicPath || t("backdrop-none")}
+          </span>
+          {musicPath && (
+            <button
+              type="button"
+              onClick={() => setMusicPath("")}
+              aria-label={t("backdrop-remove")}
+              className="shrink-0 rounded px-1 text-[11px] text-havoc-muted hover:text-red-400"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-starting-soon-note")}
+        </p>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-slate-media-note")}
+        </p>
+        <button
+          type="button"
+          onClick={add}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
+        >
+          {t("sources-starting-soon-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/** A findable "Background Music" source: a looping audio file auto-set to
+ * Monitor and Output (heard in preview AND captured to the recording/stream).
+ * Works in any scene — countdown or not — so music isn't stuck in the Starting
+ * Soon add flow. */
+function BackgroundMusicForm({ onClose, scene }: { onClose: () => void; scene: Scene | null }) {
+  const t = useT();
+  const [paths, setPaths] = useState<string[]>([]);
+  const [shuffle, setShuffle] = useState(false);
+  const choose = async () => {
+    try {
+      const picked = await open({
+        multiple: true,
+        directory: false,
+        filters: [
+          {
+            name: t("sources-starting-soon-music"),
+            extensions: AUDIO_EXTS,
+          },
+        ],
+      });
+      const next = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
+      if (next.length) setPaths((prev) => [...prev, ...next]);
+    } catch (err) {
+      console.error("music pick failed:", err);
+    }
+  };
+  const add = () => {
+    if (paths.length === 0 || !scene) {
+      onClose();
+      return;
+    }
+    // Only one background audio at a time: mute the video backdrop (if any) so
+    // the music plays, not both stacked.
+    const backdropSource = scene.items.find((item) => item.backdrop)?.source ?? null;
+    void addBackgroundMusic(scene.id, paths, t("sources-starting-soon-music-name"), {
+      shuffle,
+      muteSource: backdropSource,
+    }).finally(onClose);
+  };
+  return (
+    <PickerShell title={t("sources-add-background-music")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void choose()}
+            className="shrink-0 rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-2.5 py-1 text-[11px] text-havoc-text hover:bg-havoc-accent/25"
+          >
+            {t("sources-slate-browse")}
+          </button>
+          <span className="min-w-0 flex-1 truncate text-[10px] text-havoc-muted">
+            {paths.length
+              ? t("sources-background-music-count", { n: paths.length })
+              : t("backdrop-none")}
+          </span>
+          {paths.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPaths([])}
+              aria-label={t("backdrop-remove")}
+              className="shrink-0 rounded px-1 text-[11px] text-havoc-muted hover:text-red-400"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {paths.length > 0 && (
+          <ul className="m-0 max-h-24 list-none overflow-y-auto rounded border border-white/10 p-1">
+            {paths.map((p, index) => (
+              <li
+                key={`${p}-${index}`}
+                className="truncate px-1 py-0.5 text-[10px] text-havoc-muted"
+                title={p}
+              >
+                {p.split(/[\\/]/).pop()}
+              </li>
+            ))}
+          </ul>
+        )}
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={shuffle}
+            onChange={(event) => setShuffle(event.target.checked)}
+          />
+          {t("sources-background-music-shuffle")}
+        </label>
+        <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+          {t("sources-background-music-note")}
+        </p>
+        <button
+          type="button"
+          disabled={paths.length === 0}
+          onClick={add}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-starting-soon-add")}
         </button>
       </div>
     </PickerShell>
@@ -3224,6 +3647,7 @@ function VisualizerForm({
   const t = useT();
   const [style, setStyle] = useState<VisStyle>("bars");
   const [target, setTarget] = useState("master");
+  const [classic, setClassic] = useState(false);
   return (
     <PickerShell title={t("sources-visualizer-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
@@ -3261,6 +3685,14 @@ function VisualizerForm({
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={classic}
+            onChange={(event) => setClassic(event.target.checked)}
+          />
+          {t("sources-visualizer-classic")}
+        </label>
         <p className="m-0 text-[10px] leading-snug text-havoc-muted">
           {t("sources-visualizer-note")}
         </p>
@@ -3280,6 +3712,7 @@ function VisualizerForm({
               color: { r: 74, g: 158, b: 255, a: 255 },
               peakHold: true,
               decay: 30,
+              classic,
             });
           }}
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"

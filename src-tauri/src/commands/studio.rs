@@ -97,6 +97,13 @@ pub fn studio_reorder_scene(
     })
 }
 
+/// Clear the "Recent Scenes" quick-recall list (V1-B). Session-only state, so
+/// this is not a tracked (undoable) edit and never marks the project dirty.
+#[tauri::command]
+pub fn studio_clear_recent_scenes(app: AppHandle, state: State<'_, StudioState>) {
+    state.clear_recent_scenes(&app);
+}
+
 // -- items ------------------------------------------------------------------
 
 /// What `studio_add_item` created.

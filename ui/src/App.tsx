@@ -67,6 +67,7 @@ import { kindHasAudio } from "./api/types";
 import { AudioFiltersDialog } from "./components/AudioFiltersDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { EditTransformDialog } from "./components/EditTransformDialog";
+import { FeaturedChatDialog } from "./components/FeaturedChatDialog";
 import { MenuBar, type AppMenuDialog } from "./components/MenuBar";
 import { StatusAnnouncer } from "./components/StatusAnnouncer";
 import { clipboardSnapshot, copyFilters, copyTransform } from "./lib/clipboard";
@@ -114,6 +115,7 @@ type OpenDialog =
   | { kind: "sourceHealth" }
   | { kind: "avSync" }
   | { kind: "hotkeyAudit" }
+  | { kind: "featuredChat" }
   | { kind: "missingFiles" }
   | null;
 
@@ -313,6 +315,7 @@ export default function App() {
 
   const collection = studio?.collection ?? null;
   const studioMode = studio?.studioMode ?? null;
+  const recentScenes = studio?.recentScenes ?? [];
   const activeScene = useMemo(
     () => collection?.scenes.find((scene) => scene.id === collection.activeScene) ?? null,
     [collection],
@@ -524,6 +527,13 @@ export default function App() {
         label: t("palette-hotkey-audit"),
         keywords: "hotkey map audit conflicts cheat sheet bindings keyboard shortcuts",
         run: () => setDialog({ kind: "hotkeyAudit" }),
+      },
+      {
+        id: "action-featured-chat",
+        group: t("palette-group-actions"),
+        label: t("palette-featured-chat"),
+        keywords: "featured chat message banner pin highlight viewer comment overlay",
+        run: () => setDialog({ kind: "featuredChat" }),
       },
       {
         id: "action-panic",
@@ -973,7 +983,11 @@ export default function App() {
 
       <main className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-2">
-          <ScenesRail collection={collection} previewScene={studioMode?.previewScene ?? null} />
+          <ScenesRail
+            collection={collection}
+            previewScene={studioMode?.previewScene ?? null}
+            recentScenes={recentScenes}
+          />
           <div className="flex min-h-0 min-w-0 gap-2">
             {studioMode && (
               <StudioPreviewPane
@@ -1069,6 +1083,13 @@ export default function App() {
         />
       )}
       {dialog?.kind === "hotkeyAudit" && <HotkeyAuditDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === "featuredChat" && settings && (
+        <FeaturedChatDialog
+          settings={settings}
+          onSettingsSaved={setSettings}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog?.kind === "sourceHealth" && (
         <SourceHealthDialog
           studio={studio}

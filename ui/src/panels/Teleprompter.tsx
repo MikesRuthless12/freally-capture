@@ -853,7 +853,7 @@ export function TeleprompterDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <PickerShell title={t("teleprompter-title")} onClose={onClose} large>
+    <PickerShell title={t("teleprompter-title")} onClose={onClose} large companion>
       {!state ? (
         <p className="p-4 text-sm text-havoc-muted">{t("teleprompter-loading")}</p>
       ) : (

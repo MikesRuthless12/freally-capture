@@ -35,7 +35,7 @@ use fcap_scene::{
     Scene, SceneError, SceneId, SceneItem, SourceId, SourceSettings, Transform,
 };
 use fcap_sources::video_device::{self, VideoFormatInfo};
-use fcap_sources::{color, image, text};
+use fcap_sources::{color, countdown, image, text};
 
 use crate::preview::PreviewState;
 use crate::settings::write_atomic;
@@ -66,6 +66,21 @@ const PREVIEW_JPEG_QUALITY: u8 = 75;
 const TIMER_FLASH_WINDOW: Duration = Duration::from_secs(5);
 /// The flash highlight color (straight RGBA) a finished countdown blinks in.
 const TIMER_FLASH_COLOR: [u8; 4] = [239, 68, 68, 255];
+/// V1-C: the countdown slate's message line renders at this fraction of the
+/// number's font size (the number is the headline; the message is a caption).
+const SLATE_MESSAGE_SCALE: f32 = 0.4;
+
+/// A black or white outline, whichever contrasts the text colour — the ring
+/// that keeps slate text readable over any background regardless of what the
+/// operator picked for the text itself (V1-C). Rec. 601 luma.
+fn contrasting_outline(color: [u8; 4]) -> [u8; 4] {
+    let luma = 0.299 * color[0] as f32 + 0.587 * color[1] as f32 + 0.114 * color[2] as f32;
+    if luma > 140.0 {
+        [0, 0, 0, 255]
+    } else {
+        [255, 255, 255, 255]
+    }
+}
 /// How often a bound Text source's file is polled (CAP-M16) — one stat per
 /// poll while unchanged; OBS-comparable freshness.
 const BOUND_TEXT_POLL: Duration = Duration::from_millis(500);
@@ -81,6 +96,10 @@ const EMOJI_FONT: &str = "Apple Color Emoji";
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 const EMOJI_FONT: &str = "Noto Color Emoji";
 
+/// V1-E: the featured chat banner's sprite key in the compositor's reaction
+/// rig (an emoji sprite key is always a single emoji, so this can't collide).
+const FEATURED_SPRITE: &str = "featured-banner";
+
 // ---------------------------------------------------------------------------
 // Shared state + the command-side mutation surface
 // ---------------------------------------------------------------------------
@@ -91,6 +110,11 @@ const EMOJI_FONT: &str = "Noto Color Emoji";
 pub struct StudioDto {
     pub revision: u64,
     pub collection: Collection,
+    /// Recently-live scenes for the "Recent Scenes" quick-recall list (V1-B),
+    /// most-recent first. Session-only, so it rides the DTO rather than the
+    /// collection's own (persisted) serialization; omitted while empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub recent_scenes: Vec<SceneId>,
     /// Studio Mode (Phase 5): present while enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub studio_mode: Option<StudioModeDto>,
@@ -357,6 +381,7 @@ fn build_panic_pack(
 fn dto_of(core: &StudioCore) -> StudioDto {
     StudioDto {
         revision: core.revision,
+        recent_scenes: core.collection.recent_scenes().to_vec(),
         collection: core.collection.clone(),
         studio_mode: core.preview_scene.map(|preview_scene| StudioModeDto {
             preview_scene,
@@ -521,6 +546,23 @@ impl StudioState {
     /// Whether the panic slate is engaged (CAP-M22).
     pub fn is_panicked(&self) -> bool {
         self.lock().panic.is_some()
+    }
+
+    /// Clear the "Recent Scenes" quick-recall list (V1-B). Bumps the revision
+    /// and refreshes the UI, but never marks the project dirty (nothing
+    /// persisted changed) and never touches the undo stack. A no-op — and no
+    /// emit — when the list is already empty.
+    pub fn clear_recent_scenes<R: Runtime>(&self, app: &AppHandle<R>) {
+        let dto = {
+            let mut core = self.lock();
+            if core.collection.recent_scenes().is_empty() {
+                return;
+            }
+            core.collection.clear_recent_scenes();
+            core.revision += 1;
+            dto_of(&core)
+        };
+        let _ = app.emit("studio", &dto);
     }
 
     /// A snapshot for `studio_get` / event payloads.
@@ -1583,6 +1625,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     // the shared queue chat ingests push into.
     let mut reaction_particles: Vec<crate::reactions::Particle> = Vec::new();
     let mut reaction_rng = crate::reactions::Lcg(0x9E37_79B9_7F4A_7C15);
+    // V1-E: the featured chat banner — re-rendered + re-uploaded only when
+    // the pin (or the canvas) changes; the cached draw then rides the normal
+    // reactions pass of every bake. `None` draw = nothing pinned.
+    let mut featured_seen: Option<(u64, (u32, u32))> = None;
+    let mut featured_draw_cache: Option<fcap_compositor::ReactionDraw> = None;
     let reactions_queue = app
         .state::<crate::reactions::ReactionState>()
         .queue_handle();
@@ -1620,6 +1667,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let mut timer_faces: HashMap<SourceId, (String, bool)> = HashMap::new();
     let mut timer_done: HashSet<SourceId> = HashSet::new();
     let mut timer_flash: HashMap<SourceId, Instant> = HashMap::new();
+    // V1-C: the decoded still image behind an Image-slate countdown, cached by
+    // path so it is read from disk once, not on every ~1 Hz face repaint.
+    let mut timer_slate_images: HashMap<SourceId, (String, fcap_capture::Frame)> = HashMap::new();
     // Reset generations seen per timer — a Reset re-arms a latched wall
     // countdown (and clears its flash) without a model revision.
     let mut timer_resets: HashMap<SourceId, u32> = HashMap::new();
@@ -2558,6 +2608,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             timer_done.retain(|id| timer_sources.contains_key(id));
             timer_flash.retain(|id, _| timer_sources.contains_key(id));
             timer_resets.retain(|id, _| timer_sources.contains_key(id));
+            timer_slate_images.retain(|id, _| timer_sources.contains_key(id));
             // Bound texts: keep only the ones still bound this pass. One that
             // merely lost its binding stays in the scene (the static branch
             // now owns its face and health row); one that left the scene
@@ -2966,6 +3017,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                     font_file,
                     size_px,
                     color,
+                    message,
+                    slate,
                 } = settings
                 else {
                     continue;
@@ -3067,23 +3120,143 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                 if timer_faces.get(id) == Some(&face) {
                     continue;
                 }
-                let style = text::TextStyle {
-                    text: face.0.clone(),
-                    font_family: font_family.clone(),
-                    font_file: font_file.as_ref().map(PathBuf::from),
-                    size_px: *size_px,
-                    color: if highlight {
-                        TIMER_FLASH_COLOR
-                    } else {
-                        [color.r, color.g, color.b, color.a]
-                    },
-                    align: text::TextAlign::Left,
-                    line_spacing: 1.0,
-                    force_rtl: false,
-                    wrap_width: None,
-                    ..text::TextStyle::default()
+                // At zero a flashing countdown paints its number red; otherwise
+                // its configured colour.
+                let number_color = if highlight {
+                    TIMER_FLASH_COLOR
+                } else {
+                    [color.r, color.g, color.b, color.a]
                 };
-                match text::render_text(&style) {
+                let base_style =
+                    |text: String, size_px: f32, color: [u8; 4], align| text::TextStyle {
+                        text,
+                        font_family: font_family.clone(),
+                        font_file: font_file.as_ref().map(PathBuf::from),
+                        size_px,
+                        color,
+                        align,
+                        line_spacing: 1.0,
+                        force_rtl: false,
+                        wrap_width: None,
+                        ..text::TextStyle::default()
+                    };
+                // V1-C: slate mode paints a full-canvas "Starting Soon" card
+                // (message above a big centred number) over a colour / gradient
+                // / transparent background; otherwise the classic inline face.
+                let frame_result = match slate {
+                    Some(slate) => {
+                        // Slate text always gets a contrasting outline + soft
+                        // shadow so the number and label stay legible over ANY
+                        // background — a busy photo, a video, any colour.
+                        let legible = |mut s: text::TextStyle| {
+                            s.outline_color = contrasting_outline(s.color);
+                            s.outline_px = (s.size_px * 0.06).clamp(1.5, 12.0);
+                            s.shadow_px = (s.size_px * 0.05).clamp(1.0, 14.0);
+                            s.shadow_color = [0, 0, 0, 150];
+                            s
+                        };
+                        let number = legible(base_style(
+                            face.0.clone(),
+                            *size_px,
+                            number_color,
+                            text::TextAlign::Center,
+                        ));
+                        let message_style = legible(base_style(
+                            message.clone(),
+                            (*size_px * SLATE_MESSAGE_SCALE).max(8.0),
+                            [color.r, color.g, color.b, color.a],
+                            text::TextAlign::Center,
+                        ));
+                        // One match: an image slate decodes once and caches by
+                        // path (a failed decode falls back to a transparent
+                        // slate — text still shows — rather than blanking the
+                        // countdown); every other slate drops any cached image.
+                        let bg = match slate.as_ref() {
+                            fcap_scene::CountdownSlate::Transparent => {
+                                timer_slate_images.remove(id);
+                                countdown::SlateBg::Transparent
+                            }
+                            fcap_scene::CountdownSlate::Solid { color } => {
+                                timer_slate_images.remove(id);
+                                countdown::SlateBg::Solid([color.r, color.g, color.b, color.a])
+                            }
+                            fcap_scene::CountdownSlate::Gradient { from, to } => {
+                                timer_slate_images.remove(id);
+                                countdown::SlateBg::Gradient(
+                                    [from.r, from.g, from.b, from.a],
+                                    [to.r, to.g, to.b, to.a],
+                                )
+                            }
+                            fcap_scene::CountdownSlate::Image { path } => {
+                                // The CAP-M16 rule for EVERY user path: refuse
+                                // network paths before any stat/probe (a UNC
+                                // read leaks the NTLM hash) — a hostile scene
+                                // collection controls this string. Refused =
+                                // the transparent fallback, text still shows.
+                                if crate::commands::studio::is_remote(path.trim()) {
+                                    timer_slate_images.remove(id);
+                                    countdown::SlateBg::Transparent
+                                } else {
+                                    let stale = timer_slate_images
+                                        .get(id)
+                                        .map_or(true, |(cached, _)| cached != path);
+                                    if stale {
+                                        match fcap_sources::image::load_image_rgba(
+                                            std::path::Path::new(path),
+                                        ) {
+                                            Ok(frame) => {
+                                                timer_slate_images
+                                                    .insert(*id, (path.clone(), frame));
+                                            }
+                                            Err(err) => {
+                                                // Negative-cache the failure (a
+                                                // 1×1 transparent frame keyed by
+                                                // the same path) so a bad file
+                                                // fails ONCE — not a disk read +
+                                                // decode + log line every 1 Hz
+                                                // repaint for the whole show.
+                                                timer_slate_images.insert(
+                                                    *id,
+                                                    (
+                                                        path.clone(),
+                                                        fcap_capture::Frame {
+                                                            width: 1,
+                                                            height: 1,
+                                                            stride: 4,
+                                                            format:
+                                                                fcap_capture::PixelFormat::Rgba8,
+                                                            data: vec![0; 4],
+                                                            captured_at: std::time::Instant::now(),
+                                                        },
+                                                    ),
+                                                );
+                                                eprintln!("studio: countdown slate image: {err}");
+                                            }
+                                        }
+                                    }
+                                    match timer_slate_images.get(id) {
+                                        Some((_, frame)) => countdown::SlateBg::Image(frame),
+                                        None => countdown::SlateBg::Transparent,
+                                    }
+                                }
+                            }
+                        };
+                        countdown::render_countdown_slate(
+                            canvas.0,
+                            canvas.1,
+                            bg,
+                            &message_style,
+                            &number,
+                        )
+                    }
+                    None => text::render_text(&base_style(
+                        face.0.clone(),
+                        *size_px,
+                        number_color,
+                        text::TextAlign::Left,
+                    )),
+                };
+                match frame_result {
                     Ok(frame) => {
                         let (w, h) = (frame.width, frame.height);
                         match compositor.upload_frame(*id, &frame) {
@@ -3470,7 +3643,7 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // (particle state advances once), sprites uploaded up front; the draws
         // are baked into the program by every `bake` below, so preview,
         // recording, and stream all carry the exact same floating emoji.
-        let reaction_draws = {
+        let mut reaction_draws = {
             let pending = app.state::<crate::reactions::ReactionState>().drain();
             crate::reactions::spawn(&mut reaction_particles, pending, time, &mut reaction_rng);
             let draws = crate::reactions::step(&mut reaction_particles, time, canvas);
@@ -3506,6 +3679,61 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
             let now = state.now();
             (state.snapshot(now), now)
         };
+        // -- 6u. Featured chat banner (V1-E): re-render + re-upload ONLY when
+        // the pin (or canvas) changes; the cached draw then joins the normal
+        // reactions pass of every bake below — preview, recording, and stream
+        // all carry it, with no extra render pass of its own.
+        {
+            let revision = fcap_sources::chat::featured_revision();
+            if featured_seen != Some((revision, canvas)) {
+                featured_seen = Some((revision, canvas));
+                featured_draw_cache = fcap_sources::chat::featured().and_then(|message| {
+                    let colors = app
+                        .state::<crate::settings::SettingsStore>()
+                        .get()
+                        .featured_banner;
+                    let bg =
+                        crate::settings::FeaturedBannerSetting::rgba(&colors.bg, [16, 26, 42, 255]);
+                    let fg = crate::settings::FeaturedBannerSetting::rgba(
+                        &colors.text,
+                        [255, 255, 255, 255],
+                    );
+                    // Banner width: 60% of the canvas, at least 240 px but
+                    // never wider than the canvas itself. max-then-min (NOT
+                    // clamp) — clamp panics when the canvas is under 240.
+                    let width = (canvas.0 * 3 / 5).max(240).min(canvas.0);
+                    match fcap_sources::chat::render_featured_banner(&message, width, bg, fg) {
+                        Ok(frame) => {
+                            match compositor.set_reaction_sprite(FEATURED_SPRITE, &frame) {
+                                Ok(()) => Some(fcap_compositor::ReactionDraw {
+                                    sprite: FEATURED_SPRITE.to_string(),
+                                    // Bottom-centre, one banner-height above the edge.
+                                    x: (canvas.0.saturating_sub(frame.width) / 2) as f32,
+                                    y: canvas.1.saturating_sub(frame.height + frame.height / 2)
+                                        as f32,
+                                    size: frame.width as f32,
+                                    alpha: 1.0,
+                                }),
+                                Err(err) => {
+                                    eprintln!("studio: featured banner upload failed: {err}");
+                                    None
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("studio: featured banner render failed: {err}");
+                            None
+                        }
+                    }
+                });
+            }
+        }
+        if let Some(draw) = &featured_draw_cache {
+            // Last = drawn topmost; the truncate keeps the banner inside the
+            // pass's hard pool cap even under an emoji flood.
+            reaction_draws.truncate(fcap_compositor::REACTION_POOL - 1);
+            reaction_draws.push(draw.clone());
+        }
 
         // One full bake of the program: the compose (with any transition or
         // stinger), then the floating reactions, then the downstream keyers
@@ -4765,6 +4993,7 @@ fn start_session(
                     color,
                     peak_hold,
                     decay,
+                    classic,
                 } => {
                     let target = match target {
                         fcap_scene::VisTargetKind::Master => {
@@ -4797,6 +5026,7 @@ fn start_session(
                                 color: [color.r, color.g, color.b, color.a],
                                 peak_hold: *peak_hold,
                                 decay_db_per_s: *decay,
+                                classic: *classic,
                             },
                         ),
                         // No strip picked yet — an honest error beats a
@@ -4862,6 +5092,7 @@ fn start_session(
                     shuffle,
                     hold_last,
                     hw_decode,
+                    hidden_face,
                     ..
                 } => {
                     // The CAP-M16 rule for EVERY user path: refuse network
@@ -4892,6 +5123,7 @@ fn start_session(
                                 shuffle: *shuffle,
                                 hold_last: *hold_last,
                                 hw_decode: *hw_decode,
+                                hidden_face: *hidden_face,
                             },
                         )
                     }
@@ -5339,6 +5571,49 @@ fn render_static(settings: &SourceSettings) -> Result<fcap_capture::Frame, Strin
         SourceSettings::TestGrid { width, height } => {
             fcap_sources::testsignal::grid_frame(*width, *height).map_err(|err| err.to_string())
         }
+        // V1-D: the social & channels bar. A purely static, audio-free face —
+        // bundled platforms map to their brand colour + name; a Custom row
+        // supplies its own; blank-handle rows are skipped here so the painter
+        // never draws an empty badge.
+        SourceSettings::SocialBar {
+            header,
+            rows,
+            font_family,
+            size_px,
+            color,
+            background,
+        } => {
+            let rows = rows
+                .iter()
+                .filter(|row| !row.handle.trim().is_empty())
+                .map(|row| {
+                    let (label, badge) = match row.platform {
+                        fcap_scene::SocialPlatform::Custom => (row.label.clone(), row.color),
+                        other => (other.display_name().to_string(), other.brand_color()),
+                    };
+                    let handle = row.handle.trim();
+                    let label = label.trim();
+                    let text = if label.is_empty() {
+                        handle.to_string()
+                    } else {
+                        format!("{label}  {handle}")
+                    };
+                    fcap_sources::socialbar::SocialBarRow {
+                        badge: [badge.r, badge.g, badge.b, badge.a],
+                        text,
+                    }
+                })
+                .collect();
+            fcap_sources::socialbar::render_social_bar(&fcap_sources::socialbar::SocialBarStyle {
+                header: header.clone(),
+                font_family: font_family.clone(),
+                size_px: *size_px,
+                color: [color.r, color.g, color.b, color.a],
+                background: [background.r, background.g, background.b, background.a],
+                rows,
+            })
+            .map_err(|err| err.to_string())
+        }
         other => Err(format!("{} is not a static source", other.kind_name())),
     }
 }
@@ -5547,6 +5822,7 @@ mod tests {
             hold_last: true,
             hw_decode: true,
             now_playing_variable: String::new(),
+            hidden_face: false,
         };
         assert!(is_capture_backed(&playlist));
         assert!(playlist.has_audio());
@@ -5599,6 +5875,7 @@ mod tests {
             color: fcap_scene::Rgba::WHITE,
             peak_hold: true,
             decay: 30.0,
+            classic: false,
         }));
         // The LAN listener (CAP-N11) is session-backed with a mixer strip;
         // it composes video, so it is never audio-only.
