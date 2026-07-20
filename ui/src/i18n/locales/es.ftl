@@ -1311,6 +1311,8 @@ output-iso-post-filter = Grabar con los filtros de la fuente (post-filtro); sin 
 output-iso-format = Formato ISO
 output-iso-encoder = Codificador de vídeo ISO
 output-alpha-frec = Grabar con transparencia (alfa) — el programa sobre un fondo transparente
+output-auto-export = Guardar también un MP4 compartible junto al máster
+output-auto-export-title = Al finalizar una grabación .frec, una exportación en segundo plano escribe al lado una copia MP4 reproducible con doble clic (visible en la cola de fondo). El máster sin pérdidas sigue siendo el máster.
 output-alpha-title = El grabador recibe su propio render transparente; la vista previa y el stream siguen normales. Exporta a ProRes 4444 o QTRLE desde la lista de grabaciones — MP4/MKV aplanan el alfa.
 output-split-events = Empezar también un archivo nuevo al… (cada parte empieza exactamente en el evento; duración mínima 1 s)
 output-split-on-scene = cambiar de escena
@@ -2773,3 +2775,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Navegador
+sources-add-browser = Navegador (página web)
+sources-browser-title = Añadir una fuente de navegador
+sources-browser-add = Añadir fuente de navegador
+sources-browser-url = URL de la página (http:// o https://)
+sources-browser-url-invalid = Introduce una URL http:// o https:// — los archivos locales se reproducen con las fuentes Medios o Imagen.
+sources-browser-width = Anchura (px)
+sources-browser-height = Altura (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Fondo de página transparente (el alfa se conserva)
+sources-browser-note = Renderiza páginas http/https fuera de pantalla con el componente bajo demanda de runtime del navegador — nunca incluido, nunca dentro del proceso. Los archivos locales se reproducen con Medios/Imagen.
+sources-browser-component-missing = Necesita el componente de runtime del navegador — instálalo desde Herramientas → Componentes.

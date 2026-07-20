@@ -4663,6 +4663,7 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
             | SourceSettings::InputOverlay { .. }
             | SourceSettings::Title { .. }
             | SourceSettings::FreallyLink { .. }
+            | SourceSettings::Browser { .. }
     )
 }
 
@@ -4670,12 +4671,16 @@ fn is_capture_backed(settings: &SourceSettings) -> bool {
 /// can come back (a reopened window, a replugged display, a reconnected
 /// camera). Portal and media are excluded on purpose — a portal retry would
 /// re-pop the system picker dialog, and a bad media path won't fix itself.
+/// Browser is included: a host EOF (nav failure or the CEF component installed
+/// after the source first errored) is recoverable — `browser-host-protocol.md`
+/// promises the standard auto-recover restarts the session.
 fn auto_recoverable(settings: &SourceSettings) -> bool {
     matches!(
         settings,
         SourceSettings::Display { .. }
             | SourceSettings::Window { .. }
             | SourceSettings::VideoDevice { .. }
+            | SourceSettings::Browser { .. }
     )
 }
 
@@ -5266,6 +5271,33 @@ fn start_session(
                 SourceSettings::FreallyLink { host, port, key, .. } => {
                     fcap_sources::link::start_link(&id.0.to_string(), host, *port, key)
                 }
+                // CAP-N77: an http(s) page rendered offscreen by the
+                // browser-host helper through the on-demand CEF runtime
+                // component (Tools → Components) — never bundled, never
+                // in-process. The URL is validated http/https-only inside
+                // start_browser; no filesystem path is ever probed.
+                SourceSettings::Browser {
+                    url,
+                    width,
+                    height,
+                    fps,
+                    transparent,
+                } => match fcap_encode::cef::installed() {
+                    Some(runtime) => fcap_sources::browser::start_browser(
+                        &id.0.to_string(),
+                        fcap_sources::browser::BrowserConfig {
+                            url: url.clone(),
+                            width: *width,
+                            height: *height,
+                            fps: *fps,
+                            transparent: *transparent,
+                            cef_dir: runtime.runtime_dir,
+                        },
+                    ),
+                    None => Err(CaptureError::Backend(
+                        fcap_sources::browser::BROWSER_COMPONENT_MISSING.into(),
+                    )),
+                },
                 other => Err(CaptureError::Unsupported(format!(
                     "{} is not capture-backed",
                     other.kind_name()
@@ -5912,6 +5944,21 @@ mod tests {
             size_px: 28.0,
             color: fcap_scene::Rgba::WHITE,
         }));
+        // The browser source (CAP-N77) is capture-backed: it runs a host
+        // session streaming RGBA frames, so it must take the capture path (not
+        // render_static). It is muted in protocol v1 (audio arrives in v2) and
+        // auto-recovers on a host EOF, exactly like a window/camera.
+        let browser = SourceSettings::Browser {
+            url: "https://example.com".into(),
+            width: 1280,
+            height: 720,
+            fps: 30,
+            transparent: true,
+        };
+        assert!(is_capture_backed(&browser));
+        assert!(auto_recoverable(&browser));
+        assert!(!browser.has_audio());
+        assert!(!browser.is_audio_only());
         assert!(render_static(&SourceSettings::TestGrid {
             width: 8,
             height: 8,

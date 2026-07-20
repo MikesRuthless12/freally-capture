@@ -1298,6 +1298,8 @@ output-iso-post-filter = Записувати з фільтрами джерел
 output-iso-format = Формат ISO
 output-iso-encoder = Відеокодувальник ISO
 output-alpha-frec = Записувати з прозорістю (альфа) — програма на прозорому тлі
+output-auto-export = Також зберігати MP4 для поширення поруч із майстром
+output-auto-export-title = Коли запис .frec завершується, фоновий експорт записує поруч MP4-копію, що відкривається подвійним клацанням (видно у фоновій черзі). Майстер без втрат лишається майстром.
 output-alpha-title = Рекордер отримує власний прозорий рендер; попередній перегляд і стрим лишаються звичайними. Експортуйте в ProRes 4444 чи QTRLE зі списку записів — MP4/MKV сплющують альфу.
 output-split-events = Також починати новий файл при… (кожна частина починається точно на події; мінімальна довжина 1 с)
 output-split-on-scene = зміні сцени
@@ -2760,3 +2762,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Браузер
+sources-add-browser = Браузер (вебсторінка)
+sources-browser-title = Додати джерело «Браузер»
+sources-browser-add = Додати джерело браузера
+sources-browser-url = URL сторінки (http:// або https://)
+sources-browser-url-invalid = Введіть URL із http:// або https:// — локальні файли відтворюються через джерела «Медіа» чи «Зображення».
+sources-browser-width = Ширина (px)
+sources-browser-height = Висота (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Прозоре тло сторінки (альфа-канал зберігається)
+sources-browser-note = Рендерить http/https-сторінки поза екраном через завантажуваний на вимогу компонент середовища виконання браузера — ніколи не вбудований і не працює всередині процесу. Локальні файли відтворюються через Медіа/Зображення.
+sources-browser-component-missing = Потрібен компонент середовища виконання браузера — встановіть його в меню Інструменти → Компоненти.

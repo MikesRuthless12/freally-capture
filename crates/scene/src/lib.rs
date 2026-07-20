@@ -2415,6 +2415,13 @@ mod tests {
                 label: "Gaming PC".into(),
                 key: "gaming-pc-key".into(),
             },
+            SourceSettings::Browser {
+                url: "https://example.com/overlay".into(),
+                width: 960,
+                height: 540,
+                fps: 24,
+                transparent: false,
+            },
         ] {
             let source = Source::new("", settings);
             collection

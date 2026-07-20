@@ -1311,6 +1311,8 @@ output-iso-post-filter = Mit den Filtern der Quelle aufnehmen (Post-Filter); ohn
 output-iso-format = ISO-Format
 output-iso-encoder = ISO-Videoencoder
 output-alpha-frec = Mit Transparenz aufnehmen (Alpha) — das Programm über transparentem Hintergrund
+output-auto-export = Zusätzlich ein teilbares MP4 neben dem Master speichern
+output-auto-export-title = Wenn eine .frec-Aufnahme abgeschlossen ist, schreibt ein Hintergrund-Export eine per Doppelklick abspielbare MP4-Kopie daneben (in der Hintergrund-Warteschlange sichtbar). Der verlustfreie Master bleibt der Master.
 output-alpha-title = Der Rekorder erhält ein eigenes transparentes Rendering; Vorschau und Stream bleiben normal. Aus der Aufnahmenliste nach ProRes 4444 oder QTRLE exportieren — MP4/MKV verflachen das Alpha.
 output-split-events = Zusätzlich eine neue Datei beginnen bei… (jeder Teil beginnt exakt am Ereignis; Mindestlänge 1 s)
 output-split-on-scene = Szenenwechsel
@@ -2773,3 +2775,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Browser
+sources-add-browser = Browser (Webseite)
+sources-browser-title = Browser-Quelle hinzufügen
+sources-browser-add = Browser-Quelle hinzufügen
+sources-browser-url = Seiten-URL (http:// oder https://)
+sources-browser-url-invalid = Gib eine http://- oder https://-URL ein — lokale Dateien laufen über die Quellen Medien oder Bild.
+sources-browser-width = Breite (px)
+sources-browser-height = Höhe (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Transparenter Seitenhintergrund (Alpha bleibt erhalten)
+sources-browser-note = Rendert http/https-Seiten offscreen über die bei Bedarf geladene Browser-Laufzeit-Komponente — nie gebündelt, nie im Prozess. Lokale Dateien laufen über Medien/Bild.
+sources-browser-component-missing = Benötigt die Browser-Laufzeit-Komponente — installiere sie über Werkzeuge → Komponenten.

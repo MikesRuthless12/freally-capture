@@ -495,7 +495,7 @@ pub async fn recording_normalize<R: Runtime>(
 
 /// `<stem>.<ext>` beside `input`, adding ` (1)`, ` (2)`, … until it's free so
 /// an export never clobbers an existing file.
-fn unique_sibling(input: &std::path::Path, ext: &str) -> std::path::PathBuf {
+pub(crate) fn unique_sibling(input: &std::path::Path, ext: &str) -> std::path::PathBuf {
     let stem = input
         .file_stem()
         .and_then(|s| s.to_str())
@@ -511,6 +511,29 @@ fn unique_sibling(input: &std::path::Path, ext: &str) -> std::path::PathBuf {
         }
     }
     base
+}
+
+/// Build the collision-safe `.frec → wire` export plan from the recording
+/// settings. Shared by the manual recordings-list export and the CAP-N75
+/// auto-export so both encode a master with identical knobs (no silent drift
+/// the day a new encode field is added to only one path).
+pub(crate) fn frec_export_plan(
+    settings: &crate::settings::RecordingSettings,
+    encoder_id: String,
+    target: fcap_encode::Container,
+    input: &std::path::Path,
+) -> fcap_encode::WirePlan {
+    fcap_encode::WirePlan {
+        container: target,
+        encoder_id,
+        rate_control: settings.rate_control,
+        preset: settings.preset,
+        keyframe_sec: settings.keyframe_sec,
+        audio_bitrate_kbps: settings.audio_bitrate_kbps,
+        split_minutes: None,
+        scale: None,
+        path: unique_sibling(input, target.extension()),
+    }
 }
 
 /// Export progress + terminal state, pushed on the `recording-export` event so
@@ -529,6 +552,22 @@ pub enum ExportStatusDto {
 pub struct ExportState {
     running: AtomicBool,
     cancel: Arc<AtomicBool>,
+}
+
+impl ExportState {
+    /// Become the sole export driver. Returns `true` if acquired — the caller
+    /// must pair it with [`ExportState::end`] when the export finishes; `false`
+    /// means another export already holds it. Used by the CAP-N75 auto-export
+    /// (on the pipeline worker) to share the manual export's one-at-a-time
+    /// invariant, so the two can't both target the same `unique_sibling` path.
+    pub(crate) fn try_begin(&self) -> bool {
+        !self.running.swap(true, Ordering::SeqCst)
+    }
+
+    /// Release the driver acquired by [`ExportState::try_begin`].
+    pub(crate) fn end(&self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Cancel the running export (the partial output is removed by the worker).
@@ -558,8 +597,6 @@ pub(crate) fn start_frec_export<R: Runtime>(
     input: std::path::PathBuf,
     target: fcap_encode::Container,
 ) -> Result<(), String> {
-    use fcap_encode::WirePlan;
-
     let export = app.state::<ExportState>();
     if export.running.swap(true, Ordering::SeqCst) {
         return Err("an export is already running".to_string());
@@ -588,18 +625,7 @@ pub(crate) fn start_frec_export<R: Runtime>(
         }
     };
 
-    let output = unique_sibling(&input, target.extension());
-    let plan = WirePlan {
-        container: target,
-        encoder_id,
-        rate_control: settings.rate_control,
-        preset: settings.preset,
-        keyframe_sec: settings.keyframe_sec,
-        audio_bitrate_kbps: settings.audio_bitrate_kbps,
-        split_minutes: None,
-        scale: None,
-        path: output,
-    };
+    let plan = frec_export_plan(&settings, encoder_id, target, &input);
 
     let handle = app.clone();
     let spawned = std::thread::Builder::new()
@@ -643,7 +669,7 @@ pub(crate) fn start_frec_export<R: Runtime>(
     Ok(())
 }
 
-fn is_frec(path: &std::path::Path) -> bool {
+pub(crate) fn is_frec(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("frec"))

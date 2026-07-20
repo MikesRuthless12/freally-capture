@@ -1334,6 +1334,8 @@ output-iso-post-filter = Registra con i filtri della sorgente (post-filtro); des
 output-iso-format = Formato ISO
 output-iso-encoder = Encoder video ISO
 output-alpha-frec = Registra con trasparenza (alfa) — il programma su sfondo trasparente
+output-auto-export = Salva anche un MP4 condivisibile accanto al master
+output-auto-export-title = Quando una registrazione .frec si finalizza, un'esportazione in background scrive accanto una copia MP4 riproducibile con doppio clic (visibile nella coda in background). Il master lossless resta il master.
 output-alpha-title = Il registratore riceve un proprio render trasparente; anteprima e stream restano normali. Esporta in ProRes 4444 o QTRLE dalla lista registrazioni — MP4/MKV appiattiscono l'alfa.
 output-split-events = Inizia un nuovo file anche a… (ogni parte inizia esattamente sull'evento; durata minima 1 s)
 output-split-on-scene = cambio scena
@@ -2796,3 +2798,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Browser
+sources-add-browser = Browser (pagina web)
+sources-browser-title = Aggiungi una sorgente Browser
+sources-browser-add = Aggiungi sorgente browser
+sources-browser-url = URL della pagina (http:// o https://)
+sources-browser-url-invalid = Inserisci un URL http:// o https:// — i file locali passano dalle sorgenti Media o Immagine.
+sources-browser-width = Larghezza (px)
+sources-browser-height = Altezza (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Sfondo pagina trasparente (l'alfa si conserva)
+sources-browser-note = Renderizza pagine http/https fuori schermo tramite il componente runtime del browser scaricato su richiesta — mai incluso, mai nel processo. I file locali passano da Media/Immagine.
+sources-browser-component-missing = Richiede il componente runtime del browser — installalo da Strumenti → Componenti.

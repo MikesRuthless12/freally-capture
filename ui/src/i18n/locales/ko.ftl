@@ -1311,6 +1311,8 @@ output-iso-post-filter = 소스의 필터를 적용해 녹화(포스트 필터);
 output-iso-format = ISO 형식
 output-iso-encoder = ISO 비디오 인코더
 output-alpha-frec = 투명도(알파)와 함께 녹화 — 투명 배경 위의 프로그램
+output-auto-export = 마스터 옆에 공유용 MP4도 저장
+output-auto-export-title = .frec 녹화가 완료되면 백그라운드 내보내기가 더블클릭으로 재생되는 MP4 사본을 옆에 기록합니다(백그라운드 대기열에 표시). 무손실 마스터는 그대로 유지됩니다.
 output-alpha-title = 레코더는 자체 투명 렌더를 받습니다. 미리보기와 스트림은 그대로입니다. 녹화 목록에서 ProRes 4444 또는 QTRLE로 내보내세요 — MP4/MKV는 알파를 평탄화합니다.
 output-split-events = 다음 시점에도 새 파일 시작… (각 파트는 정확히 이벤트에서 시작; 최소 길이 1초)
 output-split-on-scene = 장면 전환
@@ -2773,3 +2775,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = 브라우저
+sources-add-browser = 브라우저 (웹 페이지)
+sources-browser-title = 브라우저 소스 추가
+sources-browser-add = 브라우저 소스 추가
+sources-browser-url = 페이지 URL (http:// 또는 https://)
+sources-browser-url-invalid = http:// 또는 https:// URL을 입력하세요 — 로컬 파일은 미디어/이미지 소스로 재생합니다.
+sources-browser-width = 너비 (px)
+sources-browser-height = 높이 (px)
+sources-browser-fps = FPS
+sources-browser-transparent = 투명한 페이지 배경 (알파 유지)
+sources-browser-note = http/https 페이지를 오프스크린으로 렌더링합니다. 주문형 브라우저 런타임 구성 요소를 사용하며 — 절대 번들되지 않고 프로세스 안에서 실행되지 않습니다. 로컬 파일은 미디어/이미지로 재생합니다.
+sources-browser-component-missing = 브라우저 런타임 구성 요소가 필요합니다 — 도구 → 컴포넌트에서 설치하세요.

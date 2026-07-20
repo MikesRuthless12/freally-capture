@@ -1298,6 +1298,8 @@ output-iso-post-filter = Gravar com os filtros da fonte (pós-filtro); desmarcad
 output-iso-format = Formato ISO
 output-iso-encoder = Codificador de vídeo ISO
 output-alpha-frec = Gravar com transparência (alfa) — o programa sobre um fundo transparente
+output-auto-export = Salvar também um MP4 compartilhável ao lado do master
+output-auto-export-title = Quando uma gravação .frec finaliza, uma exportação em segundo plano grava ao lado uma cópia MP4 reproduzível com dois cliques (visível na fila de fundo). O master sem perdas continua sendo o master.
 output-alpha-title = O gravador recebe seu próprio render transparente; a prévia e o stream continuam normais. Exporte para ProRes 4444 ou QTRLE na lista de gravações — MP4/MKV achatam o alfa.
 output-split-events = Começar um arquivo novo também ao… (cada parte começa exatamente no evento; duração mínima 1 s)
 output-split-on-scene = trocar de cena
@@ -2760,3 +2762,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Navegador
+sources-add-browser = Navegador (página da web)
+sources-browser-title = Adicionar uma fonte de navegador
+sources-browser-add = Adicionar fonte de navegador
+sources-browser-url = URL da página (http:// ou https://)
+sources-browser-url-invalid = Digite uma URL http:// ou https:// — arquivos locais tocam pelas fontes Mídia ou Imagem.
+sources-browser-width = Largura (px)
+sources-browser-height = Altura (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Fundo de página transparente (o alfa é preservado)
+sources-browser-note = Renderiza páginas http/https fora da tela pelo componente sob demanda de runtime do navegador — nunca embutido, nunca dentro do processo. Arquivos locais tocam por Mídia/Imagem.
+sources-browser-component-missing = Precisa do componente de runtime do navegador — instale-o em Ferramentas → Componentes.

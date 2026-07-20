@@ -1334,6 +1334,8 @@ output-iso-post-filter = Enregistrer avec les filtres de la source (post-filtre)
 output-iso-format = Format ISO
 output-iso-encoder = Encodeur vidéo ISO
 output-alpha-frec = Enregistrer avec transparence (alpha) — le programme sur fond transparent
+output-auto-export = Enregistrer aussi un MP4 partageable à côté du master
+output-auto-export-title = Quand un enregistrement .frec se finalise, un export en arrière-plan écrit à côté une copie MP4 lisible d'un double clic (visible dans la file d'arrière-plan). Le master sans perte reste le master.
 output-alpha-title = L'enregistreur reçoit son propre rendu transparent ; l'aperçu et le stream restent normaux. Exportez en ProRes 4444 ou QTRLE depuis la liste des enregistrements — MP4/MKV aplatissent l'alpha.
 output-split-events = Commencer aussi un nouveau fichier à… (chaque partie démarre exactement sur l'événement ; durée minimale 1 s)
 output-split-on-scene = changement de scène
@@ -2796,3 +2798,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Navigateur
+sources-add-browser = Navigateur (page web)
+sources-browser-title = Ajouter une source Navigateur
+sources-browser-add = Ajouter la source navigateur
+sources-browser-url = URL de la page (http:// ou https://)
+sources-browser-url-invalid = Saisissez une URL http:// ou https:// — les fichiers locaux passent par les sources Média ou Image.
+sources-browser-width = Largeur (px)
+sources-browser-height = Hauteur (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Fond de page transparent (l'alpha est conservé)
+sources-browser-note = Rend les pages http/https hors écran via le composant à la demande du runtime navigateur — jamais embarqué, jamais dans le processus. Les fichiers locaux passent par Média/Image.
+sources-browser-component-missing = Nécessite le composant runtime navigateur — installez-le via Outils → Composants.

@@ -1346,6 +1346,21 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, String> {
             .iter()
             .map(std::path::PathBuf::from)
             .collect();
+        // CAP-N75: the one-toggle shareable-MP4 copy for `.frec` masters —
+        // queued BEFORE the profile's chain so a Move step can't relocate
+        // the master out from under the export. Off by default. The copy lands
+        // beside the master's ORIGINAL path; if the chain then Moves/Renames the
+        // master, the two can end up in different folders (by design — the
+        // export just can't be orphaned mid-encode).
+        let auto_export = app.state::<SettingsStore>().get().recording.auto_export_mp4;
+        if auto_export {
+            let frec_masters: Vec<std::path::PathBuf> = main_files
+                .iter()
+                .filter(|path| crate::commands::recording::is_frec(path))
+                .cloned()
+                .collect();
+            crate::pipeline::enqueue_auto_export(app, frec_masters, Some(total_ms as f64 / 1000.0));
+        }
         crate::pipeline::enqueue(app, main_files, Some(total_ms as f64 / 1000.0));
     }
     {

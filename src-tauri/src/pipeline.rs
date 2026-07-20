@@ -47,6 +47,10 @@ pub struct JobDto {
 struct Queued {
     path: PathBuf,
     expected_secs: Option<f64>,
+    /// CAP-N75: a synthetic one-step ".frec → shareable MP4" job instead of
+    /// the profile's configured chain. Queued BEFORE the chain, so a `Move`
+    /// step can never relocate the master out from under the export.
+    auto_export: bool,
 }
 
 /// Tauri-managed pipeline state: the pending work + the recent-jobs view.
@@ -98,6 +102,31 @@ pub fn enqueue<R: Runtime>(app: &AppHandle<R>, files: Vec<PathBuf>, expected_sec
     if !settings.pipeline_enabled || settings.pipeline.is_empty() || files.is_empty() {
         return;
     }
+    push_queued(app, files, expected_secs, false);
+}
+
+/// CAP-N75: queue the one-toggle ".frec → shareable MP4" export for
+/// freshly-finalized masters. Independent of the profile's chain (the toggle
+/// is its own consent) but drains through the same worker + queue view, so
+/// the copy shows up in the Recordings dialog's background queue.
+pub fn enqueue_auto_export<R: Runtime>(
+    app: &AppHandle<R>,
+    files: Vec<PathBuf>,
+    expected_secs: Option<f64>,
+) {
+    if files.is_empty() {
+        return;
+    }
+    push_queued(app, files, expected_secs, true);
+}
+
+/// Push work and make sure exactly one drain worker is running.
+fn push_queued<R: Runtime>(
+    app: &AppHandle<R>,
+    files: Vec<PathBuf>,
+    expected_secs: Option<f64>,
+    auto_export: bool,
+) {
     let state = app.state::<PipelineState>();
     {
         let mut queue = state
@@ -108,6 +137,7 @@ pub fn enqueue<R: Runtime>(app: &AppHandle<R>, files: Vec<PathBuf>, expected_sec
             queue.push_back(Queued {
                 path,
                 expected_secs,
+                auto_export,
             });
         }
     }
@@ -140,10 +170,27 @@ pub fn enqueue<R: Runtime>(app: &AppHandle<R>, files: Vec<PathBuf>, expected_sec
     }
 }
 
-/// Execute one file's chain, updating the queue view step by step.
+/// Execute one file's chain, updating the queue view step by step. An
+/// auto-export job (CAP-N75) runs a synthetic single "autoExport" step in
+/// place of the profile's chain.
 fn run_job<R: Runtime>(app: &AppHandle<R>, job: Queued) {
     let settings = app.state::<SettingsStore>().get();
-    let steps = settings.recording.pipeline.clone();
+    let steps = if job.auto_export {
+        Vec::new()
+    } else {
+        settings.recording.pipeline.clone()
+    };
+    // The unified work list: the profile's chain, or the synthetic export.
+    // The queue's step DTOs are derived from it, so the two never disagree.
+    enum Work<'a> {
+        Step(&'a PipelineStep),
+        AutoExport,
+    }
+    let works: Vec<Work> = if job.auto_export {
+        vec![Work::AutoExport]
+    } else {
+        steps.iter().map(Work::Step).collect()
+    };
     let state = app.state::<PipelineState>();
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     {
@@ -158,10 +205,13 @@ fn run_job<R: Runtime>(app: &AppHandle<R>, job: Queued) {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| job.path.display().to_string()),
-            steps: steps
+            steps: works
                 .iter()
-                .map(|step| StepDto {
-                    action: step.id().to_owned(),
+                .map(|work| StepDto {
+                    action: match work {
+                        Work::AutoExport => "autoExport".into(),
+                        Work::Step(step) => step.id().into(),
+                    },
                     status: "pending".into(),
                     detail: String::new(),
                 })
@@ -174,7 +224,7 @@ fn run_job<R: Runtime>(app: &AppHandle<R>, job: Queued) {
 
     let mut current = job.path.clone();
     let mut halted = false;
-    for (index, step) in steps.iter().enumerate() {
+    for (index, work) in works.iter().enumerate() {
         let set = |status: &str, detail: String| {
             let state = app.state::<PipelineState>();
             let mut jobs = state
@@ -194,7 +244,10 @@ fn run_job<R: Runtime>(app: &AppHandle<R>, job: Queued) {
         }
         set("running", String::new());
         emit_jobs(app);
-        let outcome = run_step(app, step, &mut current, job.expected_secs);
+        let outcome = match work {
+            Work::AutoExport => run_auto_export(app, &current),
+            Work::Step(step) => run_step(app, step, &mut current, job.expected_secs),
+        };
         match &outcome {
             StepOutcome::Ok(detail) => set("ok", detail.clone()),
             StepOutcome::Warn(detail) => set("warn", detail.clone()),
@@ -434,6 +487,54 @@ fn run_step<R: Runtime>(
             StepOutcome::Ok("recordingPipeline event queued for scripts".into())
         }
     }
+}
+
+/// CAP-N75: the synthetic auto-export step — the owned `.frec` master → a
+/// shareable MP4 sibling through the same `export_frec` path the
+/// recordings-list export uses. Collision-safe naming (`unique_sibling`);
+/// the master is never touched; a missing ffmpeg component skips honestly.
+fn run_auto_export<R: Runtime>(app: &AppHandle<R>, current: &Path) -> StepOutcome {
+    use fcap_encode::Container;
+
+    if ext_of(current) != "frec" {
+        return StepOutcome::Skipped("auto-export copies .frec masters only".into());
+    }
+    let Some(ready) = app
+        .state::<crate::commands::recording::EncodeState>()
+        .ready_ffmpeg()
+    else {
+        return StepOutcome::Skipped("auto-export needs the ffmpeg component".into());
+    };
+    // Serialize with the manual recordings-list export: one export driver at a
+    // time. Otherwise the two could both resolve the same `unique_sibling` path
+    // in the window before ffmpeg creates it, and clobber each other's MP4.
+    let export = app.state::<crate::commands::recording::ExportState>();
+    if !export.try_begin() {
+        return StepOutcome::Skipped("an export is already running".into());
+    }
+    let outcome = (|| {
+        let settings = app.state::<SettingsStore>().get().recording;
+        let encoder_id = match crate::recording::resolve_encoder(app, &settings, Container::Mp4) {
+            Ok(id) => id,
+            Err(err) => return StepOutcome::Fail(err),
+        };
+        // Same plan builder as the recordings-list export — the auto-export
+        // copy stays byte-for-byte in step with a manual export of the master.
+        let plan = crate::commands::recording::frec_export_plan(
+            &settings,
+            encoder_id,
+            Container::Mp4,
+            current,
+        );
+        // The pipeline has no cancel surface — the job runs to completion.
+        let never_cancel = AtomicBool::new(false);
+        match fcap_encode::export_frec(&ready, current, &plan, |_| {}, &never_cancel) {
+            Ok(out) => StepOutcome::Ok(format!("→ {}", out.display())),
+            Err(err) => StepOutcome::Fail(err),
+        }
+    })();
+    export.end();
+    outcome
 }
 
 #[cfg(test)]
