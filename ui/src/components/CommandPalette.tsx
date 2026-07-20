@@ -93,7 +93,7 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-6 pt-[12vh]"
+      className="modal-scrim-blur fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-6 pt-[12vh]"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

@@ -410,6 +410,15 @@ pub enum SourceSettings {
         size_px: f32,
         #[serde(default = "Rgba::default_text")]
         color: Rgba,
+        /// V1-C: an optional line shown above the number in slate mode (e.g.
+        /// "Starting Soon"). Empty = no message. Ignored unless `slate` is set.
+        #[serde(default)]
+        message: String,
+        /// V1-C: when set, the timer renders as a full-canvas countdown slate
+        /// with this background instead of the inline text face. Boxed so the
+        /// (image-path-bearing) slate does not fatten every `SourceSettings`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slate: Option<Box<CountdownSlate>>,
     },
     /// The viewer-facing performance HUD (CAP-N14): the stats dock's real
     /// numbers — render fps, this process's CPU% and memory, GPU compose
@@ -476,6 +485,10 @@ pub enum SourceSettings {
         /// Bar fall rate, dB/s (the renderer clamps to 6–120).
         #[serde(default = "default_vis_decay")]
         decay: f32,
+        /// V1-C: classic level colours — green→yellow→red for VU/bars, a
+        /// phosphor-green scope — instead of the flat `color`.
+        #[serde(default)]
+        classic: bool,
     },
     /// CAP-N18: a LiveSplit-style speedrun split timer. Imports a `.lss`
     /// split file (read-only — nothing is written back), compares the live
@@ -531,6 +544,11 @@ pub enum SourceSettings {
         /// The studio variable fed the playing item's name ("" = off).
         #[serde(default)]
         now_playing_variable: String,
+        /// Audio-only lane: hide the on-canvas track-list face (pure sound —
+        /// used by background music so it adds no visible card). Video
+        /// playlists ignore this.
+        #[serde(default)]
+        hidden_face: bool,
     },
     /// CAP-N10: plays the replay buffer INTO the program. A roll snapshots
     /// the armed buffer's last `seconds` into a temporary clip (stream
@@ -600,6 +618,32 @@ pub enum SourceSettings {
         #[serde(default = "default_title_duration_ms")]
         duration_ms: u32,
     },
+    /// V1-D: a generated "social & channels" bar — a tidy vertical panel that
+    /// lists a creator's social handles, one row each: a brand-coloured badge +
+    /// the platform name + the handle. Fully local and CPU-composed: no logos
+    /// are fetched or embedded (the coloured badge *is* the design), nothing is
+    /// read off disk, and nothing dials the network. A purely static face —
+    /// it repaints only when its settings change. Blank-handle rows are skipped.
+    SocialBar {
+        /// An optional title line above the rows (`""` = no header).
+        #[serde(default)]
+        header: String,
+        /// One account per row, drawn top-to-bottom.
+        #[serde(default)]
+        rows: Vec<SocialRow>,
+        /// System font family; `None` = the bundled default face. This is a
+        /// family *name*, never a file path — the source reads nothing off disk.
+        #[serde(default)]
+        font_family: Option<String>,
+        #[serde(default = "default_social_size")]
+        size_px: f32,
+        /// The header + handle text colour.
+        #[serde(default = "Rgba::default_text")]
+        color: Rgba,
+        /// The panel's semi-transparent rounded background.
+        #[serde(default = "Rgba::default_social_bg")]
+        background: Rgba,
+    },
     /// CAP-N12: another Freally Capture instance's program feed, received
     /// over the owned Freally Link protocol on the operator's own network.
     /// Video composites onto the canvas; the sender's master audio joins
@@ -626,6 +670,77 @@ pub enum SourceSettings {
 /// The Freally Link stream's default TCP port (CAP-N12).
 fn default_link_port() -> u16 {
     9720
+}
+
+/// One [`SourceSettings::SocialBar`] account row (V1-D).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialRow {
+    #[serde(default)]
+    pub platform: SocialPlatform,
+    /// The handle shown, e.g. `@mychannel`. Blank = this row is skipped.
+    #[serde(default)]
+    pub handle: String,
+    /// The badge label for [`SocialPlatform::Custom`] (ignored otherwise —
+    /// bundled platforms show their own name).
+    #[serde(default)]
+    pub label: String,
+    /// The badge colour for [`SocialPlatform::Custom`] (ignored otherwise —
+    /// bundled platforms use their brand colour).
+    #[serde(default = "Rgba::default_color")]
+    pub color: Rgba,
+}
+
+/// A bundled social platform (its brand colour + display name baked in) or a
+/// user-defined [`SocialPlatform::Custom`] row (V1-D).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SocialPlatform {
+    #[default]
+    Youtube,
+    Twitch,
+    Kick,
+    Twitter,
+    Instagram,
+    Tiktok,
+    Facebook,
+    Discord,
+    Custom,
+}
+
+impl SocialPlatform {
+    /// The platform's brand badge colour. [`SocialPlatform::Custom`] returns
+    /// the neutral accent — its real colour rides the row's own `color` field.
+    pub fn brand_color(self) -> Rgba {
+        match self {
+            SocialPlatform::Youtube => Rgba::new(0xFF, 0x00, 0x00, 0xFF),
+            SocialPlatform::Twitch => Rgba::new(0x91, 0x46, 0xFF, 0xFF),
+            SocialPlatform::Kick => Rgba::new(0x53, 0xFC, 0x18, 0xFF),
+            SocialPlatform::Twitter => Rgba::new(0x1D, 0xA1, 0xF2, 0xFF),
+            SocialPlatform::Instagram => Rgba::new(0xE1, 0x30, 0x6C, 0xFF),
+            SocialPlatform::Tiktok => Rgba::new(0x00, 0xF2, 0xEA, 0xFF),
+            SocialPlatform::Facebook => Rgba::new(0x18, 0x77, 0xF2, 0xFF),
+            SocialPlatform::Discord => Rgba::new(0x58, 0x65, 0xF2, 0xFF),
+            SocialPlatform::Custom => Rgba::default_color(),
+        }
+    }
+
+    /// The platform's on-badge display name. These are proper nouns — the same
+    /// in every language, so they are NOT localized. [`SocialPlatform::Custom`]
+    /// returns `""`: the row's own `label` is shown instead.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            SocialPlatform::Youtube => "YouTube",
+            SocialPlatform::Twitch => "Twitch",
+            SocialPlatform::Kick => "Kick",
+            SocialPlatform::Twitter => "X",
+            SocialPlatform::Instagram => "Instagram",
+            SocialPlatform::Tiktok => "TikTok",
+            SocialPlatform::Facebook => "Facebook",
+            SocialPlatform::Discord => "Discord",
+            SocialPlatform::Custom => "",
+        }
+    }
 }
 
 /// Which protocol a [`SourceSettings::LanIngest`] listener speaks.
@@ -886,6 +1001,35 @@ pub enum CountdownEnd {
     SwitchScene,
 }
 
+/// The full-canvas background a countdown *slate* paints behind its number
+/// (V1-C, "Starting Soon"). `None` on a [`SourceSettings::Timer`] keeps the
+/// classic inline text face; any value here makes the timer render as a
+/// canvas-filling pre-show slate (an optional message line above a big
+/// countdown). `Transparent` lays the slate out but paints no fill, so
+/// whatever is composited beneath it — an image/gif/video source or a scene
+/// backdrop — shows through, which is how image/video/music backgrounds come
+/// for free without embedding a decoder here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CountdownSlate {
+    Transparent,
+    Solid {
+        color: Rgba,
+    },
+    Gradient {
+        from: Rgba,
+        to: Rgba,
+    },
+    /// A still image (png/jpg/…) contain-fit (centred, letterboxed, never
+    /// cropped) behind the countdown. Animated
+    /// backgrounds (GIF/video) are the compositor's job — set a looping scene
+    /// backdrop under a `Transparent` slate — because a single uploaded face
+    /// texture cannot play video by itself.
+    Image {
+        path: String,
+    },
+}
+
 fn default_countdown_ms() -> u64 {
     5 * 60 * 1_000
 }
@@ -937,6 +1081,11 @@ fn default_stats_size() -> f32 {
     28.0
 }
 
+/// The social bar's default handle/label type size (V1-D).
+fn default_social_size() -> f32 {
+    32.0
+}
+
 impl Rgba {
     fn default_color() -> Self {
         // The Havoc accent blue — a friendly non-black default block.
@@ -945,6 +1094,12 @@ impl Rgba {
 
     fn default_text() -> Self {
         Rgba::WHITE
+    }
+
+    /// Social bar (V1-D): a dark, semi-transparent panel so the video shows
+    /// through behind the handles.
+    fn default_social_bg() -> Self {
+        Rgba::new(0x0a, 0x0a, 0x0f, 0xb8)
     }
 
     /// Split timer (CAP-N18): ahead-of-comparison green.
@@ -1001,6 +1156,7 @@ impl SourceSettings {
             SourceSettings::LanIngest { .. } => "lanIngest",
             SourceSettings::InputOverlay { .. } => "inputOverlay",
             SourceSettings::Title { .. } => "title",
+            SourceSettings::SocialBar { .. } => "socialBar",
             SourceSettings::FreallyLink { .. } => "freallyLink",
         }
     }
@@ -1037,6 +1193,7 @@ impl SourceSettings {
             SourceSettings::LanIngest { .. } => "LAN Ingest",
             SourceSettings::InputOverlay { .. } => "Input Overlay",
             SourceSettings::Title { .. } => "Title",
+            SourceSettings::SocialBar { .. } => "Social Bar",
             SourceSettings::FreallyLink { .. } => "Freally Link",
         }
     }
@@ -1117,5 +1274,73 @@ impl Source {
             audio: settings.has_audio().then(AudioSettings::default),
             settings,
         }
+    }
+}
+
+#[cfg(test)]
+mod social_bar_tests {
+    use super::*;
+
+    /// The V1-D social bar is a purely visual, audio-free static face.
+    #[test]
+    fn social_bar_is_a_silent_static_face() {
+        let settings = SourceSettings::SocialBar {
+            header: "Follow me".into(),
+            rows: vec![SocialRow {
+                platform: SocialPlatform::Youtube,
+                handle: "@mychannel".into(),
+                label: String::new(),
+                color: Rgba::default_color(),
+            }],
+            font_family: None,
+            size_px: 32.0,
+            color: Rgba::WHITE,
+            background: Rgba::default_social_bg(),
+        };
+        assert_eq!(settings.kind_name(), "socialBar");
+        assert_eq!(settings.default_name(), "Social Bar");
+        assert!(!settings.has_audio(), "a social bar makes no sound");
+        assert!(!settings.is_audio_only());
+        assert!(!settings.is_screen_view());
+    }
+
+    /// The serde tag values the TS mirror pins must stay stable (camelCase),
+    /// and older files with absent fields still load via the field defaults.
+    #[test]
+    fn social_platform_wire_values_and_defaults_round_trip() {
+        // camelCase of the single-capital variants is clean and predictable.
+        for (platform, wire) in [
+            (SocialPlatform::Youtube, "\"youtube\""),
+            (SocialPlatform::Twitter, "\"twitter\""),
+            (SocialPlatform::Tiktok, "\"tiktok\""),
+            (SocialPlatform::Custom, "\"custom\""),
+        ] {
+            assert_eq!(serde_json::to_string(&platform).unwrap(), wire);
+        }
+        // A minimal on-disk row (only a platform + handle) fills the rest in.
+        let row: SocialRow =
+            serde_json::from_str(r#"{"platform":"twitch","handle":"@me"}"#).unwrap();
+        assert_eq!(row.platform, SocialPlatform::Twitch);
+        assert_eq!(row.color, Rgba::default_color());
+        // A bare `{"kind":"socialBar"}` loads as an empty bar (no panic).
+        let bar: SourceSettings = serde_json::from_str(r#"{"kind":"socialBar"}"#).unwrap();
+        assert_eq!(bar.kind_name(), "socialBar");
+    }
+
+    /// Every bundled platform has its documented brand colour; Custom defers to
+    /// the row's own colour (returning the neutral accent as a placeholder).
+    #[test]
+    fn brand_colours_match_the_bundled_palette() {
+        assert_eq!(
+            SocialPlatform::Youtube.brand_color(),
+            Rgba::new(0xFF, 0, 0, 0xFF)
+        );
+        assert_eq!(
+            SocialPlatform::Kick.brand_color(),
+            Rgba::new(0x53, 0xFC, 0x18, 0xFF)
+        );
+        assert_eq!(SocialPlatform::Custom.brand_color(), Rgba::default_color());
+        assert_eq!(SocialPlatform::Tiktok.display_name(), "TikTok");
+        assert_eq!(SocialPlatform::Custom.display_name(), "");
     }
 }

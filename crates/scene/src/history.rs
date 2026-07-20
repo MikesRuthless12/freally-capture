@@ -157,6 +157,10 @@ impl History {
         let entry = self.past.pop_back()?;
         let restored = entry.collection;
         let post = std::mem::replace(collection, restored);
+        // Session-only state rides ALONG the timeline, never through it:
+        // recent_scenes (V1-B) is untracked live routing, so the whole-struct
+        // swap must not revert it to the snapshot's stale copy.
+        collection.recent_scenes = post.recent_scenes.clone();
         self.future.push(Entry {
             collection: post,
             label: entry.label.clone(),
@@ -171,6 +175,8 @@ impl History {
         let entry = self.future.pop()?;
         let restored = entry.collection;
         let pre = std::mem::replace(collection, restored);
+        // Same as undo: the session-only recent_scenes list survives the swap.
+        collection.recent_scenes = pre.recent_scenes.clone();
         self.past.push_back(Entry {
             collection: pre,
             label: entry.label.clone(),

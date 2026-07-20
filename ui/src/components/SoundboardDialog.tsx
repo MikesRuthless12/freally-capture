@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { settingsSet, soundboardStopAll, soundboardTrigger } from "../api/commands";
 import type { Settings, SoundboardPad } from "../api/types";
+import { AUDIO_EXTS } from "../lib/sourceOptions";
 import { PickerShell } from "./PickerShell";
 import { useT } from "../i18n/t";
 
@@ -86,7 +87,7 @@ export function SoundboardDialog({
       filters: [
         {
           name: t("soundboard-audio-files"),
-          extensions: ["wav", "mp3", "ogg", "flac", "m4a", "aac", "opus"],
+          extensions: AUDIO_EXTS,
         },
       ],
     });

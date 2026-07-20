@@ -102,6 +102,7 @@ const GUIDE_GRAB = 10;
 /** Normalized canvas regions per backdrop split — mirrors `BackdropSplit::region()`. */
 const BACKDROP_REGIONS: Record<BackdropSplit, { x: number; y: number; w: number; h: number }> = {
   full: { x: 0, y: 0, w: 1, h: 1 },
+  fit: { x: 0, y: 0, w: 1, h: 1 },
   left: { x: 0, y: 0, w: 0.5, h: 1 },
   right: { x: 0.5, y: 0, w: 0.5, h: 1 },
   top: { x: 0, y: 0, w: 1, h: 0.5 },

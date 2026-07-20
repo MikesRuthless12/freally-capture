@@ -11,10 +11,10 @@ leaves your machine is the stream you chose to send.
 
 > **Tagline:** *Record and stream like a studio — scenes, sources, multistream, one clean app.*
 
-> **Status: in development — 0.99.0 closed all 26 must-haves, and the post-stable phases have landed
-> through 0.900.0 (Studio Management & Workflow). 0.910.0 ships the Teleprompter Rework: a caesura
-> pause-chip editor, an optional start countdown, chars/sec-or-BPM pacing, per-OS read-aloud, a
-> stream-safe fullscreen projector, and 18-language ghost-text autocomplete.** The engine is
+> **Status: stable — 1.0.0 completes the counted 100-feature roadmap (all 26 must-haves + all 74
+> nice-to-haves) and caps it with the launch polish: a "Starting Soon" countdown slate with
+> image/GIF/video/music backdrops, a Background Music source, a social & channels bar, a featured
+> chat message banner, modal depth-of-field, and scene-history hygiene.** The engine is
 > complete end to end. Real per-OS **capture** (Windows DXGI + Windows.Graphics.Capture, macOS
 > ScreenCaptureKit, Linux ScreenCast portal + X11), webcams/capture cards, the **owned wgpu GPU
 > compositor** (60 fps @ 1080p verified on hardware), the **owned scene/source model**, the **on-GPU
@@ -52,7 +52,7 @@ leaves your machine is the stream you chose to send.
 > (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
 > privately** and is not published here.
 > **Installers for every release are on the
-> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 0.910.0 is the
+> [releases page](https://github.com/MikesRuthless12/freally-capture/releases) — 1.0.0 is the
 > latest.**
 
 > **🔒 Local-first, no account, no cloud.** Composition, recording, and streaming all run **on your
@@ -233,7 +233,8 @@ The detailed build plan is maintained privately. Public release ladder:
 scenes/sources — **done**) → **0.55** (audio + recording — **done**) → **0.70** (studio MVP — **done**)
 → **0.85** (multistream/SRT/WHIP — **done**) → **0.95/0.96** (distribution + launch polish — **done**)
 → **0.99** (all 26 must-haves — **done**) → **0.100.0–0.900.0** (post-stable CAP-N phases — **done**)
-→ **0.910.0** (teleprompter rework — **current**) → **1.0.0**. Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
+→ **0.910.0** (teleprompter rework — **done**) → **1.0.0** (launch polish — **current, stable**).
+Progress is published on the [project site](https://mikesruthless12.github.io/freally-capture/).
 
 ---
 

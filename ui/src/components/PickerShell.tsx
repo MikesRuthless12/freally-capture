@@ -29,6 +29,7 @@ export function PickerShell({
   wide = false,
   large = false,
   sidebar = false,
+  companion = false,
 }: {
   title: string;
   onClose: () => void;
@@ -43,6 +44,14 @@ export function PickerShell({
    * fills edge-to-edge with no padding or scroll of its own — the children
    * own the sidebar/pane split and each pane's scrolling. Overrides `wide`. */
   sidebar?: boolean;
+  /** A companion editing surface (the teleprompter) that sits alongside live
+   * production rather than blocking it: it opts OUT of the background blur so
+   * the operator's read of what's behind stays crisp. It stays a real modal in
+   * every other respect (scrim, focus trap, and `pushModal` — which hides the
+   * native GPU preview overlay that would otherwise paint over this centered
+   * dialog). "Float over the live program" is the projector/dock's job — those
+   * are separate OS windows, immune to this blur entirely. */
+  companion?: boolean;
 }) {
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -64,7 +73,11 @@ export function PickerShell({
   useEffect(() => pushModal(), []);
 
   return createPortal(
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-6">
+    <div
+      className={`fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-6 ${
+        companion ? "" : "modal-scrim-blur"
+      }`}
+    >
       <div
         ref={dialogRef}
         role="dialog"

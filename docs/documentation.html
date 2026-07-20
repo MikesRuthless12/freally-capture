@@ -223,6 +223,123 @@
         color: #f0b429;
       }
 
+      /* ---- Unified docs search (cross-app) ---- */
+      .doc-searchbar {
+        max-width: 1150px;
+        margin: 0 auto;
+        padding: 0 2rem;
+      }
+
+      .doc-search {
+        position: relative;
+      }
+
+      .ds-box {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 10px 14px;
+      }
+
+      .ds-box:focus-within {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.12);
+      }
+
+      .ds-icon {
+        color: var(--muted);
+        font-size: 1.1rem;
+        line-height: 1;
+      }
+
+      #doc-search-input {
+        flex: 1;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        font-size: 0.98rem;
+        outline: none;
+        padding: 2px 0;
+      }
+
+      #doc-search-input::placeholder {
+        color: var(--muted);
+      }
+
+      .ds-results {
+        list-style: none;
+        margin: 6px 0 0;
+        padding: 6px;
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 50;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+        max-height: 62vh;
+        overflow-y: auto;
+      }
+
+      .ds-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+
+      .ds-item.ds-active,
+      .ds-item:hover {
+        background: rgba(110, 168, 254, 0.12);
+      }
+
+      .ds-app {
+        flex: 0 0 auto;
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent);
+        background: rgba(110, 168, 254, 0.12);
+        border: 1px solid rgba(110, 168, 254, 0.25);
+        border-radius: 6px;
+        padding: 3px 6px;
+        margin-top: 2px;
+        white-space: nowrap;
+      }
+
+      .ds-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .ds-title {
+        color: var(--text);
+        font-weight: 600;
+        font-size: 0.92rem;
+      }
+
+      .ds-desc {
+        color: var(--muted);
+        font-size: 0.8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ds-empty {
+        padding: 10px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
       @media (max-width: 820px) {
         .doc-layout {
           flex-direction: column;
@@ -269,6 +386,11 @@
       <p class="sub">The document hub for Freally Capture — every project document, plus how to build scenes, record, go live, and run the virtual camera.</p>
     </header>
 
+    <!-- Unified search across every Freally app (autocomplete). -->
+    <div class="doc-searchbar">
+      <div class="doc-search" id="doc-search"></div>
+    </div>
+
     <div class="doc-layout">
 
       <!-- ===== LEFT: Sticky table of contents ===== -->
@@ -279,16 +401,24 @@
           <a href="#getting-started">Getting started</a>
           <a href="#build-a-scene">Build a scene</a>
           <a href="#filters">Filters &amp; transitions</a>
+          <a href="#compositor-fx">Compositor &amp; visual FX</a>
+          <a href="#overlays">Overlays &amp; extra sources</a>
+          <a href="#countdown">Starting Soon countdown</a>
           <a href="#audio">Audio mixer</a>
           <a href="#record">Record</a>
+          <a href="#recording-depth">Recording &amp; replay depth</a>
           <a href="#go-live">Go live</a>
           <a href="#broadcast-safety">Broadcast safety</a>
           <a href="#sources-devices">Sources &amp; devices</a>
+          <a href="#automation">Automation &amp; control</a>
           <a href="#multistream">Multistream</a>
+          <a href="#streaming-insight">Streaming reliability &amp; insight</a>
           <a href="#virtual-camera">Virtual camera</a>
           <a href="#replay">Replay buffer</a>
           <a href="#teleprompter">Teleprompter</a>
           <a href="#remote">Remote control</a>
+          <a href="#production">Remote guests &amp; production</a>
+          <a href="#studio-management">Studio management &amp; workflow</a>
           <a href="#settings">Settings &amp; license</a>
           <a href="#privacy">Privacy</a>
         </nav>
@@ -309,7 +439,7 @@
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/PRIVACY.md">PRIVACY.md</a><p>The privacy policy (DRAFT): no accounts, no telemetry, capture stays local, streams go only to the targets you set.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/EULA.md">EULA.md</a><p>The end-user license agreement (DRAFT): the intended terms of use, your-content responsibility, and the codec/patent notice.</p></li>
             <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a><p>Attribution for bundled, downloaded, and driven components (ffmpeg/wire codecs, wgpu, hardware encoders) and the owned-component note.</p></li>
-            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/CHANGELOG.md">CHANGELOG.md</a><p>The Keep-a-Changelog history for every release on the ladder — 0.10.0 through 0.910.0 shipped; 1.0.0 lands when all 100 roadmap features are in.</p></li>
+            <li><a href="https://github.com/MikesRuthless12/freally-capture/blob/main/CHANGELOG.md">CHANGELOG.md</a><p>The Keep-a-Changelog history for every release on the ladder — 0.10.0 through the 1.0.0 stable, which completes all 100 roadmap features.</p></li>
             <li><a href="changelog.html">changelog.html</a><p>The public Releases &amp; Updates changelog page (this site).</p></li>
           </ul>
 
@@ -318,9 +448,9 @@
         <!-- Getting started -->
         <section id="getting-started">
           <h2>Getting started</h2>
-          <p class="section-intro">Freally Capture is in development. As of <strong>0.800.0</strong>, you can build scenes on the GPU compositor, mix audio across up to 6 tracks (including <strong>per-application audio</strong>), <strong>record</strong> multi-track to disk, <strong>go live</strong> (single-target and simultaneous multistream over RTMP/RTMPS/SRT/WHIP) with Studio Mode, a replay buffer, vertical/multi-canvas, nested scenes, and a no-key chat overlay — extend it all with the <strong>remote-control API</strong>, <strong>browser docks</strong>, <strong>Lua scripting</strong>, and a <strong>plugin SDK</strong> — and keep it current with a <strong>signed self-hosted auto-updater</strong>. The preview is a <strong>native GPU surface</strong> ("OBS feel") on Windows, macOS, and Linux. The interface speaks <strong>18 languages</strong>, is fully keyboard-operable and screen-reader-audible, sets itself up with a <strong>first-run wizard</strong>, and can be themed light, dark, or custom. <strong>The first CAP-M must-have batch (0.97.0)</strong> adds scene-editing depth — multi-step undo/redo, an OBS scene-collection importer, a missing-file doctor, a multi-select with align/distribute and custom guides, copy-paste transforms, a keying workbench — and monitoring — a multiview and fullscreen projectors for any scene/source/program/preview on any display, plus a one-key still grab. <strong>The second batch (0.98.0)</strong> adds broadcast safety &amp; reliability: a <strong>go-live pre-flight checklist</strong>, always-on <strong>safety alarms</strong>, a <strong>source health dashboard</strong>, <strong>mid-session encoder failover</strong>, <strong>crash-safe recording with a next-launch repair</strong>, a <strong>quit guard</strong> with an ordered shutdown, a <strong>panic button</strong>, <strong>recording filename templates</strong>, and a <strong>redacted diagnostics bundle</strong> — see <a href="#broadcast-safety" style="color:var(--accent)">Broadcast safety</a>. <strong>The third and final batch (0.99.0)</strong> closes the must-have set with sources, devices &amp; calibration: built-in <strong>test signals</strong> (SMPTE bars, calibration grid, motion sweep, lineup tone, A/V flash+beep), a guided <strong>A/V sync calibration workbench</strong>, <strong>timer &amp; clock sources</strong>, <strong>text bound to a watched file</strong> (.txt/CSV/JSON), a searchable <strong>hotkey map</strong> with conflict detection, mixer <strong>pan/solo/mono</strong>, per-device <strong>deinterlacing</strong>, and cross-platform <strong>camera controls</strong> with per-device profiles — see <a href="#sources-devices" style="color:var(--accent)">Sources &amp; devices</a>. <strong>The automation + capture &amp; device-depth release (0.200.0)</strong> makes the studio drive itself and finishes the glass-to-canvas path: an <strong>automation rules engine</strong>, <strong>macros with variables &amp; sequences</strong>, <strong>MIDI</strong> and <strong>OSC</strong> control surfaces, hotkey <strong>chords &amp; layers</strong>, a <strong>LAN touch panel</strong> and a <strong>tally-light service</strong>, <strong>PTZ camera control</strong>, and a <strong>show rundown</strong> — plus a <strong>low-latency passthrough monitor</strong>, <strong>pixel-perfect scaling</strong>, <strong>punch-in zoom &amp; follow pan</strong>, <strong>auto black-bar crop</strong>, <strong>window↔app-audio auto-linking</strong>, and <strong>HDR→SDR tone-mapping</strong>, alongside a <strong>scene backdrop</strong> and <strong>true reverse media playback</strong>. Every automation surface routes through one fixed, off-by-default command allowlist, so none can name a file or reach the internet. <strong>The new-sources &amp; overlays release (0.300.0)</strong> puts ten new things on the canvas: an <strong>instant-replay playback source</strong> (roll the armed buffer into the program at 100/50/25&nbsp;% — retimed, never interpolated), a truly gapless <strong>media playlist</strong> with per-item trims and cue points, a layered <strong>title &amp; scoreboard designer</strong> with live control, an <strong>audio visualizer</strong> (FFT bars, oscilloscope, stereo VU) tapped post-fader, a <strong>system-stats overlay</strong> of real measured numbers, a LiveSplit-compatible <strong>speedrun split timer</strong>, a keyboard/mouse/gamepad <strong>input overlay</strong>, <strong>cursor highlight &amp; click effects</strong>, an <strong>SRT/RTMP LAN ingest</strong> listener with a QR-coded URL, and <strong>Freally Link</strong> — instance-to-instance program sharing over your own network, gated by a pairing key, with no ffmpeg on either end. Both LAN sources are off until added, bind only the local machine, and never touch the internet; the input overlay and cursor effects read input only while enabled and never log a keystroke. <strong>The compositor &amp; FX depth release (0.310.0 → 0.400.0)</strong> adds 3D corner-pin, downstream keyer layers, freeze-frame, source cloning, an expanded blur family, a <strong>move (morph) transition</strong>, per-scene-pair <strong>transition rules</strong>, a WGSL <strong>shader studio</strong>, a <strong>bezier mask</strong> editor, and <strong>track-matte stingers</strong> with an optional program-audio duck. <strong>The audio production depth release (0.500.0)</strong> turns the mixer into a broadcast console: physical <strong>output routing</strong> and aux/cue mixes, a <strong>ducking matrix</strong>, a gain-sharing <strong>auto-mixer</strong>, <strong>EBU R128 loudness normalization</strong>, a <strong>parametric EQ</strong> over a live spectrum, a <strong>de-esser</strong> and rumble guard, a <strong>soundboard</strong>, <strong>audio-only (podcast) recording</strong>, per-guest <strong>mix-minus</strong> with voice-chain presets, and <strong>CLAP + VST3 plugin discovery</strong> — every audio filter now a live visual instrument with in/out/gain-reduction meters, all owned classic DSP, off by default. <strong>The recording &amp; replay depth release (0.600.0)</strong> builds out what happens to the file: <strong>per-source ISO recording</strong> (clean per-source and per-guest files, timecode-aligned to the program), a <strong>replay &amp; clip trimmer</strong> with a stream-copy-vs-re-encode badge and a one-click 9:16 reframe, <strong>alpha-channel recording</strong> to the owned lossless format with ProRes 4444 / QTRLE master export, event-driven <strong>split on scene change / marker / rundown step</strong>, typed <strong>auto-markers from studio events</strong>, a closed sandboxed <strong>post-record pipeline</strong> (verify → remux → normalize → rename → move/copy → reveal → notify scripts), a <strong>recording integrity verifier</strong>, and owned <strong>SMPTE LTC timecode</strong> generate/read with a burn-in overlay. <strong>The streaming reliability &amp; insight release (0.700.0)</strong> is about knowing a show will hold up and understanding it afterward: a <strong>network-condition simulator</strong> for pre-show drills (bandwidth caps, latency/jitter, scheduled outages), a <strong>dry-run mode</strong> that runs the whole pipeline to a private local sink with zero bytes leaving the machine, a session-long <strong>dropped-frame forensic timeline</strong>, an optional local <strong>stream session report</strong>, an <strong>encoder benchmark wizard</strong> that measures what the machine can sustain, and <strong>per-output source visibility</strong> (stream-only / recording-only items) — plus looping <strong>text effects</strong> (a "Star Wars" perspective tilt for any source and a fade-in/out loop) for unattended promos. Everything ships off by default and adds no network call. <strong>The remote guests &amp; show production release (0.800.0)</strong> turns the remote-guest session into a multi-guest studio and adds the live-production layer on top: a <strong>telestrator</strong> to draw pen/highlighter/arrow/ellipse marks straight onto the live program (baked into the recording and stream), a <strong>teleprompter</strong> across an in-app panel, a mirror-able fullscreen projector, and the LAN touch panel, a <strong>green room</strong> that holds new guests off-program for a private cam/mic tech-check before a one-click seat on air, a <strong>cue &amp; talk</strong> system for private host-to-guest text cues with countdowns over the existing P2P channel, a per-guest <strong>connection-quality dashboard</strong> (RTT, packet loss, resolution, fps, jitter, green/amber/red + sparkline), and <strong>auto-grid guest layouts</strong> that reflow a 1–9 gallery with <code>{{guestN}}</code> nameplate variables — all riding <strong>multi-guest remote sessions</strong> that now admit up to eight guests on the opt-in, serverless P2P transport, every new surface off or unbound by default. <strong>The teleprompter rework (0.910.0)</strong> deepens that prompter: <strong>Caesura pause chips</strong> (inline <code> -- </code> / <code> --N </code> pauses render as atomic, un-splittable pills), an optional <strong>3-2-1 start countdown</strong> on preview and projector, <strong>BPM scroll pacing</strong> (50–250) for reading lyrics in time with music, real <strong>SVG transport icons</strong>, a projector that <strong>frees the main window</strong> (the operator modal closes so you can run the livestream while the talent reads, auto-counting-in from the top when a countdown is armed), <strong>Read aloud</strong> through the operating system's own speech engine, and <strong>ghost-text autocomplete</strong> with Tab-to-accept backed by a per-language dictionary for all 18 languages — plus fixes to preview↔projector line-wrap matching and a seek-bar timer that could overrun the total read time. See <a href="#teleprompter" style="color:var(--accent)">Teleprompter</a>.</p>
+          <p class="section-intro">Freally Capture is in development. As of the <strong>1.0.0 stable</strong>, you can build scenes on the GPU compositor, mix audio across up to 6 tracks (including <strong>per-application audio</strong>), <strong>record</strong> multi-track to disk, <strong>go live</strong> (single-target and simultaneous multistream over RTMP/RTMPS/SRT/WHIP) with Studio Mode, a replay buffer, vertical/multi-canvas, nested scenes, and a no-key chat overlay — extend it all with the <strong>remote-control API</strong>, <strong>browser docks</strong>, <strong>Lua scripting</strong>, and a <strong>plugin SDK</strong> — and keep it current with a <strong>signed self-hosted auto-updater</strong>. The preview is a <strong>native GPU surface</strong> ("OBS feel") on Windows, macOS, and Linux. The interface speaks <strong>18 languages</strong>, is fully keyboard-operable and screen-reader-audible, sets itself up with a <strong>first-run wizard</strong>, and can be themed light, dark, or custom. <strong>The first CAP-M must-have batch (0.97.0)</strong> adds scene-editing depth — multi-step undo/redo, an OBS scene-collection importer, a missing-file doctor, a multi-select with align/distribute and custom guides, copy-paste transforms, a keying workbench — and monitoring — a multiview and fullscreen projectors for any scene/source/program/preview on any display, plus a one-key still grab. <strong>The second batch (0.98.0)</strong> adds broadcast safety &amp; reliability: a <strong>go-live pre-flight checklist</strong>, always-on <strong>safety alarms</strong>, a <strong>source health dashboard</strong>, <strong>mid-session encoder failover</strong>, <strong>crash-safe recording with a next-launch repair</strong>, a <strong>quit guard</strong> with an ordered shutdown, a <strong>panic button</strong>, <strong>recording filename templates</strong>, and a <strong>redacted diagnostics bundle</strong> — see <a href="#broadcast-safety" style="color:var(--accent)">Broadcast safety</a>. <strong>The third and final batch (0.99.0)</strong> closes the must-have set with sources, devices &amp; calibration: built-in <strong>test signals</strong> (SMPTE bars, calibration grid, motion sweep, lineup tone, A/V flash+beep), a guided <strong>A/V sync calibration workbench</strong>, <strong>timer &amp; clock sources</strong>, <strong>text bound to a watched file</strong> (.txt/CSV/JSON), a searchable <strong>hotkey map</strong> with conflict detection, mixer <strong>pan/solo/mono</strong>, per-device <strong>deinterlacing</strong>, and cross-platform <strong>camera controls</strong> with per-device profiles — see <a href="#sources-devices" style="color:var(--accent)">Sources &amp; devices</a>. <strong>The automation + capture &amp; device-depth release (0.200.0)</strong> makes the studio drive itself and finishes the glass-to-canvas path: an <strong>automation rules engine</strong>, <strong>macros with variables &amp; sequences</strong>, <strong>MIDI</strong> and <strong>OSC</strong> control surfaces, hotkey <strong>chords &amp; layers</strong>, a <strong>LAN touch panel</strong> and a <strong>tally-light service</strong>, <strong>PTZ camera control</strong>, and a <strong>show rundown</strong> — plus a <strong>low-latency passthrough monitor</strong>, <strong>pixel-perfect scaling</strong>, <strong>punch-in zoom &amp; follow pan</strong>, <strong>auto black-bar crop</strong>, <strong>window↔app-audio auto-linking</strong>, and <strong>HDR→SDR tone-mapping</strong>, alongside a <strong>scene backdrop</strong> and <strong>true reverse media playback</strong>. Every automation surface routes through one fixed, off-by-default command allowlist, so none can name a file or reach the internet. <strong>The new-sources &amp; overlays release (0.300.0)</strong> puts ten new things on the canvas: an <strong>instant-replay playback source</strong> (roll the armed buffer into the program at 100/50/25&nbsp;% — retimed, never interpolated), a truly gapless <strong>media playlist</strong> with per-item trims and cue points, a layered <strong>title &amp; scoreboard designer</strong> with live control, an <strong>audio visualizer</strong> (FFT bars, oscilloscope, stereo VU) tapped post-fader, a <strong>system-stats overlay</strong> of real measured numbers, a LiveSplit-compatible <strong>speedrun split timer</strong>, a keyboard/mouse/gamepad <strong>input overlay</strong>, <strong>cursor highlight &amp; click effects</strong>, an <strong>SRT/RTMP LAN ingest</strong> listener with a QR-coded URL, and <strong>Freally Link</strong> — instance-to-instance program sharing over your own network, gated by a pairing key, with no ffmpeg on either end. Both LAN sources are off until added, bind only the local machine, and never touch the internet; the input overlay and cursor effects read input only while enabled and never log a keystroke. <strong>The compositor &amp; FX depth release (0.310.0 → 0.400.0)</strong> adds 3D corner-pin, downstream keyer layers, freeze-frame, source cloning, an expanded blur family, a <strong>move (morph) transition</strong>, per-scene-pair <strong>transition rules</strong>, a WGSL <strong>shader studio</strong>, a <strong>bezier mask</strong> editor, and <strong>track-matte stingers</strong> with an optional program-audio duck. <strong>The audio production depth release (0.500.0)</strong> turns the mixer into a broadcast console: physical <strong>output routing</strong> and aux/cue mixes, a <strong>ducking matrix</strong>, a gain-sharing <strong>auto-mixer</strong>, <strong>EBU R128 loudness normalization</strong>, a <strong>parametric EQ</strong> over a live spectrum, a <strong>de-esser</strong> and rumble guard, a <strong>soundboard</strong>, <strong>audio-only (podcast) recording</strong>, per-guest <strong>mix-minus</strong> with voice-chain presets, and <strong>CLAP + VST3 plugin discovery</strong> — every audio filter now a live visual instrument with in/out/gain-reduction meters, all owned classic DSP, off by default. <strong>The recording &amp; replay depth release (0.600.0)</strong> builds out what happens to the file: <strong>per-source ISO recording</strong> (clean per-source and per-guest files, timecode-aligned to the program), a <strong>replay &amp; clip trimmer</strong> with a stream-copy-vs-re-encode badge and a one-click 9:16 reframe, <strong>alpha-channel recording</strong> to the owned lossless format with ProRes 4444 / QTRLE master export, event-driven <strong>split on scene change / marker / rundown step</strong>, typed <strong>auto-markers from studio events</strong>, a closed sandboxed <strong>post-record pipeline</strong> (verify → remux → normalize → rename → move/copy → reveal → notify scripts), a <strong>recording integrity verifier</strong>, and owned <strong>SMPTE LTC timecode</strong> generate/read with a burn-in overlay. <strong>The streaming reliability &amp; insight release (0.700.0)</strong> is about knowing a show will hold up and understanding it afterward: a <strong>network-condition simulator</strong> for pre-show drills (bandwidth caps, latency/jitter, scheduled outages), a <strong>dry-run mode</strong> that runs the whole pipeline to a private local sink with zero bytes leaving the machine, a session-long <strong>dropped-frame forensic timeline</strong>, an optional local <strong>stream session report</strong>, an <strong>encoder benchmark wizard</strong> that measures what the machine can sustain, and <strong>per-output source visibility</strong> (stream-only / recording-only items) — plus looping <strong>text effects</strong> (a "Star Wars" perspective tilt for any source and a fade-in/out loop) for unattended promos. Everything ships off by default and adds no network call. <strong>The remote guests &amp; show production release (0.800.0)</strong> turns the remote-guest session into a multi-guest studio and adds the live-production layer on top: a <strong>telestrator</strong> to draw pen/highlighter/arrow/ellipse marks straight onto the live program (baked into the recording and stream), a <strong>teleprompter</strong> across an in-app panel, a mirror-able fullscreen projector, and the LAN touch panel, a <strong>green room</strong> that holds new guests off-program for a private cam/mic tech-check before a one-click seat on air, a <strong>cue &amp; talk</strong> system for private host-to-guest text cues with countdowns over the existing P2P channel, a per-guest <strong>connection-quality dashboard</strong> (RTT, packet loss, resolution, fps, jitter, green/amber/red + sparkline), and <strong>auto-grid guest layouts</strong> that reflow a 1–9 gallery with <code>{{guestN}}</code> nameplate variables — all riding <strong>multi-guest remote sessions</strong> that now admit up to eight guests on the opt-in, serverless P2P transport, every new surface off or unbound by default. <strong>The teleprompter rework (0.910.0)</strong> deepens that prompter: <strong>Caesura pause chips</strong> (inline <code> -- </code> / <code> --N </code> pauses render as atomic, un-splittable pills), an optional <strong>3-2-1 start countdown</strong> on preview and projector, <strong>BPM scroll pacing</strong> (50–250) for reading lyrics in time with music, real <strong>SVG transport icons</strong>, a projector that <strong>frees the main window</strong> (the operator modal closes so you can run the livestream while the talent reads, auto-counting-in from the top when a countdown is armed), <strong>Read aloud</strong> through the operating system's own speech engine, and <strong>ghost-text autocomplete</strong> with Tab-to-accept backed by a per-language dictionary for all 18 languages — plus fixes to preview↔projector line-wrap matching and a seek-bar timer that could overrun the total read time. See <a href="#teleprompter" style="color:var(--accent)">Teleprompter</a>.</p>
 
-          <div class="warn"><strong>Status:</strong> active development. Capture, the GPU compositor + filters, the audio mixer, multi-track recording, the native GPU preview, single-target + multistream streaming with Studio Mode, the streaming-depth set (0.85.0), the extensibility surface (0.90.0 — remote API, docks, scripting, plugins), distribution + per-app audio (0.95.0 — signed auto-update, application audio, NDI seam, EULA gate), the full 26-feature must-have set (0.97.0–0.99.0), and the depth phases since — automation + capture &amp; device depth (0.200.0), new sources &amp; overlays (0.300.0), compositor &amp; FX depth (0.400.0), audio production depth (0.500.0), recording &amp; replay depth (0.600.0), streaming reliability &amp; insight (0.700.0), remote guests &amp; show production (0.800.0) — are in; the virtual camera, a true browser source, and game-capture GPU hooking follow as their own milestones — download builds from the <a href="index.html" style="color:var(--accent)">Releases page</a>.</div>
+          <div class="warn"><strong>Status:</strong> stable. <strong>1.0.0</strong> completes the 100-feature roadmap — capture, the GPU compositor + filters, the audio mixer, multi-track recording, the native GPU preview, single-target + multistream streaming with Studio Mode, the extensibility surface (remote API, docks, scripting, plugins), signed auto-update, all 26 must-haves (0.97.0–0.99.0), the depth phases (automation, sources &amp; overlays, compositor FX, audio production, recording &amp; replay, streaming reliability, remote guests, studio management, the teleprompter rework), and the launch polish (the Starting Soon countdown, background music, the social bar, the featured chat banner). The virtual camera, a true browser source, and game-capture GPU hooking follow as their own milestones — download builds from the <a href="index.html" style="color:var(--accent)">Releases page</a>.</div>
 
           <h3>Windows / macOS / Linux</h3>
           <ol class="steps">
@@ -367,6 +497,144 @@
           </ol>
         </section>
 
+        <!-- Compositor & visual FX (Phase 3, 0.310.0–0.400.0) -->
+        <section id="compositor-fx">
+          <h2>Compositor &amp; visual FX</h2>
+          <p class="section-intro">The compositor depth from 0.310.0 and 0.400.0 — 3D tilt, downstream keyers, freeze and clone, an expanded blur family, motion transitions with rules, a shader studio, bezier masks, and track-matte stingers.</p>
+
+          <h3>3D tilt (corner-pin) &amp; perspective</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Edit Transform</strong> on an item and set <strong>Tilt X</strong>, <strong>Tilt Y</strong>, and a <strong>Perspective</strong> strength to pin the source in 3D. An untilted transform renders pixel-identically — the projective matrix kicks in only when a tilt is applied.</span></li>
+          </ol>
+
+          <h3>Downstream keyer (DSK) layers</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Tools → Downstream Keyers</strong> and add any source as a persistent overlay composited on the <strong>program output</strong>, above every scene and surviving scene cuts — a station logo, a LIVE badge, a lower-third.</span></li>
+            <li><span>Reorder layers and set opacity, position/size, and on/off per layer. They render into preview, recording, stream, and multiview alike.</span></li>
+          </ol>
+
+          <h3>Freeze-frame &amp; source cloning</h3>
+          <ol class="steps">
+            <li><span>Right-click a source, open <strong>Filters</strong>, and add <strong>Freeze</strong> — it holds the last frame across program, preview, recording, and stream together; toggle it off to unfreeze.</span></li>
+            <li><span>Use the <strong>Clone</strong> button (⧉) on a source row to place one feed in multiple scenes or spots, each clone carrying its own transform and filter stack.</span></li>
+          </ol>
+
+          <h3>Blur family</h3>
+          <ol class="steps">
+            <li><span>In a source's <strong>Filters</strong>, add one of the GPU blurs beside the Gaussian: <strong>directional</strong> (motion streak along an angle), <strong>radial</strong> (spin about a center), <strong>zoom</strong> (dolly-zoom streak), or <strong>pixelate</strong> (mosaic).</span></li>
+          </ol>
+
+          <h3>Move (morph) transition &amp; transition rules</h3>
+          <ol class="steps">
+            <li><span>Choose the <strong>Move</strong> transition: items present in both the outgoing and incoming scene animate from their old position/scale/rotation/crop to the new one instead of cutting, while items in only one scene fade in or out (eased with a smootherstep).</span></li>
+            <li><span>Open <strong>Tools → Transition Rules</strong> to give a specific scene A→B pair its own transition kind and duration instead of the default. For per-item entrances, set a <strong>Reveal</strong> fade-in under <strong>Edit Transform</strong> so an item ramps in when it becomes visible.</span></li>
+          </ol>
+
+          <h3>WGSL shader studio</h3>
+          <ol class="steps">
+            <li><span>Add a <strong>user WGSL effect</strong> as a filter and edit it live; sliders are auto-generated from <code>// @param</code> annotations, and a built-in gallery ships grayscale, invert, scanlines, and vignette.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Shaders are compiled and validated at runtime — an invalid shader is simply ignored and the source renders unfiltered, never a crash.</div>
+
+          <h3>Bezier mask</h3>
+          <ol class="steps">
+            <li><span>Add the <strong>freehand mask</strong> filter and draw a closed path — drag the handles, double-click to add a point, right-click to remove — with preset shapes, per-edge feather, and invert.</span></li>
+            <li><span>Export any path as a grayscale <strong>luma-wipe</strong> pattern to reuse the shape as a reveal transition.</span></li>
+          </ol>
+
+          <h3>Track-matte stinger transitions</h3>
+          <ol class="steps">
+            <li><span>Configure a stinger to carry its transparency as a <strong>track matte</strong>, with fill and matte packed <strong>side-by-side</strong> or <strong>stacked</strong>, so per-pixel alpha survives codecs that drop it (H.264/HEVC). Optionally <strong>duck the program audio</strong> under the stinger's own audio while it plays.</span></li>
+          </ol>
+        </section>
+
+        <!-- Overlays & extra sources (Phase 2, 0.300.0) -->
+        <section id="overlays">
+          <h2>Overlays &amp; extra sources</h2>
+          <p class="section-intro">Ten local canvas sources added in 0.300.0 — replay, playlists, titles, meters, HUDs, timers, input overlays, and two LAN feeds — all added from the <strong>Sources</strong> rail's <strong>+ / Add Source</strong> menu.</p>
+
+          <h3>Instant-replay playback</h3>
+          <ol class="steps">
+            <li><span>Arm the replay buffer first (the <strong>Arm Replay</strong> control in the Controls dock), then from <strong>+ / Add Source</strong> choose <strong>Instant Replay</strong> and drop it into a scene.</span></li>
+            <li><span>Roll the last N seconds into the program with your replay hotkey — captured as a stream copy (no re-encode) and played back at <strong>100%</strong>, <strong>50%</strong>, or <strong>25%</strong>, retimed rather than frame-interpolated. Scrub or pause while it plays.</span></li>
+            <li><span>At the end the source clears itself back to transparent, so the show returns to live on its own.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Slow-motion playback is silent by design — retimed audio would smear, so it is dropped rather than faked.</div>
+
+          <h3>Media playlist &amp; background music</h3>
+          <ol class="steps">
+            <li><span>Add <strong>Media Playlist (gapless)</strong>, then build an ordered list with per-item in/out trims and cue points. The whole trimmed list runs through one decode, so item boundaries are frame-exact and truly gapless.</span></li>
+            <li><span>Set the run mode — <strong>loop</strong>, <strong>shuffle</strong>, or <strong>hold-last</strong> — and step with the next/previous hotkeys. An audio-only playlist shows the <strong>current track's name</strong> on the canvas and plays through its own mixer strip — click that strip's <strong>Monitor</strong> button to hear it in preview.</span></li>
+            <li><span>For invisible looping background music, use <strong>+ / Add Source → Background Music…</strong> instead: pick one or more <code>.mp3</code>/<code>.wav</code>/<code>.flac</code> files (optionally shuffled). It plays with no on-canvas card and mutes a video backdrop's own sound, so only one thing is ever heard.</span></li>
+          </ol>
+
+          <h3>Title &amp; scoreboard designer</h3>
+          <ol class="steps">
+            <li><span>Add <strong>Title / Scoreboard</strong> to open the layered designer: stack <strong>text</strong>, <strong>image</strong>, and <strong>shape</strong> layers, with outline and drop-shadow text and animate-in/out (fade, slide, wipe).</span></li>
+            <li><span>Bind fields to a watched file (a CSV cell or JSON pointer) or a studio variable, then control it live — swap a name, edit the score, or fire the animation without touching the scene.</span></li>
+          </ol>
+
+          <h3>Audio visualizer</h3>
+          <ol class="steps">
+            <li><span>Add <strong>Audio Visualizer</strong> and pick a style — FFT <strong>spectrum bars</strong>, an <strong>oscilloscope</strong>, or stereo <strong>VU meters</strong> — then bind it to any mixer strip, track bus, or the master mix. It also visualizes a backdrop video's audio.</span></li>
+            <li><span>In the source's <strong>Properties</strong>, toggle <strong>Classic colors</strong> for the classic VU/spectrum green→yellow→red bands, or leave it off for a single solid color; size, bar count, and fall rate live there too.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> The visualizer is tapped <strong>post-fader</strong>, so a muted source visualizes flat — it shows exactly what you hear.</div>
+
+          <h3>Stats HUD, split timer &amp; input overlay</h3>
+          <ol class="steps">
+            <li><span>Add <strong>Performance Stats (HUD)</strong> to composite the Stats dock's real measured numbers — fps, CPU, memory, GPU compose time, dropped frames, and live bitrate — with per-line toggles (GPU utilization is deliberately absent, since it isn't measured).</span></li>
+            <li><span>Add <strong>Speedrun Split Timer</strong>, import a LiveSplit <code>.lss</code> file, and run it with global split/undo/skip/reset hotkeys against personal best, best segments, or average. The file is read only — a run is never written back.</span></li>
+            <li><span>Add <strong>Input Overlay (keys/pad)</strong> for a live keyboard, mouse, and gamepad view in one of four layouts (WASD, compact keyboard, dual-stick pad, 8-way fight stick). Keyboard/mouse are Windows-first; gamepads work on all three OSes.</span></li>
+          </ol>
+
+          <h3>Social &amp; channels bar</h3>
+          <ol class="steps">
+            <li><span>Add <strong>Social Bar</strong> from <strong>+ / Add Source</strong>: a tidy panel listing your handles — pick a platform per row (<strong>YouTube, Twitch, Kick, X, Instagram, TikTok, Facebook, Discord</strong> as brand-coloured badges, or <strong>Custom</strong> with your own label and colour) and type the handle (e.g. <code>@mychannel</code>). Add an optional header line ("Follow me"), reorder rows, and set the text size and colours.</span></li>
+            <li><span>Every field stays editable afterwards in the source's <strong>Properties</strong>; rows with an empty handle are skipped, so you can keep a full list and fill in only what you use.</span></li>
+          </ol>
+
+          <h3>Featured chat message banner</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Tools → Featured Chat Message…</strong> (or the command palette). The picker lists the newest lines from every running chat overlay — click <strong>Feature</strong> on one to pin it to the program as a styled bottom banner that viewers of the stream and recording see.</span></li>
+            <li><span>Set the <strong>banner</strong> and <strong>text</strong> colours right in the dialog (they persist); click <strong>Clear</strong> to take the banner off air. The pin itself clears on restart, by design — yesterday's shout-out never haunts today's show.</span></li>
+          </ol>
+
+          <h3>Cursor highlight &amp; click effects</h3>
+          <ol class="steps">
+            <li><span>Right-click a Display or Window capture and open <strong>Filters</strong>, then add <strong>Cursor effects</strong>: a <strong>Cursor halo</strong> (color and radius), color-coded left/right <strong>Click ripples</strong>, and optional <strong>Keystroke ghosting</strong> near the pointer. Changes apply live.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> Cursor effects are Windows-only — macOS and Linux composite the cursor OS-side. Both the input overlay and keystroke ghosting read input <strong>only while enabled</strong> and are drawn straight into the frame; nothing is ever stored or logged.</div>
+
+          <h3>LAN sources: ingest &amp; Freally Link</h3>
+          <ol class="steps">
+            <li><span>Add <strong>LAN Ingest (SRT/RTMP listener)</strong> to open a listener on this machine; point a phone camera app, encoder, or second PC at the URL shown (with a QR code) and it lands in the scene with its own mixer strip. SRT can carry an optional AES passphrase; RTMP has no authentication of its own, so the form prefers SRT.</span></li>
+            <li><span>For instance-to-instance sharing, on the <strong>sending</strong> machine enable the <strong>Freally Link</strong> output and set its <strong>pairing key</strong> (the output cannot be enabled without one). On the <strong>receiving</strong> machine, add <strong>Freally Link (another instance)</strong>, hit <strong>Scan the LAN</strong>, and type the key — the sender's program appears as a source. No ffmpeg is needed on either end, and a receiver that can't present the key never sees a frame.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> Both LAN sources are <strong>off until you add them</strong>, bind only the local machine, and never touch the internet — nothing discovers you and nothing dials out.</div>
+        </section>
+
+        <!-- Starting Soon countdown (V1-C) -->
+        <section id="countdown">
+          <h2>Starting Soon countdown</h2>
+          <p class="section-intro">A one-click pre-show holding screen — a big countdown to showtime over an image, GIF, video, gradient, or music backdrop — that flashes at zero and waits for you to cut to live.</p>
+
+          <h3>Add the countdown</h3>
+          <ol class="steps">
+            <li><span>In the <strong>Sources</strong> rail, open <strong>+ / Add Source</strong> and choose <strong>Starting Soon…</strong>. It drops a full-canvas countdown — a caption above a big number — onto the scene.</span></li>
+            <li><span>Type the <strong>caption</strong> (e.g. "Starting Soon", "Be Right Back"), then set the target with the <strong>clock picker</strong>: an <strong>hour</strong> (1–12), a <strong>minute</strong> in five-minute steps, and <strong>AM/PM</strong> — the source counts down TO that wall-clock time.</span></li>
+            <li><span>At zero the countdown <strong>flashes and holds at 0:00:00</strong> — it never auto-switches. Clear it and cut to your live scene by hand when you're ready. Every field stays editable later in the source's <strong>Properties</strong>.</span></li>
+          </ol>
+
+          <h3>Choose a backdrop</h3>
+          <ol class="steps">
+            <li><span>Pick the fill: a two-color <strong>Gradient</strong> (the default), a <strong>Solid</strong> color, an <strong>Image</strong> (click <strong>Browse…</strong> for a file dialog), or <strong>Transparent</strong> to let a source underneath show through.</span></li>
+            <li><span>Choose a <strong>GIF</strong> or <strong>video</strong> file and it plays as the scene's looping backdrop behind the numbers — <strong>stretched to fit and centered</strong>, so the whole picture is visible and never cropped.</span></li>
+            <li><span>Add <strong>background music</strong> right from the dialog's <strong>Browse…</strong> (mp3/wav/flac/m4a/aac/ogg/opus) — it loops, is heard in preview, and is captured to your recording or stream. It plays with no visible card, and a video backdrop's own sound is muted so only one thing is ever heard.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Want music behind a gradient or transparent screen with no video at all? Leave the backdrop on Gradient or Transparent and add the music — a clean countdown with a soundtrack.</div>
+        </section>
+
         <!-- Audio -->
         <section id="audio">
           <h2>Audio mixer</h2>
@@ -391,6 +659,48 @@
             <li><span>Click <strong>Start Recording</strong> in <strong>Controls</strong>. A green <strong>REC</strong> dot shows the duration and track count. Click <strong>Stop</strong> to finalize the file.</span></li>
           </ol>
           <div class="warn"><strong>Codec note:</strong> mp4 with H.264/AAC (and HEVC/AV1) uses patent-encumbered codecs provided by <strong>ffmpeg</strong>, which is <em>not bundled</em> — Freally Capture fetches it on demand and verifies it the first time you need it. The owned <strong>freally-video</strong> lossless path needs nothing fetched.</div>
+        </section>
+
+        <!-- Recording & replay depth (Phase 5, 0.600.0) -->
+        <section id="recording-depth">
+          <h2>Recording &amp; replay depth</h2>
+          <p class="section-intro">Everything around the file: isolated per-source recordings, a clip trimmer, real transparency, event-driven splitting and markers, an after-recording task pipeline, an integrity check, and SMPTE timecode. Every capability here is off or neutral by default, and none of it adds a network call.</p>
+
+          <h3>Per-source ISO recording</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Settings → Output</strong> and find <strong>ISO recording</strong>. Toggle <strong>Record "{name}" as its own ISO file</strong> for each source you want captured clean — each records pre-composite, at canvas size and frame rate, so every file drops onto an editing timeline aligned with the program. Because each remote guest is just a source, per-guest ISOs come for free.</span></li>
+            <li><span>Leave <strong>Record with the source's filters</strong> checked to capture the processed look, or uncheck it for the raw source, and pick each lane's own <strong>ISO format</strong> and <strong>ISO video encoder</strong>. Audio is tapped post-filter but pre-fader/mute, so a mix decision never silences an ISO file.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Two ISO lanes are comfortable on a mid-range GPU; each additional lane costs another render and encode, and the panel says so up front.</div>
+
+          <h3>Replay &amp; clip trimmer</h3>
+          <ol class="steps">
+            <li><span>Open a saved recording in the <strong>Trim</strong> window from the recordings list, then step the playhead with <strong>Back one frame</strong> / <strong>Forward one frame</strong> and set your points with <strong>Set in</strong> and <strong>Set out</strong> while watching the live preview.</span></li>
+            <li><span>Read the export badge before you commit: a green <em>"Exports without re-encoding"</em> means the in-point sits on a keyframe (near-instant, lossless), while the amber badge warns it will re-encode — press <strong>Keyframe</strong> to snap the in-point for a lossless cut. Click <strong>Export clip</strong>, or use the <strong>9:16</strong> button to export a reframed vertical master through the vertical-canvas geometry.</span></li>
+          </ol>
+
+          <h3>Alpha-channel recording</h3>
+          <ol class="steps">
+            <li><span>In <strong>Settings → Output</strong>, enable <strong>Record with transparency (alpha)</strong> to record the program over a transparent background to the owned <code>.frec</code>. The recorder gets its own transparent render, so your preview and stream keep the normal opaque program. From the recordings list, export a <strong>ProRes 4444</strong> or <strong>QuickTime Animation (QTRLE)</strong> <code>.mov</code> master for your editor — MP4/MKV flatten the alpha.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> The <code>.frec</code> format version is unchanged — alpha is just a header flag, so alpha files stay playable everywhere and older files read back opaque.</div>
+
+          <h3>Splitting &amp; auto-markers</h3>
+          <ol class="steps">
+            <li><span>Under the split settings for the owned <code>.frec</code>, choose to start a new part file on a <strong>scene switch</strong>, a <strong>marker</strong>, or a <strong>rundown step</strong>. Each part begins on the event's exact frame boundary, with a one-second minimum part length so an event storm can't produce confetti files.</span></li>
+            <li><span>Turn on <strong>Drop chapter markers automatically on studio events</strong> to log scene switches, replay saves, reconnects, dropped-frame bursts, alarms, and rule actions as typed chapter markers — they ride into the mkv chapter titles and the <code>.chapters.txt</code> sidecar, alongside your manual marker hotkey.</span></li>
+          </ol>
+
+          <h3>Post-record pipeline &amp; integrity verifier</h3>
+          <ol class="steps">
+            <li><span>Build a per-profile <strong>Post-record pipeline</strong> from the closed, sandboxed action set — <strong>Verify</strong>, <strong>Remux to MP4</strong>, <strong>Normalize loudness</strong>, <strong>Rename</strong>, <strong>Move to folder</strong> / <strong>Copy to folder</strong>, <strong>Reveal in file manager</strong>, and <strong>Notify Lua scripts</strong>. It runs in the background with a live queue and stops at the first failure; there is deliberately no free-form "run a command" step.</span></li>
+            <li><span>Run the recording integrity verifier (after finalize or on demand) for a plain-language OK / warning / fail report covering <strong>Container</strong>, <strong>Video continuity</strong>, <strong>Audio continuity</strong>, <strong>A/V interleave</strong>, and <strong>Duration</strong>. The owned <code>.frec</code> gets the deep pass; wire files get an honest ffmpeg structure and decode-error scan.</span></li>
+          </ol>
+
+          <h3>SMPTE LTC timecode</h3>
+          <ol class="steps">
+            <li><span>Open <strong>SMPTE Timecode (LTC)</strong>, enable <strong>Generate LTC onto a track</strong> and pick the mixer track and frame rate to feed external recorders and cameras; set <strong>Read LTC from</strong> an audio input to drive a burn-in timecode line on the system-stats overlay and stamp LTC chapter markers. Classic audio timecode, fully offline, round-trip accurate to ±1 frame at 24/25/30 fps.</span></li>
+          </ol>
         </section>
 
         <!-- Go live -->
@@ -461,6 +771,38 @@
           </ol>
         </section>
 
+        <!-- Automation & control (Phase 1, 0.200.0) -->
+        <section id="automation">
+          <h2>Automation &amp; control</h2>
+          <p class="section-intro">Make the studio drive itself with rules, macros, and hardware control surfaces — every one of them routed through a single fixed command allowlist so no automation can ever name a file, spawn a process, or reach the internet.</p>
+
+          <h3>Rules, macros &amp; variables</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Tools → Automation Rules &amp; Macros…</strong> and add a rule: pick one of nine triggers (scene switch, stream state, recording state, source error, audio level crossing, system idle, window focus, time of day, or a watched file changing), add conditions (a variable equals, streaming, recording), and choose a studio action. Every rule ships <strong>disabled</strong> — enable it to arm it.</span></li>
+            <li><span>Build a macro as a named sequence of steps (run an action, wait, set a variable) with a repeat count and an optional global hotkey; run it from the UI, a hotkey, a rule, or the remote API.</span></li>
+            <li><span>Set a studio <strong>variable</strong> in a macro and reference it as <code>{{name}}</code> inside any Text source — the text updates live the moment the macro sets the value.</span></li>
+          </ol>
+
+          <h3>Control surfaces: MIDI, OSC &amp; touch panel</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Tools → MIDI Control…</strong> and MIDI-learn a pad, knob, or fader onto an action, macro, scene switch, mixer fader, or mute — with LED and motor-fader feedback that mirrors the studio's real state. No MIDI port opens until you pick one.</span></li>
+            <li><span>Enable the OSC control surface (<strong>Listen for OSC</strong>) to let TouchOSC-class controllers and lighting desks send addresses like <code>/scene/switch</code>, <code>/record/start</code>, <code>/macro/run</code>, and <code>/mixer/vol</code>. It is off by default and binds loopback unless LAN is enabled; OSC has no password of its own.</span></li>
+            <li><span>Open <strong>Tools → LAN Panel &amp; Tally…</strong> to serve a control page (scene buttons with live tally, mixer faders, action keys) to any phone via a QR code — a password is required on every request and it stays loopback unless you enable LAN. The tally page shows full-screen red/green; add <code>?scene=NAME</code> to watch a single scene.</span></li>
+          </ol>
+
+          <h3>Hotkey chords &amp; layers</h3>
+          <ol class="steps">
+            <li><span>In a hotkey field, bind either a plain key (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>) or a two-stroke chord (<kbd>Ctrl</kbd>+<kbd>K</kbd>, then <kbd>3</kbd>) — the chord's second key is only claimed while the chord is pending. Assign a <strong>Layer</strong> so a binding fires only while that layer is active; layers are sticky, so a layer key switches layers and stays there.</span></li>
+          </ol>
+
+          <h3>Cameras &amp; show rundown</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Tools → PTZ Cameras…</strong>, add a camera by its VISCA-over-IP address, store named pan/tilt/zoom presets, and bind a preset to a scene so going on program auto-recalls that shot. PTZ is LAN-only, and a camera exists only because you entered its address — nothing is discovered.</span></li>
+            <li><span>Open <strong>Tools → Show Rundown…</strong> and order steps (a scene, how long it holds, plus optional actions) with manual or automatic advance and a live "next up + remaining time". Running a rundown switches scenes the ordinary, undoable way and never edits the scene collection.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> Every rule, macro, MIDI/OSC binding, panel button, and rundown step dispatches through one fixed command allowlist — the same one the remote API exposes — so no control surface can reach a command the app's own buttons don't. Every network surface is off by default and binds loopback unless you explicitly enable LAN, and the OSC and LAN-panel settings warn that LAN traffic is unencrypted before the port opens.</div>
+        </section>
+
         <!-- Multistream -->
         <section id="multistream">
           <h2>Multistream</h2>
@@ -472,6 +814,39 @@
             <li><span>Optionally record a separate-track local copy at the same time, and save replays with the replay hotkey while you stream.</span></li>
           </ol>
           <div class="tip"><strong>Free for everyone:</strong> every feature — multistream, SRT/WHIP, advanced filters/scripting, replay presets, the stinger packs, and remote-control automation — is free. No paid tier, no payments, no ads.</div>
+        </section>
+
+        <!-- Streaming reliability & insight (Phase 6, 0.700.0) -->
+        <section id="streaming-insight">
+          <h2>Streaming reliability &amp; insight</h2>
+          <p class="section-intro">Rehearse, measure, and explain your show: drill against a simulated bad network, run the whole pipeline to a private local sink, review a forensic timeline of every event, benchmark what your machine can sustain, and split source visibility between the stream and the recording. Everything ships off or neutral by default and adds no network call.</p>
+
+          <h3>Network-condition simulator</h3>
+          <ol class="steps">
+            <li><span>In <strong>Settings → Stream</strong>, open the <strong>Network simulator (rehearsals)</strong> and choose a <strong>Profile</strong> — <strong>Hotel Wi-Fi</strong>, <strong>Mobile hotspot</strong>, or <strong>Custom</strong> with your own <strong>Bandwidth</strong>, <strong>Latency</strong>, <strong>Jitter</strong>, and scheduled <strong>Outage</strong> timing. It shapes only the rehearsal's local sinks so you can drill reconnects, multistream isolation, and bitrate choices; by construction it can never degrade a real Go Live.</span></li>
+          </ol>
+
+          <h3>Dry-run rehearsal mode</h3>
+          <ol class="steps">
+            <li><span>Press the violet <strong>Rehearse</strong> button to run the whole pipeline — compositor, encoder, mux, and the real reconnect logic — against an owned loopback sink with <strong>zero bytes leaving the machine</strong>. A <strong>REHEARSAL</strong> badge and banner mark every live surface, and stream keys are never even read, so a pre-show dry run works before the keys exist. When prompted, you can optionally also record the rehearsal to a video file.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Pair the dry run with the network simulator to rehearse reconnect behavior against a thin, flapping uplink well before show day.</div>
+
+          <h3>Dropped-frame forensic timeline</h3>
+          <ol class="steps">
+            <li><span>Watch the <strong>Session timeline</strong> record the whole session — render time, encoder queue depth, per-target bitrate and drops, reconnects, scene switches, markers, and alarms on one zoomable graph. Where the stats dock shows <em>now</em>, this answers "what happened at minute 43?" after the fact, sampled off the render loop so the 60 fps compose path gains no work.</span></li>
+          </ol>
+
+          <h3>Session report &amp; encoder benchmark</h3>
+          <ol class="steps">
+            <li><span>Enable <strong>Write a session report (HTML + Markdown) next to the recording</strong> in <strong>Settings → Stream</strong> to get a local write-up on session end: uptime, average and peak bitrate per target, down-time percentage, the reconnect log, markers, alarms, and recording paths. Local only and off by default.</span></li>
+            <li><span>Use <strong>Run encoder benchmark…</strong> to actually run short measured encode ladders (every detected encoder × preset × resolution) on your machine — about a minute, fully offline — then <strong>Apply to recording settings</strong> from the measured recommendation. Failures are listed, not hidden, and the benchmark is refused while you're live or recording so it never steals the encoder mid-show.</span></li>
+          </ol>
+
+          <h3>Per-output source visibility</h3>
+          <ol class="steps">
+            <li><span>On any source row, use the hover toggles — <strong>Show on stream</strong> / <strong>Hide on stream</strong> and <strong>Show in recording</strong> / <strong>Hide in recording</strong> — to keep alerts and chat on the live feed while the VOD recording stays clean, all within a single canvas. The master eye toggle still governs everything, and the operator's preview, projectors, and multiview always show the full program.</span></li>
+          </ol>
         </section>
 
         <!-- Virtual camera -->
@@ -520,6 +895,77 @@
             <li><span>It binds to <kbd>127.0.0.1</kbd> by default; LAN access is an explicit opt-in.</span></li>
             <li><span>Point a Companion / Stream Deck client at the shown WebSocket URL. You can switch scenes, commit transitions, toggle mutes, start/stop recording, and save replays from hardware buttons.</span></li>
           </ol>
+        </section>
+
+        <!-- Remote guests & show production (Phase 7, 0.800.0) -->
+        <section id="production">
+          <h2>Remote guests &amp; show production</h2>
+          <p class="section-intro">Turn a remote-guest session into a produced show: host up to eight guests over an opt-in peer-to-peer connection, draw on the live program, hold guests in a green room, send private cues, monitor each guest's connection, and reflow everyone into an automatic grid. Every new surface is off or unbound by default, and nothing connects until you invite someone.</p>
+
+          <h3>Multi-guest remote sessions</h3>
+          <ol class="steps">
+            <li><span>Invite guests into the opt-in remote-guest session — now <strong>host plus up to eight guests</strong>, a 1–9 gallery. Each guest is its own tile with its own mute gates, connection quality, cue channel, and one-click seating. Media flows directly peer-to-peer between host and guests: no broker, no server you run, and nothing that auto-connects.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> The session is validated to a four-guest performance budget; going beyond that depends on the host's bandwidth and CPU.</div>
+
+          <h3>Telestrator — draw on the live program</h3>
+          <ol class="steps">
+            <li><span>Open the <strong>Telestrator</strong> and pick a tool — <strong>Pen</strong>, <strong>Highlighter</strong>, <strong>Arrow</strong>, or <strong>Ellipse</strong> — then draw straight onto the outgoing program. Marks are composited into the program at the moment you draw them, so they land in both the recording and the stream (including the stream-only / recording-only variants), not just your preview.</span></li>
+            <li><span>Let marks <strong>Fade</strong> after a set time, or switch to <strong>Whiteboard mode</strong> to <strong>Keep</strong> them until you clear. Drawing is tablet-pressure aware, and <strong>Clear marks</strong> is available as a hotkey once you assign it (unbound by default).</span></li>
+          </ol>
+
+          <h3>Green room</h3>
+          <ol class="steps">
+            <li><span>Turn on the <strong>Green room</strong> so new guests land in a private holding state — you see their camera and a cam/mic tech-check in the <strong>Green-room preview</strong>, off-program, before they go live. When they're ready, click <strong>Seat on air</strong> to put them into the show in one step. The guest sees a "you're in the green room" banner on both the desktop app and the web join page.</span></li>
+          </ol>
+
+          <h3>Cue &amp; talk</h3>
+          <ol class="steps">
+            <li><span>Send a connected guest a private <strong>Cue</strong> — including presets like <strong>30 seconds</strong>, <strong>Wrap up</strong>, <strong>You're next</strong>, and <strong>Speak up</strong> — over the existing P2P data channel. The guest sees the cue with a live countdown on their join page or app, never in the program, and it adds no new network surface.</span></li>
+          </ol>
+
+          <h3>Connection-quality dashboard</h3>
+          <ol class="steps">
+            <li><span>Watch the live per-guest QoS roll-up — round-trip time, packet loss, received resolution and framerate, and jitter — with a green/amber/red badge and a history sparkline, so "your connection is degrading" is visible before viewers ever notice.</span></li>
+          </ol>
+
+          <h3>Auto-grid guest layouts</h3>
+          <ol class="steps">
+            <li><span>Enable <strong>Auto-grid</strong> to keep seated guests arranged in a non-overlapping 1–9 grid that reflows as guests join, leave, or are seated, or press the arrange control to reflow them now. Each seat publishes its name as a <code>{{guestN}}</code> variable, so a title source becomes an auto-updating nameplate.</span></li>
+          </ol>
+        </section>
+
+        <!-- Studio management & workflow (Phase 8, 0.900.0) -->
+        <section id="studio-management">
+          <h2>Studio management &amp; workflow</h2>
+          <p class="section-intro">Make a whole layout portable and shareable, keep versioned checkpoints of your scenes, theme the app, and put your most-used actions one tap away — all strictly local, with no server and no new network calls.</p>
+
+          <h3>Scene packs &amp; version control</h3>
+          <ol class="steps">
+            <li><span>Open the Workspace dialog from <strong>Scene Collection → Manage Scene Collections…</strong> — the pack, compare, snapshot, backup, and dock-layout tools all live here.</span></li>
+            <li><span>Click <strong>Export pack…</strong> to bundle the active collection plus its local assets (images, media, LUTs, masks, fonts) into a single portable <code>.fcappack</code>. URL and UNC paths are recorded as <em>external</em> rather than bundled, and fonts are flagged for attribution.</span></li>
+            <li><span>Click <strong>Import pack…</strong> and pick a <code>.fcappack</code> — it lands as a new collection, relinks its assets on this machine, and switches to it.</span></li>
+            <li><span>Click <strong>Compare &amp; merge…</strong> to diff the active collection against another collection, a <code>.fcappack</code>, or a snapshot; review added / removed / changed scenes, sources, transforms, filters, and visibility, then cherry-pick exactly which changes to merge in. Picking a scene also brings the sources it uses.</span></li>
+            <li><span>Click <strong>Snapshots…</strong>, name a checkpoint, and choose <strong>Save snapshot</strong>. Use <strong>Restore</strong> later to return to it — your current layout is saved as a snapshot first, so a restore is never one-way. Snapshots are capped at 50 with disk usage shown.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Snapshots are intentional, named history that sits beside autosave and undo — use them before a risky edit so you always have a labeled point to come back to.</div>
+
+          <h3>Backup, restore &amp; portable mode</h3>
+          <ol class="steps">
+            <li><span>In the Workspace dialog, click <strong>Backup &amp; restore…</strong>, then <strong>Export backup…</strong> to save everything — settings, profiles, and scene collections — to one versioned <code>.fcapbackup</code>.</span></li>
+            <li><span>To move to a new machine, click <strong>Restore from backup…</strong>, tick which parts to bring in (<strong>Settings</strong>, <strong>Scene collections</strong>, <strong>Profiles</strong>), and choose <strong>Restore selected</strong>. Restart Freally Capture afterward to load restored collections and profiles.</span></li>
+            <li><span>To run from a USB stick, drop a <code>freally-portable.txt</code> file next to the executable — all app data then lives under the exe's folder instead of the host OS profile. <strong>Settings → About</strong> shows the portable status and the data-folder location.</span></li>
+          </ol>
+          <div class="warn"><strong>Note:</strong> Stream keys and passwords are never written into a <code>.fcapbackup</code> — re-enter them after restoring. Server-owned fields (EULA acceptance, onboarding, camera profiles) are preserved on restore.</div>
+
+          <h3>Theming, layout &amp; quick actions</h3>
+          <ol class="steps">
+            <li><span>Open <strong>Settings → Appearance</strong> and pick the <strong>Custom</strong> theme to reveal the palette editor. Author the full six-colour palette with live <strong>WCAG contrast</strong> warnings, then use <strong>Export .fctheme…</strong> / <strong>Import .fctheme…</strong> to share it as a <code>.fctheme</code> file.</span></li>
+            <li><span>In the Workspace dialog's <strong>Dock layouts</strong> section, save the current arrangement under a name (a layout remembers stats-dock visibility and mixer orientation) and click any saved layout to switch to it.</span></li>
+            <li><span>In the Settings modal, type in the <strong>Search settings…</strong> field to jump straight to any setting; a per-category marker flags what has changed since you opened Settings.</span></li>
+            <li><span>Choose <strong>Tools → Quick actions…</strong> to open the button grid. Click <strong>Edit</strong>, then <strong>Add button</strong>, set each button's label and colour, and add <strong>Page</strong>s. Buttons fire scenes, macros, soundboard pads, and studio commands.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Quick-action command buttons fire the same allowlisted studio commands as hotkeys, and the grid's config is shared with the LAN touch panel — set it up once and it shows up on your phone too.</div>
         </section>
 
         <!-- Settings -->
@@ -588,5 +1034,8 @@
         onScroll();
       })();
     </script>
+    <!-- Unified cross-app documentation search. -->
+    <script src="search-index.js"></script>
+    <script src="search.js"></script>
   </body>
 </html>

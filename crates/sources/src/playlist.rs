@@ -14,7 +14,9 @@
 //!   `.frec` and still images play through Media/Slideshow instead.
 //! - A playlist is either video items or audio-only items; a mix errors
 //!   readably at start (the concat demuxer needs one stream shape).
-//!   Audio-only playlists draw their own "now playing" face.
+//!   Audio-only playlists paint a small "now playing" face of the current
+//!   track's name (background music hides it — pure sound). The name is also
+//!   published on a variable any Text source can show.
 //! - Shuffle draws one order per session start (a looping shuffle repeats
 //!   that order — said in the picker, not hidden).
 //! - Mixed resolutions normalize to the first video item's geometry
@@ -33,7 +35,7 @@ use crate::media::{
 };
 use crate::text::{render_text, TextAlign, TextStyle};
 
-/// The audio-only lane's face geometry + cadence.
+/// The audio-only lane's "now playing" face geometry + poll cadence.
 const AUDIO_FACE_W: u32 = 640;
 const AUDIO_FACE_H: u32 = 160;
 const AUDIO_FACE_POLL: Duration = Duration::from_millis(500);
@@ -53,6 +55,9 @@ pub struct PlaylistConfig {
     pub shuffle: bool,
     pub hold_last: bool,
     pub hw_decode: bool,
+    /// Audio-only lane: suppress the on-canvas track-list face (background
+    /// music). Ignored for video playlists.
+    pub hidden_face: bool,
 }
 
 /// The published timeline: played order, names, cumulative starts.
@@ -288,6 +293,8 @@ pub fn start_playlist(
             .expect("video lane");
         (first.width, first.height)
     } else {
+        // The audio-only "now playing" face (background music renders it
+        // transparent, but the buffer size is the same).
         (AUDIO_FACE_W, AUDIO_FACE_H)
     };
     // The transport clock is `frames / fps`, so the decoder normalizes the
@@ -318,6 +325,7 @@ pub fn start_playlist(
         looping: config.looping,
         hold_last: config.hold_last,
         hw_decode: config.hw_decode,
+        hidden_face: config.hidden_face,
     };
     let join = std::thread::Builder::new()
         .name("fcap-playlist".into())
@@ -338,6 +346,7 @@ struct PlaylistRun {
     looping: bool,
     hold_last: bool,
     hw_decode: bool,
+    hidden_face: bool,
 }
 
 enum StretchEnd {
@@ -435,7 +444,8 @@ fn run_playlist(run: PlaylistRun, hub_id: String, sender: FrameSender, stop: Arc
 }
 
 /// One stretch: pump the pipes until stop/seek/EOF. The video lane sends
-/// decoded frames; the audio-only lane draws its "now playing" face.
+/// decoded frames; the audio-only lane paints the current track's name (or
+/// one transparent frame when the face is hidden for background music).
 #[allow(clippy::too_many_arguments)]
 fn run_stretch(
     run: &PlaylistRun,
@@ -540,9 +550,24 @@ fn run_stretch(
             publish_transport(hub_id, position, duration);
         }
     } else {
-        // Audio-only lane: the position clock is the pushed sample count;
-        // the face repaints when the playing item changes.
-        let mut last_face: Option<String> = None;
+        // Audio-only lane: the position clock is the pushed sample count.
+        // Unless it is background music (`hidden_face`), the source paints a
+        // "now playing" face of the CURRENT track's name — repainted only
+        // when the playing index changes. Background music instead emits one
+        // transparent frame (an invisible source) while its audio flows from
+        // the decode ring; the current track is still on the transport for a
+        // "now playing" Text-source variable either way.
+        if run.hidden_face {
+            sender.send(Frame {
+                width: run.width,
+                height: run.height,
+                stride: run.width * 4,
+                format: PixelFormat::Rgba8,
+                data: vec![0u8; (run.width * run.height * 4) as usize],
+                captured_at: Instant::now(),
+            });
+        }
+        let mut last_index: Option<usize> = None;
         loop {
             if stop.load(Ordering::Relaxed) || !sender.is_open() {
                 break StretchEnd::Stopped;
@@ -556,28 +581,32 @@ fn run_stretch(
             let raw = seek_base + pushed;
             let position = if duration > 0.0 { raw % duration } else { raw };
             publish_transport(hub_id, position, duration);
-            let name = run
-                .table
-                .names
-                .get(run.table.index_at(position))
-                .cloned()
-                .unwrap_or_default();
-            if last_face.as_ref() != Some(&name) {
-                if let Ok(raster) = render_text(&TextStyle {
-                    text: format!("♪ {name}"),
-                    font_family: None,
-                    font_file: None,
-                    size_px: 40.0,
-                    color: [255, 255, 255, 255],
-                    align: TextAlign::Left,
-                    line_spacing: 1.0,
-                    force_rtl: false,
-                    wrap_width: Some(run.width.saturating_sub(16)),
-                    ..TextStyle::default()
-                }) {
-                    sender.send(raster);
+            if !run.hidden_face {
+                let index = run.table.index_at(position);
+                if last_index != Some(index) {
+                    // A blank display name (whitespace-only stem) would render
+                    // the 1×1 transparent frame — keep a visible marker so the
+                    // source never silently disappears from the canvas.
+                    let mut name = run.table.names.get(index).cloned().unwrap_or_default();
+                    if name.trim().is_empty() {
+                        name = "-".to_string();
+                    }
+                    if let Ok(raster) = render_text(&TextStyle {
+                        text: name,
+                        font_family: None,
+                        font_file: None,
+                        size_px: 40.0,
+                        color: [255, 255, 255, 255],
+                        align: TextAlign::Left,
+                        line_spacing: 1.0,
+                        force_rtl: false,
+                        wrap_width: Some(run.width.saturating_sub(24)),
+                        ..TextStyle::default()
+                    }) {
+                        sender.send(raster);
+                    }
+                    last_index = Some(index);
                 }
-                last_face = Some(name);
             }
             // The audio pump ending is this lane's EOF signal.
             if let Some(handle) = audio_thread.as_ref() {

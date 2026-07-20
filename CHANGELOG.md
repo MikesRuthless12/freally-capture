@@ -5,15 +5,69 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: in development.** The studio MVP shipped at **0.70.0** (single-target streaming +
-> Studio Mode); **0.85.0** adds the streaming depth — simultaneous multistream, SRT/WHIP,
-> vertical/multi-canvas, the replay buffer, and the scene/source/filter/encoder depth. The
-> release ladder below tracks the plan to 1.0.0.
+> **Status: stable.** **1.0.0** completes the counted 100-feature roadmap (all 26 CAP-M must-haves
+> + all 74 CAP-N nice-to-haves) plus the five launch-polish features. The ladder below records how
+> it got here, from the 0.70.0 studio MVP up.
 
 ## [Unreleased]
 
-> **0.99.0 closes all 26 CAP-M must-haves.** 1.0.0 is gated on the *complete* feature set, so the
-> remaining themed phases land first.
+## [1.0.0] — 2026-07-19 (Stable — Stream-Production Overlays & Launch Polish)
+
+> **The 1.0.0 stable.** The counted 100-feature gate (26 CAP-M must-haves + 74 CAP-N nice-to-haves)
+> was met at 0.900.0; this release ships the five launch-polish features parked for 1.0.0 — the
+> pre-show countdown slate, a social bar, a featured chat banner, modal depth-of-field, and scene
+> history hygiene — plus a round of player/audio fixes. Everything new ships off/unbound by default,
+> stays local, and adds no network call.
+
+### Added
+
+- **"Starting Soon" countdown slate (V1-C)** — one click from Add Source: a full-canvas countdown
+  (caption over a big clock) that counts down TO a wall-clock time picked on a 12-hour clock picker
+  (hours 1–12, minutes in 5-minute steps, AM/PM). At zero it **flashes and holds** — the host clears
+  it and cuts to live by hand, never an auto-switch. Backdrops: a two-colour gradient, a solid, a
+  still image (embedded contain-fit, centred, never cropped), or a **GIF/video** riding the scene's
+  looping backdrop — with optional **background music** (mp3/wav/flac/m4a/aac/ogg/opus) picked in the
+  same dialog. The countdown composites into the program, so viewers of the stream/recording see it.
+- **Background Music source** — Add Source → Background Music…: one or more audio files as an
+  invisible looping playlist (optional shuffle), auto-monitored so it is heard in preview and
+  captured to the recording/stream; adding it mutes a video backdrop's own audio so **only one
+  background sound ever plays**.
+- **Social & channels bar source (V1-D)** — a generated overlay listing your handles: bundled
+  platform rows (YouTube, Twitch, Kick, X, Instagram, TikTok, Facebook, Discord) as brand-coloured
+  badges plus custom rows and an optional header; every row/handle editable in Properties.
+- **Featured chat message banner (V1-E)** — pick any recent chat line (across every running chat
+  overlay) and pin it to the program as a styled bottom banner; colours persist in Settings, the pin
+  itself is deliberately transient. Cleared with one click.
+- **Modal depth-of-field (V1-A)** — every modal blurs and dims the studio behind it (theme-aware,
+  honours reduced-motion/transparency); companion surfaces like the teleprompter stay unblurred so
+  the operator can keep reading.
+- **Scene history hygiene (V1-B)** — a Recent Scenes list with a one-click **Clear History**
+  (confirmed), plus Scene Collection → Clear History to bulk-delete junk collections (the active one
+  is never touched).
+- **Audio visualizer classic colours** — a Properties checkbox switches the bars/VU to the classic
+  green→yellow→red broadcast ramp (scope gets phosphor green); off = the single solid colour.
+- **Record a rehearsal** — starting a rehearsal now offers to also record it to a normal video file
+  (only when nothing is already recording; the recording stops with the rehearsal), so a dry run can
+  become an edit-and-upload master without ever going live.
+
+### Fixed
+
+- **Media Playlist had no mixer strip** — the UI's audio-kind list was missing `playlist` (and
+  `replayPlayback`), so playlists could not be faded, muted, or monitored; both now get strips.
+- **Audio-only playlist face** — now shows the **current track's name** (clean text, no broken
+  glyph box); background-music playlists draw nothing at all. Video playlists are unchanged.
+- **Countdown/backdrop fit** — image/GIF/video backdrops letterbox (contain) and centre instead of
+  cover-cropping, so the whole picture is always visible.
+- **Review round (pre-release)** — the security pass caught one HIGH: the countdown slate's image
+  path was read in the render loop without the network-path guard every sibling path has (a UNC
+  path would leak the NTLM hash to a hostile scene collection) — now refused up front. The code
+  review caught 11 more, all fixed: a render-loop panic on canvases narrower than 240 px, a stale
+  rehearsal-recording flag that could stop a recording the user started by hand, the Recent Scenes
+  list showing the scene already on program (and undo/redo reverting that session-only list), banner
+  colour changes not repainting an already-pinned banner, the clock picker silently rounding legacy
+  non-5-minute targets, a failed slate image retrying (and logging) every second, a transparent
+  slate PNG rendering opaque, and assorted duplication now shared (one audio-extension list, one
+  clock picker, one rounded-rect painter).
 
 ## [0.910.0] — 2026-07-19 (Teleprompter Rework)
 

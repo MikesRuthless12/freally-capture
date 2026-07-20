@@ -341,6 +341,34 @@ pub fn collection_switch<R: Runtime>(
     Ok(collections_list(state))
 }
 
+/// Permanently delete every named scene collection EXCEPT the active one — the
+/// "Clear History" tidy-up for the pile of throwaway collections that accrue
+/// with no per-item remove. The active collection is never touched (it is the
+/// loaded document), and the always-present "Default" lives in its own file
+/// outside the `collections` dir, so it is never in this list. The UI confirms
+/// (listing the names) before calling — this side just deletes.
+#[tauri::command]
+pub fn collections_clear(state: State<'_, WorkspaceState>) -> Result<NamedList, String> {
+    let base = state.base()?.to_path_buf();
+    let active = state.lock().collection.clone();
+    let mut removed = 0usize;
+    for name in list_names(&state, "collections") {
+        if name == active {
+            continue; // never delete the loaded document
+        }
+        let path = crate::studio::collection_file(&base, &name);
+        // Belt-and-braces: only ever unlink a *.json under the collections dir.
+        if path.parent().and_then(|p| p.file_name()) == Some(std::ffi::OsStr::new("collections")) {
+            match std::fs::remove_file(&path) {
+                Ok(()) => removed += 1,
+                Err(err) => eprintln!("collections_clear: keeping {name:?} — {err}"),
+            }
+        }
+    }
+    println!("collections: cleared {removed} collection(s), kept {active:?}");
+    Ok(collections_list(state))
+}
+
 /// Turn an OBS collection name into a safe, unique collection name: keep only
 /// whitelisted characters, cap the stem so a ` N` suffix still fits, fall back
 /// to `"Imported"`, then bump a counter until it does not clash.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import {
   audioInputDevices,
@@ -24,6 +25,7 @@ import type {
   CameraControl,
   CaptureSource,
   CountdownEnd,
+  CountdownSlate,
   DeinterlaceMode,
   FieldOrder,
   FileBinding,
@@ -42,13 +44,22 @@ import type {
   VisStyle,
 } from "../api/types";
 import { hexToRgba, rgbaToHex } from "../lib/color";
-import { INPUT_LAYOUTS, REPLAY_SPEEDS, VIS_STYLES } from "../lib/sourceOptions";
+import {
+  INPUT_LAYOUTS,
+  REPLAY_SPEEDS,
+  SLATE_GRADIENT_FROM,
+  SLATE_GRADIENT_TO,
+  SLATE_SOLID,
+  VIS_STYLES,
+} from "../lib/sourceOptions";
 import { titleTextLayer } from "../lib/titleLayers";
 import { parseVisTarget, visTargetKey } from "../lib/visTarget";
 import { useT } from "../i18n/t";
+import { ClockSelect } from "./ClockSelect";
 import { LanIngestFields } from "./LanIngestFields";
 import { NumberField } from "./NumberField";
 import { PickerShell } from "./PickerShell";
+import { SocialBarFields } from "./SocialBarFields";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -507,6 +518,13 @@ function SettingsEditor({
       return <TextEditor draft={draft} onChange={onChange} />;
     case "title":
       return <TitleEditor draft={draft} sourceId={sourceId} onChange={onChange} />;
+    case "socialBar":
+      return (
+        <SocialBarFields
+          value={draft}
+          onChange={(next) => onChange({ kind: "socialBar", ...next })}
+        />
+      );
     case "timer":
       return <TimerEditor draft={draft} scenes={scenes} sourceId={sourceId} onChange={onChange} />;
     case "systemStats":
@@ -668,6 +686,14 @@ function SettingsEditor({
               onChange={(event) => onChange({ ...draft, peakHold: event.target.checked })}
             />
             {t("properties-vis-peak-hold")}
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.classic}
+              onChange={(event) => onChange({ ...draft, classic: event.target.checked })}
+            />
+            {t("sources-visualizer-classic")}
           </label>
           <p className="m-0 text-[10px] leading-snug text-havoc-muted">
             {t("sources-visualizer-note")}
@@ -1600,6 +1626,46 @@ function TimerEditor({
   const control = (action: "start" | "pause" | "reset") => {
     studioTimerControl(sourceId, action).catch((err) => console.error(err));
   };
+  // V1-C: the "Starting Soon" slate. `off` keeps the classic inline face;
+  // switching modes seeds sensible default colours, kept when re-selecting.
+  const slateMode = draft.slate?.kind ?? "off";
+  const setSlateMode = (mode: "off" | "transparent" | "solid" | "gradient" | "image") => {
+    let slate: CountdownSlate | null;
+    if (mode === "off") slate = null;
+    else if (mode === "transparent") slate = { kind: "transparent" };
+    else if (mode === "solid")
+      slate = draft.slate?.kind === "solid" ? draft.slate : { kind: "solid", color: SLATE_SOLID };
+    else if (mode === "gradient")
+      slate =
+        draft.slate?.kind === "gradient"
+          ? draft.slate
+          : { kind: "gradient", from: SLATE_GRADIENT_FROM, to: SLATE_GRADIENT_TO };
+    else slate = draft.slate?.kind === "image" ? draft.slate : { kind: "image", path: "" };
+    onChange({ ...draft, slate });
+  };
+  // A file browser for the slate image — still images only (the face embeds
+  // them). Wrapped so a cancel or a vanished file never throws.
+  const chooseSlateImage = async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: t("backdrop-filter-images"),
+            extensions: ["png", "jpg", "jpeg", "bmp", "webp", "gif", "tif", "tiff"],
+          },
+        ],
+      });
+      if (typeof picked === "string")
+        onChange({ ...draft, slate: { kind: "image", path: picked } });
+    } catch (err) {
+      console.error("slate image pick failed:", err);
+    }
+  };
+  // Narrowed once — the color handlers' closures keep the gradient type
+  // without re-checking a state the render guard already excludes.
+  const gradientSlate = draft.slate?.kind === "gradient" ? draft.slate : null;
   return (
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
@@ -1652,7 +1718,26 @@ function TimerEditor({
       )}
       {draft.mode === "countdown" && (
         <>
-          <div className="flex items-end gap-2">
+          <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+            <input
+              type="checkbox"
+              checked={draft.target.trim() !== ""}
+              onChange={(event) =>
+                onChange({ ...draft, target: event.target.checked ? "12:00" : "" })
+              }
+            />
+            {t("properties-timer-clock")}
+          </label>
+          {draft.target.trim() !== "" ? (
+            <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+              {t("sources-starting-soon-start-at")}
+              <ClockSelect
+                value={draft.target}
+                onChange={(target) => onChange({ ...draft, target })}
+                selectClass={inputClass}
+              />
+            </label>
+          ) : (
             <NumberField
               label={t("properties-timer-duration")}
               value={Math.round(draft.countdownMs / 1000)}
@@ -1661,21 +1746,8 @@ function TimerEditor({
               onCommit={(seconds) =>
                 onChange({ ...draft, countdownMs: Math.round(seconds) * 1000 })
               }
-              className="flex-1"
             />
-            <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
-              {t("properties-timer-target")}
-              <input
-                value={draft.target}
-                onChange={(event) => onChange({ ...draft, target: event.target.value })}
-                placeholder="19:30"
-                className={`${inputClass} font-mono`}
-              />
-            </label>
-          </div>
-          <p className="m-0 text-[10px] leading-snug text-havoc-muted">
-            {t("properties-timer-target-note")}
-          </p>
+          )}
           <div className="flex items-end gap-2">
             <label className="flex flex-1 flex-col gap-1 text-[11px] text-havoc-muted">
               {t("properties-timer-end")}
@@ -1711,6 +1783,117 @@ function TimerEditor({
               </label>
             )}
           </div>
+          {/* V1-C: the full-canvas "Starting Soon" slate. */}
+          <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+            {t("properties-timer-slate")}
+            <select
+              value={slateMode}
+              onChange={(event) =>
+                setSlateMode(
+                  event.target.value as "off" | "transparent" | "solid" | "gradient" | "image",
+                )
+              }
+              className={inputClass}
+            >
+              <option value="off">{t("properties-timer-slate-off")}</option>
+              <option value="solid">{t("sources-slate-solid")}</option>
+              <option value="gradient">{t("sources-slate-gradient")}</option>
+              <option value="image">{t("sources-slate-image")}</option>
+              <option value="transparent">{t("sources-slate-transparent")}</option>
+            </select>
+          </label>
+          {slateMode !== "off" && (
+            <>
+              <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                {t("properties-timer-message")}
+                <input
+                  value={draft.message}
+                  onChange={(event) => onChange({ ...draft, message: event.target.value })}
+                  placeholder={t("sources-starting-soon-default")}
+                  className={inputClass}
+                />
+              </label>
+              {draft.slate?.kind === "image" && (
+                <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
+                  {t("properties-image-file")}
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={draft.slate.path}
+                      onChange={(event) =>
+                        onChange({ ...draft, slate: { kind: "image", path: event.target.value } })
+                      }
+                      placeholder="C:\art\starting-soon.png"
+                      className={`${inputClass} min-w-0 flex-1`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void chooseSlateImage()}
+                      className="shrink-0 rounded-md border border-white/10 px-2.5 py-1.5 text-[11px] text-havoc-muted hover:text-havoc-text"
+                    >
+                      {t("sources-slate-browse")}
+                    </button>
+                  </div>
+                </label>
+              )}
+              <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                {t("sources-slate-media-note")}
+              </p>
+              {draft.slate?.kind === "solid" && (
+                <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+                  {t("properties-timer-slate-color")}
+                  <input
+                    type="color"
+                    value={rgbaToHex(draft.slate.color)}
+                    onChange={(event) =>
+                      onChange({
+                        ...draft,
+                        slate: { kind: "solid", color: hexToRgba(event.target.value, 255) },
+                      })
+                    }
+                    aria-label={t("properties-timer-slate-color")}
+                    className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+                  />
+                </label>
+              )}
+              {gradientSlate && (
+                <div className="flex items-center gap-4 text-[11px] text-havoc-muted">
+                  <label className="flex items-center gap-2">
+                    {t("properties-timer-slate-from")}
+                    <input
+                      type="color"
+                      value={rgbaToHex(gradientSlate.from)}
+                      onChange={(event) =>
+                        onChange({
+                          ...draft,
+                          slate: { ...gradientSlate, from: hexToRgba(event.target.value, 255) },
+                        })
+                      }
+                      aria-label={t("properties-timer-slate-from")}
+                      className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    {t("properties-timer-slate-to")}
+                    <input
+                      type="color"
+                      value={rgbaToHex(gradientSlate.to)}
+                      onChange={(event) =>
+                        onChange({
+                          ...draft,
+                          slate: { ...gradientSlate, to: hexToRgba(event.target.value, 255) },
+                        })
+                      }
+                      aria-label={t("properties-timer-slate-to")}
+                      className="h-7 w-12 cursor-pointer rounded border border-white/10 bg-transparent"
+                    />
+                  </label>
+                </div>
+              )}
+              <p className="m-0 text-[10px] leading-snug text-havoc-muted">
+                {t("properties-timer-slate-note")}
+              </p>
+            </>
+          )}
         </>
       )}
       <div className="flex items-end gap-2">

@@ -160,6 +160,20 @@ export type SoundboardPad = {
 
 export type SoundboardSettings = { pads: SoundboardPad[] };
 
+/** V1-E: the featured chat banner's persisted styling (`#rrggbb`). */
+export type FeaturedBannerSettings = {
+  bg: string;
+  text: string;
+};
+
+/** V1-E: one chat line as the featured-banner picker sees it. */
+export type ChatLine = {
+  platform: string;
+  username: string;
+  text: string;
+  atUnixMs: number;
+};
+
 export type Settings = {
   language: string;
   showStatsDock: boolean;
@@ -192,6 +206,8 @@ export type Settings = {
   /** CAP-N19: capture id → cursor effects. Server-owned — written by
    * cursorFxSet and PRESERVED across settingsSet (never edit here). */
   cursorFx?: Record<string, CursorFxSetting>;
+  /** V1-E: the featured chat banner's colors (the pin itself is transient). */
+  featuredBanner: FeaturedBannerSettings;
   /** Recording output configuration (Phase 4). */
   recording: RecordingSettings;
   /** Remote Guests networking (Phase R). */
@@ -1110,6 +1126,16 @@ export type TimerMode = "wallClock" | "countdown" | "stopwatch" | "sinceLive" | 
 /** What a countdown does at zero (CAP-M15). */
 export type CountdownEnd = "none" | "flash" | "switchScene";
 
+/** V1-C: the full-canvas background a countdown "slate" ("Starting Soon")
+ * paints behind its number. Absent/null on a timer = the classic inline face;
+ * `transparent` lays the slate out but paints no fill, so an image/gif/video
+ * source or scene backdrop composited beneath it shows through. */
+export type CountdownSlate =
+  | { kind: "transparent" }
+  | { kind: "solid"; color: Rgba }
+  | { kind: "gradient"; from: Rgba; to: Rgba }
+  | { kind: "image"; path: string };
+
 /** How a Text source's bound file parses (CAP-M16). */
 export type FileBinding = "whole" | "csvCell" | "jsonPointer";
 
@@ -1218,6 +1244,30 @@ export type InputLayout = "wasd" | "keyboard" | "gamepad" | "fightstick";
 /** CAP-N15: what the audio visualizer listens to. */
 export type VisTargetKind = "master" | "track" | "source";
 
+/** V1-D: a bundled social platform (its brand colour + name are baked into the
+ * renderer) or a user-defined `custom` row. */
+export type SocialPlatform =
+  | "youtube"
+  | "twitch"
+  | "kick"
+  | "twitter"
+  | "instagram"
+  | "tiktok"
+  | "facebook"
+  | "discord"
+  | "custom";
+
+/** V1-D: one social-bar account row. */
+export type SocialRow = {
+  platform: SocialPlatform;
+  /** The handle shown (e.g. "@mychannel"); blank = the row is skipped. */
+  handle: string;
+  /** The badge label for `custom` (ignored for bundled platforms). */
+  label: string;
+  /** The badge colour for `custom` (ignored for bundled platforms). */
+  color: Rgba;
+};
+
 /** Per-kind source settings (serde tag = `kind`). */
 export type SourceSettings =
   | { kind: "display"; captureId: string; label: string }
@@ -1306,6 +1356,11 @@ export type SourceSettings =
       fontFile?: string | null;
       sizePx: number;
       color: Rgba;
+      /** V1-C: line shown above the number in slate mode (e.g. "Starting
+       * Soon"). Empty = none. Ignored unless `slate` is set. */
+      message: string;
+      /** V1-C: when set, the timer renders as a full-canvas countdown slate. */
+      slate?: CountdownSlate | null;
     }
   | {
       kind: "systemStats";
@@ -1338,6 +1393,8 @@ export type SourceSettings =
       peakHold: boolean;
       /** Bar fall rate, dB/s (the renderer clamps to 6–120). */
       decay: number;
+      /** V1-C: classic level colours (green→yellow→red VU/bars, phosphor scope). */
+      classic: boolean;
     }
   | {
       kind: "splitTimer";
@@ -1366,6 +1423,8 @@ export type SourceSettings =
       hwDecode: boolean;
       /** The studio variable fed the playing item's name ("" = off). */
       nowPlayingVariable: string;
+      /** Audio-only: hide the on-canvas track-list face (background music). */
+      hiddenFace: boolean;
     }
   | {
       kind: "replayPlayback";
@@ -1402,6 +1461,19 @@ export type SourceSettings =
       durationMs: number;
     }
   | {
+      kind: "socialBar";
+      /** An optional title line above the rows ("" = none). */
+      header: string;
+      rows: SocialRow[];
+      /** System font family; null = the bundled default face (a name, never a path). */
+      fontFamily?: string | null;
+      sizePx: number;
+      /** The header + handle text colour. */
+      color: Rgba;
+      /** The panel's semi-transparent background. */
+      background: Rgba;
+    }
+  | {
       kind: "freallyLink";
       /** The sending instance's address — an IPv4/hostname, no scheme. */
       host: string;
@@ -1421,6 +1493,8 @@ export function kindHasAudio(kind: SourceKindName): boolean {
     kind === "audioOutput" ||
     kind === "appAudio" ||
     kind === "media" ||
+    kind === "playlist" ||
+    kind === "replayPlayback" ||
     kind === "remoteGuest" ||
     kind === "lanIngest" ||
     kind === "freallyLink" ||
@@ -1701,7 +1775,7 @@ export type DisplayInfo = {
 /** Where a scene's backdrop wallpaper sits: the whole canvas (cover-fit) or
  * one half (fit-contained there, the capture free to take the other half).
  * Mirrors `BackdropSplit` in Rust. */
-export type BackdropSplit = "full" | "left" | "right" | "top" | "bottom";
+export type BackdropSplit = "full" | "fit" | "left" | "right" | "top" | "bottom";
 
 /** Pixel-perfect scaling (CAP-N70). Mirrors `ScaleMode` in Rust: `auto` is
  * the ordinary smooth bilinear; `integer` also snaps the drawn scale to
@@ -1835,6 +1909,9 @@ export type Collection = {
 export type StudioDto = {
   revision: number;
   collection: Collection;
+  /** Recently-live scenes for the "Recent Scenes" quick-recall list (V1-B),
+   * most-recent first. Session-only; absent while empty. */
+  recentScenes?: SceneId[];
   /** Studio Mode (Phase 5): present while enabled. */
   studioMode?: StudioModeDto;
   /** Undo/redo availability + the viewable history list (CAP-M01). */

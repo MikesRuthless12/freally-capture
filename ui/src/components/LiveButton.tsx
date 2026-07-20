@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { streamStart, streamStartRehearsal, streamStatus, streamStop } from "../api/commands";
+import {
+  recordingStart,
+  recordingStatus,
+  recordingStop,
+  streamStart,
+  streamStartRehearsal,
+  streamStatus,
+  streamStop,
+} from "../api/commands";
 import { onStream } from "../api/events";
 import type { Settings, StreamStatus } from "../api/types";
 import { PreflightDialog } from "../panels/PreflightDialog";
@@ -38,6 +46,10 @@ export function LiveButton({
   const [error, setError] = useState<string | null>(null);
   // The go-live pre-flight checklist (CAP-M09).
   const [preflight, setPreflight] = useState(false);
+  // Task #10: did WE auto-start a recording for the current rehearsal? (So we
+  // stop only our own recording when the rehearsal ends — never one the user
+  // started by hand.)
+  const autoRecording = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -45,7 +57,15 @@ export function LiveButton({
     streamStatus()
       .then((current) => alive && setStatus(current))
       .catch(() => alive && setStatus(null));
-    onStream((next) => setStatus(next))
+    onStream((next) => {
+      setStatus(next);
+      // A session that ends by ANY path (failure after spent retries, panic,
+      // automation) invalidates the auto-recording claim — without this, a
+      // later End Stream would stop a recording the user started by hand.
+      if (next.state !== "live" && next.state !== "reconnecting") {
+        autoRecording.current = false;
+      }
+    })
       .then((fn) => {
         if (alive) unlisten = fn;
         else fn();
@@ -85,7 +105,29 @@ export function LiveButton({
   const start = () => launch(streamStart, ["stream key", "ingest"]);
   // CAP-N49: the rehearsal is itself the check, so it skips the pre-flight
   // dialog (and never reads keys) — a keyless pre-show dry run must work.
-  const rehearse = () => launch(streamStartRehearsal, ["stream target"]);
+  // Task #10: offer to ALSO record the dry run to a file (a keeper you can
+  // edit/upload yourself) — only when nothing is recording already, and we
+  // stop that recording ourselves when the rehearsal ends.
+  const rehearse = async () => {
+    let alsoRecord = false;
+    try {
+      const rec = await recordingStatus();
+      if (rec.state === "idle") {
+        alsoRecord = window.confirm(t("livebutton-rehearse-record-confirm"));
+      }
+    } catch {
+      // No recording status — skip the offer rather than block the rehearsal.
+    }
+    // The shared launch path (busy/error + component/settings routing), with
+    // the optional recording chained after the rehearsal starts.
+    await launch(async () => {
+      await streamStartRehearsal();
+      if (alsoRecord) {
+        await recordingStart();
+        autoRecording.current = true;
+      }
+    }, ["stream target"]);
+  };
 
   const toggle = async () => {
     if (!live) {
@@ -96,8 +138,16 @@ export function LiveButton({
     }
     setBusy(true);
     setError(null);
+    // Read the claim BEFORE stopping: the stream event that lands during the
+    // await clears the ref (any non-live state does), which would otherwise
+    // leave our own rehearsal recording running.
+    const wasAutoRecording = autoRecording.current;
+    autoRecording.current = false;
     try {
       await streamStop();
+      if (wasAutoRecording) {
+        await recordingStop();
+      }
     } catch (raw) {
       setError(String(raw));
     } finally {

@@ -265,6 +265,7 @@ pub fn import_obs(json: &str) -> Result<ObsImport, ObsImportError> {
         scenes,
         active_scene,
         hidden_muted: std::collections::HashSet::new(),
+        recent_scenes: Vec::new(),
         vertical: None,
         downstream: Vec::new(),
         transition_overrides: Vec::new(),

@@ -46,6 +46,7 @@ const settings = (mode: ThemeMode): Settings => ({
   monitorDevice: null,
   mixerLayout: "horizontal",
   theme: { mode, accent: "#4a9eff" },
+  featuredBanner: { bg: "#101a2a", text: "#ffffff" },
   alignment: { smartGuides: true, safeAreas: false, rulers: false },
   accessibility: {
     meterPreset: "default",
