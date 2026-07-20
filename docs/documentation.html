@@ -697,6 +697,12 @@
             <li><span>Run the recording integrity verifier (after finalize or on demand) for a plain-language OK / warning / fail report covering <strong>Container</strong>, <strong>Video continuity</strong>, <strong>Audio continuity</strong>, <strong>A/V interleave</strong>, and <strong>Duration</strong>. The owned <code>.frec</code> gets the deep pass; wire files get an honest ffmpeg structure and decode-error scan.</span></li>
           </ol>
 
+          <h3>Auto-export a shareable copy on stop</h3>
+          <ol class="steps">
+            <li><span>In <strong>Settings → Output</strong> (with the container set to the owned <code>.frec</code>), tick <strong>Also save a shareable MP4 next to the master</strong>. When a recording finalizes, a background export writes a double-click-playable <code>.mp4</code> beside the master — you keep the lossless, crash-salvageable <code>.frec</code> <em>and</em> get a file you can hand to anyone without thinking about export.</span></li>
+            <li><span>The copy appears in the post-record queue, is named collision-safe next to the master, and never touches the master itself. Off by default.</span></li>
+          </ol>
+
           <h3>SMPTE LTC timecode</h3>
           <ol class="steps">
             <li><span>Open <strong>SMPTE Timecode (LTC)</strong>, enable <strong>Generate LTC onto a track</strong> and pick the mixer track and frame rate to feed external recorders and cameras; set <strong>Read LTC from</strong> an audio input to drive a burn-in timecode line on the system-stats overlay and stamp LTC chapter markers. Classic audio timecode, fully offline, round-trip accurate to ±1 frame at 24/25/30 fps.</span></li>

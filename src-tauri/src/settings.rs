@@ -1538,6 +1538,11 @@ pub struct RecordingSettings {
     /// per-profile by construction, so pipelines are too.
     pub pipeline_enabled: bool,
     pub pipeline: Vec<PipelineStep>,
+    /// CAP-N75: when a `.frec` recording finalizes, also export a shareable
+    /// MP4 copy next to the master in the background (the one-toggle version
+    /// of the pipeline's remux step, but for the owned format). Off by
+    /// default; the master stays the master.
+    pub auto_export_mp4: bool,
 }
 
 impl Default for RecordingSettings {
@@ -1579,6 +1584,7 @@ impl Default for RecordingSettings {
             auto_markers: false,
             pipeline_enabled: false,
             pipeline: Vec::new(),
+            auto_export_mp4: false,
         }
     }
 }
@@ -2280,6 +2286,7 @@ mod tests {
                 split_on_scene: true,
                 split_on_marker: true,
                 auto_markers: true,
+                auto_export_mp4: true,
                 pipeline_enabled: true,
                 pipeline: vec![
                     PipelineStep::Verify,

@@ -116,6 +116,18 @@ fn default_color_height() -> u32 {
     1080
 }
 
+fn default_browser_width() -> u32 {
+    1280
+}
+
+fn default_browser_height() -> u32 {
+    720
+}
+
+fn default_browser_fps() -> u32 {
+    30
+}
+
 /// What a source *is*, plus its per-kind settings.
 ///
 /// Serialized with `kind` as the tag — the on-disk scene-collection format.
@@ -665,6 +677,21 @@ pub enum SourceSettings {
         #[serde(default)]
         key: String,
     },
+    /// CAP-N77: an http(s) page rendered offscreen by the browser-host helper
+    /// (CEF as an on-demand component — never bundled, never in-process) and
+    /// composed with transparency intact. Local files play through Media/Image.
+    Browser {
+        #[serde(default)]
+        url: String,
+        #[serde(default = "default_browser_width")]
+        width: u32,
+        #[serde(default = "default_browser_height")]
+        height: u32,
+        #[serde(default = "default_browser_fps")]
+        fps: u32,
+        #[serde(default = "default_true")]
+        transparent: bool,
+    },
 }
 
 /// The Freally Link stream's default TCP port (CAP-N12).
@@ -1158,6 +1185,7 @@ impl SourceSettings {
             SourceSettings::Title { .. } => "title",
             SourceSettings::SocialBar { .. } => "socialBar",
             SourceSettings::FreallyLink { .. } => "freallyLink",
+            SourceSettings::Browser { .. } => "browser",
         }
     }
 
@@ -1195,6 +1223,7 @@ impl SourceSettings {
             SourceSettings::Title { .. } => "Title",
             SourceSettings::SocialBar { .. } => "Social Bar",
             SourceSettings::FreallyLink { .. } => "Freally Link",
+            SourceSettings::Browser { .. } => "Browser",
         }
     }
 

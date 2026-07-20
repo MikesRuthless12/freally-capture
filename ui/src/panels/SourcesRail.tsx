@@ -7,6 +7,7 @@ import {
   audioLoopbackDevices,
   captureListSources,
   captureWindowThumbnail,
+  cefStatus,
   gameCaptureStatus,
   linkDiscover,
   openPrivacySettings,
@@ -40,6 +41,7 @@ import type {
   AudioDevice,
   AudioLevelsPayload,
   CaptureSource,
+  CefStatus,
   Collection,
   Corner,
   CornerSlot,
@@ -65,6 +67,7 @@ import type {
 } from "../api/types";
 import { CORNERS, kindHasAudio } from "../api/types";
 import { useT } from "../i18n/t";
+import { BrowserFields, type BrowserValue } from "../components/BrowserFields";
 import { ClockSelect } from "../components/ClockSelect";
 import { EmptyHint, Panel } from "../components/Panel";
 import { LanIngestFields, type LanIngestValue } from "../components/LanIngestFields";
@@ -72,6 +75,7 @@ import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { QrSvg } from "../components/QrSvg";
 import { SocialBarFields, type SocialBarValue } from "../components/SocialBarFields";
+import { browserUrlValid } from "../lib/browserUrl";
 import { hexToRgba } from "../lib/color";
 import { LAN_DEFAULT_PORTS, lanPassphraseUsable } from "../lib/lanIngest";
 import {
@@ -153,6 +157,7 @@ type PickerMode =
   | "title"
   | "socialBar"
   | "freallyLink"
+  | "browser"
   | "existing";
 
 // Values are i18n keys, resolved with `t(...)` at each render site so a
@@ -189,9 +194,18 @@ const KIND_BADGE: Record<string, string> = {
   title: "sources-badge-title",
   socialBar: "sources-badge-social",
   freallyLink: "sources-badge-link",
+  browser: "sources-badge-browser",
 };
 
 // Values are i18n keys (see KIND_BADGE).
+/** CAP-N77: the Browser source's rendering runtime (the `freally-browser-host`
+ * CEF component) ships in a later release. Until it does, the "Browser…"
+ * add-menu entry is hidden so it is never a dead option — the whole source
+ * kind (variant, dispatch, form, Properties) is in place and re-enables with
+ * one flip. A Browser source loaded from an existing scene still edits + runs
+ * (and fails readably if the runtime is absent). */
+const BROWSER_SOURCE_READY = false;
+
 const ADD_MENU: Array<[PickerMode, string]> = [
   ["display", "sources-add-display"],
   ["window", "sources-add-window"],
@@ -204,6 +218,7 @@ const ADD_MENU: Array<[PickerMode, string]> = [
   ["remoteGuest", "sources-add-remote-guest"],
   ["lanIngest", "sources-add-lan-ingest"],
   ["freallyLink", "sources-add-freally-link"],
+  ["browser", "sources-add-browser"],
   ["color", "sources-add-color"],
   ["text", "sources-add-text"],
   ["title", "sources-add-title"],
@@ -391,17 +406,19 @@ export function SourcesRail({
                 // this when the CAP-M15/M21 entries lengthened the menu).
                 className="absolute right-0 z-20 mt-1 max-h-72 w-48 overflow-y-auto rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
-                {ADD_MENU.map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => openPicker(mode)}
-                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                  >
-                    {t(label)}
-                  </button>
-                ))}
+                {ADD_MENU.filter(([mode]) => mode !== "browser" || BROWSER_SOURCE_READY).map(
+                  ([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => openPicker(mode)}
+                      className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                    >
+                      {t(label)}
+                    </button>
+                  ),
+                )}
                 <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
                   {t("sources-browser-source-note")}
                 </p>
@@ -954,6 +971,8 @@ export function SourcesRail({
         <LanIngestForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "freallyLink" ? (
         <FreallyLinkForm onClose={() => setPicker(null)} onPick={pick} />
+      ) : picker === "browser" ? (
+        <BrowserForm onClose={() => setPicker(null)} onPick={pick} />
       ) : picker === "nestedScene" ? (
         <NestedSceneForm
           collection={collection}
@@ -2682,6 +2701,63 @@ function SocialBarForm({
           className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text hover:bg-havoc-accent/25"
         >
           {t("sources-social-add")}
+        </button>
+      </div>
+    </PickerShell>
+  );
+}
+
+/**
+ * CAP-N77: the Browser source — an http(s) page rendered offscreen by the
+ * browser-host helper through the on-demand CEF runtime component (never
+ * bundled, never in-process) and composed with transparency intact. The form
+ * checks the component up front so a missing runtime is said honestly here,
+ * not discovered as a session error later; local files play through
+ * Media/Image (the URL hint says so).
+ */
+function BrowserForm({
+  onClose,
+  onPick,
+}: {
+  onClose: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
+}) {
+  const t = useT();
+  const [value, setValue] = useState<BrowserValue>({
+    url: "",
+    width: 1280,
+    height: 720,
+    fps: 30,
+    transparent: true,
+  });
+  const [cef, setCef] = useState<CefStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    cefStatus()
+      .then((status) => {
+        if (alive) setCef(status);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return (
+    <PickerShell title={t("sources-browser-title")} onClose={onClose}>
+      <div className="flex flex-col gap-2">
+        <BrowserFields value={value} onChange={setValue} />
+        {cef !== null && cef.state !== "ready" && (
+          <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
+            {t("sources-browser-component-missing")}
+          </p>
+        )}
+        <button
+          type="button"
+          disabled={!browserUrlValid(value.url)}
+          onClick={() => onPick({ kind: "browser", ...value, url: value.url.trim() })}
+          className="self-end rounded-md border border-havoc-accent/60 bg-havoc-accent/15 px-3 py-1.5 text-xs font-semibold text-havoc-text enabled:hover:bg-havoc-accent/25 disabled:opacity-50"
+        >
+          {t("sources-browser-add")}
         </button>
       </div>
     </PickerShell>

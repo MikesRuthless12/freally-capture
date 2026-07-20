@@ -1561,6 +1561,8 @@ output-iso-post-filter = Record with the source's filters (post-filter); uncheck
 output-iso-format = ISO format
 output-iso-encoder = ISO video encoder
 output-alpha-frec = Record with transparency (alpha) — the program over a transparent background
+output-auto-export = Also save a shareable MP4 next to the master
+output-auto-export-title = When a .frec recording finalizes, a background export writes a double-click-playable MP4 copy beside it (visible in the background queue). The lossless master stays the master.
 output-alpha-title = The recorder gets its own transparent render; preview and stream stay normal. Export to ProRes 4444 or QTRLE from the recordings list — MP4/MKV flatten the alpha.
 output-split-events = Also start a new file on… (each part starts exactly on the event; minimum part length 1 s)
 output-split-on-scene = scene switch
@@ -2796,3 +2798,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Browser
+sources-add-browser = Browser (web page)
+sources-browser-title = Add a Browser source
+sources-browser-add = Add browser source
+sources-browser-url = Page URL (http:// or https://)
+sources-browser-url-invalid = Enter an http:// or https:// URL — local files play through the Media or Image sources.
+sources-browser-width = Width (px)
+sources-browser-height = Height (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Transparent page background (alpha carries through)
+sources-browser-note = Renders http/https pages offscreen through the on-demand Browser Runtime component — never bundled, never in-process. Local files play through Media/Image.
+sources-browser-component-missing = Needs the Browser Runtime component — install it from Tools → Components.

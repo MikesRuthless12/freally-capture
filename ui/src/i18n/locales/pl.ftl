@@ -1311,6 +1311,8 @@ output-iso-post-filter = Nagrywaj z filtrami źródła (post-filtr); bez zaznacz
 output-iso-format = Format ISO
 output-iso-encoder = Enkoder wideo ISO
 output-alpha-frec = Nagrywaj z przezroczystością (alfa) — program na przezroczystym tle
+output-auto-export = Zapisz też udostępnialny plik MP4 obok mastera
+output-auto-export-title = Gdy nagranie .frec się finalizuje, eksport w tle zapisuje obok kopię MP4 odtwarzaną dwuklikiem (widoczną w kolejce w tle). Bezstratny master pozostaje masterem.
 output-alpha-title = Rejestrator dostaje własny przezroczysty render; podgląd i stream pozostają normalne. Eksportuj do ProRes 4444 lub QTRLE z listy nagrań — MP4/MKV spłaszczają alfę.
 output-split-events = Zaczynaj nowy plik także przy… (każda część zaczyna się dokładnie na zdarzeniu; minimalna długość 1 s)
 output-split-on-scene = zmianie sceny
@@ -2773,3 +2775,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Przeglądarka
+sources-add-browser = Przeglądarka (strona internetowa)
+sources-browser-title = Dodaj źródło Przeglądarka
+sources-browser-add = Dodaj źródło przeglądarki
+sources-browser-url = Adres URL strony (http:// lub https://)
+sources-browser-url-invalid = Podaj adres http:// lub https:// — pliki lokalne odtwarzają źródła Media lub Obraz.
+sources-browser-width = Szerokość (px)
+sources-browser-height = Wysokość (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Przezroczyste tło strony (alfa zostaje zachowana)
+sources-browser-note = Renderuje strony http/https poza ekranem przez pobierany na żądanie komponent środowiska przeglądarki — nigdy nie dołączany, nigdy w procesie. Pliki lokalne odtwarzają Media/Obraz.
+sources-browser-component-missing = Wymaga komponentu środowiska przeglądarki — zainstaluj go w Narzędzia → Komponenty.

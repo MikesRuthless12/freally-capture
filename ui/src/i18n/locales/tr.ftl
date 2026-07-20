@@ -1334,6 +1334,8 @@ output-iso-post-filter = Kaynağın filtreleriyle kaydet (filtre sonrası); işa
 output-iso-format = ISO biçimi
 output-iso-encoder = ISO video kodlayıcı
 output-alpha-frec = Saydamlıkla kaydet (alfa) — program saydam bir arka plan üzerinde
+output-auto-export = Ana kaydın yanına paylaşılabilir bir MP4 da kaydet
+output-auto-export-title = Bir .frec kaydı tamamlanınca, arka plan dışa aktarımı yanına çift tıkla oynatılabilir bir MP4 kopyası yazar (arka plan kuyruğunda görünür). Kayıpsız ana kayıt ana kayıt olarak kalır.
 output-alpha-title = Kaydedici kendi saydam render'ını alır; önizleme ve yayın normal kalır. Kayıt listesinden ProRes 4444 veya QTRLE'ye aktarın — MP4/MKV alfayı düzleştirir.
 output-split-events = Şunlarda da yeni dosya başlat… (her bölüm tam olayda başlar; asgari uzunluk 1 sn)
 output-split-on-scene = sahne geçişi
@@ -2796,3 +2798,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Tarayıcı
+sources-add-browser = Tarayıcı (web sayfası)
+sources-browser-title = Tarayıcı kaynağı ekle
+sources-browser-add = Tarayıcı kaynağı ekle
+sources-browser-url = Sayfa URL'si (http:// veya https://)
+sources-browser-url-invalid = http:// veya https:// ile başlayan bir URL girin — yerel dosyalar Medya veya Görsel kaynaklarıyla oynar.
+sources-browser-width = Genişlik (px)
+sources-browser-height = Yükseklik (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Saydam sayfa arka planı (alfa korunur)
+sources-browser-note = http/https sayfalarını ekran dışında, istek üzerine indirilen tarayıcı çalışma zamanı bileşeniyle işler — asla pakete dahil edilmez, asla süreç içinde çalışmaz. Yerel dosyalar Medya/Görsel ile oynar.
+sources-browser-component-missing = Tarayıcı çalışma zamanı bileşeni gerekir — Araçlar → Bileşenler'den kurun.

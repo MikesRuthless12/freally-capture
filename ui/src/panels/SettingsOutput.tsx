@@ -197,6 +197,19 @@ export function OutputSettingsBody({
         </label>
       )}
 
+      {/* CAP-N75: the one-toggle shareable MP4 copy — .frec masters only. */}
+      {!wire && (
+        <label className="flex items-center gap-2 text-[11px] text-havoc-muted">
+          <input
+            type="checkbox"
+            checked={rec.autoExportMp4}
+            onChange={(event) => onPatch({ autoExportMp4: event.target.checked })}
+            title={t("output-auto-export-title")}
+          />
+          {t("output-auto-export")}
+        </label>
+      )}
+
       {/* CAP-N44: typed auto-markers from studio events (any container —
           mkv embeds chapters, the rest get the sidecar). */}
       <label className="flex items-center gap-2 text-[11px] text-havoc-muted">

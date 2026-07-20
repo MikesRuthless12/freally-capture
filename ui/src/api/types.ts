@@ -907,6 +907,8 @@ export type RecordingSettings = {
   /** CAP-N45: the post-record pipeline (closed action set, per-profile). */
   pipelineEnabled: boolean;
   pipeline: PipelineStep[];
+  /** CAP-N75: also export a shareable MP4 next to a finalized `.frec`. */
+  autoExportMp4: boolean;
 };
 
 /** CAP-N45: one post-record pipeline step (a CLOSED action set — there is
@@ -1482,6 +1484,18 @@ export type SourceSettings =
       label: string;
       /** The sender's pairing key, presented on connect. */
       key: string;
+    }
+  | {
+      kind: "browser";
+      /** CAP-N77: an http(s) page rendered offscreen by the browser-host
+       * helper (CEF as an on-demand component — never bundled, never
+       * in-process). Local files play through Media/Image. */
+      url: string;
+      width: number;
+      height: number;
+      fps: number;
+      /** Render on a transparent page background (alpha carries through). */
+      transparent: boolean;
     };
 
 export type SourceKindName = SourceSettings["kind"];

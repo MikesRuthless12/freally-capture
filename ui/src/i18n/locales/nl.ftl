@@ -1334,6 +1334,8 @@ output-iso-post-filter = Opnemen met de filters van de bron (post-filter); uitge
 output-iso-format = ISO-formaat
 output-iso-encoder = ISO-video-encoder
 output-alpha-frec = Opnemen met transparantie (alfa) — het programma op een transparante achtergrond
+output-auto-export = Ook een deelbare MP4 naast de master opslaan
+output-auto-export-title = Wanneer een .frec-opname wordt afgerond, schrijft een achtergrondexport er een dubbelklik-afspeelbare MP4-kopie naast (zichtbaar in de achtergrondwachtrij). De lossless master blijft de master.
 output-alpha-title = De recorder krijgt een eigen transparante render; voorbeeld en stream blijven normaal. Exporteer naar ProRes 4444 of QTRLE vanuit de opnamelijst — MP4/MKV maken de alfa plat.
 output-split-events = Ook een nieuw bestand beginnen bij… (elk deel begint exact op de gebeurtenis; minimale lengte 1 s)
 output-split-on-scene = scènewissel
@@ -2796,3 +2798,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Browser
+sources-add-browser = Browser (webpagina)
+sources-browser-title = Browser-bron toevoegen
+sources-browser-add = Browser-bron toevoegen
+sources-browser-url = Pagina-URL (http:// of https://)
+sources-browser-url-invalid = Voer een http://- of https://-URL in — lokale bestanden spelen via de bronnen Media of Afbeelding.
+sources-browser-width = Breedte (px)
+sources-browser-height = Hoogte (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Transparante pagina-achtergrond (alfa blijft behouden)
+sources-browser-note = Rendert http/https-pagina's offscreen via de on-demand browser-runtimecomponent — nooit meegeleverd, nooit in het proces. Lokale bestanden spelen via Media/Afbeelding.
+sources-browser-component-missing = Vereist de browser-runtimecomponent — installeer die via Extra → Componenten.

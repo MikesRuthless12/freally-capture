@@ -1311,6 +1311,8 @@ output-iso-post-filter = Ghi kèm bộ lọc của nguồn (hậu lọc); bỏ c
 output-iso-format = Định dạng ISO
 output-iso-encoder = Bộ mã hóa video ISO
 output-alpha-frec = Ghi kèm độ trong suốt (alpha) — chương trình trên nền trong suốt
+output-auto-export = Cũng lưu một MP4 chia sẻ được cạnh bản gốc
+output-auto-export-title = Khi bản ghi .frec hoàn tất, xuất nền sẽ ghi cạnh nó một bản MP4 phát được bằng nhấp đúp (hiện trong hàng đợi nền). Bản gốc không mất dữ liệu vẫn là bản gốc.
 output-alpha-title = Trình ghi nhận bản kết xuất trong suốt riêng; xem trước và luồng phát vẫn bình thường. Xuất sang ProRes 4444 hoặc QTRLE từ danh sách bản ghi — MP4/MKV làm phẳng alpha.
 output-split-events = Cũng bắt đầu tệp mới khi… (mỗi phần bắt đầu đúng tại sự kiện; độ dài tối thiểu 1 giây)
 output-split-on-scene = chuyển cảnh
@@ -2773,3 +2775,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Trình duyệt
+sources-add-browser = Trình duyệt (trang web)
+sources-browser-title = Thêm nguồn Trình duyệt
+sources-browser-add = Thêm nguồn trình duyệt
+sources-browser-url = URL trang (http:// hoặc https://)
+sources-browser-url-invalid = Nhập URL http:// hoặc https:// — tệp cục bộ phát qua nguồn Phương tiện hoặc Hình ảnh.
+sources-browser-width = Chiều rộng (px)
+sources-browser-height = Chiều cao (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Nền trang trong suốt (giữ nguyên kênh alpha)
+sources-browser-note = Kết xuất trang http/https ngoài màn hình qua thành phần môi trường chạy trình duyệt tải theo yêu cầu — không bao giờ đóng gói kèm, không bao giờ chạy trong tiến trình. Tệp cục bộ phát qua Phương tiện/Hình ảnh.
+sources-browser-component-missing = Cần thành phần môi trường chạy trình duyệt — cài đặt từ Công cụ → Thành phần.

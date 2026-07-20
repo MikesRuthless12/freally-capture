@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod blackbar;
+pub mod browser;
 pub mod camera_controls;
 pub mod chat;
 pub mod color;

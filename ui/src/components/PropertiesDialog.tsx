@@ -55,6 +55,7 @@ import {
 import { titleTextLayer } from "../lib/titleLayers";
 import { parseVisTarget, visTargetKey } from "../lib/visTarget";
 import { useT } from "../i18n/t";
+import { BrowserFields } from "./BrowserFields";
 import { ClockSelect } from "./ClockSelect";
 import { LanIngestFields } from "./LanIngestFields";
 import { NumberField } from "./NumberField";
@@ -1099,6 +1100,10 @@ function SettingsEditor({
       );
     case "lanIngest":
       return <LanIngestEditor draft={draft} onChange={onChange} />;
+    case "browser":
+      return (
+        <BrowserFields value={draft} onChange={(next) => onChange({ kind: "browser", ...next })} />
+      );
     case "testBars":
     case "testGrid":
     case "testSweep":

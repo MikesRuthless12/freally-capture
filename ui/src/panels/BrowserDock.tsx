@@ -4,6 +4,7 @@ import { browserDockOpen, settingsSet } from "../api/commands";
 import type { BrowserDockSettings, Settings } from "../api/types";
 import { PickerShell } from "../components/PickerShell";
 import { useT } from "../i18n/t";
+import { browserUrlValid } from "../lib/browserUrl";
 
 const inputClass =
   "rounded-md border border-white/10 bg-havoc-panel px-2 py-1.5 text-xs text-havoc-text outline-none focus:border-havoc-accent/60";
@@ -48,7 +49,7 @@ export function BrowserDockDialog({
       setError(t("browser-dock-error-name"));
       return;
     }
-    if (!/^https?:\/\//.test(trimmedUrl)) {
+    if (!browserUrlValid(trimmedUrl)) {
       setError(t("browser-dock-error-url"));
       return;
     }

@@ -1334,6 +1334,8 @@ output-iso-post-filter = Rekam dengan filter sumber (pasca-filter); tanpa centan
 output-iso-format = Format ISO
 output-iso-encoder = Enkoder video ISO
 output-alpha-frec = Rekam dengan transparansi (alfa) — program di atas latar transparan
+output-auto-export = Simpan juga MP4 yang bisa dibagikan di samping master
+output-auto-export-title = Saat rekaman .frec selesai, ekspor latar menulis salinan MP4 yang bisa diputar dengan klik dua kali di sampingnya (terlihat di antrean latar). Master lossless tetap master.
 output-alpha-title = Perekam mendapat render transparannya sendiri; pratinjau dan stream tetap normal. Ekspor ke ProRes 4444 atau QTRLE dari daftar rekaman — MP4/MKV meratakan alfa.
 output-split-events = Mulai berkas baru juga saat… (tiap bagian mulai tepat pada peristiwa; panjang minimum 1 dtk)
 output-split-on-scene = ganti adegan
@@ -2795,3 +2797,17 @@ sources-social-up = Move account up
 sources-social-down = Move account down
 sources-social-remove = Remove account
 sources-social-note = A generated panel drawn locally — no logos are fetched or embedded (a coloured badge marks each platform), nothing is read off disk, and nothing touches the network. Rows with a blank handle are skipped.
+
+# CAP-N77: Browser source
+sources-badge-browser = Peramban
+sources-add-browser = Peramban (halaman web)
+sources-browser-title = Tambahkan sumber Peramban
+sources-browser-add = Tambahkan sumber peramban
+sources-browser-url = URL halaman (http:// atau https://)
+sources-browser-url-invalid = Masukkan URL http:// atau https:// — berkas lokal diputar lewat sumber Media atau Gambar.
+sources-browser-width = Lebar (px)
+sources-browser-height = Tinggi (px)
+sources-browser-fps = FPS
+sources-browser-transparent = Latar halaman transparan (alfa ikut terbawa)
+sources-browser-note = Merender halaman http/https di luar layar lewat komponen runtime peramban sesuai permintaan — tidak pernah dibundel, tidak pernah di dalam proses. Berkas lokal diputar lewat Media/Gambar.
+sources-browser-component-missing = Membutuhkan komponen runtime peramban — pasang dari Alat → Komponen.

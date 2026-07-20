@@ -5,11 +5,37 @@ All notable changes to Freally Capture will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Status: stable.** **1.0.0** completes the counted 100-feature roadmap (all 26 CAP-M must-haves
-> + all 74 CAP-N nice-to-haves) plus the five launch-polish features. The ladder below records how
-> it got here, from the 0.70.0 studio MVP up.
+> **Status: stable.** **1.0.0** completed the counted 100-feature roadmap (all 26 CAP-M must-haves
+> + all 74 CAP-N nice-to-haves) plus the five launch-polish features. **1.1.0** opens Phase 10 (deep
+> capture & web) with the auto-export feature owed since Build 12. The ladder below records how it
+> got here, from the 0.70.0 studio MVP up.
 
 ## [Unreleased]
+
+## [1.1.0] — 2026-07-20 (Deep Capture & Web — Phase 10, first slice)
+
+> **Post-1.0 depth begins.** Phase 10 opens the three long-standing "own milestone" capture surfaces
+> — a virtual camera, a true browser source, and game capture — as a properly scheduled build. This
+> release ships the piece that's complete and standalone: **auto-export a shareable copy on stop
+> (CAP-N75)**, the roadmap feature that was owed since Build 12. The browser-source and virtual-camera
+> runtimes are signed/component sub-milestones that land in later releases; nothing user-facing is
+> exposed for them yet. Everything new ships off by default, stays local, and adds no network call.
+
+### Added
+
+- **Auto-export a shareable MP4 on stop (CAP-N75)** — one toggle in **Settings → Output**, *"Also
+  save a shareable MP4 next to the master"* (shown only when recording to the owned `.frec`, **off
+  by default**). When a `.frec` recording finalizes, a background export writes a double-click-playable
+  MP4 copy beside it — visible in the Recordings dialog's post-record queue — through the same encode
+  path the manual export uses, with collision-safe naming. The lossless `.frec` master is never
+  touched, and the copy is queued before any post-record pipeline so a Move step can't relocate the
+  master out from under it. Keep the crash-salvageable master **and** get a shareable file for free.
+
+### Notes
+
+- Groundwork landed (not user-exposed this release): the **true browser source** (CAP-N77) app-side
+  and its helper-process CEF architecture, and the **virtual-camera** transport seam — both wait on
+  signed/component runtimes that ship as their own sub-milestones. See the roadmap's Phase 10.
 
 ## [1.0.0] — 2026-07-19 (Stable — Stream-Production Overlays & Launch Polish)
 

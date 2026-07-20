@@ -86,6 +86,7 @@ const settings = (mode: ThemeMode): Settings => ({
     splitOnRundown: false,
     autoMarkers: false,
     pipelineEnabled: false,
+    autoExportMp4: false,
     pipeline: [],
   },
   remote: { turnUrl: "", turnUsername: "", turnCredential: "" },
