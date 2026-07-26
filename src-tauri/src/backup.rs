@@ -309,10 +309,11 @@ fn safe_target(config_dir: &Path, entry: &str, selection: &RestoreSelection) -> 
         other => {
             let (dir, name, want) = if let Some(name) = other.strip_prefix("collections/") {
                 ("collections", name, selection.collections)
-            } else if let Some(name) = other.strip_prefix("profiles/") {
-                ("profiles", name, selection.profiles)
             } else {
-                return None;
+                // Anything that is neither a collection nor a profile is
+                // not a restorable entry.
+                let name = other.strip_prefix("profiles/")?;
+                ("profiles", name, selection.profiles)
             };
             // exactly `<sub>/<stem>.json`, no further separators. Also reject any
             // `:` — on Windows a name like `C:foo.json` is drive-relative (joins
