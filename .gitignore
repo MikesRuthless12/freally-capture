@@ -97,6 +97,7 @@ PHASE-6-PROGRESS.md
 PHASE-8-PROGRESS.md
 V1.0.0-PROGRESS.md
 V1.1.0-PROGRESS.md
+V1.2.0-HANDOFF.md
 
 # The CEF SDK staged by scripts/fetch-cef-sdk.mjs (CEF_ROOT for the browser
 # host's `cef` feature). Fetched on demand, ~350 MB, never vendored.
