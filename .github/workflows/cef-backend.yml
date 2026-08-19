@@ -141,6 +141,20 @@ jobs:
         shell: bash
         run: node scripts/fetch-cef-sdk.mjs
 
+      # What the dist actually contains. The Windows build reported
+      # `cef_sandbox.lib is not in …/Release`, and whether the renderer sandbox
+      # can be enabled at all hinges on that one file — so list it rather than
+      # keep guessing which distribution carries it.
+      - name: Inventory the staged SDK
+        shell: bash
+        run: |
+          echo "--- .cef-sdk ---"
+          ls -la .cef-sdk 2>/dev/null || true
+          echo "--- .cef-sdk/Release ---"
+          ls -la .cef-sdk/Release 2>/dev/null | head -40 || true
+          echo "--- any cef_sandbox anywhere in the dist ---"
+          find .cef-sdk -iname '*sandbox*' 2>/dev/null || echo "  (none)"
+
       - name: Clippy the CEF backend
         shell: bash
         run: |
@@ -161,4 +175,11 @@ jobs:
           export CEF_ROOT="$PWD/.cef-sdk"
           cp "$CEF_ROOT"/Release/*.so "$CEF_ROOT"/Release/*.bin target/release/ 2>/dev/null || true
           cp -r "$CEF_ROOT"/Resources/* target/release/ 2>/dev/null || true
+          # Linux's loader does NOT search the executable's own directory, so
+          # copying libcef.so next to the binary is not enough on its own — the
+          # host linked fine and then died at startup with
+          #   error while loading shared libraries: libcef.so: cannot open
+          #   shared object file
+          # Point the loader at both the SDK and the copy beside the binary.
+          export LD_LIBRARY_PATH="$CEF_ROOT/Release:$PWD/target/release:${LD_LIBRARY_PATH:-}"
           xvfb-run -a node scripts/cef-smoke.mjs
