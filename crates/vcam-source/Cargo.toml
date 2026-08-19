@@ -1,0 +1,32 @@
+[package]
+name = "freally-vcam-source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "CAP-N76 virtual-camera frame-server source: an IMFMediaSource COM DLL the Windows Frame Server loads, serving the app's program frames read from the fcap-stream shared-memory transport (design/vcam-source.md)."
+
+# cdylib: the COM server the Frame Server loads. rlib too so the transport reader
+# and registration logic are unit-testable without loading the DLL.
+[lib]
+name = "freally_vcam_source"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fcap-stream = { path = "../stream" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-core = "0.58"
+windows = { workspace = true, features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }

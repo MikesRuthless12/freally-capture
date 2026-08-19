@@ -26,15 +26,17 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # CI runs are cold: incremental compilation never pays off and only bloats the
+  # rust-cache. Off = faster builds and a smaller, faster-to-restore cache.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - run: cargo fmt --all -- --check
@@ -42,10 +44,9 @@ jobs:
   cargo-deny:
     name: cargo-deny (licenses + advisories)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           log-level: warn
@@ -54,15 +55,17 @@ jobs:
   cargo-audit:
     name: cargo-audit (RustSec advisories)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-audit
-        run: cargo install --locked cargo-audit
+      - name: Install cargo-audit (prebuilt)
+        # A prebuilt binary drop-in — seconds, versus ~2 min compiling it from
+        # source on every run (and no rust-cache needed just to build a tool).
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: Run cargo audit
         # Unmaintained-class advisories are warnings here (they don't fail
         # audit); the deny.toml [advisories] ignore list documents each one.
@@ -75,10 +78,9 @@ jobs:
   ui:
     name: UI (prettier + eslint + i18n + vitest + build)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -104,14 +106,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright Chromium
+        # With a cache hit only the OS libs are pulled (fast); a miss downloads
+        # the browser too. Either way the command is safe to re-run.
         run: npx playwright install --with-deps chromium
         working-directory: ui
       - name: Build the UI
@@ -136,8 +143,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - name: Install Linux prerequisites
         if: matrix.os == 'ubuntu-latest'
         uses: ./.github/actions/linux-deps
@@ -148,6 +153,9 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # The real CEF OSR backend (`freally-browser-host --features cef`) links
+      # libcef and needs the ~340 MB CEF SDK + libclang, so it is built and
+      # smoke-tested by its own workflow (cef-backend.yml), not on every push.
 
   tauri-build:
     name: Tauri debug build (${{ matrix.os }})
@@ -159,8 +167,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - name: Install Linux prerequisites
         if: matrix.os == 'ubuntu-latest'
         uses: ./.github/actions/linux-deps

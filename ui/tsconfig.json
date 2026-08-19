@@ -8,10 +8,6 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@freally/central-panel": ["../vendor/freally-central/ui/src/panel"]
-    },
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,

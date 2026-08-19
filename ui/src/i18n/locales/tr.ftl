@@ -301,6 +301,8 @@ sources-game-title = Oyun Yakalama
 sources-game-checking = Kontrol ediliyor…
 sources-game-use-portal = Ekran Yakalama (Portal) kullan
 sources-game-use-window = Bunun yerine Pencere Yakalama kullan
+sources-game-accept = Riski kabul et ve oyun seç
+sources-game-pick = Yakalanacak oyun penceresini seçin. Yalnızca oynarken bağlı kalır.
 
 # Image picker
 sources-image-title = Görüntü ekle
@@ -2578,8 +2580,6 @@ menu-help-bug = Hata bildir…
 menu-help-updates = Güncellemeleri denetle…
 menu-help-whats-new = Yenilikler
 menu-help-about = Hakkında…
-menu-help-more-apps = Diğer Freally uygulamaları…
-moreapps-title = Diğer Freally uygulamaları
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Ayar kategorileri
@@ -2811,4 +2811,7 @@ sources-browser-height = Yükseklik (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Saydam sayfa arka planı (alfa korunur)
 sources-browser-note = http/https sayfalarını ekran dışında, istek üzerine indirilen tarayıcı çalışma zamanı bileşeniyle işler — asla pakete dahil edilmez, asla süreç içinde çalışmaz. Yerel dosyalar Medya/Görsel ile oynar.
-sources-browser-component-missing = Tarayıcı çalışma zamanı bileşeni gerekir — Araçlar → Bileşenler'den kurun.
+sources-browser-component-missing = Browser Runtime bileşenini gerektirir — Araçlar → Bileşenler'den kurun.
+sources-browser-component-unsupported = CEF bu platform için Browser Runtime derlemesi yayınlamıyor, bu nedenle bu kaynak burada işlenemez.
+sources-browser-component-installing = Browser Runtime bileşeni kuruluyor… tamamlandığında bu kaynak işlenecek.
+sources-browser-component-error = Browser Runtime bileşeni kurulamadı: { $message }

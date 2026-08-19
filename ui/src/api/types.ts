@@ -1274,6 +1274,15 @@ export type SocialRow = {
 export type SourceSettings =
   | { kind: "display"; captureId: string; label: string }
   | { kind: "window"; captureId: string; label: string }
+  | {
+      /** CAP-N78: a game captured via the injected GPU hook (Windows), degrading
+       * to window capture. `captureId` is the game window; `acknowledged` records
+       * the per-title anti-cheat opt-in — injection never happens without it. */
+      kind: "gameCapture";
+      captureId: string;
+      label: string;
+      acknowledged: boolean;
+    }
   | { kind: "portal" }
   | {
       kind: "videoDevice";
@@ -1696,6 +1705,13 @@ export type GameCaptureStatus = {
   risk: string;
   fallback: "windowCapture" | "portal";
   guidance: string;
+};
+
+/** CAP-N76 virtual-camera availability (mirrors `VirtualCameraStatusDto`). */
+export type VirtualCameraStatus = {
+  available: boolean;
+  /** `null` when available; an honest install/why-not message otherwise. */
+  reason: string | null;
 };
 
 /** One source's live levels/status in the `audio` event. */

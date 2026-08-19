@@ -42,10 +42,6 @@ fcap-encode = { path = "../crates/encode" }
 fcap-stream = { path = "../crates/stream" }
 fcap-script = { path = "../crates/script" }
 fcap-preview = { path = "../crates/preview" }
-# The "Central inside" panel's engine (detect/download/install/launch), shared
-# verbatim with Freally Central via the vendor/freally-central submodule — the
-# same pinned commit supplies the panel UI the webview embeds.
-freally-central-engine = { path = "../vendor/freally-central/crates/freally-central-engine" }
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-dialog = "2"
@@ -73,3 +69,8 @@ rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 # the native-preview child window. Matches Tauri's raw-window-handle 0.6.
 [target.'cfg(target_os = "linux")'.dependencies]
 raw-window-handle = { workspace = true }
+
+# CAP-N76: the Windows virtual camera (MFCreateVirtualCamera + shared transport).
+# The registered frame-server source DLL is the signed component milestone.
+[target.'cfg(target_os = "windows")'.dependencies]
+fcap-vcam-win = { path = "../crates/vcam-win" }

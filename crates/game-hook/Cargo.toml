@@ -1,0 +1,28 @@
+[package]
+name = "freally-game-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "CAP-N78 game-capture hook: patches the D3D present vtable in an opted-in game and publishes its back buffer as a named shared texture (design/game-hook-protocol.md)."
+
+# cdylib: this is injected into the game process. `rlib` too, so the app side
+# and the tests can link the protocol types without loading the DLL.
+[lib]
+name = "freally_game_hook"
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

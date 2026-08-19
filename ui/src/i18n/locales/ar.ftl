@@ -295,6 +295,8 @@ sources-game-title = التقاط لعبة
 sources-game-checking = جارٍ الفحص…
 sources-game-use-portal = استخدم التقاط الشاشة (البوابة)
 sources-game-use-window = استخدم التقاط النافذة بدلًا من ذلك
+sources-game-accept = أوافق على المخاطرة واختيار لعبة
+sources-game-pick = اختر نافذة اللعبة لالتقاطها. تبقى مرتبطة أثناء اللعب فقط.
 
 # Image picker
 sources-image-title = إضافة صورة
@@ -2542,8 +2544,6 @@ menu-help-bug = أبلِغ عن خطأ…
 menu-help-updates = تحقّق من التحديثات…
 menu-help-whats-new = ما الجديد
 menu-help-about = حول…
-menu-help-more-apps = المزيد من تطبيقات Freally…
-moreapps-title = المزيد من تطبيقات Freally
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = فئات الإعدادات
@@ -2775,4 +2775,7 @@ sources-browser-height = الارتفاع (px)
 sources-browser-fps = FPS
 sources-browser-transparent = خلفية صفحة شفافة (تُحفظ قناة ألفا)
 sources-browser-note = يعرض صفحات http/https خارج الشاشة عبر مكوّن بيئة تشغيل المتصفح عند الطلب — لا يُضمَّن أبدًا ولا يعمل داخل العملية. الملفات المحلية تُشغَّل عبر الوسائط/الصورة.
-sources-browser-component-missing = يحتاج إلى مكوّن بيئة تشغيل المتصفح — ثبّته من أدوات → المكوّنات.
+sources-browser-component-missing = يتطلب مكوّن Browser Runtime — ثبّته من أدوات ← المكوّنات.
+sources-browser-component-unsupported = لا تنشر CEF إصدار Browser Runtime لهذه المنصة، لذا لا يمكن عرض هذا المصدر هنا.
+sources-browser-component-installing = جارٍ تثبيت مكوّن Browser Runtime… سيُعرض هذا المصدر بعد الانتهاء.
+sources-browser-component-error = تعذّر تثبيت مكوّن Browser Runtime: { $message }

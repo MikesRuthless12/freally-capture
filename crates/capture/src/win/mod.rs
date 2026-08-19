@@ -8,6 +8,8 @@
 #![allow(unsafe_code)]
 
 pub(crate) mod dxgi;
+pub(crate) mod gamehook;
+pub(crate) mod inject;
 pub(crate) mod keys;
 pub(crate) mod pointer;
 pub(crate) mod wgc;
@@ -95,6 +97,20 @@ pub(crate) fn display_is_hdr(id: &str) -> Option<bool> {
         desc.ColorSpace
             != windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
     )
+}
+
+/// The executable recorded in a window-capture id at the moment the user picked
+/// it.
+///
+/// Deliberately NOT re-resolved: this is the program the user actually saw and
+/// approved. `window_process` re-resolves by identity every call and can land on
+/// a different process (a restart, or the durable-rebind fallback matching on
+/// exe name alone), so the two must be compared, never conflated — that
+/// comparison is the whole point of the game-capture consent gate.
+pub(crate) fn capture_id_executable(id: &str) -> Option<String> {
+    let raw = id.strip_prefix(WINDOW_PREFIX)?;
+    let (_, key) = decode_window_id(raw)?;
+    (!key.app.is_empty()).then_some(key.app)
 }
 
 /// The process behind a window-capture id — `(pid, exe file name)`,

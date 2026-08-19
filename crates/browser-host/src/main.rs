@@ -25,6 +25,29 @@ struct Args {
     cef: String,
 }
 
+/// The protocol's scheme allowlist, and **the only** gate for any URL this host
+/// loads — the one from argv *and* every navigation the page then asks for.
+///
+/// Checking argv alone would be a hole: a page served over http can redirect
+/// (302, `location.href`, `window.open`, a frame) to `file://` and read local
+/// files, or to `javascript:`/`data:` to run script the operator never chose.
+/// The initial URL being safe says nothing about where the page goes next.
+///
+/// **The CEF backend MUST call this from its navigation handler** (`OnBeforeBrowse`
+/// and the resource-request path) and refuse anything it rejects — see
+/// `design/browser-host-protocol.md`. Keeping one function means the argv rule
+/// and the redirect rule can never drift apart.
+///
+/// Fails closed: schemes are case-insensitive (RFC 3986), and anything that is
+/// not plainly http/https is refused — `file://` and its UNC forms (which would
+/// stat a network path, the CAP-M16 rule), `javascript:`, `data:`, `blob:`,
+/// `about:`, `chrome:`, and any scheme invented later. Local files already play
+/// through the Media/Image sources.
+pub fn is_allowed_url(url: &str) -> bool {
+    let url = url.trim().to_ascii_lowercase();
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
 /// Hand-rolled parsing — the protocol is tiny and the host takes no deps.
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut url = None;
@@ -59,10 +82,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         // beat a panic in a helper the app supervises.
         Ok(n.max(min).min(max))
     };
-    let url = url.ok_or("--url is required")?;
-    // Schemes are case-insensitive (RFC 3986); still an allowlist, fails closed.
-    let scheme = url.to_ascii_lowercase();
-    if !(scheme.starts_with("http://") || scheme.starts_with("https://")) {
+    let url = url.ok_or("--url is required")?.trim().to_string();
+    if !is_allowed_url(&url) {
         return Err("--url must be http:// or https:// (protocol v1)".into());
     }
     Ok(Args {
@@ -76,6 +97,15 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    // CEF relaunches this exe for its own subprocesses (GPU, renderer, utility)
+    // with `--type=` args our parser doesn't understand. cef_execute_process
+    // must run BEFORE we parse, so a subprocess exits here without ever reaching
+    // the argument check. Returns None only in the main browser process.
+    #[cfg(feature = "cef")]
+    if let Some(code) = cef_backend::run_subprocess_if_any() {
+        return code;
+    }
+
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
         Ok(args) => args,
@@ -85,9 +115,11 @@ fn main() -> ExitCode {
         }
     };
 
+    // Exactly one of these two blocks survives cfg-stripping, so whichever
+    // remains is main's tail expression.
     #[cfg(feature = "cef")]
     {
-        return backend::run(args);
+        cef_backend::run(args)
     }
     #[cfg(not(feature = "cef"))]
     {
@@ -102,24 +134,12 @@ fn main() -> ExitCode {
     }
 }
 
+// The real OSR renderer, compiled only under `--features cef` against the pinned
+// CEF SDK (linked by build.rs). Skeleton and real build share `main` + argument
+// parsing byte-for-byte; only this module differs.
 #[cfg(feature = "cef")]
-mod backend {
-    //! The real OSR renderer, compiled only in the CI component build
-    //! against the pinned CEF SDK. Kept as a named seam so the skeleton and
-    //! the real build share `main`/argument parsing byte-for-byte.
-    use super::Args;
-    use std::process::ExitCode;
-
-    pub fn run(_args: Args) -> ExitCode {
-        // CI build wires: load libcef from --cef (refuse a mismatched
-        // version → exit 3), CefInitialize windowless, create the OSR
-        // browser at width×height, OnPaint → stdout writer (FBH1 header
-        // once, then fixed-size RGBA frames paced at fps), SIGTERM/stdin
-        // close → clean shutdown (exit 0).
-        eprintln!("freally-browser-host: CEF backend not implemented yet");
-        ExitCode::from(4)
-    }
-}
+#[path = "cef_backend.rs"]
+mod cef_backend;
 
 #[cfg(test)]
 mod tests {
@@ -180,5 +200,36 @@ mod tests {
         ]))
         .expect("clamped, not rejected");
         assert_eq!((args.width, args.height, args.fps), (3840, 64, 1));
+    }
+
+    #[test]
+    fn the_allowlist_gates_redirect_targets_not_just_argv() {
+        assert!(is_allowed_url("https://example.com/overlay"));
+        assert!(is_allowed_url("http://localhost:8080/x"));
+        assert!(
+            is_allowed_url("  HTTPS://Example.com  "),
+            "case + surrounding space"
+        );
+
+        // Everything a redirected page could reach for. Each of these is a
+        // realistic 302 / location.href target, not a theoretical scheme.
+        for hostile in [
+            "file:///C:/Windows/win.ini",
+            "file:///etc/passwd",
+            r"file://\server\share\x.html",
+            "javascript:fetch('/steal')",
+            "data:text/html,<script>alert(1)</script>",
+            "blob:https://example.com/9b1d",
+            "about:blank",
+            "chrome://settings",
+            "devtools://devtools/bundled/inspector.html",
+            "ftp://example.com/x",
+            "",
+            "   ",
+            "//example.com/protocol-relative",
+            "ht\ttp://example.com",
+        ] {
+            assert!(!is_allowed_url(hostile), "must fail closed for {hostile:?}");
+        }
     }
 }

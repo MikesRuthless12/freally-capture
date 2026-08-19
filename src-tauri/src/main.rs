@@ -150,8 +150,6 @@ fn main() {
             }
         }));
     }
-    // "Central inside" (More Freally apps): the engine's managed state.
-    builder = freally_central_engine::attach(builder);
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
@@ -267,6 +265,7 @@ fn main() {
             salvage::salvage_dismiss,
             commands::integrations_status,
             commands::game_capture_status,
+            commands::virtual_camera_status,
             eula::eula_status,
             eula::eula_accept,
             commands::settings_get,
@@ -532,16 +531,7 @@ fn main() {
             commands::native_preview_set_region,
             commands::native_preview_active,
             commands::native_preview_set_selection,
-            commands::native_preview_set_overlay,
-            // "Central inside" (More Freally apps) — the shared engine's
-            // commands, central_-prefixed so they can never collide with ours.
-            freally_central_engine::detect::central_detect_installed,
-            freally_central_engine::download::central_start_download,
-            freally_central_engine::download::central_cancel_download,
-            freally_central_engine::install::central_install_apps,
-            freally_central_engine::install::central_cancel_installs,
-            freally_central_engine::install::central_launch_app,
-            freally_central_engine::central_platform
+            commands::native_preview_set_overlay
         ])
         .setup(|app| {
             println!("init: setup entered");

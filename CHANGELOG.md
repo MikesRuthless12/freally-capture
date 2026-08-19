@@ -6,11 +6,145 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Status: stable.** **1.0.0** completed the counted 100-feature roadmap (all 26 CAP-M must-haves
-> + all 74 CAP-N nice-to-haves) plus the five launch-polish features. **1.1.0** opens Phase 10 (deep
-> capture & web) with the auto-export feature owed since Build 12. The ladder below records how it
-> got here, from the 0.70.0 studio MVP up.
+> + all 74 CAP-N nice-to-haves) plus the five launch-polish features. **1.1.0** added the
+> auto-export feature owed since Build 12, and **1.2.0** adds the last three: the virtual camera,
+> a true browser source, and game capture. The ladder below records how it got here, from the
+> 0.70.0 studio MVP up.
 
 ## [Unreleased]
+
+## [1.2.0] — 2026-08-19 (Deep Capture & Web)
+
+> **The last three additions to the app.** The virtual camera, a true browser source, and game
+> capture via an injected GPU present-hook. All three are Windows-first with the per-OS story
+> stated honestly rather than faked. Two of them ship components that are **not yet code-signed**,
+> and the live-scenario drills (camera visible in a conferencing app; injecting into a protected
+> title) are still owed — both are called out in the notes below rather than papered over.
+
+### Added
+
+- **Game Capture via an injected GPU present-hook (CAP-N78, Windows).** A game can
+  now be captured through its own swap-chain `Present` — for exclusive-fullscreen
+  titles WGC window capture cannot reach, at the game's native present rate. It is
+  **strictly per-title opt-in**: nothing injects until you accept the blunt
+  anti-cheat/AV risk for that specific game (a `Consent` scoped to one executable,
+  minted only from an explicit acknowledgement — it can never be replayed against
+  another game), and a title that refuses the hook degrades to the existing Window
+  Capture with an honest message, never a crash. Sources ▸ Game Capture (read
+  first) → accept → pick the game. The hook DLL patches only the DXGI vtable,
+  copies each back buffer into a keyed-mutex shared texture, and restores the
+  vtable on unload; a busy frame is skipped so the game never stalls on us. HDR
+  back buffers route to WGC (which the desktop compositor tone-maps) rather than
+  being misread as 8-bit. New crate `freally-game-hook`; protocol in
+  `design/game-hook-protocol.md`.
+- **Virtual Camera (CAP-N76, Windows).** The composed program is fed to a "Freally
+  Capture Virtual Camera" through a lock-free double-buffered shared-memory transport
+  (`fcap_stream::vcam::transport`) and the Media Foundation `MFCreateVirtualCamera` lifecycle
+  (`fcap-vcam-win`), which tears the device down on stop *and* drop so no zombie camera lingers.
+  The registered frame-server source is a real `IMFMediaSource` COM DLL (`freally-vcam-source`)
+  that self-registers per-user (no admin) and serves the app's frames as an RGB32 stream — the
+  same on-demand, hash-verified component model as the ffmpeg/CEF bridges. `virtual_camera_status`
+  surfaces the honest availability to the UI; the camera runs unsigned for the current user, with
+  code-signing the only release-gated step. macOS (CoreMediaIO) and Linux (v4l2loopback) are their
+  own components.
+- **True Browser Source — CEF OSR backend (CAP-N77).** An arbitrary http/https page renders
+  offscreen through CEF at the chosen resolution/fps and streams to the compositor as `FBH1` +
+  fixed-size frames. The backend (`crates/browser-host --features cef`) links libcef from the
+  pinned, hash-verified CEF component and gates **every** navigation through the shared allowlist
+  (a redirect to `file://`/`javascript:` is cancelled, never followed). Verified end-to-end on
+  Windows: a live URL renders to real frames with clean stdin-EOF shutdown. The runtime is fetched
+  on first use only (never bundled); per-OS code-signing is the remaining release step.
+
+### Security
+
+- **The browser source now runs Chromium's renderer sandbox on Windows.** The host renders
+  arbitrary web pages, and one can arrive from an imported scene collection, so it previously
+  started Chromium with the sandbox switched off — the single control that keeps a compromised
+  page from becoming code execution as you. Windows now runs sandboxed. macOS and Linux stay
+  unsandboxed for the moment (the Linux sandbox needs a privileged helper the component does not
+  ship yet), which is stated in the code rather than left to look intentional.
+- **Game Capture consent no longer travels in a scene collection.** A collection is a shareable
+  document — a `.fcappack`, an OBS import, a snapshot, a hand-edited file — so it must never be
+  able to carry authority to inject a DLL into another process. It previously could: the
+  "I accept the anti-cheat risk" flag was a field in the document, and a received pack whose
+  Game Capture source named any executable would inject into it on import, with no prompt and the
+  risk text never shown. Loading a collection now always clears that flag (covered by a
+  regression test), so an imported layout degrades to plain Window Capture until the operator
+  opts in again through the picker — the one place the warning is actually displayed.
+- **Consent is now bound to the executable the user actually approved.** It was minted from the
+  executable resolved at start time and then checked against that same string, so the check could
+  never fail and the documented "consent for `game-a.exe` can never be replayed against
+  `game-b.exe`" guarantee did not exist at runtime. Consent is now granted for the program
+  recorded when the source was picked and verified against the one the window resolves to now, so
+  a source that rebinds to a different process is refused rather than injected.
+
+### Removed
+
+- **Freally Central integration ("More Freally apps").** Freally Central no longer exists, so the
+  vendored `vendor/freally-central` submodule and everything that depended on it are gone: the
+  `freally-central-engine` crate dependency and its seven `central_*` Tauri commands, the
+  **Help → More Freally apps** menu item and its dialog, the panel's `fcp-*` theme bridge, the
+  `@freally/central-panel` tsconfig/vite aliases, and the vendored `fcp-*` locale catalogs that
+  were layered into every bundle. Capture no longer depends on a repository that is gone — a fresh
+  clone and CI checkout now succeed where the missing submodule would have failed them.
+
+### Fixed
+
+- **The browser host is now shut down cleanly instead of killed outright.** The host was spawned
+  with its stdin at `/dev/null`, which made the protocol's documented "stdin closed → exit 0"
+  signal impossible to send — so every stop was a hard kill, orphaning CEF's own render/GPU
+  subprocesses. Its stdin is a live pipe now, and closing it gives the host a bounded grace period
+  (500 ms) to exit on its own before it is killed. The bound is deliberate: `stop()` joins the
+  pump, so this sits on the studio's reconcile path and must never wedge a scene change.
+- **The CEF runtime fetcher is pinned to the line the host is built against.** It previously took
+  whatever `index.json` called newest. CEF has no ABI stability across majors and the host refuses
+  a runtime it was not built against, so "latest" could spend a ~100 MB download to arrive at a
+  Browser source that dead-ends. The newest stable `minimal` build *within* the pinned major now
+  wins, which still picks up Chromium security patches inside the line.
+- **The http/https-only rule now covers redirects, not just the initial URL.** A page served over
+  http could redirect — 302, `location.href`, `window.open`, a subframe — to `file://` and read
+  local files, or to `javascript:`/`data:` to run script the operator never chose. The allowlist is
+  a single tested gate (`is_allowed_url`) that the CEF backend is now required to call from its
+  navigation handler, so the argv rule and the redirect rule cannot drift apart.
+- **The Browser picker's component banner follows the install instead of freezing at open.** It
+  read the runtime status once at mount, so installing from Tools → Components with the picker open
+  left it still saying the component was missing. It now subscribes to the `cef` event, and tells
+  the four states apart: not installed, an install already under way, an install that failed (with
+  its reason), and a platform CEF publishes no build for — where "install it from Components" was
+  advice that could never succeed.
+- **The browser host's CEF backend seam is linted in CI.** `--features cef` is built only by the
+  component milestone, so it had drifted into a state that failed `clippy -D warnings` and would
+  have broken that build on its first run. CI now lints the seam on every push.
+- **Game capture survives a resize or alt-tab.** The producer's named shared-texture handle was
+  created and then dropped on the floor, so the name stayed registered for the life of the game
+  process. Every geometry change then tried to re-create the texture under a name that still
+  existed, failed with `DXGI_ERROR_NAME_ALREADY_EXISTS`, and capture died permanently with
+  nothing surfaced. The handle is owned and closed now, and the old texture is released before
+  the replacement is built.
+- **The first Game Capture add no longer silently falls back to Window Capture.** Injection
+  returns as soon as the remote `LoadLibraryW` does, but `DllMain` only *spawns* the arming
+  thread — the control block does not exist until that thread has built a device and a dummy
+  swap chain. The app attached immediately and always lost that race. It now waits (bounded) for
+  the hook to actually arm.
+- **A hooked game that exits releases the source.** `FLAG_PRODUCER_ALIVE` is never cleared — a
+  game that is killed or crashes never runs `DLL_PROCESS_DETACH` — so the last control block
+  survived with the flag set and the pump spun on the final frame forever, never closing and
+  never triggering auto-recovery. The app now asks the OS whether the game is still running.
+- **A game that is slow to load the hook is no longer at risk of a crash.** On the injection
+  timeout the remote page was released while the game's `LoadLibraryW` could still be reading it.
+  The page is now freed only once that thread has demonstrably exited.
+- **A failed arm can be retried.** If the control-block mapping failed, the "installed" flag was
+  left set, so the process stayed permanently half-armed: injected, never publishing, and unable
+  to recover. The hook state is also published *before* the vtable slot is patched — a present
+  landing in between found no state and returned `S_OK` without chaining to the real `Present`,
+  silently swallowing that frame's flip.
+- **The virtual-camera source DLL can no longer be unloaded while in use.** `DllCanUnloadNow`
+  answered `S_OK` unconditionally — that export *is* how COM asks — so a `CoFreeUnusedLibraries`
+  in the frame-server host could unload it while a conferencing app still held the media source.
+  It now reports a real object and server-lock count. `Shutdown` also breaks the strong
+  source↔stream reference cycle that leaked every camera open.
+- **Two user-visible strings had runs of stray spaces** baked in by a line-wrap (the pinned-CEF
+  Components error and the non-Windows virtual-camera tooltip).
 
 ## [1.1.0] — 2026-07-20 (Deep Capture & Web — Phase 10, first slice)
 

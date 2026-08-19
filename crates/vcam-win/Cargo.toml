@@ -1,0 +1,19 @@
+[package]
+name = "fcap-vcam-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "CAP-N76 Windows virtual camera: MFCreateVirtualCamera fed from fcap-stream's shared-memory frame transport. The registered frame-server source DLL is the signed component."
+
+[dependencies]
+fcap-stream = { path = "../stream" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+] }

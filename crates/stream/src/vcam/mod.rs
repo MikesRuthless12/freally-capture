@@ -35,6 +35,8 @@
 //! feed model below already carries the audio track choice so the driver
 //! milestone only implements transport.
 
+pub mod transport;
+
 /// What the virtual camera would output — the **program**, the vertical
 /// canvas, or one **single source** (VC-4: share just a camera or a
 /// window into a meeting while the program keeps compositing elsewhere).
@@ -63,22 +65,8 @@ pub trait VcamOutput: Send {
     fn stop(&mut self) -> Result<(), String>;
 }
 
-/// Whether a driver-backed [`VcamOutput`] exists on this build/OS. `false`
-/// everywhere today — the UI keeps its button disabled with the honest
-/// tooltip instead of pretending.
-pub fn driver_available() -> bool {
-    false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn no_driver_ships_yet_and_the_ui_must_say_so() {
-        assert!(
-            !driver_available(),
-            "flip this only when a real OS driver component lands"
-        );
-    }
-}
+// Whether a *driver-backed* camera exists is an OS-FFI question (registry +
+// Media Foundation on Windows) that this `forbid(unsafe_code)` crate cannot
+// answer, so it is not asked here: the Windows probe is `fcap_vcam_win::
+// available()` and the app calls it directly. The macOS CMIO and Linux v4l2
+// components bring their own probes when they land.

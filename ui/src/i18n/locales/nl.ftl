@@ -301,6 +301,8 @@ sources-game-title = Spelopname
 sources-game-checking = Controleren…
 sources-game-use-portal = Schermopname gebruiken (Portal)
 sources-game-use-window = In plaats daarvan vensteropname gebruiken
+sources-game-accept = Risico accepteren & game kiezen
+sources-game-pick = Kies het spelvenster om vast te leggen. Het blijft alleen gekoppeld terwijl je speelt.
 
 # Image picker
 sources-image-title = Een afbeelding toevoegen
@@ -2578,8 +2580,6 @@ menu-help-bug = Meld een bug…
 menu-help-updates = Controleren op updates…
 menu-help-whats-new = Wat is er nieuw
 menu-help-about = Over…
-menu-help-more-apps = Meer Freally-apps…
-moreapps-title = Meer Freally-apps
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Instellingscategorieën
@@ -2811,4 +2811,7 @@ sources-browser-height = Hoogte (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Transparante pagina-achtergrond (alfa blijft behouden)
 sources-browser-note = Rendert http/https-pagina's offscreen via de on-demand browser-runtimecomponent — nooit meegeleverd, nooit in het proces. Lokale bestanden spelen via Media/Afbeelding.
-sources-browser-component-missing = Vereist de browser-runtimecomponent — installeer die via Extra → Componenten.
+sources-browser-component-missing = Vereist de Browser Runtime-component — installeer deze via Extra → Componenten.
+sources-browser-component-unsupported = CEF publiceert geen Browser Runtime-build voor dit platform, dus deze bron kan hier niet renderen.
+sources-browser-component-installing = Browser Runtime-component wordt geïnstalleerd… deze bron rendert zodra dat klaar is.
+sources-browser-component-error = De Browser Runtime-component kon niet worden geïnstalleerd: { $message }
