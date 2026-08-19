@@ -8,3 +8,13 @@
 #include "include/capi/cef_request_handler_capi.h"
 #include "include/capi/cef_resource_request_handler_capi.h"
 #include "include/internal/cef_types.h"
+
+// The Windows sandbox handle factory. Chromium's renderer sandbox is the
+// control that keeps a compromised web page from becoming code execution, and
+// this host renders arbitrary http(s) URLs — so it is not optional. The two
+// functions are plain `extern "C"`, but they live in cef_sandbox.lib (a static
+// library built against the static CRT), which is why build.rs also switches
+// this crate to +crt-static on Windows.
+#ifdef _WIN32
+#include "include/cef_sandbox_win.h"
+#endif

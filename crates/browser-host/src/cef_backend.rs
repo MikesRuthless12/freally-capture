@@ -306,6 +306,17 @@ include!(concat!(env!("OUT_DIR"), "/cef_api_version.rs"));
 /// `run` (CEF wants the same app for execute_process and initialize).
 static mut APP: *mut App = std::ptr::null_mut();
 
+/// The Windows sandbox handle, created once in `run_subprocess_if_any` and
+/// handed to BOTH `cef_execute_process` and `cef_initialize` — CEF requires the
+/// same pointer for both, and every relaunched subprocess goes through
+/// `cef_execute_process`, so it must be created before anything else.
+///
+/// Null off Windows, where the sandbox is not wired up (Linux needs a SUID
+/// `chrome-sandbox` helper the component does not ship yet, so it stays on
+/// `no_sandbox` there and says so).
+#[cfg(windows)]
+static mut SANDBOX: *mut std::os::raw::c_void = std::ptr::null_mut();
+
 /// MUST run before the host parses its own `--url`/`--width` args: CEF relaunches
 /// this same executable for its GPU/renderer/utility subprocesses with `--type=`
 /// arguments our parser would reject. `cef_execute_process` handles those
@@ -324,10 +335,22 @@ pub fn run_subprocess_if_any() -> Option<ExitCode> {
     // SAFETY: single write before any other access; the process is single-threaded here.
     unsafe { APP = app };
 
+    // Create the sandbox handle before execute_process: every relaunched
+    // subprocess re-enters here, and CEF requires the same pointer for both
+    // execute_process and initialize.
+    #[cfg(windows)]
+    // SAFETY: documented factory; the handle lives for the process and is
+    // destroyed in `run` after cef_shutdown.
+    unsafe {
+        SANDBOX = cef_sandbox_info_create();
+    }
+    #[cfg(windows)]
+    let sandbox = unsafe { SANDBOX };
+    #[cfg(not(windows))]
+    let sandbox = std::ptr::null_mut();
+
     // SAFETY: execute_process with our app; subprocesses run their loop inside.
-    let code = unsafe {
-        cef_execute_process(&mut main_args, app as *mut _cef_app_t, std::ptr::null_mut())
-    };
+    let code = unsafe { cef_execute_process(&mut main_args, app as *mut _cef_app_t, sandbox) };
     (code >= 0).then(|| ExitCode::from(code as u8))
 }
 
@@ -349,7 +372,13 @@ pub fn run(args: Args) -> ExitCode {
     // the transparent/opaque page inherits.
     let mut settings: _cef_settings_t = unsafe { std::mem::zeroed() };
     settings.size = std::mem::size_of::<_cef_settings_t>();
-    settings.no_sandbox = 1;
+    // The renderer sandbox is what stops a hostile page from becoming code
+    // execution as the user, and this host loads arbitrary http(s) URLs — one
+    // of which can arrive from an imported scene collection. Windows gets the
+    // real sandbox via cef_sandbox.lib. Linux/macOS stay unsandboxed for now
+    // (Linux needs a SUID `chrome-sandbox` helper the component does not ship),
+    // which is stated honestly rather than silently.
+    settings.no_sandbox = if cfg!(windows) { 0 } else { 1 };
     settings.windowless_rendering_enabled = 1;
     settings.multi_threaded_message_loop = 0;
     settings.background_color = if args.transparent {
@@ -358,16 +387,39 @@ pub fn run(args: Args) -> ExitCode {
         0xFFFF_FFFF // opaque white
     };
 
+    // Point CEF at the runtime the app actually installed. `--cef` is exactly
+    // this path and was previously parsed and then thrown away, which left the
+    // resource lookup falling back to CEF's default "beside the executable"
+    // search — and so depending on the inherited working directory. Both paths
+    // are set only when they exist, so a dist with a different layout degrades
+    // to the old behaviour instead of failing to initialise.
+    let cef_root = std::path::Path::new(args.cef.trim());
+    let resources = cef_root.join("Resources");
+    if resources.is_dir() {
+        // SAFETY: writes a CEF-owned string into the settings struct, which
+        // outlives cef_initialize below.
+        unsafe {
+            set_cef_string(
+                &mut settings.resources_dir_path,
+                &resources.to_string_lossy(),
+            )
+        };
+        let locales = resources.join("locales");
+        if locales.is_dir() {
+            // SAFETY: as above.
+            unsafe { set_cef_string(&mut settings.locales_dir_path, &locales.to_string_lossy()) };
+        }
+    }
+
+    // The same sandbox handle execute_process was given — CEF requires both to
+    // match.
+    #[cfg(windows)]
+    let sandbox = unsafe { SANDBOX };
+    #[cfg(not(windows))]
+    let sandbox = std::ptr::null_mut();
+
     // SAFETY: initialise CEF with our app; libcef is linked by build.rs.
-    if unsafe {
-        cef_initialize(
-            &mut main_args,
-            &settings,
-            app as *mut _cef_app_t,
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
+    if unsafe { cef_initialize(&mut main_args, &settings, app as *mut _cef_app_t, sandbox) } == 0 {
         eprintln!("freally-browser-host: cef_initialize failed");
         return ExitCode::from(4);
     }
@@ -430,6 +482,15 @@ pub fn run(args: Args) -> ExitCode {
     // SAFETY: tear CEF down; the singletons are leaked by design (process end).
     unsafe {
         cef_shutdown();
+    }
+    // The sandbox handle must outlive cef_shutdown, so it is released last.
+    #[cfg(windows)]
+    // SAFETY: pairs with the cef_sandbox_info_create in run_subprocess_if_any.
+    unsafe {
+        if !SANDBOX.is_null() {
+            cef_sandbox_info_destroy(SANDBOX);
+            SANDBOX = std::ptr::null_mut();
+        }
     }
     ExitCode::from(0)
 }

@@ -48,6 +48,39 @@ mod cef {
             root.join("Release").display()
         );
         println!("cargo:rustc-link-lib=dylib=libcef");
+
+        // The Windows renderer sandbox. `cef_sandbox_info_create` lives in
+        // cef_sandbox.lib, a STATIC library CEF builds against the static CRT
+        // (/MT). Rust's MSVC target defaults to the dynamic CRT (/MD), and
+        // mixing the two is a link error — so the host must be built with
+        // `-C target-feature=+crt-static`, which the component workflow sets
+        // for this crate's own cargo invocation. libcef itself is a DLL with
+        // its own CRT, so it is unaffected either way.
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+            println!("cargo:rustc-link-lib=static=cef_sandbox");
+            // cef_sandbox.lib's own dependencies.
+            for lib in [
+                "Advapi32",
+                "dbghelp",
+                "Delayimp",
+                "ntdll",
+                "OleAut32",
+                "PowrProf",
+                "Propsys",
+                "psapi",
+                "SetupAPI",
+                "Shell32",
+                "Shlwapi",
+                "Userenv",
+                "version",
+                "wbemuuid",
+                "WindowsApp",
+                "winmm",
+            ] {
+                println!("cargo:rustc-link-lib=dylib={lib}");
+            }
+        }
+
         println!("cargo:rerun-if-env-changed=CEF_ROOT");
         println!("cargo:rerun-if-changed=cef_bindings.h");
 

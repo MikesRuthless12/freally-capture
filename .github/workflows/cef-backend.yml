@@ -35,6 +35,16 @@ jobs:
     name: build + smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      # Windows only: the renderer sandbox needs cef_sandbox.lib, a STATIC
+      # library CEF builds against the static CRT (/MT), while Rust's MSVC
+      # target defaults to /MD — mixing the two is a link error. Set at job
+      # level so clippy and build agree and cargo does not rebuild between them.
+      #
+      # Scoping it here is safe: the `cef` feature is built by this workflow
+      # alone. The workspace build and the release bundle compile the skeleton
+      # host, which links no static library and keeps the default CRT.
+      RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-C target-feature=+crt-static' || '' }}
     strategy:
       fail-fast: false
       matrix:
