@@ -57,6 +57,12 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Security
 
+- **The browser source now runs Chromium's renderer sandbox on Windows.** The host renders
+  arbitrary web pages, and one can arrive from an imported scene collection, so it previously
+  started Chromium with the sandbox switched off — the single control that keeps a compromised
+  page from becoming code execution as you. Windows now runs sandboxed. macOS and Linux stay
+  unsandboxed for the moment (the Linux sandbox needs a privileged helper the component does not
+  ship yet), which is stated in the code rather than left to look intentional.
 - **Game Capture consent no longer travels in a scene collection.** A collection is a shareable
   document — a `.fcappack`, an OBS import, a snapshot, a hand-edited file — so it must never be
   able to carry authority to inject a DLL into another process. It previously could: the
