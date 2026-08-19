@@ -71,6 +71,27 @@ jobs:
           version: "18"
           cached: true
 
+      # Resolve libclang ONCE for every later step (build.rs runs bindgen in
+      # both the clippy and the build step).
+      #
+      # The trap this replaces: `export LIBCLANG_PATH="${LIBCLANG_PATH:-}"`.
+      # Exporting it EMPTY is strictly worse than leaving it unset — bindgen
+      # treats "" as a search path it was explicitly given, reports it as
+      # invalid, and then refuses to fall back to the normal system lookup, so
+      # every job died with "Unable to find libclang … (invalid: [])".
+      - name: Resolve LIBCLANG_PATH
+        shell: bash
+        run: |
+          if [ -n "${LIBCLANG_PATH:-}" ]; then
+            echo "LIBCLANG_PATH is already set to $LIBCLANG_PATH"
+          elif [ -n "${LLVM_PATH:-}" ]; then
+            echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> "$GITHUB_ENV"
+            echo "resolved LIBCLANG_PATH to $LLVM_PATH/lib"
+          else
+            echo "neither LIBCLANG_PATH nor LLVM_PATH is set — leaving it unset"
+            echo "so bindgen falls back to its own system lookup."
+          fi
+
       # Resolve + fetch + verify the pinned CEF **standard** dist (headers +
       # Release/libcef.lib), then export CEF_ROOT for build.rs. The resolver is
       # the same CDN index the app's fetcher pins to.
@@ -82,7 +103,6 @@ jobs:
         shell: bash
         run: |
           export CEF_ROOT="$PWD/.cef-sdk"
-          export LIBCLANG_PATH="${LIBCLANG_PATH:-}"
           cargo clippy -p freally-browser-host --features cef --all-targets -- -D warnings
 
       - name: Build the CEF backend
