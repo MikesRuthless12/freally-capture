@@ -152,8 +152,12 @@ jobs:
           ls -la .cef-sdk 2>/dev/null || true
           echo "--- .cef-sdk/Release ---"
           ls -la .cef-sdk/Release 2>/dev/null | head -40 || true
+          echo "--- .cef-sdk/Resources ---"
+          ls -la .cef-sdk/Resources 2>/dev/null | head -40 || true
           echo "--- any cef_sandbox anywhere in the dist ---"
           find .cef-sdk -iname '*sandbox*' 2>/dev/null || echo "  (none)"
+          echo "--- where is icudtl.dat? ---"
+          find .cef-sdk -name 'icudtl.dat' 2>/dev/null || echo "  (none)"
 
       - name: Clippy the CEF backend
         shell: bash
@@ -173,8 +177,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           export CEF_ROOT="$PWD/.cef-sdk"
-          cp "$CEF_ROOT"/Release/*.so "$CEF_ROOT"/Release/*.bin target/release/ 2>/dev/null || true
-          cp -r "$CEF_ROOT"/Resources/* target/release/ 2>/dev/null || true
+          # Stage every runtime file beside the binary. Which directory holds
+          # what varies by dist — the last run died with
+          #   ERROR:base/i18n/icu_util.cc: Invalid file descriptor to ICU data
+          # because icudtl.dat was not staged, and it is not in Release/ on
+          # Linux. Copy by name from anywhere in the dist rather than assuming.
+          cp "$CEF_ROOT"/Release/*.so* "$CEF_ROOT"/Release/*.bin "$CEF_ROOT"/Release/*.json \
+            target/release/ 2>/dev/null || true
+          cp -r "$CEF_ROOT"/Resources/. target/release/ 2>/dev/null || true
+          find "$CEF_ROOT" -name 'icudtl.dat' -exec cp {} target/release/ \; 2>/dev/null || true
+          echo "--- staged next to the host binary ---"
+          ls -la target/release | grep -viE '\.d$|\.rlib$|^d.*deps|build|incremental|examples' | head -25
           # Linux's loader does NOT search the executable's own directory, so
           # copying libcef.so next to the binary is not enough on its own — the
           # host linked fine and then died at startup with
