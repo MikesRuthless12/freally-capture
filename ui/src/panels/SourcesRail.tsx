@@ -75,7 +75,7 @@ import { NumberField } from "../components/NumberField";
 import { PickerShell } from "../components/PickerShell";
 import { QrSvg } from "../components/QrSvg";
 import { SocialBarFields, type SocialBarValue } from "../components/SocialBarFields";
-import { browserUrlValid } from "../lib/browserUrl";
+import { browserComponentNotice, browserUrlValid } from "../lib/browserUrl";
 import { hexToRgba } from "../lib/color";
 import { LAN_DEFAULT_PORTS, lanPassphraseUsable } from "../lib/lanIngest";
 import {
@@ -108,6 +108,7 @@ import {
   startMicTest,
 } from "../remote/devices";
 import { joinTargetFromInput, parseInviteInput, webJoinLink } from "../remote/invite";
+import { onCef } from "../api/events";
 
 type SourcesRailProps = {
   collection: Collection | null;
@@ -918,6 +919,7 @@ export function SourcesRail({
         <GameCapturePicker
           onClose={() => setPicker(null)}
           onUseWindowCapture={() => setPicker("window")}
+          onPick={pick}
         />
       ) : picker === "image" ? (
         <ImageForm onClose={() => setPicker(null)} onPick={pick} />
@@ -1919,13 +1921,20 @@ function AppAudioPicker({
 function GameCapturePicker({
   onClose,
   onUseWindowCapture,
+  onPick,
 }: {
   onClose: () => void;
   onUseWindowCapture: () => void;
+  onPick: (settings: SourceSettings, name?: string) => void;
 }) {
   const t = useT();
   const [status, setStatus] = useState<GameCaptureStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The consent gate: the game window grid is only reachable AFTER the user
+  // explicitly accepts the anti-cheat risk for this session's pick. This mirrors
+  // the Rust `Consent::grant` gate — no acknowledgement, no injection.
+  const [accepted, setAccepted] = useState(false);
+  const [games, setGames] = useState<CaptureSource[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1941,19 +1950,88 @@ function GameCapturePicker({
     };
   }, []);
 
+  // Once accepted, list windows to pick the game from (re-scanned on a timer so
+  // a game launched after opening this picker shows up).
+  useEffect(() => {
+    if (!accepted) return;
+    let alive = true;
+    const refresh = () =>
+      captureListSources()
+        .then((all) => {
+          if (alive) setGames(all.filter((s) => s.kind === "window"));
+        })
+        .catch(() => undefined);
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [accepted]);
+
+  const hookHere = status?.hookPossible ?? false;
+
   return (
     <PickerShell title={t("sources-game-title")} onClose={onClose}>
       {error ? (
         <p className="m-0 text-xs text-red-400">{error}</p>
       ) : status === null ? (
         <p className="m-0 text-xs text-havoc-muted">{t("sources-game-checking")}</p>
+      ) : accepted ? (
+        // Step 2 — pick the game window; creating the source records consent.
+        <div className="flex flex-col gap-2 text-xs">
+          <p className="m-0 leading-relaxed text-havoc-muted">{t("sources-game-pick")}</p>
+          {games === null ? (
+            <p className="m-0 text-havoc-muted">{t("sources-capture-looking")}</p>
+          ) : games.length === 0 ? (
+            <p className="m-0 text-havoc-muted">{t("sources-capture-none-windows")}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {games.map((entry, index) => (
+                <WindowThumbTile
+                  key={entry.id}
+                  entry={entry}
+                  index={index}
+                  onPick={() =>
+                    onPick(
+                      {
+                        kind: "gameCapture",
+                        captureId: entry.id,
+                        label: entry.label,
+                        acknowledged: true,
+                      },
+                      entry.label,
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onUseWindowCapture}
+            className="mt-1 self-start rounded-md border border-white/10 px-3 py-1.5 text-havoc-muted hover:border-havoc-accent/50 hover:text-havoc-text"
+          >
+            {t("sources-game-use-window")}
+          </button>
+        </div>
       ) : (
+        // Step 1 — the blunt risk text and the explicit accept action.
         <div className="flex flex-col gap-3 text-xs">
           <p className="m-0 rounded-md border border-red-400/25 bg-red-400/5 p-2 leading-relaxed text-red-200/90">
             {status.risk}
           </p>
           <p className="m-0 leading-relaxed text-havoc-muted">{status.guidance}</p>
           <div className="flex flex-wrap gap-2">
+            {hookHere && (
+              <button
+                type="button"
+                onClick={() => setAccepted(true)}
+                className="rounded-md border border-red-400/40 bg-red-400/10 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-400/20"
+              >
+                {t("sources-game-accept")}
+              </button>
+            )}
             <button
               type="button"
               onClick={onUseWindowCapture}
@@ -2731,6 +2809,10 @@ function BrowserForm({
     transparent: true,
   });
   const [cef, setCef] = useState<CefStatus | null>(null);
+  // Read once, then follow the `cef` event: the operator can install the
+  // runtime from Tools → Components with this picker still open, and a banner
+  // frozen on the state at mount would keep telling them to go do what they
+  // just did.
   useEffect(() => {
     let alive = true;
     cefStatus()
@@ -2738,17 +2820,24 @@ function BrowserForm({
         if (alive) setCef(status);
       })
       .catch(() => undefined);
+    const unlisten = onCef((status) => {
+      if (alive) setCef(status);
+    });
     return () => {
       alive = false;
+      void unlisten.then((off) => off()).catch(() => undefined);
     };
   }, []);
+  const cefNotice = browserComponentNotice(cef);
   return (
     <PickerShell title={t("sources-browser-title")} onClose={onClose}>
       <div className="flex flex-col gap-2">
         <BrowserFields value={value} onChange={setValue} />
-        {cef !== null && cef.state !== "ready" && (
+        {cefNotice !== null && (
           <p className="m-0 rounded-md border border-amber-400/20 bg-amber-400/5 p-2 text-[11px] leading-relaxed text-amber-200/90">
-            {t("sources-browser-component-missing")}
+            {cefNotice.key === "sources-browser-component-error"
+              ? t(cefNotice.key, { message: cefNotice.message })
+              : t(cefNotice.key)}
           </p>
         )}
         <button

@@ -9,11 +9,12 @@
 //! The integrity story is honest for a runtime whose hash we can't embed at
 //! build time: we do **not** hardcode a checksum. Instead [`resolve_build`]
 //! fetches the official CEF build index over HTTPS
-//! (`cef-builds.spotifycdn.com/index.json`), picks the **newest stable
-//! `minimal`** distribution for this OS, and takes that entry's authoritative
-//! **SHA-1** straight from the index. The download is then verified against it
-//! before extraction — the same trusted source vouches for both the file and
-//! its hash. A mismatch refuses the install.
+//! (`cef-builds.spotifycdn.com/index.json`), picks the newest stable
+//! `minimal` distribution for this OS **within the pinned CEF line**
+//! ([`PINNED_CEF_MAJOR`]), and takes that entry's authoritative **SHA-1**
+//! straight from the index. The download is then verified against it before
+//! extraction — the same trusted source vouches for both the file and its
+//! hash. A mismatch refuses the install.
 //!
 //! This module ships the **download + verify + extract** half. The browser
 //! source that *renders* through the extracted runtime is the named follow-on
@@ -33,6 +34,20 @@ use thiserror::Error;
 
 const INDEX_URL: &str = "https://cef-builds.spotifycdn.com/index.json";
 const FILE_BASE: &str = "https://cef-builds.spotifycdn.com/";
+
+/// The CEF line the **browser host** is built against.
+///
+/// CEF has no ABI stability *across majors* (`design/browser-host-protocol.md`),
+/// and the host refuses a runtime it was not built against with exit code 3. So
+/// the fetcher must never hand it whatever `index.json` calls latest: that would
+/// spend a ~100 MB download to arrive at a Browser source that dead-ends.
+///
+/// Pinning the **major**, not an exact build, is deliberate — Chromium security
+/// patches inside the line are still picked up automatically (the newest stable
+/// `minimal` *within* this major wins), which matters for a browser engine.
+///
+/// **Bump this together with the host's CI build — they are one unit.**
+pub const PINNED_CEF_MAJOR: u32 = 151;
 
 /// The CEF CDN platform key for this build target (`None` if CEF publishes no
 /// build for it — said honestly).
@@ -78,6 +93,10 @@ pub fn platform_key() -> Option<&'static str> {
 pub enum CefError {
     #[error("CEF publishes no browser-source runtime for this platform")]
     Unsupported,
+    #[error(
+        "the CEF build index has no stable {0}.x runtime for this platform. The Browser Runtime is pinned to the CEF line its host was built against, so a newer line cannot be substituted — update the app, or retry later."
+    )]
+    PinnedUnavailable(u32),
     #[error("could not reach the CEF build index / download: {0}")]
     Http(String),
     #[error("i/o error: {0}")]
@@ -138,7 +157,8 @@ pub struct CefBuild {
 }
 
 /// Fetch the CEF build index and resolve the newest stable `minimal` build for
-/// this platform (with its authoritative SHA-1). Blocking — run off the UI thread.
+/// this platform **in the pinned CEF line** (with its authoritative SHA-1).
+/// Blocking — run off the UI thread.
 pub fn resolve_build() -> Result<CefBuild, CefError> {
     let key = platform_key().ok_or(CefError::Unsupported)?;
     let agent = ureq::AgentBuilder::new()
@@ -152,18 +172,21 @@ pub fn resolve_build() -> Result<CefBuild, CefError> {
         .into_reader();
     let index: Index = serde_json::from_reader(BufReader::new(reader))
         .map_err(|err| CefError::Http(format!("could not parse the CEF index: {err}")))?;
-    pick_build(&index, key).ok_or(CefError::Unsupported)
+    pick_build(&index, key, PINNED_CEF_MAJOR).ok_or(CefError::PinnedUnavailable(PINNED_CEF_MAJOR))
 }
 
-/// Pure selection: newest **stable** version (by Chromium version) whose files
-/// include a `minimal` entry with a non-empty sha1. Split out so it is testable
-/// without the network.
-fn pick_build(index: &Index, key: &str) -> Option<CefBuild> {
+/// Pure selection: newest **stable** version (by Chromium version) **in the
+/// `major` CEF line** whose files include a `minimal` entry with a non-empty
+/// sha1. `major` is a parameter rather than the constant so the selection is
+/// testable without the network — [`resolve_build`] passes [`PINNED_CEF_MAJOR`].
+fn pick_build(index: &Index, key: &str, major: u32) -> Option<CefBuild> {
     let platform = index.0.get(key)?;
     let best = platform
         .versions
         .iter()
         .filter(|v| v.channel.eq_ignore_ascii_case("stable"))
+        // The ABI gate: a different major would be refused by the host.
+        .filter(|v| cef_major(&v.cef_version) == Some(major))
         .filter(|v| v.files.iter().any(is_usable_minimal))
         .max_by_key(|v| chromium_ord(&v.cef_version))?;
     let file = best.files.iter().find(|f| is_usable_minimal(f))?;
@@ -174,6 +197,17 @@ fn pick_build(index: &Index, key: &str) -> Option<CefBuild> {
         sha1: file.sha1.clone(),
         size_bytes: file.size,
     })
+}
+
+/// The CEF major — the leading integer of a `cef_version` — which tracks the
+/// Chromium major and is CEF's ABI boundary.
+fn cef_major(cef_version: &str) -> Option<u32> {
+    cef_version
+        .split('.')
+        .next()?
+        .trim_matches(|c: char| !c.is_ascii_digit())
+        .parse()
+        .ok()
 }
 
 fn is_usable_minimal(f: &FileEntry) -> bool {
@@ -481,19 +515,45 @@ mod tests {
           ] }
         }"#;
         let index: Index = serde_json::from_str(json).unwrap();
-        let build = pick_build(&index, "windows64").expect("resolves a build");
+        let build = pick_build(&index, "windows64", 120).expect("resolves a build");
         // Newest STABLE (120, not the 121 beta), the minimal file, sha1 intact,
         // and the URL has the + encoded.
         assert_eq!(build.cef_version, "120.0.0+gbbbb+chromium-120.0.6099.109");
         assert_eq!(build.sha1, "3333333333333333333333333333333333333333");
         assert_eq!(build.size_bytes, 150);
         assert_eq!(build.url, format!("{FILE_BASE}new%2Bminimal.tar.bz2"));
+
+        // The pin is the ABI gate: the OLDER line still resolves to its own
+        // newest build, and a line the index has no stable build for resolves
+        // to nothing rather than silently falling back to a newer runtime the
+        // host would refuse with exit 3.
+        let older = pick_build(&index, "windows64", 118).expect("the pinned older line");
+        assert_eq!(older.cef_version, "118.0.0+gaaaa+chromium-118.0.5993.88");
+        assert!(
+            pick_build(&index, "windows64", 121).is_none(),
+            "121 is beta-only here — never substitute another major"
+        );
+        assert!(
+            pick_build(&index, "windows64", 999).is_none(),
+            "absent line"
+        );
+    }
+
+    #[test]
+    fn cef_major_reads_the_abi_line() {
+        assert_eq!(
+            cef_major("151.0.5+gd0f4e1a+chromium-151.0.7204.97"),
+            Some(151)
+        );
+        assert_eq!(cef_major("99.2.9+gf426765+chromium-99.0.4844.51"), Some(99));
+        assert_eq!(cef_major(""), None);
+        assert_eq!(cef_major("nonsense"), None);
     }
 
     #[test]
     fn pick_build_is_none_for_unknown_platform() {
         let index: Index = serde_json::from_str(r#"{"windows64":{"versions":[]}}"#).unwrap();
-        assert!(pick_build(&index, "solaris").is_none());
+        assert!(pick_build(&index, "solaris", PINNED_CEF_MAJOR).is_none());
     }
 
     /// The real thing (network + ~100 MB): resolve the newest stable build from

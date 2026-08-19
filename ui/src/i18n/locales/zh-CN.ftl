@@ -297,6 +297,8 @@ sources-game-title = 游戏采集
 sources-game-checking = 正在检查…
 sources-game-use-portal = 使用屏幕采集（门户）
 sources-game-use-window = 改用窗口采集
+sources-game-accept = 接受风险并选择游戏
+sources-game-pick = 选择要捕获的游戏窗口。仅在游玩时保持挂钩。
 
 # Image picker
 sources-image-title = 添加图像
@@ -2561,8 +2563,6 @@ menu-help-bug = 报告错误…
 menu-help-updates = 检查更新…
 menu-help-whats-new = 更新内容
 menu-help-about = 关于…
-menu-help-more-apps = 更多 Freally 应用…
-moreapps-title = 更多 Freally 应用
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = 设置类别
@@ -2794,4 +2794,7 @@ sources-browser-height = 高度 (px)
 sources-browser-fps = FPS
 sources-browser-transparent = 透明页面背景（保留 alpha 通道）
 sources-browser-note = 通过按需下载的浏览器运行时组件在屏幕外渲染 http/https 页面 — 绝不随应用捆绑，也绝不在进程内运行。本地文件请用媒体/图像来源播放。
-sources-browser-component-missing = 需要浏览器运行时组件 — 请到 工具 → 组件 中安装。
+sources-browser-component-missing = 需要 Browser Runtime 组件 — 请在“工具 → 组件”中安装。
+sources-browser-component-unsupported = CEF 未为此平台发布 Browser Runtime 版本，因此该源无法在此渲染。
+sources-browser-component-installing = 正在安装 Browser Runtime 组件…完成后该源即可渲染。
+sources-browser-component-error = 无法安装 Browser Runtime 组件：{ $message }

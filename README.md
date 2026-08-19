@@ -46,9 +46,10 @@ leaves your machine is the stream you chose to send.
 > off-by-default command allowlist) and **Capture & Device Depth** (a low-latency passthrough monitor,
 > pixel-perfect scaling, punch-in zoom, auto black-bar crop, window↔app-audio auto-linking, and
 > HDR→SDR tone-mapping), alongside a scene backdrop/wallpaper and true reverse media playback.
-> **1.0.0 ships once the remaining feature set lands** — it is deliberately gated on the
-> *complete* product, not just the must-haves. A true browser source, the virtual camera, and
-> game-capture GPU hooking follow as their own milestones. The detailed planning + design set
+> **1.0.0 shipped the complete product**, not just the must-haves. **1.2.0** adds the last three:
+> the **virtual camera**, a true **browser source**, and **game capture** via GPU hooking — all
+> three Windows-first, with the macOS/Linux gaps and the not-yet-signed components stated plainly
+> in [the docs](https://mikesruthless12.github.io/freally-capture/documentation.html). The detailed planning + design set
 > (product vision, PRD, roadmap, build-prompts guide, and go-to-market plan) is **maintained
 > privately** and is not published here.
 > **Installers for every release are on the
@@ -77,7 +78,8 @@ leaves your machine is the stream you chose to send.
 5. **Extras** — a rolling **replay buffer** with a save hotkey, a **vertical/multi-canvas** second output (recordable + streamable independently), a **live chat overlay** (YouTube/Twitch/Kick — **no key or sign-in, ever**) and **floating reactions** baked into the program, **nested scenes / source groups / per-scene audio**, stinger + luma transition packs, **recording chapter markers**, **global hotkeys** for everything (with a searchable **hotkey map** that flags conflicts), **profiles + scene collections**, a live **stats dock** (fps/dropped frames/CPU/GPU/bitrate), and a **teleprompter** — an operator dock, a stream-safe **fullscreen projector**, and LAN control — with caesura **pause chips**, a **start countdown**, **chars/sec or BPM** pacing, per-OS **read-aloud**, and **18-language ghost-text autocomplete**.
 6. **Keep the show safe** — a **go-live pre-flight checklist**, always-on **safety alarms** (silent audio, clipping, a black/frozen picture, a low-disk forecast), a **source-health dashboard**, **mid-session encoder failover**, **crash-safe recording** with a next-launch repair, a **quit guard**, and a **panic button** that cuts to a privacy slate and hard-mutes everything.
 7. **Calibrate the chain** — built-in **test signals** (SMPTE bars, a calibration grid, a motion sweep, a 1 kHz lineup tone, an A/V flash+beep) and a guided **A/V sync calibration workbench** that measures your camera/mic offset and applies it; plus **deinterlacing** and cross-platform **camera controls** (exposure, white balance, focus, zoom) with per-device profiles that survive hotplug.
-8. **Extend it** — a password-protected **WebSocket remote-control API** (Stream Deck / Companion-style; **off by default**, loopback unless you opt into LAN), **browser docks** (chat popouts / alerts / web buttons as their own window), **sandboxed Lua scripting** (react to go-live/scene/recording events, drive the studio — no file or OS access), and a **plugin SDK** (add a source or filter without touching core). A **virtual camera** and a true **browser source** follow as their own signed-driver / on-demand-component milestones.
+8. **Extend it** — a password-protected **WebSocket remote-control API** (Stream Deck / Companion-style; **off by default**, loopback unless you opt into LAN), **browser docks** (chat popouts / alerts / web buttons as their own window), **sandboxed Lua scripting** (react to go-live/scene/recording events, drive the studio — no file or OS access), and a **plugin SDK** (add a source or filter without touching core).
+9. **Reach further** — an OS-level **virtual camera** (your program as a webcam in Zoom/Meet/Discord/Teams), a true **browser source** (any http/https page rendered offscreen, every navigation allowlist-gated so a redirect to `file://` is cancelled), and **game capture** via an injected GPU present-hook for exclusive-fullscreen titles — strictly per-title opt-in after you accept the anti-cheat risk, degrading to Window Capture rather than crashing. Windows-first; the browser runtime is an on-demand, hash-verified component that is never bundled.
 
 It is **OBS-class power in one clean app** — an owned GPU compositor and an owned lossless codec, fully
 local and account-free, the same on all three desktop OSes, and integrated with the Freally suite.
@@ -134,7 +136,7 @@ remote API** via **`tungstenite`** · the **Tauri bundler** per-OS installers.
 **Everything is free.** There is no Pro tier, no payments, no license keys, no ads, and no account —
 the full studio for everyone: scenes/sources/compositor, all video + audio filters, multi-track
 recording (hardware encoders + `freally-video` lossless), streaming **including multistream to many
-targets** and **SRT/WHIP**, the **virtual camera**, Studio Mode + all transitions (including the
+targets** and **SRT/WHIP**, the **virtual camera** (Windows in 1.2.0), Studio Mode + all transitions (including the
 stinger/luma packs), the **replay buffer with presets**, **vertical/multi-canvas output**, scripting/
 plugins, and **remote-control automation**.
 
@@ -151,8 +153,9 @@ plugins, and **remote-control automation**.
     libasound2-dev libpulse-dev libv4l-dev libdbus-1-dev libclang-dev \
     libudev-dev
   ```
-  (`libv4l-dev` is for the webcam; `libudev-dev` is for gamepad detection (the input overlay);
-  `v4l2loopback` is needed for the **virtual camera** on Linux.)
+  (`libv4l-dev` is for the webcam; `libudev-dev` is for gamepad detection (the input overlay).
+  `v4l2loopback` will be needed for the **virtual camera** on Linux when that component ships —
+  the Linux camera is not part of 1.2.0.)
 
 ## Build & run
 
@@ -195,8 +198,8 @@ packages each, and opens a **draft GitHub Release** with the downloadable instal
 | OS | Produces | Notes |
 |----|----------|-------|
 | Windows | `.msi` / `.exe` (NSIS) | GUI app, no console window |
-| macOS | `.app` / `.dmg` | **notarized**; ships the **CoreMediaIO virtual-camera plugin** |
-| Linux | AppImage / `.deb` / `.rpm` / Flatpak | virtual camera needs `v4l2loopback` |
+| macOS | `.app` / `.dmg` | **notarized**. The CoreMediaIO virtual-camera extension is its own component — **not in 1.2.0** |
+| Linux | AppImage / `.deb` / `.rpm` / Flatpak | The `v4l2loopback` virtual camera is its own component — **not in 1.2.0** |
 
 Signed/notarized installers and the **signed, self-hosted auto-updater** shipped in **0.95.0** — the
 updater refuses any package it can't verify against a public key baked into the binary.

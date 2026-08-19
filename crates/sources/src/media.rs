@@ -159,7 +159,32 @@ pub(crate) fn f32_samples_into(bytes: &[u8], samples: &mut Vec<f32>) {
 pub(crate) fn spawn_kill_watchdog(
     name: &str,
     stop: &Arc<AtomicBool>,
+    children: Vec<std::process::Child>,
+) -> (
+    std::sync::mpsc::Sender<()>,
+    Option<std::thread::JoinHandle<()>>,
+) {
+    spawn_kill_watchdog_with_grace(name, stop, children, Duration::ZERO, || {})
+}
+
+/// [`spawn_kill_watchdog`] with a **graceful** first step, for helpers whose
+/// protocol defines a clean exit (the browser host: stdin EOF → exit 0).
+///
+/// `signal` runs first — dropping the child's stdin handle is what tells the
+/// host to wind itself down — then each child gets up to `grace` to leave on
+/// its own before being killed. A CEF host that exits cleanly releases its own
+/// render/GPU subprocesses; killing the parent outright orphans them.
+///
+/// `grace` is deliberately **bounded and short**: `stop()` joins the pump,
+/// which joins this thread, so the wait is on the studio's reconcile path.
+/// `Duration::ZERO` reproduces the plain kill exactly (what the media source
+/// wants for ffmpeg, which has no clean-exit contract).
+pub(crate) fn spawn_kill_watchdog_with_grace(
+    name: &str,
+    stop: &Arc<AtomicBool>,
     mut children: Vec<std::process::Child>,
+    grace: Duration,
+    signal: impl FnOnce() + Send + 'static,
 ) -> (
     std::sync::mpsc::Sender<()>,
     Option<std::thread::JoinHandle<()>>,
@@ -178,7 +203,20 @@ pub(crate) fn spawn_kill_watchdog(
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 }
             }
+            signal();
+            let deadline = Instant::now() + grace;
             for child in &mut children {
+                // Poll rather than block: one deadline covers every child, so a
+                // first child that uses the whole grace cannot extend the wait.
+                while !grace.is_zero() && Instant::now() < deadline {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                        Err(_) => break,
+                    }
+                }
+                // kill() on an already-reaped child is a no-op error we ignore;
+                // wait() then just returns the recorded status.
                 let _ = child.kill();
                 let _ = child.wait();
             }
@@ -1581,5 +1619,28 @@ mod tests {
             Ok(_) => panic!("junk mp4 must not start a session"),
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_watchdog_sends_its_clean_shutdown_signal_before_killing() {
+        // The browser host's protocol exit-0 path depends on this signal
+        // actually firing (it drops the host's stdin → EOF). A watchdog that
+        // only killed would orphan CEF's render subprocesses.
+        let fired = Arc::new(AtomicBool::new(false));
+        let signal_fired = Arc::clone(&fired);
+        let stop = Arc::new(AtomicBool::new(false));
+        let (kill_tx, watchdog) = spawn_kill_watchdog_with_grace(
+            "test-grace-watchdog",
+            &stop,
+            Vec::new(),
+            Duration::from_millis(50),
+            move || signal_fired.store(true, Ordering::Relaxed),
+        );
+        let _ = kill_tx.send(());
+        watchdog.expect("watchdog thread").join().expect("join");
+        assert!(
+            fired.load(Ordering::Relaxed),
+            "the clean-shutdown signal must fire before any kill"
+        );
     }
 }

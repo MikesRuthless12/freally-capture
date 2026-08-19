@@ -301,6 +301,8 @@ sources-game-title = ゲームキャプチャ
 sources-game-checking = 確認中…
 sources-game-use-portal = 画面キャプチャ（ポータル）を使用
 sources-game-use-window = 代わりにウィンドウキャプチャを使用
+sources-game-accept = リスクに同意してゲームを選ぶ
+sources-game-pick = キャプチャするゲームウィンドウを選びます。プレイ中のみフックされます。
 
 # Image picker
 sources-image-title = 画像を追加
@@ -2578,8 +2580,6 @@ menu-help-bug = バグを報告…
 menu-help-updates = アップデートを確認…
 menu-help-whats-new = 新機能
 menu-help-about = このアプリについて…
-menu-help-more-apps = その他のFreallyアプリ…
-moreapps-title = その他のFreallyアプリ
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = 設定カテゴリ
@@ -2811,4 +2811,7 @@ sources-browser-height = 高さ (px)
 sources-browser-fps = FPS
 sources-browser-transparent = 透明なページ背景（アルファはそのまま合成）
 sources-browser-note = http/https ページをオフスクリーンで描画します。オンデマンドのブラウザランタイムコンポーネントを使用 — 同梱もプロセス内実行もしません。ローカルファイルはメディア／画像で再生します。
-sources-browser-component-missing = ブラウザランタイムコンポーネントが必要です — ツール → コンポーネント からインストールしてください。
+sources-browser-component-missing = Browser Runtime コンポーネントが必要です — ツール → コンポーネントからインストールしてください。
+sources-browser-component-unsupported = CEF はこのプラットフォーム向けの Browser Runtime ビルドを公開していないため、このソースはここでは描画できません。
+sources-browser-component-installing = Browser Runtime コンポーネントをインストール中… 完了するとこのソースが描画されます。
+sources-browser-component-error = Browser Runtime コンポーネントをインストールできませんでした: { $message }

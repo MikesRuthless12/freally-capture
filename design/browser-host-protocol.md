@@ -55,9 +55,19 @@ One line on stderr explains any non-zero exit (the app logs it verbatim).
 
 ## Rules inherited from the charter
 
-- **http/https only in v1** — `file://` UNC forms would stat network paths (the CAP-M16 NTLM
-  rule); local files already play through Media/Image. Enforced BOTH app-side
-  (`browser::validate_url`) and host-side.
+- **http/https only in v1 — for EVERY navigation, not just the initial URL.** `file://` UNC
+  forms would stat network paths (the CAP-M16 NTLM rule); local files already play through
+  Media/Image. Enforced BOTH app-side (`browser::validate_url`) and host-side
+  (`is_allowed_url`).
+
+  Checking only the URL passed in argv is a hole: a page served over http can redirect to
+  another scheme — a 302, `location.href`, `window.open`, or a subframe — and reach
+  `file://` (read local files), `javascript:`/`data:` (run script the operator never chose),
+  or `chrome://`/`devtools://`. **The CEF backend MUST route every navigation and resource
+  request through `is_allowed_url` and refuse what it rejects** (cancel the navigation; the
+  page stays on the last allowed document — a blocked redirect is not a fatal error and must
+  not exit the host). `is_allowed_url` is the single gate for argv and redirects alike, so
+  the two rules cannot drift; its tests cover the realistic redirect targets.
 - No telemetry, no accounts; the page's own network traffic is the user's choice, exactly like
   OBS's browser source.
 - Chromium CVEs apply from the day this ships: the component panel surfaces the CEF version and

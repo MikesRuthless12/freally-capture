@@ -34,6 +34,7 @@ import type {
   FilterId,
   FilterKind,
   GameCaptureStatus,
+  VirtualCameraStatus,
   GuideLine,
   Health,
   HotkeyAuditEntry,
@@ -1168,6 +1169,12 @@ export function integrationsStatus(): Promise<IntegrationsStatus> {
 /** Game-capture status: honest anti-cheat/AV risk + the working fallback. */
 export function gameCaptureStatus(): Promise<GameCaptureStatus> {
   return invoke<GameCaptureStatus>("game_capture_status");
+}
+
+/** CAP-N76 — virtual-camera availability (true only when the signed source
+ * component is registered; otherwise `reason` is the honest install message). */
+export function virtualCameraStatus(): Promise<VirtualCameraStatus> {
+  return invoke<VirtualCameraStatus>("virtual_camera_status");
 }
 
 /** The EULA text + version + whether the current version is already accepted. */

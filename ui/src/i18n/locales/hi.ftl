@@ -295,6 +295,8 @@ sources-game-title = गेम कैप्चर
 sources-game-checking = जाँच हो रही है…
 sources-game-use-portal = Screen Capture (Portal) का उपयोग करें
 sources-game-use-window = इसके बजाय Window Capture का उपयोग करें
+sources-game-accept = जोखिम स्वीकारें और गेम चुनें
+sources-game-pick = कैप्चर करने के लिए गेम विंडो चुनें। यह केवल खेलते समय हुक रहती है।
 
 # Image picker
 sources-image-title = एक इमेज जोड़ें
@@ -2542,8 +2544,6 @@ menu-help-bug = एक बग रिपोर्ट करें…
 menu-help-updates = अपडेट जाँचें…
 menu-help-whats-new = नया क्या है
 menu-help-about = ऐप के बारे में…
-menu-help-more-apps = और Freally ऐप्स…
-moreapps-title = और Freally ऐप्स
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = सेटिंग्स श्रेणियाँ
@@ -2775,4 +2775,7 @@ sources-browser-height = ऊँचाई (px)
 sources-browser-fps = FPS
 sources-browser-transparent = पारदर्शी पेज बैकग्राउंड (अल्फ़ा बना रहता है)
 sources-browser-note = http/https पेजों को ऑफ़स्क्रीन रेंडर करता है, ऑन-डिमांड ब्राउज़र रनटाइम कॉम्पोनेन्ट के ज़रिए — कभी बंडल नहीं, कभी प्रोसेस के भीतर नहीं। लोकल फ़ाइलें मीडिया/छवि से चलती हैं।
-sources-browser-component-missing = ब्राउज़र रनटाइम कॉम्पोनेन्ट चाहिए — इसे उपकरण → कंपोनेंट से इंस्टॉल करें।
+sources-browser-component-missing = इसके लिए Browser Runtime घटक चाहिए — इसे टूल्स → घटक से इंस्टॉल करें।
+sources-browser-component-unsupported = CEF इस प्लेटफ़ॉर्म के लिए Browser Runtime बिल्ड प्रकाशित नहीं करता, इसलिए यह स्रोत यहाँ रेंडर नहीं हो सकता।
+sources-browser-component-installing = Browser Runtime घटक इंस्टॉल हो रहा है… पूरा होते ही यह स्रोत रेंडर होगा।
+sources-browser-component-error = Browser Runtime घटक इंस्टॉल नहीं हो सका: { $message }

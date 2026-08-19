@@ -2438,7 +2438,8 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
                         // window). Live retunes go through `cursor_fx_set`;
                         // this covers session (re)starts and app relaunches.
                         if let SourceSettings::Display { capture_id, .. }
-                        | SourceSettings::Window { capture_id, .. } = &source.settings
+                        | SourceSettings::Window { capture_id, .. }
+                        | SourceSettings::GameCapture { capture_id, .. } = &source.settings
                         {
                             let fx = app
                                 .state::<crate::settings::SettingsStore>()
@@ -4642,11 +4643,53 @@ fn deinterlace_config(
     Some((mode, order))
 }
 
+/// CAP-N78 — start a Game Capture source: resolve the pid + executable from the
+/// window `capture_id`, mint the per-title consent from `acknowledged`, and run
+/// the injected hook, degrading to window capture on any failure. Windows-only;
+/// every other OS uses window capture directly (the honest per-OS story).
+#[cfg(target_os = "windows")]
+fn start_game_capture(
+    capture_id: &str,
+    acknowledged: bool,
+) -> Result<CaptureSession, CaptureError> {
+    let Some((pid, exe)) = fcap_capture::window_process(capture_id) else {
+        // The window is gone or unresolvable — fall back to window capture,
+        // which will surface its own honest not-found error.
+        return fcap_capture::start_capture(capture_id);
+    };
+    // Consent is granted for the executable recorded in the id when the user
+    // picked it, and checked against the one the id resolves to NOW. These are
+    // not the same string: `window_process` re-resolves by identity, and the
+    // durable-rebind fallback matches on exe name alone, so a stored id can
+    // come to point at a different process. Minting consent from the resolved
+    // name would make the check `exe == exe` — vacuously true — and defeat the
+    // whole per-title gate.
+    let Some(approved) = fcap_capture::capture_id_executable(capture_id) else {
+        return fcap_capture::start_capture(capture_id);
+    };
+    match fcap_capture::gamecapture::Consent::grant(&approved, acknowledged) {
+        Some(consent) => fcap_capture::start_game_capture(pid, &exe, &consent, capture_id),
+        // No acknowledgement recorded yet: never inject — capture the window.
+        None => fcap_capture::start_capture(capture_id),
+    }
+}
+
+/// Non-Windows: there is no injection model, so a Game Capture source is window
+/// capture. Said plainly in the picker; nothing here pretends otherwise.
+#[cfg(not(target_os = "windows"))]
+fn start_game_capture(
+    capture_id: &str,
+    _acknowledged: bool,
+) -> Result<CaptureSession, CaptureError> {
+    fcap_capture::start_capture(capture_id)
+}
+
 fn is_capture_backed(settings: &SourceSettings) -> bool {
     matches!(
         settings,
         SourceSettings::Display { .. }
             | SourceSettings::Window { .. }
+            | SourceSettings::GameCapture { .. }
             | SourceSettings::Portal {}
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Media { .. }
@@ -4679,6 +4722,7 @@ fn auto_recoverable(settings: &SourceSettings) -> bool {
         settings,
         SourceSettings::Display { .. }
             | SourceSettings::Window { .. }
+            | SourceSettings::GameCapture { .. }
             | SourceSettings::VideoDevice { .. }
             | SourceSettings::Browser { .. }
     )
@@ -4901,6 +4945,11 @@ fn start_session(
                 | SourceSettings::Window { capture_id, .. } => {
                     fcap_capture::start_capture(capture_id)
                 }
+                SourceSettings::GameCapture {
+                    capture_id,
+                    acknowledged,
+                    ..
+                } => start_game_capture(capture_id, *acknowledged),
                 SourceSettings::Portal {} => fcap_capture::start_capture("portal"),
                 SourceSettings::VideoDevice {
                     device_id,
@@ -5460,9 +5509,9 @@ fn follow_anchor(
     let item = scene.item(item_id)?;
     let source = sources.iter().find(|source| source.id == item.source)?;
     let capture_id = match &source.settings {
-        SourceSettings::Display { capture_id, .. } | SourceSettings::Window { capture_id, .. } => {
-            capture_id
-        }
+        SourceSettings::Display { capture_id, .. }
+        | SourceSettings::Window { capture_id, .. }
+        | SourceSettings::GameCapture { capture_id, .. } => capture_id,
         _ => return None,
     };
     let (cx, cy) = fcap_capture::cursor_screen_position()?;

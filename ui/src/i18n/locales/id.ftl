@@ -301,6 +301,8 @@ sources-game-title = Tangkapan Game
 sources-game-checking = Memeriksa…
 sources-game-use-portal = Gunakan Tangkapan Layar (Portal)
 sources-game-use-window = Gunakan Tangkapan Jendela saja
+sources-game-accept = Terima risiko & pilih game
+sources-game-pick = Pilih jendela game untuk ditangkap. Tetap terkait hanya selama Anda memainkannya.
 
 # Image picker
 sources-image-title = Tambah Gambar
@@ -2577,8 +2579,6 @@ menu-help-bug = Laporkan bug…
 menu-help-updates = Periksa pembaruan…
 menu-help-whats-new = Yang baru
 menu-help-about = Tentang…
-menu-help-more-apps = Aplikasi Freally lainnya…
-moreapps-title = Aplikasi Freally lainnya
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Kategori pengaturan
@@ -2810,4 +2810,7 @@ sources-browser-height = Tinggi (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Latar halaman transparan (alfa ikut terbawa)
 sources-browser-note = Merender halaman http/https di luar layar lewat komponen runtime peramban sesuai permintaan — tidak pernah dibundel, tidak pernah di dalam proses. Berkas lokal diputar lewat Media/Gambar.
-sources-browser-component-missing = Membutuhkan komponen runtime peramban — pasang dari Alat → Komponen.
+sources-browser-component-missing = Membutuhkan komponen Browser Runtime — pasang dari Alat → Komponen.
+sources-browser-component-unsupported = CEF tidak menerbitkan build Browser Runtime untuk platform ini, jadi sumber ini tidak dapat dirender di sini.
+sources-browser-component-installing = Memasang komponen Browser Runtime… sumber ini akan dirender setelah selesai.
+sources-browser-component-error = Komponen Browser Runtime tidak dapat dipasang: { $message }

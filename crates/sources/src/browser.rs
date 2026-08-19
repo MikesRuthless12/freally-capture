@@ -29,7 +29,7 @@ use std::time::Instant;
 
 use fcap_capture::{frame_channel, CaptureError, CaptureSession, Frame, PixelFormat};
 
-use crate::media::{read_exact_or_end, spawn_kill_watchdog};
+use crate::media::{read_exact_or_end, spawn_kill_watchdog_with_grace};
 
 /// Shown when the browser-host component is missing — surfaced both here (when
 /// a source tries to start) and by the studio dispatch (which can't reach this
@@ -52,6 +52,11 @@ pub struct BrowserConfig {
 
 /// The stdout stream's magic — bump on any layout change.
 const MAGIC: &[u8; 4] = b"FBH1";
+
+/// How long the host may take to honour its clean-shutdown signal before it is
+/// killed. Long enough for CEF to release its subprocesses, short enough that a
+/// scene change never stalls: `stop()` joins the pump, which joins the watchdog.
+const HOST_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Where the browser-host executable lives once its component is installed:
 /// a `host` sibling of the CEF runtime's `current` install.
@@ -110,7 +115,10 @@ pub fn start_browser(hub_id: &str, config: BrowserConfig) -> Result<CaptureSessi
         .arg(fps.to_string())
         .arg("--cef")
         .arg(&config.cef_dir)
-        .stdin(Stdio::null())
+        // A live stdin pipe, not null: closing it is the protocol’s clean-shutdown
+        // signal (host exits 0). With Stdio::null() the host would see EOF the
+        // instant it started — the signal could never mean anything.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if config.transparent {
@@ -128,6 +136,10 @@ pub fn start_browser(hub_id: &str, config: BrowserConfig) -> Result<CaptureSessi
         .stdout
         .take()
         .ok_or_else(|| CaptureError::Backend("the browser host gave no output pipe".into()))?;
+    let host_stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| CaptureError::Backend("the browser host gave no input pipe".into()))?;
 
     let (sender, receiver) = frame_channel();
     let stop = Arc::new(AtomicBool::new(false));
@@ -136,13 +148,24 @@ pub fn start_browser(hub_id: &str, config: BrowserConfig) -> Result<CaptureSessi
     let join = std::thread::Builder::new()
         .name("fcap-browser".into())
         .spawn(move || {
-            // The stop watchdog kills the host the instant `stop` is set, which
-            // unblocks the fixed-size read below. Without it a host that paints
-            // once and then goes quiet (a static overlay — a lower-third, a
-            // logo) leaves the pump blocked forever, and a later `stop()` (which
-            // joins this thread) would wedge the whole studio reconcile loop.
-            let (kill_tx, watchdog) =
-                spawn_kill_watchdog("fcap-browser-watchdog", &thread_stop, vec![child]);
+            // The stop watchdog winds the host down the instant `stop` is set,
+            // which unblocks the fixed-size read below. Without it a host that
+            // paints once and then goes quiet (a static overlay — a lower-third,
+            // a logo) leaves the pump blocked forever, and a later `stop()`
+            // (which joins this thread) would wedge the whole studio reconcile.
+            //
+            // Graceful first: dropping `host_stdin` gives the host EOF, the
+            // protocol's clean-shutdown signal (exit 0), so CEF tears its own
+            // render/GPU subprocesses down instead of being orphaned by a kill
+            // of the parent. HOST_SHUTDOWN_GRACE bounds the wait — `stop()`
+            // joins this thread, so it sits on the studio's reconcile path.
+            let (kill_tx, watchdog) = spawn_kill_watchdog_with_grace(
+                "fcap-browser-watchdog",
+                &thread_stop,
+                vec![child],
+                HOST_SHUTDOWN_GRACE,
+                move || drop(host_stdin),
+            );
             let wind_down =
                 |kill_tx: std::sync::mpsc::Sender<()>,
                  watchdog: Option<std::thread::JoinHandle<()>>| {

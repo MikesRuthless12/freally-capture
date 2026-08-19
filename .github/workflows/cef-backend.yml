@@ -1,0 +1,92 @@
+# CAP-N77 — build + smoke the real CEF OSR browser-host backend.
+#
+# The backend links libcef and needs the pinned CEF **standard** SDK (headers +
+# libcef.lib) plus libclang for bindgen, so it is heavy and runs on demand + when
+# the browser-host crate or this workflow changes — not on every push. The
+# default `ci.yml` builds the crate WITHOUT `--features cef` (the honest skeleton
+# that exits 3), so day-to-day CI needs no SDK.
+name: CEF backend (browser source)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/browser-host/**"
+      - ".github/workflows/cef-backend.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cef-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  # CEF_MAJOR is deliberately NOT set here: scripts/fetch-cef-sdk.mjs reads
+  # PINNED_CEF_MAJOR out of crates/encode/src/cef.rs, so the line CI builds
+  # against and the line the shipped fetcher installs cannot drift.
+
+jobs:
+  build-cef-backend:
+    name: build + smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux prerequisites
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./.github/actions/linux-deps
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # libclang for bindgen (the CEF C API bindings). Prebuilt, cached by the OS.
+      #
+      # BUILD-TIME ONLY — LLVM (~1 GB) is a host tool for this job and is NEVER
+      # redistributed: bindgen emits plain Rust into OUT_DIR, so the compiled
+      # host has no LLVM linkage. This job deliberately has `contents: read` and
+      # NO upload-artifact step, and the release path (release.yml) neither
+      # installs LLVM nor builds `--features cef`. Do not add an upload here.
+      - name: Install LLVM/Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18"
+          cached: true
+
+      # Resolve + fetch + verify the pinned CEF **standard** dist (headers +
+      # Release/libcef.lib), then export CEF_ROOT for build.rs. The resolver is
+      # the same CDN index the app's fetcher pins to.
+      - name: Fetch + stage the pinned CEF SDK
+        shell: bash
+        run: node scripts/fetch-cef-sdk.mjs
+
+      - name: Clippy the CEF backend
+        shell: bash
+        run: |
+          export CEF_ROOT="$PWD/.cef-sdk"
+          export LIBCLANG_PATH="${LIBCLANG_PATH:-}"
+          cargo clippy -p freally-browser-host --features cef --all-targets -- -D warnings
+
+      - name: Build the CEF backend
+        shell: bash
+        run: |
+          export CEF_ROOT="$PWD/.cef-sdk"
+          cargo build -p freally-browser-host --features cef --release
+
+      # A headless smoke: render a data: URL for a moment and assert the FBH1
+      # header + at least one frame come out. Linux needs a virtual display.
+      - name: Smoke — render + FBH1 header (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          export CEF_ROOT="$PWD/.cef-sdk"
+          cp "$CEF_ROOT"/Release/*.so "$CEF_ROOT"/Release/*.bin target/release/ 2>/dev/null || true
+          cp -r "$CEF_ROOT"/Resources/* target/release/ 2>/dev/null || true
+          xvfb-run -a node scripts/cef-smoke.mjs

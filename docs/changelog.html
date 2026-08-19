@@ -24,8 +24,34 @@
     </header>
 
     <main>
-      <!-- 1.1.0 — deep capture & web (phase 10, first slice) -->
+      <!-- 1.2.0 — deep capture & web -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">1.2.0</span>
+            <span class="date">Aug 19, 2026 · Deep Capture &amp; Web</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v1.2.0">Download</a>
+        </div>
+
+        <h2>1.2.0 — Deep Capture &amp; Web</h2>
+        <p class="summary">
+          The last three additions to the app: an OS-level virtual camera, a true browser source,
+          and game capture through an injected GPU present-hook. All three are Windows-first, with
+          the per-OS story stated honestly rather than faked. Two ship components that are
+          <strong>not yet code-signed</strong>, and two live-scenario drills are still owed — both
+          said plainly below rather than papered over.
+        </p>
+        <ul class="features">
+          <li><strong>Virtual camera</strong> — the composed program is selectable as “Freally Capture Virtual Camera” in Zoom, Meet, Discord and Teams. Frames reach the OS through a lock-free double-buffered shared-memory transport and a real <code>IMFMediaSource</code> COM source that self-registers per-user (no admin, no silent install), and the device is torn down on stop <em>and</em> on drop so no zombie camera lingers. macOS (CoreMediaIO) and Linux (v4l2loopback) remain their own components. <em>Owed: code-signing, and the live “visible in a call” drill.</em></li>
+          <li><strong>True browser source</strong> — any http/https page rendered offscreen through CEF at the resolution and fps you choose. Every navigation passes one shared allowlist, so a redirect to <code>file://</code> or <code>javascript:</code> is cancelled rather than followed, and the runtime is fetched on first use only — hash-verified, removable, never bundled. The app runs fine, with an honest note, when it is absent. <em>Owed: per-OS code-signing and the macOS/Linux build legs.</em></li>
+          <li><strong>Game capture (GPU present-hook)</strong> — reaches exclusive-fullscreen titles that window capture cannot, at the game’s own present rate. Strictly <strong>per-title opt-in</strong>: nothing injects until you accept the blunt anti-cheat/AV risk for that specific executable, and that consent can never be replayed against another game. A title that refuses the hook degrades to Window Capture with an honest message, never a crash; HDR back buffers route to window capture rather than being misread as 8-bit. <em>Owed: the inject-into-a-live-title drill.</em></li>
+          <li><strong>Removed: the “More Freally apps” Central panel.</strong> Freally Central no longer exists, so the integration and its vendored submodule are gone. A fresh clone and CI checkout now succeed where the missing submodule would have failed them.</li>
+        </ul>
+      </article>
+
+      <!-- 1.1.0 — deep capture & web (phase 10, first slice) -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">1.1.0</span>

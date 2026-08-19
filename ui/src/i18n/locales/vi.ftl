@@ -295,6 +295,8 @@ sources-game-title = Chụp Trò chơi
 sources-game-checking = Đang kiểm tra…
 sources-game-use-portal = Dùng Chụp Màn hình (Portal)
 sources-game-use-window = Dùng Chụp Cửa sổ thay thế
+sources-game-accept = Chấp nhận rủi ro & chọn trò chơi
+sources-game-pick = Chọn cửa sổ trò chơi để chụp. Nó chỉ được móc trong khi bạn chơi.
 
 # Image picker
 sources-image-title = Thêm Ảnh
@@ -2555,8 +2557,6 @@ menu-help-bug = Báo lỗi…
 menu-help-updates = Kiểm tra cập nhật…
 menu-help-whats-new = Có gì mới
 menu-help-about = Giới thiệu…
-menu-help-more-apps = Các ứng dụng Freally khác…
-moreapps-title = Các ứng dụng Freally khác
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Danh mục cài đặt
@@ -2788,4 +2788,7 @@ sources-browser-height = Chiều cao (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Nền trang trong suốt (giữ nguyên kênh alpha)
 sources-browser-note = Kết xuất trang http/https ngoài màn hình qua thành phần môi trường chạy trình duyệt tải theo yêu cầu — không bao giờ đóng gói kèm, không bao giờ chạy trong tiến trình. Tệp cục bộ phát qua Phương tiện/Hình ảnh.
-sources-browser-component-missing = Cần thành phần môi trường chạy trình duyệt — cài đặt từ Công cụ → Thành phần.
+sources-browser-component-missing = Cần thành phần Browser Runtime — cài đặt từ Công cụ → Thành phần.
+sources-browser-component-unsupported = CEF không phát hành bản dựng Browser Runtime cho nền tảng này, nên nguồn này không thể hiển thị ở đây.
+sources-browser-component-installing = Đang cài đặt thành phần Browser Runtime… nguồn này sẽ hiển thị khi hoàn tất.
+sources-browser-component-error = Không thể cài đặt thành phần Browser Runtime: { $message }

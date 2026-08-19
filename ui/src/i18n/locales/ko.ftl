@@ -295,6 +295,8 @@ sources-game-title = 게임 캡처
 sources-game-checking = 확인 중…
 sources-game-use-portal = 화면 캡처 사용 (포털)
 sources-game-use-window = 대신 윈도우 캡처 사용
+sources-game-accept = 위험을 감수하고 게임 선택
+sources-game-pick = 캡처할 게임 창을 선택하세요. 플레이하는 동안에만 후킹됩니다.
 
 # Image picker
 sources-image-title = 이미지 추가
@@ -2555,8 +2557,6 @@ menu-help-bug = 버그 신고…
 menu-help-updates = 업데이트 확인…
 menu-help-whats-new = 새로운 기능
 menu-help-about = 정보…
-menu-help-more-apps = 더 많은 Freally 앱…
-moreapps-title = 더 많은 Freally 앱
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = 설정 카테고리
@@ -2788,4 +2788,7 @@ sources-browser-height = 높이 (px)
 sources-browser-fps = FPS
 sources-browser-transparent = 투명한 페이지 배경 (알파 유지)
 sources-browser-note = http/https 페이지를 오프스크린으로 렌더링합니다. 주문형 브라우저 런타임 구성 요소를 사용하며 — 절대 번들되지 않고 프로세스 안에서 실행되지 않습니다. 로컬 파일은 미디어/이미지로 재생합니다.
-sources-browser-component-missing = 브라우저 런타임 구성 요소가 필요합니다 — 도구 → 컴포넌트에서 설치하세요.
+sources-browser-component-missing = Browser Runtime 구성 요소가 필요합니다 — 도구 → 구성 요소에서 설치하세요.
+sources-browser-component-unsupported = CEF는 이 플랫폼용 Browser Runtime 빌드를 제공하지 않으므로 이 소스는 여기서 렌더링할 수 없습니다.
+sources-browser-component-installing = Browser Runtime 구성 요소를 설치하는 중… 완료되면 이 소스가 렌더링됩니다.
+sources-browser-component-error = Browser Runtime 구성 요소를 설치하지 못했습니다: { $message }

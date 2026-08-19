@@ -28,11 +28,14 @@ members = [
     "crates/script",    # sandboxed Lua scripting: react to studio events, drive the command surface
     "crates/plugin",    # the plugin SDK: documented Source/Filter contracts + the registry seam
     "crates/browser-host", # CAP-N77 browser-host skeleton: CEF OSR → RGBA pipe (real backend = CI `cef` feature)
+    "crates/game-hook", # CAP-N78 game-capture hook: injected D3D present-hook → named shared texture (Windows)
+    "crates/vcam-win", # CAP-N76 Windows virtual camera: MFCreateVirtualCamera + shared-memory transport
+    "crates/vcam-source", # CAP-N76 frame-server source DLL: IMFMediaSource the Frame Server loads (Windows)
     "plugins/checkerboard", # the sample plugin: adds a source + a filter without touching core
 ]
 
 [workspace.package]
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.80"
 authors = ["Mike Weaver <mythodikalone@gmail.com>"]

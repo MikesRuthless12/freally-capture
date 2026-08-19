@@ -346,6 +346,20 @@ impl Collection {
                 self.vertical = None;
             }
         }
+        // A scene collection is a SHAREABLE document (`.fcappack`, an OBS
+        // import, a snapshot, a hand-edited file), so it must never carry
+        // authority to inject a DLL into another process. `acknowledged` says
+        // the user was shown the anti-cheat/ban warning and accepted it for one
+        // specific game — that is a statement about a person at a keyboard on
+        // THIS machine, and it cannot survive a file transfer. Clearing it here
+        // means an imported pack always degrades to plain Window Capture until
+        // the operator opts in again through the picker, which is the only
+        // place the risk text is actually shown.
+        for source in &mut self.sources {
+            if let SourceSettings::GameCapture { acknowledged, .. } = &mut source.settings {
+                *acknowledged = false;
+            }
+        }
         // Nested-scene sources with a missing target render nothing forever —
         // drop them (their items go with the dangling-source pass below).
         let scene_ids: Vec<SceneId> = self.scenes.iter().map(|scene| scene.id).collect();
@@ -3991,6 +4005,44 @@ mod tests {
             "rule dropped with its scene"
         );
         assert!(c.transition_overrides.is_empty());
+    }
+
+    /// A scene collection is a shareable document, so it must never be able to
+    /// carry consent to inject a DLL into another process. `sanitize` runs on
+    /// every load and every import path and must strip `acknowledged` —
+    /// otherwise a crafted `.fcappack` injects into whatever executable its
+    /// `captureId` names, with no prompt and no risk text ever shown.
+    #[test]
+    fn sanitize_strips_game_capture_consent_from_loaded_collections() {
+        let mut collection = Collection::new();
+        let scene = collection.active_scene;
+        let (source_id, _) = collection
+            .add_item_with_new_source(
+                scene,
+                Source::new(
+                    "Game",
+                    SourceSettings::GameCapture {
+                        capture_id: "win:0:Y2hyb21lLmV4ZQ==::".into(),
+                        label: "Chrome".into(),
+                        acknowledged: true,
+                    },
+                ),
+            )
+            .expect("added");
+
+        collection.sanitize();
+
+        match &collection
+            .source(source_id)
+            .expect("the source survives")
+            .settings
+        {
+            SourceSettings::GameCapture { acknowledged, .. } => assert!(
+                !*acknowledged,
+                "a loaded or imported collection must never carry injection consent"
+            ),
+            other => panic!("expected a GameCapture source, got {other:?}"),
+        }
     }
 
     #[test]

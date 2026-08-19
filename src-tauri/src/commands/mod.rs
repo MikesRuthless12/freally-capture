@@ -262,6 +262,48 @@ pub fn game_capture_status() -> GameCaptureStatusDto {
     }
 }
 
+/// CAP-N76 — virtual-camera availability. `available` is true only when a
+/// driver-backed camera can run here right now (Windows 11 + the signed
+/// frame-server source component registered); otherwise `reason` explains why,
+/// so the UI keeps Start disabled with an honest tooltip instead of failing on
+/// click. The composed program is fed to the camera through the shared-memory
+/// transport once a source is registered (design/vcam-source.md).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualCameraStatusDto {
+    pub available: bool,
+    /// `None` when available; an honest, actionable message otherwise.
+    pub reason: Option<String>,
+}
+
+#[tauri::command]
+pub fn virtual_camera_status() -> VirtualCameraStatusDto {
+    #[cfg(target_os = "windows")]
+    {
+        if fcap_vcam_win::available() {
+            VirtualCameraStatusDto {
+                available: true,
+                reason: None,
+            }
+        } else {
+            VirtualCameraStatusDto {
+                available: false,
+                reason: Some(fcap_vcam_win::SOURCE_NOT_REGISTERED.to_string()),
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        VirtualCameraStatusDto {
+            available: false,
+            reason: Some(
+                "the virtual camera ships first on Windows; the macOS (CoreMediaIO) and Linux (v4l2loopback) components are their own milestones"
+                    .to_string(),
+            ),
+        }
+    }
+}
+
 /// A one-shot JPEG thumbnail (`data:` URI) of the window `id`, for the picker's
 /// live preview (the UI re-requests it on a timer). `Ok(None)` = no thumbnail
 /// available — a minimized / GPU-composited window, or a platform without it yet

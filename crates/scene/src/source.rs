@@ -158,6 +158,19 @@ pub enum SourceSettings {
         #[serde(default)]
         label: String,
     },
+    /// CAP-N78 — a game captured via the injected GPU present-hook (Windows),
+    /// degrading to window capture where the hook cannot run. `capture_id` is
+    /// the game window (the pid + executable are resolved from it, and it is the
+    /// fallback source); `acknowledged` records that the user accepted the
+    /// anti-cheat risk for THIS game — injection never happens without it.
+    GameCapture {
+        #[serde(default)]
+        capture_id: String,
+        #[serde(default)]
+        label: String,
+        #[serde(default)]
+        acknowledged: bool,
+    },
     /// The Wayland ScreenCast portal — the *system dialog* picks the actual
     /// screen/window on every (re)start; that honesty is by design.
     Portal {},
@@ -1156,6 +1169,7 @@ impl SourceSettings {
         match self {
             SourceSettings::Display { .. } => "display",
             SourceSettings::Window { .. } => "window",
+            SourceSettings::GameCapture { .. } => "gameCapture",
             SourceSettings::Portal {} => "portal",
             SourceSettings::VideoDevice { .. } => "videoDevice",
             SourceSettings::Image { .. } => "image",
@@ -1194,6 +1208,7 @@ impl SourceSettings {
         match self {
             SourceSettings::Display { .. } => "Display Capture",
             SourceSettings::Window { .. } => "Window Capture",
+            SourceSettings::GameCapture { .. } => "Game Capture",
             SourceSettings::Portal {} => "Screen Capture (Portal)",
             SourceSettings::VideoDevice { .. } => "Video Capture Device",
             SourceSettings::Image { .. } => "Image",

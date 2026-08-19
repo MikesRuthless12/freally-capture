@@ -5,16 +5,22 @@ edition.workspace = true
 license.workspace = true
 publish = false
 description = "CAP-N77 browser host: renders an http(s) URL offscreen via the on-demand CEF runtime and streams RGBA frames over stdout (design/browser-host-protocol.md)."
+build = "build.rs"
 
 [[bin]]
 name = "freally-browser-host"
 path = "src/main.rs"
 
 [features]
-# The real CEF OSR backend — enabled ONLY by the CI component build, which
-# links against the pinned CEF SDK per-OS. Without it the host exits 3 with
-# an honest message, so workspace builds never need the SDK.
-cef = []
+# The real CEF OSR backend. Enabled by the component build (and locally with the
+# CEF SDK staged); build.rs binds the C API headers and links libcef. Without it
+# the host exits 3 with an honest message, so plain workspace builds need no SDK.
+cef = ["dep:bindgen"]
 
 [dependencies]
-# Deliberately none: args are parsed by hand, the protocol is raw bytes.
+# Deliberately none at runtime: args are parsed by hand, the protocol is raw bytes.
+
+[build-dependencies]
+# Only pulled in under the `cef` feature — generates the CEF C API bindings from
+# the SDK headers so the struct layouts are exact (never hand-transcribed).
+bindgen = { version = "0.72", optional = true }

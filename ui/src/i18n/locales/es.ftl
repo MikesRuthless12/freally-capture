@@ -295,6 +295,8 @@ sources-game-title = Captura de juego
 sources-game-checking = Comprobando…
 sources-game-use-portal = Usar Captura de pantalla (Portal)
 sources-game-use-window = Usar Captura de ventana en su lugar
+sources-game-accept = Aceptar el riesgo y elegir un juego
+sources-game-pick = Elige la ventana del juego a capturar. Solo queda enganchada mientras juegas.
 
 # Image picker
 sources-image-title = Añadir una imagen
@@ -2555,8 +2557,6 @@ menu-help-bug = Informar de un error…
 menu-help-updates = Buscar actualizaciones…
 menu-help-whats-new = Novedades
 menu-help-about = Acerca de…
-menu-help-more-apps = Más aplicaciones de Freally…
-moreapps-title = Más aplicaciones de Freally
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Categorías de ajustes
@@ -2788,4 +2788,7 @@ sources-browser-height = Altura (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Fondo de página transparente (el alfa se conserva)
 sources-browser-note = Renderiza páginas http/https fuera de pantalla con el componente bajo demanda de runtime del navegador — nunca incluido, nunca dentro del proceso. Los archivos locales se reproducen con Medios/Imagen.
-sources-browser-component-missing = Necesita el componente de runtime del navegador — instálalo desde Herramientas → Componentes.
+sources-browser-component-missing = Necesita el componente Browser Runtime: instálalo en Herramientas → Componentes.
+sources-browser-component-unsupported = CEF no publica una compilación de Browser Runtime para esta plataforma, así que esta fuente no puede renderizarse aquí.
+sources-browser-component-installing = Instalando el componente Browser Runtime… esta fuente se renderizará cuando termine.
+sources-browser-component-error = No se pudo instalar el componente Browser Runtime: { $message }

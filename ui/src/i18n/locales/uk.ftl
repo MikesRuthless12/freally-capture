@@ -295,6 +295,8 @@ sources-game-title = Захоплення гри
 sources-game-checking = Перевірка…
 sources-game-use-portal = Використати захоплення екрана (Portal)
 sources-game-use-window = Використати натомість захоплення вікна
+sources-game-accept = Прийняти ризик і вибрати гру
+sources-game-pick = Виберіть вікно гри для захоплення. Прив'язка зберігається лише під час гри.
 
 # Image picker
 sources-image-title = Додати зображення
@@ -2542,8 +2544,6 @@ menu-help-bug = Повідомити про ваду…
 menu-help-updates = Перевірити оновлення…
 menu-help-whats-new = Що нового
 menu-help-about = Про програму…
-menu-help-more-apps = Інші застосунки Freally…
-moreapps-title = Інші застосунки Freally
 
 # --- OBS-style Settings modal (obs-chrome): sidebar categories, OK/Cancel/Apply, hotkey pool, meter colors ---
 settings-categories = Категорії налаштувань
@@ -2775,4 +2775,7 @@ sources-browser-height = Висота (px)
 sources-browser-fps = FPS
 sources-browser-transparent = Прозоре тло сторінки (альфа-канал зберігається)
 sources-browser-note = Рендерить http/https-сторінки поза екраном через завантажуваний на вимогу компонент середовища виконання браузера — ніколи не вбудований і не працює всередині процесу. Локальні файли відтворюються через Медіа/Зображення.
-sources-browser-component-missing = Потрібен компонент середовища виконання браузера — встановіть його в меню Інструменти → Компоненти.
+sources-browser-component-missing = Потрібен компонент Browser Runtime — установіть його в Інструменти → Компоненти.
+sources-browser-component-unsupported = CEF не публікує збірку Browser Runtime для цієї платформи, тож це джерело тут не відтвориться.
+sources-browser-component-installing = Установлення компонента Browser Runtime… джерело відтвориться після завершення.
+sources-browser-component-error = Не вдалося встановити компонент Browser Runtime: { $message }

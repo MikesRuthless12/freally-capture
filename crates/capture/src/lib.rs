@@ -32,6 +32,12 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod win;
+/// CAP-N78 — the per-title Game Capture consent gate (Windows). Re-exported so
+/// the app can mint consent without reaching into the private `win` module.
+#[cfg(target_os = "windows")]
+pub mod gamecapture {
+    pub use crate::win::inject::Consent;
+}
 /// Durable window identity + re-resolution, shared by the per-OS window paths.
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 mod window_match;
@@ -375,6 +381,21 @@ pub fn display_is_hdr(id: &str) -> Option<bool> {
     }
 }
 
+/// The executable recorded in a window-capture id when the user picked it —
+/// the program they actually saw, as opposed to whatever the id resolves to
+/// now. Used to bind game-capture consent to one specific title.
+pub fn capture_id_executable(id: &str) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        win::capture_id_executable(id)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        None
+    }
+}
+
 /// The process behind a window-capture id — `(pid, exe name)`, re-resolved
 /// by window identity per call (CAP-N73's window↔app-audio auto-link).
 /// Windows-only today; other platforms return `None` and the UI says so.
@@ -446,6 +467,82 @@ pub fn start_capture(id: &str) -> Result<CaptureSession, CaptureError> {
             "no capture backend for {}",
             std::env::consts::OS
         )))
+    }
+}
+
+/// CAP-N78 — start capturing a game via the injected GPU hook (Windows only),
+/// falling back to `fallback_window_id` window capture when the hook cannot run.
+///
+/// `consent` is the user's per-title opt-in after seeing [`game::risk_warning`];
+/// it is minted by `win::inject::Consent::grant` and is scoped to `executable`,
+/// so it can never be replayed against another game. When the target is already
+/// hooked this attaches to the live frame stream; otherwise it injects once,
+/// explicitly. Any failure — a protected/anti-cheat title, an HDR back buffer, a
+/// game that never presents — degrades to WGC window capture with the honest
+/// reason logged, exactly as the roadmap's DoD requires: never a crash.
+///
+/// How long to wait for the injected DLL's arming thread to publish its control
+/// block before giving up and degrading. Generous — the thread creates a D3D11
+/// device and a dummy swap chain, which a loaded game can be slow to schedule —
+/// but bounded, so a title that silently swallows the DLL still degrades.
+#[cfg(target_os = "windows")]
+const HOOK_ARM_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Poll interval while waiting for the hook to arm.
+#[cfg(target_os = "windows")]
+const HOOK_ARM_POLL: Duration = Duration::from_millis(25);
+
+/// Wait until the injected hook publishes a live control block for `pid`.
+#[cfg(target_os = "windows")]
+fn wait_until_hooked(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if win::gamehook::is_hooked(pid) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(HOOK_ARM_POLL);
+    }
+}
+
+/// Blocking (injection + arm wait + first-frame wait): call off the UI thread.
+#[cfg(target_os = "windows")]
+pub fn start_game_capture(
+    pid: u32,
+    executable: &str,
+    consent: &win::inject::Consent,
+    fallback_window_id: &str,
+) -> Result<CaptureSession, CaptureError> {
+    // Already hooked (a re-add, or a prior session): just attach.
+    if !win::gamehook::is_hooked(pid) {
+        if let Err(reason) = win::inject::inject(pid, executable, consent) {
+            eprintln!("game-capture: hook injection failed, using window capture: {reason}");
+            return start_capture(fallback_window_id);
+        }
+        // `inject` returns as soon as the remote `LoadLibraryW` returns, but
+        // `DllMain` only *spawns* the arming thread — it must not touch D3D
+        // under the loader lock. The control block does not exist until that
+        // thread has built a hidden window, a D3D11 device and a dummy swap
+        // chain and reached `arm()`, which is tens to hundreds of milliseconds
+        // later. Attaching immediately always loses that race, so the first add
+        // would silently fall back to window capture even though the hook was
+        // on its way up.
+        if !wait_until_hooked(pid, HOOK_ARM_TIMEOUT) {
+            eprintln!(
+                "game-capture: the hook did not arm within {:?}, using window capture",
+                HOOK_ARM_TIMEOUT
+            );
+            return start_capture(fallback_window_id);
+        }
+    }
+    match win::gamehook::start_game_hook_capture(pid) {
+        Ok(session) => Ok(session),
+        Err(reason) => {
+            eprintln!("game-capture: hook unavailable, using window capture: {reason}");
+            start_capture(fallback_window_id)
+        }
     }
 }
 
