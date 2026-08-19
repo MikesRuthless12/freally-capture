@@ -6,11 +6,71 @@ description: >
 runs:
   using: composite
   steps:
-    - name: Install apt packages
+    # GitHub's Ubuntu runners point apt at `azure.archive.ubuntu.com`, which
+    # goes down often enough to matter — when it does, `apt-get update` prints
+    # a wall of `Ign:` lines and every job hangs until the 10-minute step cap,
+    # taking the whole run with it. Point apt at the canonical mirror up front
+    # and bound every call, so a bad mirror FAILS FAST and visibly instead of
+    # burning the cap.
+    - name: Point apt at a reachable mirror
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        # Deliberately LOW. With a dead host still in the list, generous retries
+        # are self-defeating: they burn the 10-minute step cap before the job
+        # can report anything, so the failure takes longer to surface than it
+        # needs to. Two short attempts is enough to ride out a blip and fast
+        # enough to expose an outage.
+        sudo tee /etc/apt/apt.conf.d/99-freally-retries >/dev/null <<'CONF'
+        Acquire::Retries "2";
+        Acquire::http::Timeout "20";
+        Acquire::https::Timeout "20";
+        Acquire::ftp::Timeout "20";
+        CONF
+
+        # Rewrite the mirror BEFORE the first fetch rather than after a failed
+        # one. Waiting for the default to fail costs a timeout every single run
+        # for no benefit — we already know which host is unreliable, and
+        # archive.ubuntu.com is the canonical one that stayed up throughout.
+        # Covers both the classic sources.list and the newer deb822 .sources.
+        echo "--- apt sources before ---"
+        ls -la /etc/apt/sources.list.d/ 2>/dev/null || true
+        grep -rhoE 'https?://[^ ]*ubuntu\.com[^ ]*' \
+          /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | sort -u || echo "  (none found)"
+
+        # Rewrite ANY *.ubuntu.com archive host to the canonical one. Deliberately
+        # broad: 24.04 runners use the deb822 `/etc/apt/sources.list.d/ubuntu.sources`
+        # while older images use the classic `/etc/apt/sources.list`, and a
+        # too-specific pattern silently matches neither — which is exactly what
+        # happened on the first attempt, where every `Get:` still came from
+        # azure.archive.ubuntu.com while the step reported success.
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          sudo sed -i -E 's#https?://[A-Za-z0-9.-]*\.?archive\.ubuntu\.com#http://archive.ubuntu.com#g; s#https?://[A-Za-z0-9.-]*security\.ubuntu\.com#http://security.ubuntu.com#g' "$f"
+        done
+
+        echo "--- apt sources after ---"
+        grep -rhoE 'https?://[^ ]*ubuntu\.com[^ ]*' \
+          /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | sort -u || echo "  (none found)"
+
+        # Fail loudly if the rewrite did not take, rather than silently spending
+        # the whole budget on the mirror we were trying to avoid.
+        if grep -rqE 'https?://[A-Za-z0-9.-]+\.archive\.ubuntu\.com' \
+             /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+          echo "::warning::a regional archive.ubuntu.com mirror survived the rewrite"
+        fi
+
+        # EVERY apt call is bounded. An unbounded one is the whole failure mode
+        # we are fixing: without a timeout a dead mirror does not error, it
+        # hangs until the job cap and takes the run with it. Better to fail in
+        # three minutes with a readable log than to stall for an hour.
+        sudo timeout 180 apt-get update
+
+    - name: Install apt packages
+      shell: bash
+      # Bounded for the same reason as the update above. This is a real download
+      # of the gtk/webkit stack, so the budget is generous — but finite.
+      run: |
+        sudo timeout 900 apt-get install -y \
           pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf \
           libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
           libpipewire-0.3-dev libwayland-dev libasound2-dev libssl-dev \

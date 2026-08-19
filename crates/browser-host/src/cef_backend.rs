@@ -108,6 +108,51 @@ unsafe fn take_cef_string(s: cef_string_userfree_t) -> String {
     out
 }
 
+/// Fill a `cef_main_args_t` for this platform.
+///
+/// The struct is genuinely different per OS: on Windows it carries the module
+/// `instance`, on POSIX it carries `argc`/`argv`. Writing the Windows field
+/// unconditionally is why this backend had never compiled on Linux or macOS —
+/// nothing built it until the component workflow started running.
+///
+/// The POSIX `argv` must outlive every CEF call that reads it, so it is owned by
+/// a process-lived `OnceLock` rather than a local.
+#[cfg(not(windows))]
+fn argv_storage() -> &'static (Vec<std::ffi::CString>, Vec<*mut std::os::raw::c_char>) {
+    static ARGV: OnceLock<(Vec<std::ffi::CString>, Vec<*mut std::os::raw::c_char>)> =
+        OnceLock::new();
+    ARGV.get_or_init(|| {
+        let owned: Vec<std::ffi::CString> = std::env::args_os()
+            .map(|a| {
+                use std::os::unix::ffi::OsStrExt;
+                std::ffi::CString::new(a.as_os_str().as_bytes()).unwrap_or_default()
+            })
+            .collect();
+        // CEF wants a NULL-terminated argv, as main() receives.
+        let mut ptrs: Vec<*mut std::os::raw::c_char> =
+            owned.iter().map(|s| s.as_ptr() as *mut _).collect();
+        ptrs.push(std::ptr::null_mut());
+        (owned, ptrs)
+    })
+}
+
+fn main_args() -> _cef_main_args_t {
+    // SAFETY: the struct is plain data; every field is set below or left zero.
+    let mut args: _cef_main_args_t = unsafe { std::mem::zeroed() };
+    #[cfg(windows)]
+    {
+        // SAFETY: documented call; a null module name returns this process.
+        args.instance = unsafe { GetModuleHandleW(std::ptr::null()) } as *mut _;
+    }
+    #[cfg(not(windows))]
+    {
+        let (owned, ptrs) = argv_storage();
+        args.argc = owned.len() as std::os::raw::c_int;
+        args.argv = ptrs.as_ptr() as *mut *mut std::os::raw::c_char;
+    }
+    args
+}
+
 /// A no-op refcount for a process-lived singleton: never frees.
 unsafe extern "C" fn noop_add_ref(_s: *mut _cef_base_ref_counted_t) {}
 unsafe extern "C" fn noop_release(_s: *mut _cef_base_ref_counted_t) -> std::os::raw::c_int {
@@ -329,8 +374,7 @@ pub fn run_subprocess_if_any() -> Option<ExitCode> {
     unsafe {
         let _ = cef_api_hash(CEF_API_VERSION, 0);
     }
-    let mut main_args: _cef_main_args_t = unsafe { std::mem::zeroed() };
-    main_args.instance = unsafe { GetModuleHandleW(std::ptr::null()) } as *mut _;
+    let mut main_args = main_args();
     let app = Box::into_raw(App::new());
     // SAFETY: single write before any other access; the process is single-threaded here.
     unsafe { APP = app };
@@ -360,8 +404,7 @@ pub fn run(args: Args) -> ExitCode {
     OUT_H.store(args.height, Ordering::Relaxed);
     OUT_FPS.store(args.fps, Ordering::Relaxed);
 
-    let mut main_args: _cef_main_args_t = unsafe { std::mem::zeroed() };
-    main_args.instance = unsafe { GetModuleHandleW(std::ptr::null()) } as *mut _;
+    let mut main_args = main_args();
     // Reuse the app created in run_subprocess_if_any (the required call order).
     // SAFETY: APP was set there before main parsed args.
     let app = unsafe { APP };
@@ -500,8 +543,8 @@ pub fn run(args: Args) -> ExitCode {
 #[cfg(windows)]
 const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
 
+#[cfg(windows)]
 extern "system" {
     fn GetModuleHandleW(module: *const u16) -> *mut std::os::raw::c_void;
-    #[cfg(windows)]
     fn GetStdHandle(which: u32) -> *mut std::os::raw::c_void;
 }

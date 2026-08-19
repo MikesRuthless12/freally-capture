@@ -101,6 +101,34 @@ function sha1(path) {
 
 const cefMajor = (v) => parseInt(v.cef_version, 10);
 
+// Extract the .tar.bz2.
+//
+// Windows ships bsdtar as `tar`, and it fails on CEF's bzip2 archives with
+// "Child returned status 128 / Error is not recoverable" even though the
+// download is intact (the sha1 verifies immediately before this). 7-Zip is
+// present on the GitHub Windows runners and handles it, so try that first and
+// fall back to `tar` — which is the right tool everywhere else.
+function extract(archive, outDir) {
+  const attempts =
+    process.platform === "win32"
+      ? [
+          // 7z cannot do .tar.bz2 in one pass: bz2 → .tar, then untar.
+          ["7z", ["x", "-y", `-o${outDir}`, archive]],
+          ["7z", ["x", "-y", `-o${outDir}`, join(outDir, "cef.tar")]],
+        ]
+      : [["tar", ["-xjf", archive, "-C", outDir]]];
+
+  for (const [cmd, args] of attempts) {
+    const res = spawnSync(cmd, args, { stdio: "inherit" });
+    if (res.status !== 0) {
+      throw new Error(
+        `extraction failed: ${cmd} exited ${res.status ?? res.signal}` +
+          (res.error ? ` (${res.error.message})` : ""),
+      );
+    }
+  }
+}
+
 async function main() {
   console.log(`Resolving CEF standard SDK for ${PLATFORM} in the ${MAJOR}.x line…`);
   const index = await fetchJson(INDEX);
@@ -122,8 +150,7 @@ async function main() {
   }
   console.log("  sha1 verified.");
 
-  const tar = spawnSync("tar", ["-xjf", archive, "-C", OUT], { stdio: "inherit" });
-  if (tar.status !== 0) throw new Error("tar extraction failed");
+  extract(archive, OUT);
 
   // Flatten cef_binary_*/ into .cef-sdk/ so CEF_ROOT points straight at it.
   const dir = readdirSync(OUT).find((n) => n.startsWith("cef_binary_"));
