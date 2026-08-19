@@ -79,17 +79,47 @@ jobs:
       # treats "" as a search path it was explicitly given, reports it as
       # invalid, and then refuses to fall back to the normal system lookup, so
       # every job died with "Unable to find libclang … (invalid: [])".
+      # Only export a directory that DEMONSTRABLY holds the library. clang-sys
+      # reports the paths it examined and rejected; `invalid: []` — an empty
+      # list — means it looked at a directory with no candidate files in it at
+      # all, which is what `$LLVM_PATH/lib` turned out to be on these runners.
+      # `llvm-config --libdir` is the authoritative answer, so ask it first.
       - name: Resolve LIBCLANG_PATH
         shell: bash
         run: |
-          if [ -n "${LIBCLANG_PATH:-}" ]; then
-            echo "LIBCLANG_PATH is already set to $LIBCLANG_PATH"
-          elif [ -n "${LLVM_PATH:-}" ]; then
-            echo "LIBCLANG_PATH=$LLVM_PATH/lib" >> "$GITHUB_ENV"
-            echo "resolved LIBCLANG_PATH to $LLVM_PATH/lib"
+          set -u
+          case "${{ matrix.os }}" in
+            windows-latest) pattern='libclang.dll' ;;
+            macos-latest)   pattern='libclang*.dylib' ;;
+            *)              pattern='libclang.so*' ;;
+          esac
+
+          holds_libclang() {
+            [ -n "${1:-}" ] && [ -d "$1" ] && \
+              find "$1" -maxdepth 1 -name "$pattern" -print -quit | grep -q .
+          }
+
+          candidates=""
+          if command -v llvm-config >/dev/null 2>&1; then
+            candidates="$candidates $(llvm-config --libdir 2>/dev/null || true)"
+          fi
+          candidates="$candidates ${LIBCLANG_PATH:-} ${LLVM_PATH:-}/lib ${LLVM_PATH:-}/bin"
+          candidates="$candidates /usr/lib/llvm-18/lib /usr/lib/llvm-17/lib /usr/lib/x86_64-linux-gnu"
+          candidates="$candidates /opt/homebrew/opt/llvm/lib /usr/local/opt/llvm/lib"
+
+          found=""
+          for dir in $candidates; do
+            if holds_libclang "$dir"; then found="$dir"; break; fi
+          done
+
+          if [ -n "$found" ]; then
+            echo "LIBCLANG_PATH=$found" >> "$GITHUB_ENV"
+            echo "libclang found in: $found"
+            find "$found" -maxdepth 1 -name "$pattern"
           else
-            echo "neither LIBCLANG_PATH nor LLVM_PATH is set — leaving it unset"
-            echo "so bindgen falls back to its own system lookup."
+            echo "::warning::no directory containing $pattern was found; leaving"
+            echo "LIBCLANG_PATH unset so bindgen still gets its own lookup."
+            echo "Searched:"; for dir in $candidates; do echo "  - $dir"; done
           fi
 
       # Resolve + fetch + verify the pinned CEF **standard** dist (headers +
