@@ -32,16 +32,32 @@ runs:
         # for no benefit — we already know which host is unreliable, and
         # archive.ubuntu.com is the canonical one that stayed up throughout.
         # Covers both the classic sources.list and the newer deb822 .sources.
-        echo "pointing apt at archive.ubuntu.com"
-        sudo sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' \
-          /etc/apt/sources.list 2>/dev/null || true
-        if [ -d /etc/apt/sources.list.d ]; then
-          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
-            -exec sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' {} + \
-            2>/dev/null || true
+        echo "--- apt sources before ---"
+        ls -la /etc/apt/sources.list.d/ 2>/dev/null || true
+        grep -rhoE 'https?://[^ ]*ubuntu\.com[^ ]*' \
+          /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | sort -u || echo "  (none found)"
+
+        # Rewrite ANY *.ubuntu.com archive host to the canonical one. Deliberately
+        # broad: 24.04 runners use the deb822 `/etc/apt/sources.list.d/ubuntu.sources`
+        # while older images use the classic `/etc/apt/sources.list`, and a
+        # too-specific pattern silently matches neither — which is exactly what
+        # happened on the first attempt, where every `Get:` still came from
+        # azure.archive.ubuntu.com while the step reported success.
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          sudo sed -i -E 's#https?://[A-Za-z0-9.-]*\.?archive\.ubuntu\.com#http://archive.ubuntu.com#g; s#https?://[A-Za-z0-9.-]*security\.ubuntu\.com#http://security.ubuntu.com#g' "$f"
+        done
+
+        echo "--- apt sources after ---"
+        grep -rhoE 'https?://[^ ]*ubuntu\.com[^ ]*' \
+          /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | sort -u || echo "  (none found)"
+
+        # Fail loudly if the rewrite did not take, rather than silently spending
+        # the whole budget on the mirror we were trying to avoid.
+        if grep -rqE 'https?://[A-Za-z0-9.-]+\.archive\.ubuntu\.com' \
+             /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+          echo "::warning::a regional archive.ubuntu.com mirror survived the rewrite"
         fi
-        grep -rhoE 'https?://[a-z0-9.-]+/ubuntu' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
-          | sort -u | sed 's/^/  mirror: /' || true
 
         # EVERY apt call is bounded. An unbounded one is the whole failure mode
         # we are fixing: without a timeout a dead mirror does not error, it
@@ -54,7 +70,7 @@ runs:
       # Bounded for the same reason as the update above. This is a real download
       # of the gtk/webkit stack, so the budget is generous — but finite.
       run: |
-        sudo timeout 600 apt-get install -y \
+        sudo timeout 900 apt-get install -y \
           pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf \
           libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
           libpipewire-0.3-dev libwayland-dev libasound2-dev libssl-dev \
