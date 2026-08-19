@@ -51,6 +51,18 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+
+      # Pin our own Node. The macOS runner's preinstalled Homebrew node@24 is
+      # broken against the system SQLite and aborts on startup:
+      #   dyld: Symbol not found: _sqlite3_load_extension
+      #     Referenced from: .../node@24/24.18.0/lib/libnode.137.dylib
+      #     Expected in: /usr/lib/libsqlite3.dylib
+      # which killed `node scripts/fetch-cef-sdk.mjs` with SIGABRT (exit 134)
+      # before it could do anything.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install Linux prerequisites
         if: matrix.os == 'ubuntu-latest'
         uses: ./.github/actions/linux-deps
