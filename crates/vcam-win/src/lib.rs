@@ -13,6 +13,14 @@
 //! component" error instead of a silent failure or a fake success.
 //!
 //! AUDITED `unsafe`: Media Foundation COM interop + the shared-memory mapping.
+//!
+//! The whole crate is Windows-only: its content is Media Foundation COM, and
+//! the `windows` dependency is declared under a `cfg(target_os = "windows")`
+//! target table. Without this gate a `--workspace` build on Linux or macOS
+//! still compiles the crate root, fails to resolve `use windows::…`, and takes
+//! CI down — `src-tauri` already depends on it only for Windows, and the
+//! sibling crates gate the same way at their `mod win;` declarations.
+#![cfg(windows)]
 #![allow(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
