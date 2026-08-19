@@ -41,43 +41,75 @@ mod cef {
             root.display()
         );
 
-        // Link libcef from the SDK's Release dir. The C API exports resolve
-        // against libcef.lib (the import lib for libcef.dll).
-        println!(
-            "cargo:rustc-link-search=native={}",
-            root.join("Release").display()
-        );
-        println!("cargo:rustc-link-lib=dylib=libcef");
+        // How CEF is linked differs per platform, and the name is NOT the same
+        // everywhere: Windows ships the import library `libcef.lib` (so the
+        // link name really is `libcef`), Linux ships `libcef.so` (so the name
+        // is `cef` — rustc adds the `lib` prefix itself), and macOS ships no
+        // library at all, only the "Chromium Embedded Framework" bundle.
+        // Passing the Windows name everywhere is why Linux and macOS both died
+        // with "cannot find -llibcef" / "library 'libcef' not found".
+        let release = root.join("Release");
+        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        println!("cargo:rustc-check-cfg=cfg(cef_sandbox)");
+        match target_os.as_str() {
+            "macos" => {
+                println!("cargo:rustc-link-search=framework={}", release.display());
+                println!("cargo:rustc-link-lib=framework=Chromium Embedded Framework");
+            }
+            "windows" => {
+                println!("cargo:rustc-link-search=native={}", release.display());
+                println!("cargo:rustc-link-lib=dylib=libcef");
+            }
+            _ => {
+                println!("cargo:rustc-link-search=native={}", release.display());
+                println!("cargo:rustc-link-lib=dylib=cef");
+            }
+        }
 
         // The Windows renderer sandbox. `cef_sandbox_info_create` lives in
         // cef_sandbox.lib, a STATIC library CEF builds against the static CRT
-        // (/MT). Rust's MSVC target defaults to the dynamic CRT (/MD), and
-        // mixing the two is a link error — so the host must be built with
-        // `-C target-feature=+crt-static`, which the component workflow sets
-        // for this crate's own cargo invocation. libcef itself is a DLL with
-        // its own CRT, so it is unaffected either way.
-        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-            println!("cargo:rustc-link-lib=static=cef_sandbox");
-            // cef_sandbox.lib's own dependencies.
-            for lib in [
-                "Advapi32",
-                "dbghelp",
-                "Delayimp",
-                "ntdll",
-                "OleAut32",
-                "PowrProf",
-                "Propsys",
-                "psapi",
-                "SetupAPI",
-                "Shell32",
-                "Shlwapi",
-                "Userenv",
-                "version",
-                "wbemuuid",
-                "WindowsApp",
-                "winmm",
-            ] {
-                println!("cargo:rustc-link-lib=dylib={lib}");
+        // (/MT) — which is why the component workflow builds this crate with
+        // `-C target-feature=+crt-static`. libcef itself is a DLL with its own
+        // CRT and is unaffected either way.
+        //
+        // It is linked ONLY when the distribution actually ships it. Not every
+        // CEF dist does, and a hard dependency turns a missing optional
+        // hardening library into a build failure (`LNK1181: cannot open input
+        // file 'cef_sandbox.lib'`). When it is absent the backend compiles
+        // without the sandbox and says so loudly, rather than not building.
+        let sandbox_lib = release.join("cef_sandbox.lib");
+        if target_os == "windows" {
+            if sandbox_lib.is_file() {
+                println!("cargo:rustc-cfg=cef_sandbox");
+                println!("cargo:rustc-link-lib=static=cef_sandbox");
+                // cef_sandbox.lib's own dependencies.
+                for lib in [
+                    "Advapi32",
+                    "dbghelp",
+                    "Delayimp",
+                    "ntdll",
+                    "OleAut32",
+                    "PowrProf",
+                    "Propsys",
+                    "psapi",
+                    "SetupAPI",
+                    "Shell32",
+                    "Shlwapi",
+                    "Userenv",
+                    "version",
+                    "wbemuuid",
+                    "WindowsApp",
+                    "winmm",
+                ] {
+                    println!("cargo:rustc-link-lib=dylib={lib}");
+                }
+            } else {
+                println!(
+                    "cargo:warning=cef_sandbox.lib is not in {} — building the browser host \
+                     WITHOUT the Chromium renderer sandbox. Pages will render, but a renderer \
+                     compromise is not contained.",
+                    release.display()
+                );
             }
         }
 

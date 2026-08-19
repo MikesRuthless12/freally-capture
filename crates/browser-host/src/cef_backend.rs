@@ -376,10 +376,10 @@ static mut APP: *mut App = std::ptr::null_mut();
 /// same pointer for both, and every relaunched subprocess goes through
 /// `cef_execute_process`, so it must be created before anything else.
 ///
-/// Null off Windows, where the sandbox is not wired up (Linux needs a SUID
-/// `chrome-sandbox` helper the component does not ship yet, so it stays on
-/// `no_sandbox` there and says so).
-#[cfg(windows)]
+/// Null unless the SDK actually shipped cef_sandbox.lib and build.rs linked it
+/// (`cfg(cef_sandbox)`). Linux would additionally need a SUID `chrome-sandbox`
+/// helper the component does not ship, so it stays unsandboxed and says so.
+#[cfg(cef_sandbox)]
 static mut SANDBOX: *mut std::os::raw::c_void = std::ptr::null_mut();
 
 /// MUST run before the host parses its own `--url`/`--width` args: CEF relaunches
@@ -402,15 +402,15 @@ pub fn run_subprocess_if_any() -> Option<ExitCode> {
     // Create the sandbox handle before execute_process: every relaunched
     // subprocess re-enters here, and CEF requires the same pointer for both
     // execute_process and initialize.
-    #[cfg(windows)]
+    #[cfg(cef_sandbox)]
     // SAFETY: documented factory; the handle lives for the process and is
     // destroyed in `run` after cef_shutdown.
     unsafe {
         SANDBOX = cef_sandbox_info_create();
     }
-    #[cfg(windows)]
+    #[cfg(cef_sandbox)]
     let sandbox = unsafe { SANDBOX };
-    #[cfg(not(windows))]
+    #[cfg(not(cef_sandbox))]
     let sandbox = std::ptr::null_mut();
 
     // SAFETY: execute_process with our app; subprocesses run their loop inside.
@@ -441,7 +441,7 @@ pub fn run(args: Args) -> ExitCode {
     // real sandbox via cef_sandbox.lib. Linux/macOS stay unsandboxed for now
     // (Linux needs a SUID `chrome-sandbox` helper the component does not ship),
     // which is stated honestly rather than silently.
-    settings.no_sandbox = if cfg!(windows) { 0 } else { 1 };
+    settings.no_sandbox = if cfg!(cef_sandbox) { 0 } else { 1 };
     settings.windowless_rendering_enabled = 1;
     settings.multi_threaded_message_loop = 0;
     settings.background_color = if args.transparent {
@@ -476,9 +476,9 @@ pub fn run(args: Args) -> ExitCode {
 
     // The same sandbox handle execute_process was given — CEF requires both to
     // match.
-    #[cfg(windows)]
+    #[cfg(cef_sandbox)]
     let sandbox = unsafe { SANDBOX };
-    #[cfg(not(windows))]
+    #[cfg(not(cef_sandbox))]
     let sandbox = std::ptr::null_mut();
 
     // SAFETY: initialise CEF with our app; libcef is linked by build.rs.
@@ -547,7 +547,7 @@ pub fn run(args: Args) -> ExitCode {
         cef_shutdown();
     }
     // The sandbox handle must outlive cef_shutdown, so it is released last.
-    #[cfg(windows)]
+    #[cfg(cef_sandbox)]
     // SAFETY: pairs with the cef_sandbox_info_create in run_subprocess_if_any.
     unsafe {
         if !SANDBOX.is_null() {
