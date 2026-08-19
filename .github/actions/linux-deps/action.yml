@@ -9,9 +9,9 @@ runs:
     # GitHub's Ubuntu runners point apt at `azure.archive.ubuntu.com`, which
     # goes down often enough to matter — when it does, `apt-get update` prints
     # a wall of `Ign:` lines and every job hangs until the 10-minute step cap,
-    # taking the whole run with it. Fall back to the canonical mirror and give
-    # apt bounded retries and timeouts so a bad mirror FAILS FAST and visibly
-    # instead of burning the cap.
+    # taking the whole run with it. Point apt at the canonical mirror up front
+    # and bound every call, so a bad mirror FAILS FAST and visibly instead of
+    # burning the cap.
     - name: Point apt at a reachable mirror
       shell: bash
       run: |
@@ -27,24 +27,34 @@ runs:
         Acquire::ftp::Timeout "20";
         CONF
 
-        # Try the default mirror once, quickly. If it cannot be reached, rewrite
-        # every apt source to archive.ubuntu.com and try again.
-        if ! sudo timeout 90 apt-get update -o Acquire::Retries=1; then
-          echo "::warning::the default apt mirror failed; switching to archive.ubuntu.com"
-          # Both the classic sources.list and the newer deb822 .sources layout.
-          sudo sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' \
-            /etc/apt/sources.list 2>/dev/null || true
-          if [ -d /etc/apt/sources.list.d ]; then
-            sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
-              -exec sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' {} +
-          fi
-          sudo apt-get update
+        # Rewrite the mirror BEFORE the first fetch rather than after a failed
+        # one. Waiting for the default to fail costs a timeout every single run
+        # for no benefit — we already know which host is unreliable, and
+        # archive.ubuntu.com is the canonical one that stayed up throughout.
+        # Covers both the classic sources.list and the newer deb822 .sources.
+        echo "pointing apt at archive.ubuntu.com"
+        sudo sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' \
+          /etc/apt/sources.list 2>/dev/null || true
+        if [ -d /etc/apt/sources.list.d ]; then
+          sudo find /etc/apt/sources.list.d -type f \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -i 's|https\?://[a-z0-9.-]*archive\.ubuntu\.com|http://archive.ubuntu.com|g' {} + \
+            2>/dev/null || true
         fi
+        grep -rhoE 'https?://[a-z0-9.-]+/ubuntu' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null \
+          | sort -u | sed 's/^/  mirror: /' || true
+
+        # EVERY apt call is bounded. An unbounded one is the whole failure mode
+        # we are fixing: without a timeout a dead mirror does not error, it
+        # hangs until the job cap and takes the run with it. Better to fail in
+        # three minutes with a readable log than to stall for an hour.
+        sudo timeout 180 apt-get update
 
     - name: Install apt packages
       shell: bash
+      # Bounded for the same reason as the update above. This is a real download
+      # of the gtk/webkit stack, so the budget is generous — but finite.
       run: |
-        sudo apt-get install -y \
+        sudo timeout 600 apt-get install -y \
           pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf \
           libxcb1-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
           libpipewire-0.3-dev libwayland-dev libasound2-dev libssl-dev \
