@@ -358,10 +358,13 @@ impl App {
     }
 }
 
-/// The CEF API version the bindings were generated against. libcef learns the
-/// client's version from the FIRST call to `cef_api_hash`; without it every
-/// struct is read as version -1 and libcef aborts. build.rs writes this from
-/// the same constant it hands bindgen, so the two cannot drift.
+// The CEF API version the bindings were generated against. libcef learns the
+// client's version from the FIRST call to `cef_api_hash`; without it every
+// struct is read as version -1 and libcef aborts. build.rs writes this from the
+// same constant it hands bindgen, so the two cannot drift.
+//
+// A plain comment, not a doc comment: rustdoc cannot document a macro
+// invocation, and `-D warnings` turns that into an error.
 include!(concat!(env!("OUT_DIR"), "/cef_api_version.rs"));
 
 /// The app object, created once and reused by both `run_subprocess_if_any` and
@@ -391,7 +394,7 @@ pub fn run_subprocess_if_any() -> Option<ExitCode> {
     unsafe {
         let _ = cef_api_hash(CEF_API_VERSION, 0);
     }
-    let mut main_args = main_args();
+    let main_args = main_args();
     let app = Box::into_raw(App::new());
     // SAFETY: single write before any other access; the process is single-threaded here.
     unsafe { APP = app };
@@ -411,7 +414,7 @@ pub fn run_subprocess_if_any() -> Option<ExitCode> {
     let sandbox = std::ptr::null_mut();
 
     // SAFETY: execute_process with our app; subprocesses run their loop inside.
-    let code = unsafe { cef_execute_process(&mut main_args, app as *mut _cef_app_t, sandbox) };
+    let code = unsafe { cef_execute_process(&main_args, app as *mut _cef_app_t, sandbox) };
     (code >= 0).then(|| ExitCode::from(code as u8))
 }
 
@@ -421,7 +424,7 @@ pub fn run(args: Args) -> ExitCode {
     OUT_H.store(args.height, Ordering::Relaxed);
     OUT_FPS.store(args.fps, Ordering::Relaxed);
 
-    let mut main_args = main_args();
+    let main_args = main_args();
     // Reuse the app created in run_subprocess_if_any (the required call order).
     // SAFETY: APP was set there before main parsed args.
     let app = unsafe { APP };
@@ -479,7 +482,7 @@ pub fn run(args: Args) -> ExitCode {
     let sandbox = std::ptr::null_mut();
 
     // SAFETY: initialise CEF with our app; libcef is linked by build.rs.
-    if unsafe { cef_initialize(&mut main_args, &settings, app as *mut _cef_app_t, sandbox) } == 0 {
+    if unsafe { cef_initialize(&main_args, &settings, app as *mut _cef_app_t, sandbox) } == 0 {
         eprintln!("freally-browser-host: cef_initialize failed");
         return ExitCode::from(4);
     }
