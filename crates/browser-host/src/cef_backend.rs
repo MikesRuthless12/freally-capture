@@ -108,19 +108,27 @@ unsafe fn take_cef_string(s: cef_string_userfree_t) -> String {
     out
 }
 
-/// Fill a `cef_main_args_t` for this platform.
+/// The owned argv strings plus the pointer array CEF reads.
 ///
-/// The struct is genuinely different per OS: on Windows it carries the module
-/// `instance`, on POSIX it carries `argc`/`argv`. Writing the Windows field
-/// unconditionally is why this backend had never compiled on Linux or macOS —
-/// nothing built it until the component workflow started running.
-///
-/// The POSIX `argv` must outlive every CEF call that reads it, so it is owned by
-/// a process-lived `OnceLock` rather than a local.
+/// A newtype because a `static OnceLock<T>` requires `T: Send + Sync`, and a
+/// `Vec<*mut c_char>` is neither — raw pointers opt out of both.
 #[cfg(not(windows))]
-fn argv_storage() -> &'static (Vec<std::ffi::CString>, Vec<*mut std::os::raw::c_char>) {
-    static ARGV: OnceLock<(Vec<std::ffi::CString>, Vec<*mut std::os::raw::c_char>)> =
-        OnceLock::new();
+struct Argv {
+    owned: Vec<std::ffi::CString>,
+    ptrs: Vec<*mut std::os::raw::c_char>,
+}
+
+// SAFETY: `ptrs` points into `owned`, which lives in the same value; both are
+// written once inside the `OnceLock` and only ever read afterwards, so there is
+// no aliasing and nothing to race on.
+#[cfg(not(windows))]
+unsafe impl Send for Argv {}
+#[cfg(not(windows))]
+unsafe impl Sync for Argv {}
+
+#[cfg(not(windows))]
+fn argv_storage() -> &'static Argv {
+    static ARGV: OnceLock<Argv> = OnceLock::new();
     ARGV.get_or_init(|| {
         let owned: Vec<std::ffi::CString> = std::env::args_os()
             .map(|a| {
@@ -132,10 +140,19 @@ fn argv_storage() -> &'static (Vec<std::ffi::CString>, Vec<*mut std::os::raw::c_
         let mut ptrs: Vec<*mut std::os::raw::c_char> =
             owned.iter().map(|s| s.as_ptr() as *mut _).collect();
         ptrs.push(std::ptr::null_mut());
-        (owned, ptrs)
+        Argv { owned, ptrs }
     })
 }
 
+/// Fill a `cef_main_args_t` for this platform.
+///
+/// The struct is genuinely different per OS: on Windows it carries the module
+/// `instance`, on POSIX it carries `argc`/`argv`. Writing the Windows field
+/// unconditionally is why this backend had never compiled on Linux or macOS —
+/// nothing built it until the component workflow started running.
+///
+/// The POSIX `argv` must outlive every CEF call that reads it, hence the
+/// process-lived [`Argv`] rather than a local.
 fn main_args() -> _cef_main_args_t {
     // SAFETY: the struct is plain data; every field is set below or left zero.
     let mut args: _cef_main_args_t = unsafe { std::mem::zeroed() };
@@ -146,9 +163,9 @@ fn main_args() -> _cef_main_args_t {
     }
     #[cfg(not(windows))]
     {
-        let (owned, ptrs) = argv_storage();
-        args.argc = owned.len() as std::os::raw::c_int;
-        args.argv = ptrs.as_ptr() as *mut *mut std::os::raw::c_char;
+        let argv = argv_storage();
+        args.argc = argv.owned.len() as std::os::raw::c_int;
+        args.argv = argv.ptrs.as_ptr() as *mut *mut std::os::raw::c_char;
     }
     args
 }
