@@ -51,30 +51,24 @@ fn luma(px: &[u8], format: PixelFormat) -> u32 {
 }
 
 /// Whether one row (`fixed` = y) reads as a bar, and its mean luma.
-fn row_stats(frame: &Frame, y: u32) -> (bool, u32) {
+fn row_is_bar(frame: &Frame, y: u32) -> bool {
     let stride = frame.stride as usize;
     let row = &frame.data[y as usize * stride..];
     let mut dark = 0usize;
     let mut total = 0usize;
-    let mut sum = 0u64;
     let mut x = 0usize;
     while x < frame.width as usize {
         let px = &row[x * 4..x * 4 + 4];
-        let l = luma(px, frame.format);
-        sum += u64::from(l);
-        if l <= BAR_LUMA {
+        if luma(px, frame.format) <= BAR_LUMA {
             dark += 1;
         }
         total += 1;
         x += SAMPLE_STRIDE;
     }
     if total == 0 {
-        return (false, 0);
+        return false;
     }
-    (
-        dark as f32 / total as f32 >= BAR_SHARE,
-        (sum / total as u64) as u32,
-    )
+    dark as f32 / total as f32 >= BAR_SHARE
 }
 
 /// Whether one column (`fixed` = x) reads as a bar.
@@ -128,10 +122,10 @@ pub fn detect_bars(frame: &Frame) -> DetectedBars {
     let max_h = (frame.width as f32 * MAX_SIDE_SHARE) as u32;
 
     let mut bars = DetectedBars::default();
-    while bars.top < max_v && row_stats(frame, bars.top).0 {
+    while bars.top < max_v && row_is_bar(frame, bars.top) {
         bars.top += 1;
     }
-    while bars.bottom < max_v && row_stats(frame, frame.height - 1 - bars.bottom).0 {
+    while bars.bottom < max_v && row_is_bar(frame, frame.height - 1 - bars.bottom) {
         bars.bottom += 1;
     }
     while bars.left < max_h && column_is_bar(frame, bars.left) {

@@ -146,7 +146,6 @@ sources-group-title = सोर्स ग्रुप करें — दो �
 sources-group-aria = सोर्स ग्रुप करें
 sources-arrange = व्यवस्थित करें: स्क्रीन + कोने
 sources-add-source = एक सोर्स जोड़ें
-sources-browser-source-note = Browser Source अपने स्वयं के ऑन-डिमांड कंपोनेंट माइलस्टोन के रूप में आता है (एक ~180 MB Chromium इंजन — कभी बंडल नहीं होता)। आज: Window Capture + एक क्रोमा/कलर की के साथ एक असली ब्राउज़र विंडो कैप्चर करें, या चैट/अलर्ट को एक डॉक के रूप में खोलें (Controls → Docks)।
 
 # Empty state
 sources-empty = इस सीन में कोई सोर्स नहीं — “+” से एक Display Capture, Window, Webcam, Image, Color या Text जोड़ें। उन्हें कैनवास पर ड्रैग, स्केल और रोटेट करें; दाईं ओर के बटन स्टैक को फिर से क्रमबद्ध करते हैं।
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ रिकॉर्डिंग रोकें
 controls-reactions-label = रिएक्शन (प्रोग्राम में बेक किए गए)
 controls-reactions-title = प्रोग्राम के ऊपर एक रिएक्शन तैराएँ — रिकॉर्ड और स्ट्रीम दोनों, ताकि रीप्ले सही पल दिखाए। चैट में दर्शक भी इन्हें ट्रिगर करते हैं (उनका रिएक्शन इमोजी अपने आप तैरता है); एक बाढ़ केवल स्क्रीन पर मौजूद संख्या को सीमित करती है।
 controls-react = रिएक्ट { $emoji }
-controls-virtual-camera-title = वर्चुअल कैमरे को प्रति OS अपना साइन किया हुआ ड्राइवर कंपोनेंट चाहिए (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO extension / Linux v4l2loopback) — यह अपने माइलस्टोन के रूप में आता है। फ़ीड मॉडल इसके लिए तैयार है: प्रोग्राम, वर्टिकल कैनवास, या एक अकेला सोर्स, Windows/Linux पर एक जोड़े वर्चुअल माइक के साथ (macOS में कोई वर्चुअल-माइक API नहीं है — ईमानदारी से कहा)।
 controls-virtual-camera = ⌁ वर्चुअल कैमरा शुरू करें
+controls-virtual-camera-stop = ⌁ वर्चुअल कैमरा रोकें
+controls-virtual-camera-ready = प्रोग्राम को ऐसे कैमरे के रूप में प्रकाशित करें जिसे अन्य ऐप्स चुन सकें।
 controls-saved = सहेजा गया: { $path }
 
 # --- MixerDock.tsx ---
@@ -2779,3 +2779,7 @@ sources-browser-component-missing = इसके लिए Browser Runtime घ�
 sources-browser-component-unsupported = CEF इस प्लेटफ़ॉर्म के लिए Browser Runtime बिल्ड प्रकाशित नहीं करता, इसलिए यह स्रोत यहाँ रेंडर नहीं हो सकता।
 sources-browser-component-installing = Browser Runtime घटक इंस्टॉल हो रहा है… पूरा होते ही यह स्रोत रेंडर होगा।
 sources-browser-component-error = Browser Runtime घटक इंस्टॉल नहीं हो सका: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = यह पैनल रुक गया
+panel-error-hint = रिकॉर्डिंग और स्ट्रीमिंग प्रभावित नहीं हैं। इसे बंद करके फिर खोलें।

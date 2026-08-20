@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { pushModal } from "../lib/modal";
 import { useT } from "../i18n/t";
+import { ErrorBoundary, PanelErrorFallback } from "./ErrorBoundary";
 
 /**
  * A centered modal shell shared by the add-source pickers and dialogs.
@@ -118,7 +119,12 @@ export function PickerShell({
           </div>
         </header>
         <div className={sidebar ? "flex min-h-0 flex-1" : "min-h-0 flex-1 overflow-auto p-3"}>
-          {children}
+          {/* Inside the shell, not around it: a dialog that throws keeps its
+              header and its close button, so it stays dismissible instead of
+              unmounting the studio and stranding this full-screen scrim. */}
+          <ErrorBoundary fallback={(error) => <PanelErrorFallback error={error} />}>
+            {children}
+          </ErrorBoundary>
         </div>
       </div>
     </div>,

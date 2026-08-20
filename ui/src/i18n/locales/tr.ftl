@@ -152,7 +152,6 @@ sources-group-title = Kaynakları grupla — iki veya daha fazla öğe seçin, s
 sources-group-aria = Kaynakları grupla
 sources-arrange = Düzenle: ekran + köşeler
 sources-add-source = Kaynak ekle
-sources-browser-source-note = Tarayıcı Kaynağı kendi isteğe bağlı bileşen aşamasıyla gelir (~180 MB Chromium motoru — asla paketlenmez). Bugün: gerçek bir tarayıcı penceresini Pencere Yakalama + bir kroma/renk anahtarıyla yakalayın ya da sohbeti/uyarıları bir Panel olarak açın (Denetimler → Paneller).
 
 # Empty state
 sources-empty = Bu sahnede kaynak yok — “+” ile bir Ekran Yakalama, Pencere, Web kamerası, Görüntü, Renk veya Metin ekleyin. Bunları tuval üzerinde sürükleyin, ölçekleyin ve döndürün; sağ taraftaki düğmeler yığını yeniden sıralar.
@@ -454,8 +453,9 @@ controls-pause-recording = ⏸ Kaydı Duraklat
 controls-reactions-label = Tepkiler (programa gömülü)
 controls-reactions-title = Programın üzerinde bir tepki uçur — kaydedilir VE yayınlanır, böylece tekrar tam anı gösterir. Sohbetteki izleyiciler de bunları tetikler (tepki emojileri otomatik uçar); bir sel yalnızca ekrandakini sınırlar.
 controls-react = { $emoji } tepki ver
-controls-virtual-camera-title = Sanal kamera her işletim sistemi için kendi imzalı sürücü bileşenini gerektirir (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO uzantısı / Linux v4l2loopback) — kendi aşaması olarak gelir. Akış modeli hazır: program, dikey tuval veya tek bir kaynak, Windows/Linux'ta eşli bir sanal mikrofonla (macOS'te sanal mikrofon API'si yok — dürüstçe söylenirse).
 controls-virtual-camera = ⌁ Sanal Kamerayı Başlat
+controls-virtual-camera-stop = ⌁ Sanal kamerayı durdur
+controls-virtual-camera-ready = Programı diğer uygulamaların seçebileceği bir kamera olarak yayınlar.
 controls-saved = Kaydedildi: { $path }
 
 # --- MixerDock.tsx ---
@@ -2815,3 +2815,7 @@ sources-browser-component-missing = Browser Runtime bileşenini gerektirir — A
 sources-browser-component-unsupported = CEF bu platform için Browser Runtime derlemesi yayınlamıyor, bu nedenle bu kaynak burada işlenemez.
 sources-browser-component-installing = Browser Runtime bileşeni kuruluyor… tamamlandığında bu kaynak işlenecek.
 sources-browser-component-error = Browser Runtime bileşeni kurulamadı: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Bu panel durdu
+panel-error-hint = Kayıt ve yayın etkilenmez. Kapatıp yeniden açın.

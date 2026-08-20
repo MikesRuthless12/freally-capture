@@ -55,7 +55,13 @@ fn automix_share(env: f32, group_sum: f32, group_len: usize) -> f32 {
 
 /// The fader curve: the bottom of the fader is silence, everything else dB.
 fn fader_gain(volume_db: f32) -> f32 {
-    if volume_db <= MIN_VOLUME_DB + 0.01 {
+    // The `is_finite` guard matches `engine::output_gain`. A NaN here is not
+    // merely a bad block: `strip.gain += (NaN - gain) * k` is *sticky*, so the
+    // strip stays NaN forever and poisons the master, the LUFS meter and the
+    // recording even after the value is corrected. Today `sanitize`/`set_audio_volume`
+    // make it unreachable; this keeps it unreachable for a future OSC, MIDI or
+    // script setter that forgets.
+    if !volume_db.is_finite() || volume_db <= MIN_VOLUME_DB + 0.01 {
         0.0
     } else {
         db_to_lin(volume_db)
@@ -547,7 +553,11 @@ impl MixerCore {
             };
             let mut peak = 0.0f32;
             for frame in strip.scratch.chunks_exact_mut(2) {
-                strip.gain += (target - strip.gain) * (1.0 - self.gain_coef);
+                // Flushed: a fade to a muted target decays toward zero and would
+                // otherwise sit in the denormal range multiplying every sample.
+                strip.gain = crate::dsp::flush_denormal(
+                    strip.gain + (target - strip.gain) * (1.0 - self.gain_coef),
+                );
                 frame[0] *= strip.gain;
                 frame[1] *= strip.gain;
                 peak = peak.max(frame[0].abs()).max(frame[1].abs());
@@ -555,7 +565,7 @@ impl MixerCore {
 
             // 6. What actually mixes is what meters + drives the sidechain.
             strip.meter.push_block(&strip.scratch);
-            strip.envelope = peak.max(strip.envelope * ENVELOPE_FALL);
+            strip.envelope = crate::dsp::flush_denormal(peak.max(strip.envelope * ENVELOPE_FALL));
             next_envelopes.insert(*id, strip.envelope);
 
             // 7. Routing. While ANY strip solos, the monitor carries only the

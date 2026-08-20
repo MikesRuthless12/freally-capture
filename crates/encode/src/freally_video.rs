@@ -173,10 +173,16 @@ fn slice_rows(height: u32) -> usize {
 }
 
 fn workers() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .clamp(1, 8)
+    // Cached: this is called once per frame per direction (encode and decode),
+    // and `available_parallelism` is a syscall whose answer never changes for
+    // the life of the process.
+    static WORKERS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *WORKERS.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 8)
+    })
 }
 
 /// Subtract the previous pixel from each pixel, per byte channel, per row —
@@ -274,6 +280,10 @@ pub struct FrecWriter {
     out: BufWriter<File>,
     /// Previous frame (reconstruction reference for deltas).
     previous: Option<Vec<u8>>,
+    /// Reused delta buffer. A delta frame is 119 of every 120 frames, so
+    /// allocating a fresh full-frame Vec each time was ~8 MB of alloc + memcpy
+    /// per frame at 1080p — the buffer is refilled, never grown, after warm-up.
+    delta: Vec<u8>,
     frame_index: u64,
     keyframe_every: u64,
     index: Vec<(u64, u64)>,
@@ -290,6 +300,7 @@ impl FrecWriter {
             spec,
             out: BufWriter::with_capacity(1 << 20, file),
             previous: None,
+            delta: Vec::new(),
             frame_index: 0,
             index: Vec::new(),
             written: 0,
@@ -347,11 +358,18 @@ impl FrecWriter {
             compress_frame(pixels, row_bytes, true)
         } else {
             let previous = self.previous.as_ref().expect("delta implies a reference");
-            let mut delta = pixels.to_vec();
-            for (byte, prev) in delta.iter_mut().zip(previous) {
-                *byte = byte.wrapping_sub(*prev);
-            }
-            compress_frame(&delta, row_bytes, false)
+            // Fill the reused buffer and subtract in one pass: copying first and
+            // then rewriting every byte doubled the memory traffic (two full
+            // frames read + two written) for no gain.
+            self.delta.clear();
+            self.delta.reserve(pixels.len());
+            self.delta.extend(
+                pixels
+                    .iter()
+                    .zip(previous)
+                    .map(|(byte, prev)| byte.wrapping_sub(*prev)),
+            );
+            compress_frame(&self.delta, row_bytes, false)
         };
 
         let mut payload =
@@ -661,9 +679,11 @@ fn decode_slice(
             out.copy_from_slice(data);
         }
         METHOD_FLZ | METHOD_SUB_FLZ => {
-            let decoded = flz::decompress(data, out.len())
+            // Straight into the destination: `out` is already exactly one
+            // slice, so the old decompress-to-Vec-then-copy paid a full extra
+            // frame of allocation and memcpy on every decoded frame.
+            flz::decompress_into(data, out)
                 .map_err(|_| FrecError::Corrupt("slice stream corrupt"))?;
-            out.copy_from_slice(&decoded);
             if method == METHOD_SUB_FLZ {
                 unpredict_sub(out, row_bytes);
             }

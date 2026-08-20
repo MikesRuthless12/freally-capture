@@ -76,6 +76,17 @@ impl Gpu {
         }))
         .map_err(|err| CompositorError::Device(err.to_string()))?;
 
+        // wgpu's default uncaptured-error sink is `panic!`, and this device is
+        // driven from the studio's render thread — so any validation or
+        // out-of-memory error anywhere in the crate would take a live recording
+        // and stream down with it. Log instead: the frame that provoked it is
+        // lost, which is survivable, and the message says what happened. Errors
+        // the code can actually handle are still caught by explicit error
+        // scopes (see `FilterEngine::compile_user_pipeline`).
+        device.on_uncaptured_error(std::sync::Arc::new(|err| {
+            tracing::error!(error = %err, "compositor GPU error (frame dropped)");
+        }));
+
         Ok(Self {
             instance,
             adapter,

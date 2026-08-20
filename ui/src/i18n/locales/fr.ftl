@@ -152,7 +152,6 @@ sources-group-title = Grouper des sources — choisissez au moins deux élément
 sources-group-aria = Grouper les sources
 sources-arrange = Disposer : écran + coins
 sources-add-source = Ajouter une source
-sources-browser-source-note = La source navigateur arrive comme son propre composant à la demande (un moteur Chromium d'environ 180 Mo — jamais intégré). Aujourd'hui : capturez une vraie fenêtre de navigateur avec Capture de fenêtre + une incrustation chroma/couleur, ou ouvrez le chat/les alertes en tant que dock (Contrôles → Docks).
 
 # Empty state
 sources-empty = Aucune source dans cette scène — ajoutez une Capture d'écran, une Fenêtre, une Webcam, une Image, une Couleur ou du Texte avec « + ». Déplacez-les, redimensionnez-les et faites-les pivoter sur le canevas ; les boutons de droite réordonnent la pile.
@@ -454,8 +453,9 @@ controls-pause-recording = ⏸ Mettre l'enregistrement en pause
 controls-reactions-label = Réactions (intégrées au programme)
 controls-reactions-title = Faites flotter une réaction sur le programme — enregistrée ET diffusée, pour que la relecture montre l'instant exact. Les spectateurs du chat les déclenchent aussi (leur emoji de réaction flotte automatiquement) ; un afflux ne fait que limiter ce qui est à l'écran.
 controls-react = Réagir { $emoji }
-controls-virtual-camera-title = La caméra virtuelle nécessite son propre composant pilote signé par OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / extension CoreMediaIO macOS / v4l2loopback Linux) — elle arrive comme sa propre étape. Le modèle de flux est prêt pour elle : programme, canevas vertical ou une seule source, avec un micro virtuel associé sous Windows/Linux (macOS n'a pas d'API de micro virtuel — dit honnêtement).
 controls-virtual-camera = ⌁ Démarrer la caméra virtuelle
+controls-virtual-camera-stop = ⌁ Arrêter la caméra virtuelle
+controls-virtual-camera-ready = Publie le programme comme une caméra que les autres applications peuvent choisir.
 controls-saved = Enregistré : { $path }
 
 # --- MixerDock.tsx ---
@@ -2815,3 +2815,7 @@ sources-browser-component-missing = Nécessite le composant Browser Runtime — 
 sources-browser-component-unsupported = CEF ne publie pas de build Browser Runtime pour cette plateforme ; cette source ne peut donc pas s’afficher ici.
 sources-browser-component-installing = Installation du composant Browser Runtime… cette source s’affichera une fois terminée.
 sources-browser-component-error = Le composant Browser Runtime n’a pas pu être installé : { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Ce panneau s'est arrêté
+panel-error-hint = L'enregistrement et la diffusion continuent. Fermez puis rouvrez.

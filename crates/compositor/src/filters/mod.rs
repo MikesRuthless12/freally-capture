@@ -425,7 +425,11 @@ pub(crate) fn plan_filter(
             let fade_out = fade_out_s.clamp(0.0, 600.0);
             let hidden = hidden_s.clamp(0.0, 3600.0);
             let cycle = fade_in + visible + fade_out + hidden;
-            if cycle < 1e-3 {
+            // `f32::clamp` propagates NaN, so a hand-edited NaN duration would
+            // survive to here, fail all three phase tests, and fall through to
+            // `alpha = 0.0` — hiding the item forever with no error anywhere.
+            // Every other filter degrades to "skip the filter" on bad input.
+            if !cycle.is_finite() || cycle < 1e-3 {
                 return None;
             }
             let t = time_seconds.rem_euclid(cycle);
@@ -981,19 +985,23 @@ impl FilterEngine {
         self.uniform_capacity = capacity;
     }
 
-    pub fn pipeline(&self, kind: PassKind) -> &wgpu::RenderPipeline {
+    /// The pipeline for a planned pass, or `None` if it is no longer available.
+    ///
+    /// Fallible on purpose: a user shader's pipeline can be evicted between
+    /// planning and drawing, and a dropped filter must degrade to "this item
+    /// renders unfiltered for one frame" — never to a panic on the render
+    /// thread, which would take a live recording and stream down with it.
+    pub fn pipeline(&self, kind: PassKind) -> Option<&wgpu::RenderPipeline> {
         if let PassKind::UserShader(hash) = kind {
             return self
                 .user_pipelines
                 .get(&hash)
-                .and_then(|entry| entry.as_ref())
-                .expect("a planned user-shader pass has a compiled pipeline");
+                .and_then(|entry| entry.as_ref());
         }
         self.pipelines
             .iter()
             .find(|(candidate, _)| *candidate == kind)
             .map(|(_, pipeline)| pipeline)
-            .expect("every pass kind has a pipeline")
     }
 
     /// Compile + cache a user WGSL effect (CAP-N22), returning its pass hash if
@@ -1011,7 +1019,15 @@ impl FilterEngine {
             None => {}
         }
         if self.user_pipelines.len() >= MAX_USER_PIPELINES {
-            self.user_pipelines.clear(); // bound memory under heavy live-editing
+            // Bound memory under heavy live-editing — but NEVER by clearing the
+            // whole map. This runs while `compose_scene` is planning, so earlier
+            // items in this same frame already hold `PassKind::UserShader(hash)`
+            // plans; wiping the map pulled the pipeline out from under them.
+            // Failed compiles are cached as `None` purely to stop retrying, so
+            // they are the cheap thing to drop. If there are none to drop we
+            // simply exceed the soft cap this frame rather than risk a live
+            // shader; the next edit gets another chance to reclaim.
+            self.user_pipelines.retain(|_, entry| entry.is_some());
         }
         let pipeline = compile_user_pipeline(
             device,
@@ -1062,6 +1078,17 @@ impl FilterEngine {
                     return Err(CompositorError::BadFrame(
                         "mask image data shorter than its geometry".into(),
                     ));
+                }
+                // The same guard `upload_frame` applies to captured frames. The
+                // decoder's own ceiling is 16384px, but the adapter's real limit
+                // can be 8192 — without this a large mask PNG reaches wgpu
+                // validation, which is an uncaptured error and so a panic on
+                // the render thread rather than a readable filter error.
+                let max_dim = device.limits().max_texture_dimension_2d;
+                if *width > max_dim || *height > max_dim {
+                    return Err(CompositorError::BadFrame(format!(
+                        "mask image {width}×{height} exceeds the adapter's {max_dim}px texture limit"
+                    )));
                 }
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("fcap mask"),
@@ -1495,6 +1522,35 @@ mod tests {
         assert!(
             out[0].abs() < 1e-3 && (out[1] - 1.0).abs() < 1e-3 && out[2].abs() < 1e-3,
             "red → green, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_fade_loop_skips_the_filter_rather_than_hiding_the_item() {
+        // `f32::clamp` propagates NaN, so a hand-edited collection could reach
+        // the phase tests with a NaN cycle: all three comparisons are false and
+        // the old code fell through to `alpha = 0.0`, hiding the source forever
+        // with no error. Every other filter degrades to "skip the filter".
+        // (An infinite duration is NOT in scope: `clamp` maps +∞ to the 600 s
+        // ceiling and −∞ to 0, both perfectly ordinary cycles. NaN is the only
+        // value that survives clamping and then fails every comparison.)
+        let id = FilterId::new();
+        let empty = no_resources();
+        assert!(
+            plan_filter(
+                &FilterKind::FadeLoop {
+                    fade_in_s: f32::NAN,
+                    visible_s: 1.0,
+                    fade_out_s: 1.0,
+                    hidden_s: 1.0,
+                },
+                id,
+                (64, 64),
+                3.0,
+                &empty,
+            )
+            .is_none(),
+            "a NaN duration must skip the filter, not blank the item"
         );
     }
 

@@ -146,7 +146,6 @@ sources-group-title = Grupuj źródła — wybierz co najmniej dwa elementy, a n
 sources-group-aria = Grupuj źródła
 sources-arrange = Rozmieść: ekran + rogi
 sources-add-source = Dodaj źródło
-sources-browser-source-note = Źródło przeglądarki jest dostarczane jako osobny, pobierany na żądanie komponent (silnik Chromium o rozmiarze ~180 MB — nigdy nie jest dołączany). Na razie: przechwyć prawdziwe okno przeglądarki za pomocą Przechwytywania okna + klucza chrominancji/koloru albo otwórz czat/alerty jako dok (Sterowanie → Doki).
 
 # Empty state
 sources-empty = Brak źródeł w tej scenie — dodaj Przechwytywanie ekranu, Okno, Kamerę, Obraz, Kolor lub Tekst za pomocą „+”. Przeciągaj, skaluj i obracaj je na płótnie; przyciski po prawej stronie zmieniają kolejność w stosie.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ Wstrzymaj nagrywanie
 controls-reactions-label = Reakcje (wtopione w program)
 controls-reactions-title = Wyświetl reakcję nad programem — nagrywaną ORAZ transmitowaną, aby powtórka pokazała dokładny moment. Widzowie na czacie też je wyzwalają (ich emoji reakcji unosi się automatycznie); zalew jedynie ogranicza to, co jest na ekranie.
 controls-react = Reaguj { $emoji }
-controls-virtual-camera-title = Kamera wirtualna wymaga własnego, podpisanego sterownika na każdy system operacyjny (Win11 MFCreateVirtualCamera / Win10 DirectShow / rozszerzenie CoreMediaIO macOS / Linux v4l2loopback) — jest dostarczana jako osobny etap. Model sygnału jest na nią gotowy: program, płótno pionowe lub pojedyncze źródło, ze sparowanym mikrofonem wirtualnym w Windows/Linux (macOS nie ma API mikrofonu wirtualnego — mówiąc szczerze).
 controls-virtual-camera = ⌁ Uruchom kamerę wirtualną
+controls-virtual-camera-stop = ⌁ Zatrzymaj kamerę wirtualną
+controls-virtual-camera-ready = Publikuje program jako kamerę, którą mogą wybrać inne aplikacje.
 controls-saved = Zapisano: { $path }
 
 # --- MixerDock.tsx ---
@@ -2792,3 +2792,7 @@ sources-browser-component-missing = Wymaga komponentu Browser Runtime — zainst
 sources-browser-component-unsupported = CEF nie publikuje kompilacji Browser Runtime dla tej platformy, więc to źródło nie może się tu renderować.
 sources-browser-component-installing = Instalowanie komponentu Browser Runtime… to źródło wyrenderuje się po zakończeniu.
 sources-browser-component-error = Nie udało się zainstalować komponentu Browser Runtime: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Ten panel został zatrzymany
+panel-error-hint = Nagrywanie i transmisja działają dalej. Zamknij i otwórz ponownie.

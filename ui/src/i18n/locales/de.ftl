@@ -146,7 +146,6 @@ sources-group-title = Quellen gruppieren — wähle zwei oder mehr Elemente, dan
 sources-group-aria = Quellen gruppieren
 sources-arrange = Anordnen: Bildschirm + Ecken
 sources-add-source = Quelle hinzufügen
-sources-browser-source-note = Browser-Quelle kommt als eigene bedarfsgesteuerte Komponente in einem eigenen Meilenstein (eine ~180 MB Chromium-Engine — nie mitgeliefert). Heute: nimm ein echtes Browserfenster mit Fensteraufnahme + einem Chroma-/Color-Key auf, oder öffne Chat/Benachrichtigungen als Dock (Steuerung → Docks).
 
 # Empty state
 sources-empty = Keine Quellen in dieser Szene — füge mit „+“ eine Bildschirmaufnahme, ein Fenster, eine Webcam, ein Bild, eine Farbe oder Text hinzu. Ziehe, skaliere und rotiere sie auf der Leinwand; die Schaltflächen rechts ordnen den Stapel um.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ Aufnahme pausieren
 controls-reactions-label = Reaktionen (ins Programm eingebrannt)
 controls-reactions-title = Lasse eine Reaktion über dem Programm schweben — aufgenommen UND gestreamt, damit die Wiederholung den genauen Moment zeigt. Zuschauer im Chat lösen diese ebenfalls aus (ihr Reaktions-Emoji schwebt automatisch); eine Flut begrenzt nur, was auf dem Bildschirm ist.
 controls-react = Reagieren { $emoji }
-controls-virtual-camera-title = Die virtuelle Kamera braucht pro Betriebssystem eine eigene signierte Treiberkomponente (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO-Erweiterung / Linux v4l2loopback) — sie kommt als eigener Meilenstein. Das Feed-Modell ist dafür bereit: Programm, vertikale Leinwand oder eine einzelne Quelle, mit einem gepaarten virtuellen Mikro unter Windows/Linux (macOS hat keine Virtual-Mic-API — ehrlich gesagt).
 controls-virtual-camera = ⌁ Virtuelle Kamera starten
+controls-virtual-camera-stop = ⌁ Virtuelle Kamera stoppen
+controls-virtual-camera-ready = Veröffentlicht das Programm als Kamera, die andere Apps auswählen können.
 controls-saved = Gespeichert: { $path }
 
 # --- MixerDock.tsx ---
@@ -2792,3 +2792,7 @@ sources-browser-component-missing = Benötigt die Browser-Runtime-Komponente —
 sources-browser-component-unsupported = CEF veröffentlicht keine Browser-Runtime für diese Plattform, daher kann diese Quelle hier nicht rendern.
 sources-browser-component-installing = Browser-Runtime-Komponente wird installiert … diese Quelle rendert, sobald das fertig ist.
 sources-browser-component-error = Die Browser-Runtime-Komponente konnte nicht installiert werden: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Dieses Panel wurde gestoppt
+panel-error-hint = Aufnahme und Streaming laufen weiter. Schließen und erneut öffnen.

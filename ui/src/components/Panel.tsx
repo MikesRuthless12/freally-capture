@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { ErrorBoundary, PanelErrorFallback } from "./ErrorBoundary";
+
 type PanelProps = {
   title: string;
   /** Right-aligned header extras (badges, small buttons). */
@@ -21,7 +23,11 @@ export function Panel({ title, actions, children, className = "" }: PanelProps) 
         </h2>
         {actions}
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        <ErrorBoundary fallback={(error) => <PanelErrorFallback error={error} />}>
+          {children}
+        </ErrorBoundary>
+      </div>
     </section>
   );
 }

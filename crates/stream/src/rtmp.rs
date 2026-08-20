@@ -180,7 +180,12 @@ impl StreamTarget {
                 }
             }
             StreamProtocol::Whip => {
-                if !(ingest.starts_with("https://") || ingest.starts_with("http://")) {
+                // https only. For WHIP the stream key IS the bearer token in the
+                // Authorization header, so a plaintext endpoint puts the
+                // credential on the wire in the clear on every reconnect, and an
+                // active MITM can rewrite the SDP answer to redirect the media.
+                // The doc comment and both error messages already promised this.
+                if !ingest.starts_with("https://") {
                     return Err(TargetError::BadIngestScheme);
                 }
                 Ok(ingest.to_string())

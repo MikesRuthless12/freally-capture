@@ -152,7 +152,6 @@ sources-group-title = Kelompokkan sumber — pilih dua item atau lebih, lalu Bua
 sources-group-aria = Kelompokkan sumber
 sources-arrange = Susun: layar + sudut
 sources-add-source = Tambah sumber
-sources-browser-source-note = Browser Source hadir sebagai komponen sesuai-permintaan tersendiri (mesin Chromium ~180 MB — tidak pernah dibundel). Saat ini: tangkap jendela browser sungguhan dengan Tangkapan Jendela + chroma/color key, atau buka chat/peringatan sebagai Dok (Kontrol → Dok).
 
 # Empty state
 sources-empty = Tidak ada sumber di scene ini — tambahkan Tangkapan Layar, Jendela, Webcam, Gambar, Warna, atau Teks dengan “+”. Geser, skalakan, dan putar di kanvas; tombol di sisi kanan mengatur ulang urutan tumpukan.
@@ -454,8 +453,9 @@ controls-pause-recording = ⏸ Jeda Rekaman
 controls-reactions-label = Reaksi (dipanggang ke dalam program)
 controls-reactions-title = Apungkan reaksi di atas program — direkam DAN di-stream, jadi replay menampilkan momen persisnya. Penonton di chat juga memicunya (emoji reaksi mereka mengapung otomatis); banjir hanya membatasi yang ada di layar.
 controls-react = Reaksi { $emoji }
-controls-virtual-camera-title = Kamera virtual memerlukan komponen driver bertanda tangan tersendiri per OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / ekstensi CoreMediaIO macOS / v4l2loopback Linux) — hadir sebagai milestone tersendiri. Model feed sudah siap untuknya: program, kanvas vertikal, atau satu sumber, dengan mik virtual berpasangan di Windows/Linux (macOS tidak punya API mik virtual — dikatakan jujur).
 controls-virtual-camera = ⌁ Mulai Kamera Virtual
+controls-virtual-camera-stop = ⌁ Hentikan kamera virtual
+controls-virtual-camera-ready = Terbitkan program sebagai kamera yang dapat dipilih aplikasi lain.
 controls-saved = Tersimpan: { $path }
 
 # --- MixerDock.tsx ---
@@ -2814,3 +2814,7 @@ sources-browser-component-missing = Membutuhkan komponen Browser Runtime — pas
 sources-browser-component-unsupported = CEF tidak menerbitkan build Browser Runtime untuk platform ini, jadi sumber ini tidak dapat dirender di sini.
 sources-browser-component-installing = Memasang komponen Browser Runtime… sumber ini akan dirender setelah selesai.
 sources-browser-component-error = Komponen Browser Runtime tidak dapat dipasang: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Panel ini berhenti
+panel-error-hint = Perekaman dan streaming tidak terpengaruh. Tutup lalu buka lagi.

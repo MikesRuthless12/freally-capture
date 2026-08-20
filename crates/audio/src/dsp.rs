@@ -189,8 +189,26 @@ impl Biquad {
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.z1;
         self.z1 = self.b1 * x - self.a1 * y + self.z2;
-        self.z2 = self.b2 * x - self.a2 * y;
+        self.z2 = flush_denormal(self.b2 * x - self.a2 * y);
         y
+    }
+}
+
+/// Snap a decayed value to zero before it becomes a denormal.
+///
+/// A recursive filter fed digital silence — a muted strip, a media source that
+/// ended, a closed gate ahead of an EQ — decays asymptotically *into* the
+/// denormal range and stays there. On x86 a denormal multiply-add costs 10–100×
+/// a normal one, so six muted strips with EQ can burn more CPU than six live
+/// ones. The crate is `forbid(unsafe_code)`, so the MXCSR flush-to-zero bit is
+/// unavailable and this explicit snap is the portable equivalent. The threshold
+/// is far below anything audible (−400 dBFS).
+#[inline]
+pub(crate) fn flush_denormal(x: f32) -> f32 {
+    if x.abs() < 1e-20 {
+        0.0
+    } else {
+        x
     }
 }
 

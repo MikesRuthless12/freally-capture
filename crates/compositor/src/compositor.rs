@@ -231,6 +231,12 @@ pub struct Compositor {
     filters: FilterEngine,
     /// Per-item chain textures, reused frame to frame (keyed by pass index).
     chain_cache: HashMap<ItemId, Vec<ChainTex>>,
+    /// Items whose filter chains were used anywhere since the last sweep.
+    /// Accumulated across EVERY compose in a tick — program, preview, vertical,
+    /// each nested scene, each thumbnail, each projector, both halves of a
+    /// transition — because the cache is global but a compose only knows about
+    /// its own scene.
+    chain_live: HashSet<ItemId>,
 
     /// Studio Mode's transition machinery, built on first use and rebuilt on
     /// a canvas resize (its scratch textures are canvas-sized).
@@ -573,6 +579,7 @@ impl Compositor {
             scene_refs: HashMap::new(),
             filters,
             chain_cache: HashMap::new(),
+            chain_live: HashSet::new(),
             transition: None,
             transition_luma: None,
             transition_luma_epoch: 0,
@@ -998,6 +1005,7 @@ impl Compositor {
         if matches!(kind, TransitionKind::Cut) || progress >= 1.0 {
             return self.render(to, time_seconds);
         }
+        self.sweep_chain_cache();
         self.ensure_transition_rig();
         // A luma image set/cleared since the rig last built its group-3 bind.
         if self
@@ -1077,6 +1085,7 @@ impl Compositor {
         progress: f32,
         _time_seconds: f32,
     ) -> Result<(), CompositorError> {
+        self.sweep_chain_cache();
         let p = progress.clamp(0.0, 1.0);
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
 
@@ -1084,13 +1093,18 @@ impl Compositor {
         // A CAP-N53 output-hidden item is invisible to the whole morph.
         let mut from_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
         for item in &from.items {
-            if item.visible && !self.output_hidden.contains(&item.id) {
+            // A group toggled hidden hides its members, exactly as every other
+            // compose path treats it — without this, every item in a hidden
+            // group pops onto the program (recorded and streamed) for the whole
+            // Move transition and vanishes again when it lands.
+            if item.visible && !from.group_hides(item.id) && !self.output_hidden.contains(&item.id)
+            {
                 from_by_source.insert(item.source, item);
             }
         }
         let mut to_by_source: HashMap<SourceId, &SceneItem> = HashMap::new();
         for item in &to.items {
-            if item.visible && !self.output_hidden.contains(&item.id) {
+            if item.visible && !to.group_hides(item.id) && !self.output_hidden.contains(&item.id) {
                 to_by_source.insert(item.source, item);
             }
         }
@@ -1101,6 +1115,7 @@ impl Compositor {
         let mut jobs: Vec<(SourceId, BlendMode, ItemUniform)> = Vec::new();
         for item in &from.items {
             if !item.visible
+                || from.group_hides(item.id)
                 || self.output_hidden.contains(&item.id)
                 || to_by_source.contains_key(&item.source)
             {
@@ -1111,7 +1126,7 @@ impl Compositor {
             }
         }
         for item in &to.items {
-            if !item.visible || self.output_hidden.contains(&item.id) {
+            if !item.visible || to.group_hides(item.id) || self.output_hidden.contains(&item.id) {
                 continue;
             }
             let (transform, opacity) = match from_by_source.get(&item.source) {
@@ -2320,7 +2335,19 @@ impl Compositor {
     /// no frame yet, and fully-cropped items are skipped. Enabled filters run
     /// first, each item through its own GPU chain; `time_seconds` drives the
     /// time-based ones (Scroll).
+    /// Drop filter-chain textures for items nothing composed last tick.
+    ///
+    /// Called at the top of each program bake, which is the one point where a
+    /// whole tick's worth of composes is known to be finished. Evicting inside
+    /// `compose_scene` instead meant every target destroyed every other
+    /// target's chains, so the cache never survived a single frame.
+    fn sweep_chain_cache(&mut self) {
+        let live = std::mem::take(&mut self.chain_live);
+        self.chain_cache.retain(|id, _| live.contains(id));
+    }
+
     pub fn render(&mut self, scene: &Scene, time_seconds: f32) -> Result<(), CompositorError> {
+        self.sweep_chain_cache();
         let target = self.program_view.clone();
         let canvas = (self.canvas_width as f32, self.canvas_height as f32);
         self.render_to(scene, time_seconds, target, canvas, false, false)
@@ -2479,7 +2506,7 @@ impl Compositor {
         let mut filter_staging: Vec<u8> = Vec::new();
         let mut draws: Vec<Draw> = Vec::new();
         let mut chain_passes: Vec<ChainPass> = Vec::new();
-        let mut live_chains: Vec<ItemId> = Vec::new();
+        let mut live_chains: HashSet<ItemId> = HashSet::new();
 
         // Collected up front so the CAP-N53 output-hidden borrow ends before
         // the loop body mutates `self` (filter pipelines, chain caches).
@@ -2613,7 +2640,7 @@ impl Compositor {
 
             let has_chain = !plans.is_empty();
             if has_chain {
-                live_chains.push(item.id);
+                live_chains.insert(item.id);
                 let pass_count = plans.len();
                 for (pass_index, plan) in plans.into_iter().enumerate() {
                     self.ensure_chain_texture(item.id, pass_index, plan.out);
@@ -2643,9 +2670,14 @@ impl Compositor {
             });
         }
 
-        // Chain textures for items that no longer filter are dropped so a
-        // toggled-off chain never pins GPU memory.
-        self.chain_cache.retain(|id, _| live_chains.contains(id));
+        // Record, do not evict. `compose_scene` runs many times per tick
+        // (program, preview, vertical, every nested scene, every thumbnail,
+        // every projector, and BOTH scenes of a transition), and the cache is
+        // keyed globally — so retaining against just this scene threw away
+        // every other target chain and rebuilt it microseconds later. At 1080p
+        // a single blur chain is two 8 MB render targets created and destroyed
+        // 60 times a second. `sweep_chain_cache` does the eviction once a tick.
+        self.chain_live.extend(live_chains.iter().copied());
 
         self.ensure_uniform_capacity(draws.len() as u64);
         self.filters
@@ -2670,8 +2702,18 @@ impl Compositor {
 
         // 1. Filter chains — one pass per planned filter stage.
         for chain_pass in &chain_passes {
-            let chain = &self.chain_cache[&chain_pass.item];
-            let target = &chain[chain_pass.pass_index].view;
+            // Indexed defensively: the cache is keyed by `ItemId` alone, so two
+            // items sharing an id in one scene (a copy-pasted block in a
+            // hand-edited or externally-merged collection) share one entry, and
+            // the second item's `truncate` can shorten the vector below the
+            // first item's recorded `pass_index`. Skipping renders that item
+            // unfiltered instead of panicking the render thread.
+            let Some(chain) = self.chain_cache.get(&chain_pass.item) else {
+                continue;
+            };
+            let Some(target) = chain.get(chain_pass.pass_index).map(|tex| &tex.view) else {
+                continue;
+            };
             let input_bind = if chain_pass.pass_index == 0 {
                 // A frozen item (CAP-N25) feeds its held snapshot into the chain,
                 // not the live source — so a clone of the same source stays live.
@@ -2707,7 +2749,14 @@ impl Compositor {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(self.filters.pipeline(chain_pass.plan.kind));
+            // A user shader's pipeline can vanish between planning and drawing
+            // (eviction under live-editing churn). Skipping the pass leaves the
+            // item unfiltered for a frame, which is survivable; panicking here
+            // would kill the studio mid-stream.
+            let Some(pipeline) = self.filters.pipeline(chain_pass.plan.kind) else {
+                continue;
+            };
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.filters.uniform_bind, &[chain_pass.uniform_offset]);
             pass.set_bind_group(1, input_bind, &[]);
             if let Some(resource) = chain_pass.plan.resource {

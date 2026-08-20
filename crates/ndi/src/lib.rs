@@ -169,6 +169,16 @@ pub fn detect() -> NdiStatus {
     let candidates =
         resolve_candidates(|k| std::env::var(k).ok(), &default_dirs(), library_names());
     for path in candidates {
+        // Enforced here, in release too. The `NDI_RUNTIME_DIR_*` env vars are
+        // user-writable (on Windows `HKCU\Environment` persists across logins),
+        // so a relative or UNC value would reach `LoadLibraryW` as a relative
+        // path and reopen exactly the exe-dir/CWD/PATH search this module
+        // exists to avoid — and `DllMain` runs on load, inside the signed app.
+        // `probe_library`'s `debug_assert!` cannot carry this: it is compiled
+        // out of the shipping build.
+        if !path.is_absolute() {
+            continue;
+        }
         // Every candidate is an absolute path from a trusted dir; skip the ones
         // that aren't present rather than letting the loader search.
         if !path_exists(&path) {

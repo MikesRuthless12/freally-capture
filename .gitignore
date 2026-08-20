@@ -102,3 +102,11 @@ V1.2.0-HANDOFF.md
 # The CEF SDK staged by scripts/fetch-cef-sdk.mjs (CEF_ROOT for the browser
 # host's `cef` feature). Fetched on demand, ~350 MB, never vendored.
 .cef-sdk/
+
+# cargo-fuzz: keep the harness (fuzz/Cargo.toml, fuzz/fuzz_targets), never the
+# generated corpus, crash artifacts or build output.
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/Cargo.lock

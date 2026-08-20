@@ -12,9 +12,12 @@ import {
   recordingStart,
   recordingStatus,
   recordingStop,
+  virtualCameraStart,
+  virtualCameraStatus,
+  virtualCameraStop,
 } from "../api/commands";
 import { onOpenFrec, onRecording } from "../api/events";
-import type { RecordingStatus, Settings } from "../api/types";
+import type { RecordingStatus, Settings, VirtualCameraStatus } from "../api/types";
 import { LiveButton } from "../components/LiveButton";
 import { Panel } from "../components/Panel";
 import { RecDot } from "../components/RecDot";
@@ -99,6 +102,24 @@ export function ControlsDock({
   const [dialog, setDialog] = useState<ControlsDialogKind | null>(null);
 
   const [openedFrec, setOpenedFrec] = useState<string | null>(null);
+  const [vcam, setVcam] = useState<VirtualCameraStatus | null>(null);
+
+  // CAP-N76: the camera is owned by the studio thread, so its running state can
+  // change without us asking (a canvas resize restarts it, a push failure stops
+  // it). Poll rather than read once, on the same cadence as the other bridges.
+  useEffect(() => {
+    let alive = true;
+    const read = () =>
+      virtualCameraStatus()
+        .then((next) => alive && setVcam(next))
+        .catch(() => undefined);
+    void read();
+    const timer = window.setInterval(read, 2000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpenRef) return;
@@ -321,12 +342,31 @@ export function ControlsDock({
         </div>
         <button
           type="button"
-          disabled
-          title={t("controls-virtual-camera-title")}
-          className={`${buttonBase} border-white/10 bg-white/[0.04] text-havoc-text`}
+          disabled={!vcam?.available}
+          // Unavailable: the backend's own reason (why it cannot run here).
+          // Available: what turning it on actually does. Never a stale promise.
+          title={vcam?.available ? t("controls-virtual-camera-ready") : (vcam?.reason ?? "")}
+          onClick={() => {
+            const stop = vcam?.running === true;
+            const call = stop ? virtualCameraStop() : virtualCameraStart();
+            call
+              .then(() => virtualCameraStatus())
+              .then(setVcam)
+              .catch((err) => setActionError(String(err)));
+          }}
+          className={`${buttonBase} ${
+            vcam?.running
+              ? "border-havoc-accent/50 bg-havoc-accent/15 text-havoc-text hover:border-havoc-accent/70"
+              : "border-white/10 bg-white/[0.04] text-havoc-text hover:border-havoc-accent/50"
+          }`}
         >
-          {t("controls-virtual-camera")}
+          {vcam?.running ? t("controls-virtual-camera-stop") : t("controls-virtual-camera")}
         </button>
+        {vcam?.error && (
+          <p role="alert" className="m-0 text-[10px] leading-snug break-words text-red-300">
+            {vcam.error}
+          </p>
+        )}
         {/* The dialog LAUNCHERS moved to the menu bar (File/Tools/Help/…);
             only the live-operation controls stay down here. The dialogs
             themselves still render below — the menus open them through

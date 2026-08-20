@@ -148,7 +148,6 @@ sources-group-title = 分组来源 — 选择两个或更多项目，然后点�
 sources-group-aria = 分组来源
 sources-arrange = 排列：屏幕 + 四角
 sources-add-source = 添加来源
-sources-browser-source-note = 浏览器来源作为独立的按需组件里程碑发布（约 180 MB 的 Chromium 引擎 — 从不打包在内）。目前：用"窗口采集" + 色度/颜色键采集真实的浏览器窗口，或将聊天/提醒作为停靠窗打开（控制 → 停靠窗）。
 
 # Empty state
 sources-empty = 此场景中没有来源 — 用"+"添加显示器采集、窗口、摄像头、图像、色源或文本。在画布上拖动、缩放和旋转它们；右侧按钮可重新排列堆叠顺序。
@@ -448,8 +447,9 @@ controls-pause-recording = ⏸ 暂停录制
 controls-reactions-label = 反应（烘焙进节目）
 controls-reactions-title = 让一个反应漂浮在节目上方 — 同时录制并推流，因此回放会呈现确切的时刻。聊天中的观众也能触发它们（他们的反应表情会自动漂浮）；刷屏只会限制屏幕上的数量。
 controls-react = 反应 { $emoji }
-controls-virtual-camera-title = 虚拟摄像头需要每个操作系统各自的签名驱动组件（Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO 扩展 / Linux v4l2loopback）— 它作为独立里程碑发布。馈送模型已为其就绪：节目、竖屏画布或单个来源，并在 Windows/Linux 上配有一个配对的虚拟麦克风（macOS 没有虚拟麦克风 API — 如实相告）。
 controls-virtual-camera = ⌁ 启动虚拟摄像头
+controls-virtual-camera-stop = ⌁ 停止虚拟摄像头
+controls-virtual-camera-ready = 将节目输出为其他应用可选择的摄像头。
 controls-saved = 已保存：{ $path }
 
 # --- MixerDock.tsx ---
@@ -2798,3 +2798,7 @@ sources-browser-component-missing = 需要 Browser Runtime 组件 — 请在“�
 sources-browser-component-unsupported = CEF 未为此平台发布 Browser Runtime 版本，因此该源无法在此渲染。
 sources-browser-component-installing = 正在安装 Browser Runtime 组件…完成后该源即可渲染。
 sources-browser-component-error = 无法安装 Browser Runtime 组件：{ $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = 此面板已停止
+panel-error-hint = 录制和直播不受影响。请关闭后重新打开。

@@ -151,6 +151,11 @@ struct MailboxInner {
     slot: Mutex<MailboxSlot>,
     cond: Condvar,
     dropped: AtomicU64,
+    /// Mirrors `MailboxSlot::closed` for lock-free reads. Backends poll
+    /// `is_open()` once per loop pass — the game-capture pump does it every
+    /// 500 µs — and taking the frame mutex just to read a bool contended
+    /// directly with the consumer. Written under the lock, read relaxed.
+    closed_flag: AtomicBool,
     /// Live [`FrameSender`] handles; the last one to drop closes the channel.
     senders: AtomicUsize,
 }
@@ -180,6 +185,7 @@ pub fn frame_channel() -> (FrameSender, FrameReceiver) {
         }),
         cond: Condvar::new(),
         dropped: AtomicU64::new(0),
+        closed_flag: AtomicBool::new(false),
         senders: AtomicUsize::new(1),
     });
     (
@@ -193,14 +199,24 @@ pub fn frame_channel() -> (FrameSender, FrameReceiver) {
 impl FrameSender {
     /// Publish a frame, replacing (and counting) any unconsumed one.
     pub fn send(&self, frame: Frame) {
-        let mut slot = self.inner.slot.lock().expect("frame mailbox poisoned");
-        if slot.closed.is_some() {
-            return;
-        }
-        if slot.frame.replace(frame).is_some() {
-            self.inner.dropped.fetch_add(1, Ordering::Relaxed);
-        }
-        self.inner.cond.notify_one();
+        let displaced = {
+            let mut slot = self.inner.slot.lock().expect("frame mailbox poisoned");
+            if slot.closed.is_some() {
+                return;
+            }
+            let displaced = slot.frame.replace(frame);
+            if displaced.is_some() {
+                self.inner.dropped.fetch_add(1, Ordering::Relaxed);
+            }
+            self.inner.cond.notify_one();
+            displaced
+        };
+        // The frame this one replaced is freed AFTER the guard is dropped.
+        // Dropping it inside the lock meant an 8 MB deallocation (1080p RGBA)
+        // ran in the critical section the consumer's `recv_timeout` is waiting
+        // on — and a mailbox only displaces a frame when the consumer is
+        // already behind, which is exactly when it must not be blocked further.
+        drop(displaced);
     }
 
     /// Close the channel; `error` tells the consumer *why* (None = clean stop).
@@ -208,14 +224,16 @@ impl FrameSender {
         let mut slot = self.inner.slot.lock().expect("frame mailbox poisoned");
         if slot.closed.is_none() {
             slot.closed = Some(error.unwrap_or(CaptureError::Stopped));
+            // Published while the lock is held, so a relaxed read can never see
+            // "open" after a sender has observed the close.
+            self.inner.closed_flag.store(true, Ordering::Relaxed);
         }
         self.inner.cond.notify_all();
     }
 
     /// Whether the channel is still open (backends stop pushing once closed).
     pub fn is_open(&self) -> bool {
-        let slot = self.inner.slot.lock().expect("frame mailbox poisoned");
-        slot.closed.is_none()
+        !self.inner.closed_flag.load(Ordering::Relaxed)
     }
 }
 

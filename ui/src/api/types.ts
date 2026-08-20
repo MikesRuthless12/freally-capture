@@ -1712,6 +1712,10 @@ export type VirtualCameraStatus = {
   available: boolean;
   /** `null` when available; an honest install/why-not message otherwise. */
   reason: string | null;
+  /** Whether the OS camera is up right now (the studio thread owns it). */
+  running: boolean;
+  /** The last start failure, so a click that failed explains itself. */
+  error: string | null;
 };
 
 /** One source's live levels/status in the `audio` event. */

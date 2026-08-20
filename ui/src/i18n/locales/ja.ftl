@@ -152,7 +152,6 @@ sources-group-title = ソースをグループ化 — 2つ以上の項目を選�
 sources-group-aria = ソースをグループ化
 sources-arrange = 配置: 画面 + 四隅
 sources-add-source = ソースを追加
-sources-browser-source-note = ブラウザソースは独自のオンデマンドコンポーネントのマイルストーンとして提供されます（約180 MBのChromiumエンジン — 決してバンドルしません）。現在は: ウィンドウキャプチャ + クロマ/カラーキーで実際のブラウザウィンドウをキャプチャするか、チャット/アラートをドックとして開いてください（コントロール → ドック）。
 
 # Empty state
 sources-empty = このシーンにソースがありません — 「+」で画面キャプチャ、ウィンドウ、ウェブカメラ、画像、カラー、テキストを追加してください。キャンバス上でドラッグ、拡大縮小、回転できます。右側のボタンで重なり順を変更します。
@@ -454,8 +453,9 @@ controls-pause-recording = ⏸ 録画を一時停止
 controls-reactions-label = リアクション（プログラムに焼き込み）
 controls-reactions-title = プログラム上にリアクションを浮かべます — 録画も配信もされるので、リプレイに正確な瞬間が映ります。チャットの視聴者もこれをトリガーできます（そのリアクション絵文字が自動的に浮かびます）。殺到しても画面上の数が制限されるだけです。
 controls-react = リアクション { $emoji }
-controls-virtual-camera-title = 仮想カメラはOSごとに独自の署名済みドライバコンポーネントが必要です（Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO 拡張 / Linux v4l2loopback） — 独自のマイルストーンとして提供されます。フィードモデルは準備済みです: プログラム、縦型キャンバス、または単一ソースを、Windows/Linux ではペアの仮想マイクとともに（macOS には仮想マイクAPIがありません — 正直に言います）。
 controls-virtual-camera = ⌁ 仮想カメラを開始
+controls-virtual-camera-stop = ⌁ 仮想カメラを停止
+controls-virtual-camera-ready = プログラムを他のアプリが選べるカメラとして公開します。
 controls-saved = 保存しました: { $path }
 
 # --- MixerDock.tsx ---
@@ -2815,3 +2815,7 @@ sources-browser-component-missing = Browser Runtime コンポーネントが必�
 sources-browser-component-unsupported = CEF はこのプラットフォーム向けの Browser Runtime ビルドを公開していないため、このソースはここでは描画できません。
 sources-browser-component-installing = Browser Runtime コンポーネントをインストール中… 完了するとこのソースが描画されます。
 sources-browser-component-error = Browser Runtime コンポーネントをインストールできませんでした: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = このパネルは停止しました
+panel-error-hint = 録画と配信は影響を受けません。閉じてから開き直してください。

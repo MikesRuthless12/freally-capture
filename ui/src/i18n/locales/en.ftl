@@ -170,7 +170,6 @@ sources-group-title = Group sources — pick two or more items, then Create grou
 sources-group-aria = Group sources
 sources-arrange = Arrange: screen + corners
 sources-add-source = Add a source
-sources-browser-source-note = Browser Source ships as its own on-demand component milestone (a ~180 MB Chromium engine — never bundled). Today: capture a real browser window with Window Capture + a chroma/color key, or open chat/alerts as a Dock (Controls → Docks).
 
 # Empty state
 sources-empty = No sources in this scene — add a Display Capture, Window, Webcam, Image, Color, or Text with “+”. Drag, scale, and rotate them on the canvas; right side buttons reorder the stack.
@@ -578,8 +577,9 @@ controls-pause-recording = ⏸ Pause Recording
 controls-reactions-label = Reactions (baked into the program)
 controls-reactions-title = Float a reaction over the program — recorded AND streamed, so the replay shows the exact moment. Viewers in chat trigger these too (their reaction emoji float automatically); a flood only caps what's on screen.
 controls-react = React { $emoji }
-controls-virtual-camera-title = The virtual camera needs its own signed driver component per OS (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO extension / Linux v4l2loopback) — it ships as its own milestone. The feed model is ready for it: program, vertical canvas, or a single source, with a paired virtual mic on Windows/Linux (macOS has no virtual-mic API — said honestly).
 controls-virtual-camera = ⌁ Start Virtual Camera
+controls-virtual-camera-stop = ⌁ Stop Virtual Camera
+controls-virtual-camera-ready = Publish the program as a camera other apps can pick.
 controls-saved = Saved: { $path }
 
 # --- MixerDock.tsx ---
@@ -2815,3 +2815,7 @@ sources-browser-component-missing = Needs the Browser Runtime component — inst
 sources-browser-component-unsupported = CEF publishes no Browser Runtime build for this platform, so this source cannot render here.
 sources-browser-component-installing = Installing the Browser Runtime component… this source will render once it finishes.
 sources-browser-component-error = The Browser Runtime component could not be installed: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = This panel stopped
+panel-error-hint = Recording and streaming are unaffected. Close and reopen it.

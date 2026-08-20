@@ -1,0 +1,33 @@
+# Coverage-guided fuzzing for the parsers that take untrusted bytes.
+#
+# These are the attack surface: `.frec` payloads come from recordings and
+# imported packs, and capture ids round-trip through a scene collection that a
+# `.fcappack` or a hand edit can author. The deterministic sweeps in the crates'
+# own test modules run on every CI push; this goes far deeper, and needs nightly
+# (libFuzzer), so it is run deliberately rather than on every commit.
+#
+#   cargo +nightly fuzz run flz_decompress -- -max_total_time=300
+#
+# Excluded from the workspace so a stable-toolchain `cargo test --workspace`
+# never tries to build it.
+[package]
+name = "freally-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+fcap-encode = { path = "../crates/encode" }
+
+[[bin]]
+name = "flz_decompress"
+path = "fuzz_targets/flz_decompress.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

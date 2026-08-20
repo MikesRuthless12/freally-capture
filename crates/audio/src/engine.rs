@@ -685,6 +685,16 @@ fn run(
                 let got = ring.pop_into(&mut block, BLOCK_SAMPLES);
                 if got < BLOCK_SAMPLES {
                     block.resize(BLOCK_SAMPLES, 0.0); // underrun → silence
+                                                      // …and re-arm the prebuffer. The fast-clock direction is
+                                                      // handled above by `trim_to`; without this the slow-clock
+                                                      // direction had no recovery at all — once the 30 ms cushion
+                                                      // drained (a device whose clock runs marginally slow, a
+                                                      // scheduling stall, a wake from sleep) EVERY later block was
+                                                      // a partial one spliced with silence. That is sustained
+                                                      // crackle rather than one glitch, for the life of the
+                                                      // source. Counting it keeps the dropped stat honest.
+                    runtime.started = false;
+                    dropped_total += (BLOCK_SAMPLES - got) as u64;
                 }
                 inputs.insert(*id, block);
             }

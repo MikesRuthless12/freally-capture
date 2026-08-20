@@ -75,8 +75,24 @@ pub fn compress(input: &[u8], out: &mut Vec<u8>) {
     if input.is_empty() {
         return;
     }
-    // Position + 1 per hash slot; 0 = empty. 64 KiB, cheap to zero per call.
-    let mut table = vec![0u32; 1 << HASH_BITS];
+    // Position + 1 per hash slot; 0 = empty. 64 KiB. Kept per-thread and
+    // re-zeroed rather than reallocated: `compress` runs once per slice, so at
+    // 1080p60 that was ~480 allocations of 64 KiB a second, each one arriving
+    // cold and evicting the working set the match loop depends on.
+    thread_local! {
+        static TABLE: std::cell::RefCell<Vec<u32>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    TABLE.with(|cell| {
+        let mut table = cell.borrow_mut();
+        table.clear();
+        table.resize(1 << HASH_BITS, 0);
+        compress_with(input, out, &mut table);
+    });
+}
+
+/// [`compress`], with the caller supplying the (already zeroed) match table.
+fn compress_with(input: &[u8], out: &mut Vec<u8>, table: &mut [u32]) {
     let mut pos = 0usize;
     let mut literal_start = 0usize;
 
@@ -134,18 +150,30 @@ fn take_extended(input: &[u8], cursor: &mut usize, nibble: u8) -> Result<usize, 
 /// Decompress a stream produced by [`compress`]. `decoded_len` is the exact
 /// original size (the container stores it); output never exceeds it.
 pub fn decompress(input: &[u8], decoded_len: usize) -> Result<Vec<u8>, FlzError> {
-    let mut out: Vec<u8> = Vec::with_capacity(decoded_len);
-    let mut cursor = 0usize;
+    let mut out = vec![0u8; decoded_len];
+    decompress_into(input, &mut out)?;
+    Ok(out)
+}
 
-    while out.len() < decoded_len {
+/// [`decompress`] straight into a caller-owned buffer, whose length IS the
+/// expected decoded size. Callers that already have an exactly-sized
+/// destination (the `.frec` slice decoder) use this so a decoded frame costs no
+/// intermediate allocation and no second copy.
+pub fn decompress_into(input: &[u8], out: &mut [u8]) -> Result<(), FlzError> {
+    let decoded_len = out.len();
+    let mut cursor = 0usize;
+    let mut written = 0usize;
+
+    while written < decoded_len {
         let token = *input.get(cursor).ok_or(FlzError::Corrupt)?;
         cursor += 1;
         let literal_len = take_extended(input, &mut cursor, token >> 4)?;
         let literal_end = cursor.checked_add(literal_len).ok_or(FlzError::Corrupt)?;
-        if literal_end > input.len() || out.len() + literal_len > decoded_len {
+        if literal_end > input.len() || written + literal_len > decoded_len {
             return Err(FlzError::Corrupt);
         }
-        out.extend_from_slice(&input[cursor..literal_end]);
+        out[written..written + literal_len].copy_from_slice(&input[cursor..literal_end]);
+        written += literal_len;
         cursor = literal_end;
 
         if cursor == input.len() {
@@ -157,27 +185,31 @@ pub fn decompress(input: &[u8], decoded_len: usize) -> Result<Vec<u8>, FlzError>
         let offset = u16::from_le_bytes([input[cursor], input[cursor + 1]]) as usize;
         cursor += 2;
         let match_len = MIN_MATCH + take_extended(input, &mut cursor, token & 0x0F)?;
-        if offset == 0 || offset > out.len() || out.len() + match_len > decoded_len {
+        if offset == 0 || offset > written || written + match_len > decoded_len {
             return Err(FlzError::Corrupt);
         }
-        let start = out.len() - offset;
+        let start = written - offset;
         if offset == 1 {
             // Run of one byte — the dominant shape in delta'd frames.
-            out.resize(out.len() + match_len, out[start]);
+            let byte = out[start];
+            out[written..written + match_len].fill(byte);
         } else if match_len <= offset {
-            out.extend_from_within(start..start + match_len);
+            // Non-overlapping: one memmove.
+            out.copy_within(start..start + match_len, written);
         } else {
+            // Overlapping run: each byte must be copied after the byte it
+            // repeats has itself been written, so this stays a forward loop.
             for k in 0..match_len {
-                let byte = out[start + k];
-                out.push(byte);
+                out[written + k] = out[start + k];
             }
         }
+        written += match_len;
     }
 
-    if out.len() != decoded_len {
+    if written != decoded_len {
         return Err(FlzError::Corrupt);
     }
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -271,6 +303,66 @@ mod tests {
         let head: Vec<u8> = data[..1000].to_vec();
         data.extend_from_slice(&head);
         round_trip(&data);
+    }
+
+    /// An in-tree fuzz sweep: every mutation of a valid stream, and pure noise,
+    /// must return `Err` rather than panic, hang, or write out of bounds.
+    ///
+    /// `decompress_into` writes through a cursor into a caller-owned slice and
+    /// trusts `input` for every length and back-reference, so a malformed
+    /// stream is the one thing that could make it index past the end. The
+    /// `.frec` payloads it decodes arrive from recordings and imported packs,
+    /// i.e. from outside. Deterministic (fixed seeds) so a failure is
+    /// reproducible, and cheap enough to run in the normal suite on every OS —
+    /// deeper coverage is the `cargo-fuzz` target, which needs nightly.
+    #[test]
+    fn malformed_streams_never_panic_or_overrun() {
+        let sources: [Vec<u8>; 3] = [
+            b"hello hello hello hello hello".repeat(20),
+            vec![0u8; 4096],
+            noise(4096, 0x5eed),
+        ];
+        for data in &sources {
+            let mut valid = Vec::new();
+            compress(data, &mut valid);
+
+            // Single-byte mutations at every offset, cycling bit patterns.
+            for at in 0..valid.len() {
+                for xor in [0x01u8, 0x7f, 0x80, 0xff] {
+                    let mut broken = valid.clone();
+                    broken[at] ^= xor;
+                    // Any outcome is fine except a panic; when it does decode,
+                    // it must respect the destination length exactly.
+                    let mut out = vec![0u8; data.len()];
+                    if decompress_into(&broken, &mut out).is_ok() {
+                        assert_eq!(out.len(), data.len());
+                    }
+                }
+            }
+
+            // Every truncation.
+            for keep in 0..valid.len() {
+                let mut out = vec![0u8; data.len()];
+                let _ = decompress_into(&valid[..keep], &mut out);
+            }
+
+            // Lying about the decoded length in both directions.
+            for len in [0usize, 1, data.len() / 2, data.len() + 1, data.len() * 2] {
+                let mut out = vec![0u8; len];
+                let _ = decompress_into(&valid, &mut out);
+            }
+        }
+
+        // Pure noise as a "stream", at several lengths and seeds.
+        for seed in [1u32, 7, 99, 0xabcd] {
+            for len in [1usize, 3, 17, 64, 512] {
+                let junk = noise(len, seed);
+                for out_len in [0usize, 1, 64, 4096] {
+                    let mut out = vec![0u8; out_len];
+                    let _ = decompress_into(&junk, &mut out);
+                }
+            }
+        }
     }
 
     #[test]

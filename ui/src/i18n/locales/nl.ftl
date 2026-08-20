@@ -152,7 +152,6 @@ sources-group-title = Bronnen groeperen — kies twee of meer items en klik op G
 sources-group-aria = Bronnen groeperen
 sources-arrange = Schikken: scherm + hoeken
 sources-add-source = Een bron toevoegen
-sources-browser-source-note = Browserbron komt als eigen on-demand component-mijlpaal (een ~180 MB Chromium-engine — nooit meegeleverd). Vandaag: leg een echt browservenster vast met Vensteropname + een chroma-/kleursleutel, of open chat/meldingen als dock (Bediening → Docks).
 
 # Empty state
 sources-empty = Geen bronnen in deze scène — voeg met "+" een beeldschermopname, venster, webcam, afbeelding, kleur of tekst toe. Versleep, schaal en roteer ze op het canvas; de knoppen rechts herschikken de stapel.
@@ -454,8 +453,9 @@ controls-pause-recording = ⏸ Opname pauzeren
 controls-reactions-label = Reacties (ingebakken in het programma)
 controls-reactions-title = Laat een reactie over het programma zweven — opgenomen ÉN gestreamd, zodat de herhaling het exacte moment toont. Kijkers in de chat activeren deze ook (hun reactie-emoji zweven automatisch); een vloed beperkt alleen wat op het scherm staat.
 controls-react = Reageer { $emoji }
-controls-virtual-camera-title = De virtuele camera vereist per OS een eigen ondertekend stuurprogramma-component (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO-extensie / Linux v4l2loopback) — het komt als eigen mijlpaal. Het signaalmodel is er klaar voor: programma, verticaal canvas of één bron, met een gekoppelde virtuele microfoon op Windows/Linux (macOS heeft geen virtuele-microfoon-API — eerlijk gezegd).
 controls-virtual-camera = ⌁ Virtuele camera starten
+controls-virtual-camera-stop = ⌁ Virtuele camera stoppen
+controls-virtual-camera-ready = Publiceer het programma als camera die andere apps kunnen kiezen.
 controls-saved = Opgeslagen: { $path }
 
 # --- MixerDock.tsx ---
@@ -2815,3 +2815,7 @@ sources-browser-component-missing = Vereist de Browser Runtime-component — ins
 sources-browser-component-unsupported = CEF publiceert geen Browser Runtime-build voor dit platform, dus deze bron kan hier niet renderen.
 sources-browser-component-installing = Browser Runtime-component wordt geïnstalleerd… deze bron rendert zodra dat klaar is.
 sources-browser-component-error = De Browser Runtime-component kon niet worden geïnstalleerd: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Dit paneel is gestopt
+panel-error-hint = Opnemen en streamen gaan gewoon door. Sluit en heropen het.
