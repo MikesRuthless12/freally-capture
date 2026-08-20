@@ -1733,7 +1733,7 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fcap-appaudio"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "thiserror 2.0.18",
  "windows 0.58.0",
@@ -1742,7 +1742,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-audio"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "cpal",
  "fcap-scene",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-capture"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "ashpd",
  "block2",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-compositor"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "bytemuck",
  "fcap-capture",
@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-encode"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "bzip2",
  "directories",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-ndi"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "libloading 0.8.9",
  "thiserror 2.0.18",
@@ -1816,14 +1816,14 @@ dependencies = [
 
 [[package]]
 name = "fcap-plugin"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "fcap-plugin-checkerboard"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "fcap-plugin",
  "serde_json",
@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-preview"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "objc2",
  "objc2-core-foundation",
@@ -1845,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-scene"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-script"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "mlua",
  "serde_json",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-sources"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "chrono",
  "fcap-audio",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-stream"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "fcap-encode",
  "serde",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "fcap-vcam-win"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "fcap-stream",
  "windows 0.58.0",
@@ -2053,14 +2053,14 @@ dependencies = [
 
 [[package]]
 name = "freally-browser-host"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "bindgen 0.72.1",
 ]
 
 [[package]]
 name = "freally-capture"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "chrono",
  "directories",
@@ -2099,14 +2099,14 @@ dependencies = [
 
 [[package]]
 name = "freally-game-hook"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "windows 0.58.0",
 ]
 
 [[package]]
 name = "freally-vcam-source"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "fcap-stream",
  "windows 0.58.0",

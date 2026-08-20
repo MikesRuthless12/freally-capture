@@ -8,10 +8,128 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 > **Status: stable.** **1.0.0** completed the counted 100-feature roadmap (all 26 CAP-M must-haves
 > + all 74 CAP-N nice-to-haves) plus the five launch-polish features. **1.1.0** added the
 > auto-export feature owed since Build 12, and **1.2.0** adds the last three: the virtual camera,
-> a true browser source, and game capture. The ladder below records how it got here, from the
-> 0.70.0 studio MVP up.
+> a true browser source, and game capture. **1.2.1** is the Operation_Optimization audit: no new
+> features, but a full-codebase security/correctness pass — and the three 1.2.0 additions now
+> actually reachable and working. The ladder below records how it got here, from the 0.70.0
+> studio MVP up.
 
 ## [Unreleased]
+
+## [1.2.1] — 2026-08-20 (Operation_Optimization — audit, hardening & reachability)
+
+> **A full-codebase audit, and the fixes it turned up.** Every section of the app — all ~147k
+> lines across 13 sections — went through `/simplify`, `/security-review` and `/code-review`.
+> Nothing new was added. What changed is that several things which were *shipped* in 1.2.0 now
+> actually **work**: game capture reached no modern title, the virtual camera could not be
+> started at all, and the browser source was hidden from the menu. Alongside those, a path guard
+> that every other guard in the app depends on was bypassable by one character.
+
+### Fixed — security
+
+- **The network-path guard missed two UNC spellings Windows accepts.** `is_remote` tested `\\`
+  and `//` but not `/\` or `\/`, and Win32 treats the separators interchangeably in that
+  two-character prefix — `GetFullPath("/\localhost\C$\Windows")` really does resolve to
+  `\\localhost\C$\Windows`. Because this one predicate backs *every* path check in the app
+  (recordings, folder reveal, pack import, the pipeline, automation, and six studio guards), a
+  single substituted character reached a real SMB connection and leaked an NTLM credential hash
+  to an attacker-named host. Now normalises both separators and trims leading whitespace.
+- **Game-capture injection trusted a possibly-reused pid.** `inject()` checked consent against
+  the executable name the *caller* passed, never against the process it actually opened — and
+  Windows recycles pids aggressively between the window lookup and `OpenProcess`. It now queries
+  the image name from the open handle and re-checks consent before `CreateRemoteThread`.
+- **WHIP accepted `http://`.** For WHIP the stream key *is* the bearer token, so a plaintext
+  endpoint put the credential on the wire in the clear on every reconnect. `https` only.
+- **`espeak-ng` was missing `--` before user text** (the `spd-say` branch already had it), so a
+  teleprompter line like `-w/home/user/.bashrc` made it write a WAV over that file.
+- **NDI's "absolute paths only" rule was a `debug_assert!`** — compiled out of the shipping
+  build, leaving a user-writable env var able to steer `LoadLibraryW` at a relative path.
+- **The remote-guest invite token moved out of the query string** into the URL fragment, so it
+  no longer reaches Pages access logs, browser history, or a cross-origin `Referer`.
+- **The SRT ingest passphrase is masked**, like every other secret field in the app.
+
+### Fixed — crashes and correctness
+
+- **The compositor could panic on the render thread.** It cleared the entire user-shader
+  pipeline cache mid-frame while `compose_scene` still held plans pointing into it, then
+  `.expect()`d — reachable with two shader filters and ordinary live editing, because every
+  keystroke in the shader editor mints a new hash. Lookups are fallible now, and eviction drops
+  only failed compiles.
+- **No wgpu uncaptured-error handler was installed**, so any validation or out-of-memory error
+  anywhere in the compositor was a process panic. Now logged, with the frame dropped.
+- **Hidden groups appeared on air during Move transitions** — every other compose path honours
+  `group_hides`; the morph path did not, so hidden items were recorded and streamed for the
+  duration of the transition.
+- **Streaming and replay now refuse a wrong-sized frame.** The canvas can change mid-session and
+  encoders are fed fixed-size raw frames, so one mis-sized buffer desynced the byte stream for
+  the rest of the broadcast while the status still read "live".
+- **An audio underrun had no recovery.** Once the 30 ms prebuffer drained, every later block was
+  a partial one spliced with silence — sustained crackle rather than a single glitch.
+- Duplicate item ids no longer index past the filter-chain cache; a NaN fade duration skips the
+  filter instead of hiding the source forever; oversized mask images are refused rather than
+  panicking wgpu; and `fader_gain` gained the `is_finite` guard its sibling already had (a NaN
+  there is sticky and permanently poisons the master mix, LUFS and the recording).
+
+### Fixed — CAP-N78 game capture now works on modern titles
+
+- **Only `IDXGISwapChain::Present` was hooked.** DXGI 1.2+ **flip-model** games — most of what
+  runs in exclusive fullscreen — present through `Present1` and never touch that slot, so
+  injection reported success and not one frame ever arrived. Both slots are hooked now, covered
+  by an end-to-end test that builds a real flip-model swap chain, presents only through
+  `Present1`, and reads the captured frame back out.
+- **Device-lost is handled.** The shared texture records the device that created it, so a TDR or
+  an alt-tab out of exclusive fullscreen rebuilds instead of copying between two devices.
+- **Multiple swap chains no longer thrash the shared texture** every present (a launcher window,
+  an editor viewport or a splash screen used to force a full-resolution rebuild 60+ times a
+  second); the first chain is latched.
+- **Multisampled back buffers are resolved** instead of failing `CopyResource` silently.
+- **The vtable is genuinely restored on unload** — explicitly from `DLL_PROCESS_DETACH`, and only
+  if the slots still hold our functions, so an overlay that hooked afterwards is never silently
+  unhooked. (The previous claim that `HookState`'s `Drop` did this was wrong: Rust never drops
+  statics.)
+- **A D3D12 title now fails fast and honestly** instead of burning the first-frame timeout, and
+  the injected DLL no longer writes to stderr — a GUI-subsystem game has no stderr handle, and
+  with `panic = "abort"` a failed write aborted the *game*.
+- The game's render thread no longer pays a 4 ms keyed-mutex wait on every present.
+
+### Fixed — reachable at last
+
+- **The browser source is in the Add menu.** It shipped complete in 1.2.0 but behind a disabled
+  flag, and the menu still told operators to use Window Capture instead.
+- **The virtual camera can be started.** The backend was complete and nothing called it: there
+  were no start/stop commands and the button was hardcoded disabled. It is now wired end to end,
+  teeing off the *existing* program readback so enabling it costs one extra publish per frame
+  that was already being read. Still unsigned, and still owed a real Zoom/Meet/Teams drill.
+
+### Changed — performance
+
+- Four decode paths copied the whole frame every frame; the compositor destroyed and rebuilt
+  every filter-chain texture 60×/s (the cache was pruned per compose, but compose runs for
+  program, preview, vertical, nested scenes, thumbnails, projectors and both halves of a
+  transition); `.frec` recording made a syscall per frame and copied 8 MB before subtracting;
+  FLZ allocated a 64 KiB table per slice and the decoder allocated a buffer it immediately
+  copied away; `sanitize` was quadratic on every load and import; the capture mailbox freed an
+  8 MB frame inside the lock its consumer waits on.
+- **Audio denormals are flushed.** With `forbid(unsafe_code)` the MXCSR flush-to-zero bit is
+  unavailable, so muted strips decayed into the denormal range and stayed there, costing 10–100×
+  per sample.
+
+### Added — robustness and tooling
+
+- **A React error boundary**, wired into the two shared shells (`PickerShell`, imported by 59
+  files, and `Panel`). A render throw used to unmount the entire studio while the Rust side kept
+  encoding and streaming — not off-air, but blind and unable to stop. A crashed dialog now keeps
+  its close button.
+- **Two visual-smoke tests were passing on a blank screen.** `11-recordings` and `19-profiles`
+  were both exactly 4,255 bytes: the mock never defined the commands those dialogs read, the app
+  unmounted, and the loop asserted nothing. The mock gained 16 commands and a complete settings
+  fixture, and the loop now asserts the dialog is actually visible.
+- **Fuzzing.** Deterministic malformed-input sweeps for the `.frec` decompressor and the
+  capture-id parser run in the normal suite on all three OSes, plus a `cargo-fuzz` harness —
+  77,625,230 executions against `flz::decompress_into` with zero crashes.
+- `docs/local-security-tooling.md` records the local-only scanners that were run (Semgrep: 0
+  findings; Trivy: 0 secrets, 0 high/critical) and, honestly, why Miri is *not* worth adding
+  here: all twelve library crates already `deny(unsafe_code)`, and the remaining unsafe is FFI,
+  which Miri cannot execute.
 
 ## [1.2.0] — 2026-08-19 (Deep Capture & Web)
 

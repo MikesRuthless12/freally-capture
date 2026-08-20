@@ -46,13 +46,17 @@ impl VirtualCameraState {
         self.running.load(Ordering::Relaxed)
     }
 
-    /// Studio-thread only: record that the camera came up.
+    /// Studio-thread only: record that the camera came up. Only the Windows
+    /// `reconcile` path reaches this; elsewhere the start fails outright.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn mark_running(&self) {
         self.running.store(true, Ordering::Relaxed);
         *lock(&self.error) = None;
     }
 
-    /// Studio-thread only: record that the camera is down.
+    /// Studio-thread only: record that the camera is down. Windows-only, for
+    /// the same reason as `mark_running`.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn mark_stopped(&self) {
         self.running.store(false, Ordering::Relaxed);
     }
@@ -92,6 +96,7 @@ pub struct CameraHost {
     camera: Option<fcap_vcam_win::MfVirtualCamera>,
     /// The geometry the camera was started at; a canvas resize restarts it,
     /// because the shared frame region is sized once at start.
+    #[cfg(target_os = "windows")]
     started_at: Option<(u32, u32)>,
 }
 
