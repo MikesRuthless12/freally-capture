@@ -79,7 +79,10 @@ impl ShapeProfile {
         if self.outage_every_s == 0 || self.outage_len_s == 0 {
             return false;
         }
-        let period_ms = u64::from(self.outage_every_s + self.outage_len_s) * 1_000;
+        // Widen BEFORE adding: summing two u32 first wraps in release, and a
+        // wrapped 0 makes the modulo below a division by zero — a panic that
+        // kills the rehearsal drain thread rather than failing the profile.
+        let period_ms = (u64::from(self.outage_every_s) + u64::from(self.outage_len_s)) * 1_000;
         let healthy_ms = u64::from(self.outage_every_s) * 1_000;
         elapsed_ms % period_ms >= healthy_ms
     }
@@ -156,6 +159,22 @@ impl Jitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_outage_period_that_would_overflow_u32_does_not_panic() {
+        // The sum of the two seconds fields must be widened before it is added:
+        // adding as u32 wraps in release, and a wrapped 0 turns the modulo in
+        // `is_out` into a division by zero, killing the rehearsal drain thread.
+        let profile = ShapeProfile {
+            outage_every_s: u32::MAX,
+            outage_len_s: 1,
+            ..ShapeProfile::hotel_wifi()
+        };
+        // Any elapsed time at all — the point is that this returns rather than
+        // panicking. Early in the timeline it is inside the healthy interval.
+        assert!(!profile.is_out(0));
+        assert!(!profile.is_out(60_000));
+    }
 
     #[test]
     fn token_bucket_grants_exactly_the_configured_rate() {

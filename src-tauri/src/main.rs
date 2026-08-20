@@ -67,6 +67,7 @@ mod telestrator;
 mod theme;
 mod timers;
 mod tts;
+mod vcam;
 mod webpanel;
 
 use audio::{AudioRuntime, HotkeyRegistry};
@@ -190,6 +191,7 @@ fn main() {
         .manage(benchmark::BenchmarkState::default())
         .manage(replay::ReplayState::new())
         .manage(reactions::ReactionState::new())
+        .manage(vcam::VirtualCameraState::default())
         .manage(telestrator::TelestratorState::new())
         .manage(teleprompter::TeleprompterState::new())
         .manage(events::RuntimeStats::default())
@@ -266,6 +268,8 @@ fn main() {
             commands::integrations_status,
             commands::game_capture_status,
             commands::virtual_camera_status,
+            commands::virtual_camera_start,
+            commands::virtual_camera_stop,
             eula::eula_status,
             eula::eula_accept,
             commands::settings_get,

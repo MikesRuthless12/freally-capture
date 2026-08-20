@@ -283,6 +283,27 @@ pub fn encode_video_payload(width: u32, height: u32, jpeg: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Write a video frame without ever copying the JPEG.
+///
+/// [`write_frame`] takes one contiguous payload, so the sender had to build
+/// `[w][h][jpeg]` first — a full copy of a 200–500 KB JPEG on every frame, in
+/// the one place [`write_frame`]'s own doc says a copy must be avoided. The
+/// bytes on the wire are identical to `write_frame(w, kind, encode_video_payload(..))`.
+pub fn write_video_frame(
+    writer: &mut impl std::io::Write,
+    width: u32,
+    height: u32,
+    jpeg: &[u8],
+) -> std::io::Result<()> {
+    let mut header = [0u8; 13];
+    header[0] = FRAME_VIDEO;
+    header[1..5].copy_from_slice(&((8 + jpeg.len()) as u32).to_le_bytes());
+    header[5..9].copy_from_slice(&width.to_le_bytes());
+    header[9..13].copy_from_slice(&height.to_le_bytes());
+    writer.write_all(&header)?;
+    writer.write_all(jpeg)
+}
+
 /// Decode a video payload (`None` = malformed or absurd dimensions).
 pub fn decode_video_payload(payload: &[u8]) -> Option<(u32, u32, &[u8])> {
     if payload.len() < 8 {
@@ -681,6 +702,25 @@ mod tests {
         .expect("future hello still decodes");
         assert_ne!(future.version, PROTOCOL_VERSION);
         assert!(decode_hello(&[1]).is_none(), "truncated hello is refused");
+    }
+
+    #[test]
+    fn the_zero_copy_video_write_is_byte_identical_to_the_copying_one() {
+        // `write_video_frame` skips building the `[w][h][jpeg]` payload, which
+        // is a full JPEG copy per frame. It may not change the wire format.
+        let jpeg = b"\xff\xd8\xff\xe0 not really a jpeg";
+        let mut zero_copy = Vec::new();
+        write_video_frame(&mut zero_copy, 1920, 1080, jpeg).expect("write");
+
+        let mut copying = Vec::new();
+        write_frame(
+            &mut copying,
+            FRAME_VIDEO,
+            &encode_video_payload(1920, 1080, jpeg),
+        )
+        .expect("write");
+
+        assert_eq!(zero_copy, copying);
     }
 
     #[test]

@@ -29,7 +29,13 @@ pub fn tts_speak(text: String, rate: f32) -> Result<(), String> {
         // Fall back to espeak-ng (words-per-minute ~= rate * 175).
         let wpm = ((rate * 175.0).round() as i32).clamp(80, 500);
         Command::new("espeak-ng")
-            .args(["-s", &wpm.to_string(), &text])
+            // `--` before the text, exactly like the spd-say branch above. The
+            // text is user-controlled (teleprompter chunks start at arbitrary
+            // offsets), and espeak-ng parses with getopt_long and accepts
+            // attached short-option values — so a single token like
+            // `-w/home/user/.bashrc` makes it write a WAV over that file. A
+            // benign line merely starting with `-` breaks TTS today.
+            .args(["-s", &wpm.to_string(), "--", &text])
             .spawn()
             .map(|_| ())
             .map_err(|e| {

@@ -399,8 +399,9 @@ fn serve_client(
                     // Header + payload written straight to the socket — the
                     // payload is a whole program frame, so the intermediate
                     // copies `encode_frame` would make are real bandwidth.
-                    let payload = wire::encode_video_payload(width, height, &jpeg);
-                    if wire::write_frame(&mut stream, wire::FRAME_VIDEO, &payload).is_err() {
+                    // `write_video_frame` emits the geometry inside the header,
+                    // so the JPEG itself is never copied on the way out.
+                    if wire::write_video_frame(&mut stream, width, height, &jpeg).is_err() {
                         return;
                     }
                 }

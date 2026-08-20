@@ -67,7 +67,12 @@ export function LanIngestFields({
       {value.protocol === "srt" && (
         <label className="flex flex-col gap-1 text-[11px] text-havoc-muted">
           {t("sources-lan-passphrase-label")}
+          {/* Masked like every other secret field in the app (stream key,
+              web-panel password, remote-control password, guest key). This was
+              the only one rendering a credential in the clear — on a screen
+              that is often visible while a Display Capture source is live. */}
           <input
+            type="password"
             value={value.passphrase}
             onChange={(event) => onChange({ ...value, passphrase: event.target.value })}
             className={`${inputClass} font-mono`}

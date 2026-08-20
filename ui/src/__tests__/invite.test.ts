@@ -50,7 +50,11 @@ describe("invite tokens", () => {
   it("builds a web-join link the join flow can round-trip", () => {
     const token = mintInvite(PEER, 30, NOW);
     const link = webJoinLink(token);
-    expect(link).toBe(`${WEB_JOIN_BASE}?token=${token}`);
+    // A FRAGMENT, not a query: holding the token is the capability to join, and
+    // a query string reaches the server's access log, browser history and any
+    // cross-origin Referer. `docs/join.html` reads either form.
+    expect(link).toBe(`${WEB_JOIN_BASE}#token=${token}`);
+    expect(link).not.toContain("?token=");
     // A scanned QR pastes back into the app too — same token, same peer.
     expect(parseInviteInput(link)).toBe(token);
     expect(joinTargetFromInput(link, NOW + 1000)).toEqual({ peerId: PEER });

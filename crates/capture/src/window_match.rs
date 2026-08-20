@@ -220,6 +220,60 @@ mod tests {
         WindowKey::new(app, class, title)
     }
 
+    /// An in-tree fuzz sweep over the capture-id parser.
+    ///
+    /// A capture id is persisted in a scene collection, so it comes back from a
+    /// `.fcappack`, an OBS import, or a hand-edited JSON file — i.e. from
+    /// outside. `decode_window_id` must therefore be total: any string at all
+    /// yields `Some` or `None`, never a panic and never an over-shift in the
+    /// base64 decoder. Deterministic so a failure reproduces.
+    #[test]
+    fn decoding_an_arbitrary_capture_id_never_panics() {
+        // Deterministic pseudo-random bytes (xorshift — no rand dependency).
+        let mut seed = 0x1234_5678u32;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+
+        // Hand-picked shapes first: the structural edges.
+        for raw in [
+            "",
+            ":",
+            "::",
+            ":::",
+            "::::",
+            "0",
+            "-1",
+            "99999999999999999999999999",
+            "18446744073709551615",
+            "18446744073709551616",
+            "1:::",
+            "1:!!!:!!!:!!!",
+            "1:=:=:=",
+            "1:====:A:B",
+            "1:A:B",
+            "1:A:B:C:D",
+            "\u{0}:\u{0}:\u{0}:\u{0}",
+            "1:🙂:🙂:🙂",
+        ] {
+            let _ = decode_window_id(raw);
+        }
+
+        // Then random strings over an alphabet that includes the separator,
+        // base64 characters, padding, and bytes that are not valid base64.
+        const ALPHABET: &[u8] = b":ABCXYZabcxyz0189+/=!\x7f ";
+        for _ in 0..4_000 {
+            let len = (next() % 24) as usize;
+            let raw: String = (0..len)
+                .map(|_| ALPHABET[(next() as usize) % ALPHABET.len()] as char)
+                .collect();
+            let _ = decode_window_id(&raw);
+        }
+    }
+
     #[test]
     fn base64_round_trips_including_empty_and_unicode() {
         for s in [

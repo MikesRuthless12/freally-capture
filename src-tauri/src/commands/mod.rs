@@ -274,34 +274,69 @@ pub struct VirtualCameraStatusDto {
     pub available: bool,
     /// `None` when available; an honest, actionable message otherwise.
     pub reason: Option<String>,
+    /// Whether the OS camera is up right now (the studio thread owns it).
+    pub running: bool,
+    /// The last start failure, so a click that failed explains itself.
+    pub error: Option<String>,
 }
 
-#[tauri::command]
-pub fn virtual_camera_status() -> VirtualCameraStatusDto {
+/// Is a driver-backed camera usable here, and what is it doing?
+fn virtual_camera_availability() -> (bool, Option<String>) {
     #[cfg(target_os = "windows")]
     {
         if fcap_vcam_win::available() {
-            VirtualCameraStatusDto {
-                available: true,
-                reason: None,
-            }
+            (true, None)
         } else {
-            VirtualCameraStatusDto {
-                available: false,
-                reason: Some(fcap_vcam_win::SOURCE_NOT_REGISTERED.to_string()),
-            }
+            (
+                false,
+                Some(fcap_vcam_win::SOURCE_NOT_REGISTERED.to_string()),
+            )
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        VirtualCameraStatusDto {
-            available: false,
-            reason: Some(
+        (
+            false,
+            Some(
                 "the virtual camera ships first on Windows; the macOS (CoreMediaIO) and Linux (v4l2loopback) components are their own milestones"
                     .to_string(),
             ),
-        }
+        )
     }
+}
+
+#[tauri::command]
+pub fn virtual_camera_status(
+    state: tauri::State<'_, crate::vcam::VirtualCameraState>,
+) -> VirtualCameraStatusDto {
+    let (available, reason) = virtual_camera_availability();
+    VirtualCameraStatusDto {
+        available,
+        reason,
+        running: state.running(),
+        error: state.error(),
+    }
+}
+
+/// Ask the studio loop to bring the camera up. Refused up front when no
+/// driver-backed camera can run here, so the UI never starts a spinner for
+/// something that cannot happen.
+#[tauri::command]
+pub fn virtual_camera_start(
+    state: tauri::State<'_, crate::vcam::VirtualCameraState>,
+) -> Result<(), String> {
+    let (available, reason) = virtual_camera_availability();
+    if !available {
+        return Err(reason.unwrap_or_else(|| "the virtual camera is unavailable".to_string()));
+    }
+    state.request_on();
+    Ok(())
+}
+
+/// Ask the studio loop to tear the camera down.
+#[tauri::command]
+pub fn virtual_camera_stop(state: tauri::State<'_, crate::vcam::VirtualCameraState>) {
+    state.request_off();
 }
 
 /// A one-shot JPEG thumbnail (`data:` URI) of the window `id`, for the picker's

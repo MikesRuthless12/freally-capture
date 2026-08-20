@@ -227,10 +227,19 @@ pub(crate) fn spawn_kill_watchdog_with_grace(
 
 /// Loop-side: publish the playhead for the transport UI.
 pub(crate) fn publish_transport(id: &str, position: f32, duration: f32) {
-    transport_registry()
+    let value = (position.max(0.0), duration.max(0.0));
+    let mut map = transport_registry()
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(id.to_string(), (position.max(0.0), duration.max(0.0)));
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // This runs once per decoded frame, so update the existing slot in place —
+    // `insert` would allocate a fresh key `String` per frame, per media source,
+    // only to throw it away.
+    match map.get_mut(id) {
+        Some(slot) => *slot = value,
+        None => {
+            map.insert(id.to_owned(), value);
+        }
+    }
 }
 
 /// Start playing a media file. `hub_id` keys the mixer-side audio ring —
@@ -901,11 +910,7 @@ fn run_frec(
                 while pause.load(Ordering::Relaxed)
                     && !stop.load(Ordering::Relaxed)
                     && sender.is_open()
-                    && seek_registry()
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .get(hub_id.as_str())
-                        .is_none()
+                    && !seek_pending(hub_id.as_str())
                 {
                     std::thread::sleep(Duration::from_millis(30));
                 }
@@ -1221,11 +1226,7 @@ fn run_wire_stretch(
                 && pause.load(Ordering::Relaxed)
                 && !stop.load(Ordering::Relaxed)
                 && sender.is_open()
-                && seek_registry()
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get(hub_id)
-                    .is_none()
+                && !seek_pending(hub_id)
             {
                 std::thread::sleep(Duration::from_millis(30));
             }
@@ -1240,12 +1241,17 @@ fn run_wire_stretch(
                 end = StretchEnd::Ended; // end of file (or the child was killed)
                 break;
             }
+            // Move the filled buffer into the frame and take a fresh one — a
+            // clone is a full-frame memcpy per frame (8 MB at 1080p, ~500 MB/s
+            // at 60 fps). `read_exact_or_end` refills the replacement before
+            // the next send, so its zeroing is never observed.
+            let pixels = std::mem::replace(&mut data, vec![0u8; frame_bytes]);
             sender.send(Frame {
                 width: info.width,
                 height: info.height,
                 stride: info.width * 4,
                 format: PixelFormat::Rgba8,
-                data: data.clone(),
+                data: pixels,
                 captured_at: Instant::now(),
             });
             force_frame = false;
@@ -1275,16 +1281,10 @@ fn run_wire_stretch(
 
 /// `read_exact` that treats EOF/broken pipe as a clean end.
 pub(crate) fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> bool {
-    let mut filled = 0usize;
-    while filled < buf.len() {
-        match reader.read(&mut buf[filled..]) {
-            Ok(0) => return false,
-            Ok(n) => filled += n,
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => return false,
-        }
-    }
-    true
+    // The same loop as `read_available`, keeping only "did it fill?" — the two
+    // can only exit full or at EOF/error, so a full fill is exactly `true`.
+    // Sharing it keeps the interrupted-read retry in one place.
+    read_available(reader, buf).0 == buf.len()
 }
 
 /// Fill `buf` as far as possible; returns `(bytes_filled, done)`. `done` is

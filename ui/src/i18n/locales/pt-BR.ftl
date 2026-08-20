@@ -146,7 +146,6 @@ sources-group-title = Agrupar fontes — escolha dois ou mais itens e depois Cri
 sources-group-aria = Agrupar fontes
 sources-arrange = Organizar: tela + cantos
 sources-add-source = Adicionar uma fonte
-sources-browser-source-note = A Fonte de Navegador chega como seu próprio componente sob demanda em um marco futuro (um motor Chromium de ~180 MB — nunca embutido). Hoje: capture uma janela de navegador real com Captura de Janela + um chroma/color key, ou abra chat/alertas como um Dock (Controles → Docks).
 
 # Empty state
 sources-empty = Nenhuma fonte nesta cena — adicione uma Captura de Tela, Janela, Webcam, Imagem, Cor ou Texto com "+". Arraste, redimensione e gire no canvas; os botões à direita reordenam a pilha.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ Pausar Gravação
 controls-reactions-label = Reações (embutidas no programa)
 controls-reactions-title = Faça uma reação flutuar sobre o programa — gravada E transmitida, para que o replay mostre o momento exato. Espectadores no chat também disparam essas (o emoji de reação deles flutua automaticamente); uma enxurrada apenas limita o que aparece na tela.
 controls-react = Reagir { $emoji }
-controls-virtual-camera-title = A câmera virtual precisa do seu próprio componente de driver assinado por SO (Win11 MFCreateVirtualCamera / Win10 DirectShow / extensão CoreMediaIO do macOS / v4l2loopback do Linux) — ela chega como seu próprio marco. O modelo de feed já está pronto para ela: programa, canvas vertical ou uma única fonte, com um microfone virtual pareado no Windows/Linux (o macOS não tem API de microfone virtual — dito honestamente).
 controls-virtual-camera = ⌁ Iniciar Câmera Virtual
+controls-virtual-camera-stop = ⌁ Parar câmera virtual
+controls-virtual-camera-ready = Publica o programa como uma câmera que outros apps podem escolher.
 controls-saved = Salvo: { $path }
 
 # --- MixerDock.tsx ---
@@ -2779,3 +2779,7 @@ sources-browser-component-missing = Precisa do componente Browser Runtime — in
 sources-browser-component-unsupported = O CEF não publica uma compilação do Browser Runtime para esta plataforma, então esta fonte não pode ser renderizada aqui.
 sources-browser-component-installing = Instalando o componente Browser Runtime… esta fonte será renderizada quando terminar.
 sources-browser-component-error = Não foi possível instalar o componente Browser Runtime: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Este painel parou
+panel-error-hint = Gravação e transmissão não são afetadas. Feche e abra novamente.

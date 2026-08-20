@@ -12,7 +12,7 @@
 //! on their way into the lane maker, are never logged, and every visible
 //! status carries service labels instead.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -68,6 +68,16 @@ pub struct StreamBridgeState {
     /// When the current session went live — the CAP-M15 "time since live"
     /// clock. Read gated on `active`, so a stale instant is harmless.
     since: Mutex<Option<Instant>>,
+    /// Expected bytes per frame for each canvas, latched at Go Live.
+    ///
+    /// The encoder is fed raw frames of a fixed size, so a single wrong-sized
+    /// buffer does not glitch one frame — it shifts every byte after it and the
+    /// broadcast is diagonal garbage for the rest of the show, while the status
+    /// still reads "live". Nothing else stops that: the canvas CAN change
+    /// mid-session (a collection switch, a pack import, a snapshot restore) and
+    /// none of those paths is guarded. Dropping the frame freezes the picture
+    /// honestly instead, which is recoverable.
+    frame_bytes: [AtomicUsize; 2],
 }
 
 impl StreamBridgeState {
@@ -81,7 +91,21 @@ impl StreamBridgeState {
             feed: Mutex::new(None),
             terminal: Mutex::new(None),
             since: Mutex::new(None),
+            frame_bytes: [AtomicUsize::new(0), AtomicUsize::new(0)],
         }
+    }
+
+    /// Latch the byte size of each canvas at Go Live. `0` = no expectation.
+    pub fn set_frame_geometry(&self, main: Option<(u32, u32)>, vertical: Option<(u32, u32)>) {
+        let bytes = |dims: Option<(u32, u32)>| dims.map_or(0, |(w, h)| w as usize * h as usize * 4);
+        self.frame_bytes[0].store(bytes(main), Ordering::Relaxed);
+        self.frame_bytes[1].store(bytes(vertical), Ordering::Relaxed);
+    }
+
+    /// Whether a frame is the size this session was started for.
+    fn frame_fits(&self, lane: usize, len: usize) -> bool {
+        let expected = self.frame_bytes[lane].load(Ordering::Relaxed);
+        expected == 0 || expected == len
     }
 
     /// When the running session went live; `None` while not live.
@@ -131,7 +155,10 @@ impl StreamBridgeState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(handle) = feed.as_ref() {
-            handle.push_frame(0, pixels);
+            // Never forward a wrong-sized frame — see `frame_bytes`.
+            if self.frame_fits(0, pixels.len()) {
+                handle.push_frame(0, pixels);
+            }
         }
     }
 
@@ -142,7 +169,9 @@ impl StreamBridgeState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(handle) = feed.as_ref() {
-            handle.push_frame(1, pixels);
+            if self.frame_fits(1, pixels.len()) {
+                handle.push_frame(1, pixels);
+            }
         }
     }
 
@@ -749,6 +778,12 @@ fn start_with<R: Runtime>(app: &AppHandle<R>, rehearsal: bool) -> Result<(), Str
     state
         .wants_vertical
         .store(plans.iter().any(|plan| plan.canvas == 1), Ordering::Relaxed);
+    // Latch what a frame must measure for this session. The canvas can still be
+    // changed underneath us (collection switch, pack import, snapshot restore —
+    // none of them is guarded while live), and the encoders are fed fixed-size
+    // raw frames, so a single mis-sized buffer would desync the byte stream for
+    // the rest of the broadcast.
+    state.set_frame_geometry(Some(main_dims), vertical_dims);
     *state
         .since
         .lock()
@@ -791,6 +826,7 @@ fn teardown<R: Runtime>(app: &AppHandle<R>, terminal: Option<StreamDto>) {
     state.active.store(false, Ordering::Relaxed);
     state.wants_main.store(false, Ordering::Relaxed);
     state.wants_vertical.store(false, Ordering::Relaxed);
+    state.set_frame_geometry(None, None);
     *state
         .feed
         .lock()
@@ -881,4 +917,47 @@ pub fn spawn_status_thread<R: Runtime>(app: AppHandle<R>) {
             std::thread::sleep(Duration::from_secs(1));
         })
         .expect("stream status thread spawns");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wrong_sized_frame_is_refused_so_the_broadcast_cannot_desync() {
+        // The encoder is fed fixed-size raw frames, so a single mis-sized
+        // buffer shifts every byte after it — the stream turns to diagonal
+        // garbage for the rest of the show while the status still reads
+        // "live". The canvas really can change mid-session (a collection
+        // switch, a pack import, a snapshot restore; none of those paths is
+        // guarded while live), so this is reachable without any hostile input.
+        let state = StreamBridgeState::new();
+        state.set_frame_geometry(Some((1920, 1080)), Some((1080, 1920)));
+
+        let main_bytes = 1920 * 1080 * 4;
+        assert!(state.frame_fits(0, main_bytes), "the size it went live at");
+        assert!(
+            !state.frame_fits(0, 1280 * 720 * 4),
+            "a canvas change mid-session must be dropped, not forwarded"
+        );
+
+        // The vertical lane is tracked separately — it has its own geometry.
+        assert!(state.frame_fits(1, 1080 * 1920 * 4));
+        assert!(
+            !state.frame_fits(1, 640 * 480 * 4),
+            "the vertical lane keeps its own expectation"
+        );
+        // Honest limit of a length check: 1080×1920 and 1920×1080 hold the same
+        // number of bytes, so a *transposed* canvas passes. The push sites only
+        // receive an `Arc<Vec<u8>>` with no dimensions, so length is all that is
+        // available there — and it still catches the case that actually occurs,
+        // which is a canvas resized to a different area.
+        assert!(state.frame_fits(1, main_bytes));
+
+        // Cleared on teardown: with no session there is no expectation, and a
+        // zero must never be read as "every frame is wrong".
+        state.set_frame_geometry(None, None);
+        assert!(state.frame_fits(0, main_bytes));
+        assert!(state.frame_fits(0, 12_345));
+    }
 }

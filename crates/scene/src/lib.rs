@@ -54,6 +54,8 @@ pub use source::{
     VideoDeviceFormat, VisStyle, VisTargetKind,
 };
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -362,7 +364,10 @@ impl Collection {
         }
         // Nested-scene sources with a missing target render nothing forever —
         // drop them (their items go with the dangling-source pass below).
-        let scene_ids: Vec<SceneId> = self.scenes.iter().map(|scene| scene.id).collect();
+        // Sets, not `Vec`s: every one of these is probed once per source or per
+        // item, so a linear `contains` makes the whole repair quadratic in the
+        // size of the collection — on every load, import and snapshot restore.
+        let scene_ids: HashSet<SceneId> = self.scenes.iter().map(|scene| scene.id).collect();
         self.sources.retain(|source| {
             !matches!(&source.settings, SourceSettings::NestedScene { scene } if !scene_ids.contains(scene))
         });
@@ -371,7 +376,7 @@ impl Collection {
         // A hand-edited file could hold a nested-scene cycle the engine must
         // never walk: drop any nested source whose target reaches back to a
         // scene showing it.
-        let cyclic: Vec<SourceId> = self
+        let cyclic: HashSet<SourceId> = self
             .sources
             .iter()
             .filter_map(|source| match &source.settings {
@@ -387,14 +392,14 @@ impl Collection {
             .collect();
         self.sources.retain(|source| !cyclic.contains(&source.id));
         // Drop items pointing at sources that don't exist…
-        let source_ids: Vec<SourceId> = self.sources.iter().map(|source| source.id).collect();
+        let source_ids: HashSet<SourceId> = self.sources.iter().map(|source| source.id).collect();
         for scene in &mut self.scenes {
             scene.items.retain(|item| source_ids.contains(&item.source));
             // Groups only ever reference live items; empty groups go.
             scene.prune_groups();
         }
         // Per-scene mixer overrides stay bounded and only on audio sources.
-        let audio_ids: Vec<SourceId> = self
+        let audio_ids: HashSet<SourceId> = self
             .sources
             .iter()
             .filter(|source| source.settings.has_audio())
@@ -410,8 +415,7 @@ impl Collection {
         }
         // Downstream keyers (CAP-N24): drop layers whose source vanished and
         // clamp opacity; a live layer keeps its source alive through the gc.
-        let live_sources: std::collections::HashSet<SourceId> =
-            self.sources.iter().map(|source| source.id).collect();
+        let live_sources: HashSet<SourceId> = self.sources.iter().map(|source| source.id).collect();
         self.downstream
             .retain(|dsk| live_sources.contains(&dsk.source));
         for dsk in &mut self.downstream {
@@ -849,7 +853,11 @@ impl Collection {
 
     /// Drop pool sources no item references (called by the removal paths).
     fn gc_sources(&mut self) {
-        let referenced: Vec<SourceId> = self
+        // A set, not a `Vec`: the `Vec` held one entry per item across every
+        // scene (duplicates included) and was then probed linearly once per
+        // source — 50 sources over 500 items is 25k comparisons for a single
+        // item delete.
+        let referenced: HashSet<SourceId> = self
             .scenes
             .iter()
             .flat_map(|scene| scene.items.iter().map(|item| item.source))

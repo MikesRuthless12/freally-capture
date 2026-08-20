@@ -650,6 +650,13 @@ impl Scene {
 
     /// The group `item` belongs to, if any (an item is in at most one).
     pub fn group_of(&self, item: ItemId) -> Option<&SourceGroup> {
+        // Called once per item per compose, and a compose runs for program,
+        // preview, vertical, every transition scratch, every nested pass and
+        // every projector — so the overwhelmingly common "this scene has no
+        // groups" case must not walk anything at all.
+        if self.groups.is_empty() {
+            return None;
+        }
         self.groups.iter().find(|group| group.items.contains(&item))
     }
 
@@ -660,7 +667,11 @@ impl Scene {
 
     /// Drop dangling member ids and empty groups (after item removals).
     pub fn prune_groups(&mut self) {
-        let live: Vec<ItemId> = self.items.iter().map(|item| item.id).collect();
+        if self.groups.is_empty() {
+            return;
+        }
+        let live: std::collections::HashSet<ItemId> =
+            self.items.iter().map(|item| item.id).collect();
         for group in &mut self.groups {
             group.items.retain(|id| live.contains(id));
         }

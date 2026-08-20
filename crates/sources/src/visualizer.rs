@@ -91,6 +91,10 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
             // Bars state: heights + peak markers, both in dB.
             let mut window = vec![0.0f32; FFT_N * 2];
             let mut mono = vec![0.0f32; FFT_N];
+            // Constants of the session, not of the frame: the Hann window and
+            // the log-spaced band edges never change once `bands` is known.
+            let hann = hann_window();
+            let edges = band_edges(bands);
             let mut heights = vec![FLOOR_DB; bands];
             let mut peaks: Vec<(f32, f32)> = vec![(FLOOR_DB, 0.0); bands];
             // Scope state: one column per output pixel, two samples each.
@@ -114,7 +118,7 @@ pub fn start_visualizer(config: VisualizerConfig) -> Result<CaptureSession, Capt
                             ring.latest(&mut window);
                         }
                         downmix_mono(&window, &mut mono);
-                        let spectrum = spectrum_db(&mono, bands);
+                        let spectrum = spectrum_db_with(&mono, &hann, &edges);
                         step_heights(&mut heights, &spectrum, dt, decay);
                         step_peaks(&mut peaks, &heights, dt);
                         let heights01: Vec<f32> = heights.iter().copied().map(level01).collect();
@@ -186,15 +190,25 @@ fn band_edges(bands: usize) -> Vec<f32> {
 /// Hann-windowed FFT of `mono` (must be [`FFT_N`] long) into `bands`
 /// log-spaced dB values, clamped to [`FLOOR_DB`]..=0. Each band takes its
 /// loudest bin; a band narrower than one bin reads its nearest bin.
-fn spectrum_db(mono: &[f32], bands: usize) -> Vec<f32> {
-    debug_assert_eq!(mono.len(), FFT_N);
-    let mut re: Vec<f32> = (0..FFT_N)
+/// The Hann window, which is a constant of `FFT_N` — built once per session by
+/// the render loop rather than recomputed per frame (2048 `cos()` per frame is
+/// ~61k/s at 30 fps, all producing the same table).
+fn hann_window() -> Vec<f32> {
+    (0..FFT_N)
         .map(|index| {
-            // Hann window (coherent gain 0.5, compensated below).
+            // Coherent gain 0.5, compensated in `full_scale` below.
             let phase = std::f32::consts::TAU * index as f32 / FFT_N as f32;
-            mono[index] * 0.5 * (1.0 - phase.cos())
+            0.5 * (1.0 - phase.cos())
         })
-        .collect();
+        .collect()
+}
+
+/// As [`spectrum_db`], with the window and band edges supplied by the caller so
+/// a per-frame call rebuilds neither.
+fn spectrum_db_with(mono: &[f32], hann: &[f32], edges: &[f32]) -> Vec<f32> {
+    debug_assert_eq!(mono.len(), FFT_N);
+    debug_assert_eq!(hann.len(), FFT_N);
+    let mut re: Vec<f32> = (0..FFT_N).map(|index| mono[index] * hann[index]).collect();
     let mut im = vec![0.0f32; FFT_N];
     fcap_audio::fft::fft_in_place(&mut re, &mut im, false);
     // Sine of amplitude 1.0 → |bin| = N/2 · window gain 0.5 → N/4.
@@ -204,7 +218,6 @@ fn spectrum_db(mono: &[f32], bands: usize) -> Vec<f32> {
         (r * r + i * i).sqrt() / full_scale
     };
     let hz_per_bin = SAMPLE_RATE as f32 / FFT_N as f32;
-    let edges = band_edges(bands);
     let max_bin = FFT_N / 2 - 1;
     edges
         .windows(2)
@@ -462,7 +475,7 @@ mod tests {
 
     #[test]
     fn a_1khz_sine_lands_in_its_band_and_nowhere_near_8khz() {
-        let spectrum = spectrum_db(&sine(1_000.0, 1.0), 48);
+        let spectrum = spectrum_db_with(&sine(1_000.0, 1.0), &hann_window(), &band_edges(48));
         let hot = band_of(1_000.0, 48);
         let loudest = spectrum
             .iter()

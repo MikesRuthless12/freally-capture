@@ -146,7 +146,6 @@ sources-group-title = Nhóm nguồn — chọn hai mục trở lên, rồi Tạo
 sources-group-aria = Nhóm nguồn
 sources-arrange = Sắp xếp: màn hình + các góc
 sources-add-source = Thêm một nguồn
-sources-browser-source-note = Nguồn Trình duyệt sẽ ra mắt như thành phần theo yêu cầu riêng của nó (một engine Chromium ~180 MB — không bao giờ đóng gói kèm). Hiện tại: chụp một cửa sổ trình duyệt thật bằng Chụp Cửa sổ + khóa chroma/màu, hoặc mở chat/thông báo dưới dạng Dock (Điều khiển → Docks).
 
 # Empty state
 sources-empty = Không có nguồn nào trong cảnh này — thêm Chụp Màn hình, Cửa sổ, Webcam, Ảnh, Màu hoặc Văn bản bằng “+”. Kéo, chỉnh tỷ lệ và xoay chúng trên khung hình; các nút bên phải sắp xếp lại thứ tự lớp.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ Tạm dừng Ghi
 controls-reactions-label = Phản ứng (gắn sẵn vào chương trình)
 controls-reactions-title = Cho một phản ứng nổi lên trên chương trình — được ghi VÀ phát trực tiếp, nên bản phát lại hiển thị đúng khoảnh khắc đó. Người xem trong chat cũng kích hoạt chúng (emoji phản ứng của họ tự động nổi lên); cơn lũ chỉ giới hạn những gì hiển thị trên màn hình.
 controls-react = Phản ứng { $emoji }
-controls-virtual-camera-title = Camera ảo cần thành phần trình điều khiển đã ký riêng cho mỗi HĐH (Win11 MFCreateVirtualCamera / Win10 DirectShow / phần mở rộng CoreMediaIO macOS / v4l2loopback Linux) — nó ra mắt như cột mốc riêng. Mô hình luồng đã sẵn sàng cho nó: chương trình, khung hình dọc, hoặc một nguồn duy nhất, kèm micro ảo ghép đôi trên Windows/Linux (macOS không có API micro ảo — nói thật lòng).
 controls-virtual-camera = ⌁ Khởi động Camera Ảo
+controls-virtual-camera-stop = ⌁ Dừng camera ảo
+controls-virtual-camera-ready = Phát chương trình dưới dạng camera mà ứng dụng khác có thể chọn.
 controls-saved = Đã lưu: { $path }
 
 # --- MixerDock.tsx ---
@@ -2792,3 +2792,7 @@ sources-browser-component-missing = Cần thành phần Browser Runtime — cài
 sources-browser-component-unsupported = CEF không phát hành bản dựng Browser Runtime cho nền tảng này, nên nguồn này không thể hiển thị ở đây.
 sources-browser-component-installing = Đang cài đặt thành phần Browser Runtime… nguồn này sẽ hiển thị khi hoàn tất.
 sources-browser-component-error = Không thể cài đặt thành phần Browser Runtime: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Bảng này đã dừng
+panel-error-hint = Ghi và phát trực tiếp không bị ảnh hưởng. Đóng rồi mở lại.

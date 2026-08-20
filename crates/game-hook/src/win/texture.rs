@@ -16,10 +16,20 @@ use windows::Win32::Graphics::Dxgi::{IDXGIKeyedMutex, IDXGIResource1, DXGI_SHARE
 
 /// How long either side waits for the keyed mutex before giving up on a frame.
 ///
-/// Deliberately tiny. The protocol's stall rule is that the **game must never
-/// be delayed** because the capture app is slow or has died holding the key —
-/// a skipped frame is always better than a stuttering game.
-pub const MUTEX_TIMEOUT_MS: u32 = 4;
+/// Zero. The protocol's stall rule is that the **game must never be delayed**
+/// because the capture app is slow or has died holding the key — a skipped
+/// frame is always better than a stuttering game — and a non-zero timeout does
+/// not honour that rule, it only bounds how badly it is broken.
+///
+/// This was 4 ms, which is the *entire* frame budget at 240 Hz and most of it
+/// at 144 Hz. It is charged on the game's own render thread inside `Present`,
+/// and the hand-off is asymmetric (the producer takes key 0 and releases key 1,
+/// so only the consumer hands key 0 back) — so once the app-side pump falls
+/// behind, or the DLL stays injected with no consumer at all (there is no eject
+/// path), the game pays it on *every* present. `AcquireSync` with a 0 timeout
+/// returns `WAIT_TIMEOUT` immediately, which the caller already treats as
+/// "skip this frame".
+pub const MUTEX_TIMEOUT_MS: u32 = 0;
 
 /// A shared texture the game presents into.
 pub struct SharedTexture {
@@ -28,6 +38,16 @@ pub struct SharedTexture {
     pub width: u32,
     pub height: u32,
     pub format: DXGI_FORMAT,
+    /// The raw `ID3D11Device` this texture was created on, compared (never
+    /// dereferenced) to detect a device-lost rebuild.
+    ///
+    /// Geometry alone is not enough: after a TDR, a driver update, or an
+    /// alt-tab out of exclusive fullscreen, many titles create a NEW device at
+    /// the SAME resolution. Without this the hook keeps a texture owned by the
+    /// dead device and then asks the new device's context to `CopyResource`
+    /// between two different devices, which is invalid and silently never
+    /// recovers.
+    pub device: *mut core::ffi::c_void,
     /// The producer's named NT handle, closed on drop.
     ///
     /// It MUST be owned: the name stays registered for exactly as long as this
@@ -108,6 +128,7 @@ impl SharedTexture {
             width,
             height,
             format,
+            device: Interface::as_raw(device),
             shared_handle: Some(shared_handle),
         })
     }
@@ -136,6 +157,7 @@ impl SharedTexture {
             width: desc.Width,
             height: desc.Height,
             format: desc.Format,
+            device: Interface::as_raw(device),
             // The consumer opened the name; it does not own it.
             shared_handle: None,
         })
@@ -217,6 +239,42 @@ mod tests {
     use super::*;
     use crate::protocol::{texture_name, KEY_CONSUMER, KEY_PRODUCER};
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+
+    #[test]
+    fn a_texture_records_the_device_that_created_it() {
+        // The device-lost guard. A TDR, a driver update, or an alt-tab out of
+        // exclusive fullscreen makes many titles create a NEW device at the
+        // SAME resolution — so the rebuild check cannot be geometry-only, or
+        // the hook keeps a texture owned by the dead device and asks the new
+        // device's context to copy between two devices. Two real devices at
+        // identical geometry is exactly that situation.
+        let Ok(first_device) = create_device() else {
+            eprintln!("no D3D11 hardware device — skipping");
+            return;
+        };
+        let second_device = create_device().expect("second device");
+
+        // A name of its own. `texture_name` is keyed on the pid alone (one hook
+        // per game process, by design), so the sibling test in this same test
+        // binary would otherwise race us to the same name and one of the two
+        // would fail with DXGI_ERROR_NAME_ALREADY_EXISTS.
+        let name = format!("{}-devicecheck", texture_name(std::process::id()));
+        let texture =
+            SharedTexture::create(&first_device, &name, 1920, 1080, DXGI_FORMAT_B8G8R8A8_UNORM)
+                .expect("create the shared texture");
+
+        assert_eq!(
+            texture.device,
+            Interface::as_raw(&first_device),
+            "the texture remembers the device it was created on"
+        );
+        assert_ne!(
+            texture.device,
+            Interface::as_raw(&second_device),
+            "a different device must be distinguishable at identical geometry — \
+             this is what `needs_rebuild` keys off after a device-lost"
+        );
+    }
 
     #[test]
     fn a_named_shared_texture_round_trips_between_devices() {

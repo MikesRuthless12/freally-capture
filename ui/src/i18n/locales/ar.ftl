@@ -146,7 +146,6 @@ sources-group-title = جمّع المصادر — اختر عنصرين أو أ�
 sources-group-aria = تجميع المصادر
 sources-arrange = ترتيب: شاشة + زوايا
 sources-add-source = إضافة مصدر
-sources-browser-source-note = يأتي مصدر المتصفح كمكوّن مستقل عند الطلب (محرك Chromium بحجم ~180 ميجابايت — لا يُضمَّن أبدًا). حاليًا: التقط نافذة متصفح حقيقية عبر التقاط نافذة + مفتاح كروما/لون، أو افتح الدردشة/التنبيهات كرصيف (عناصر التحكم ← الأرصفة).
 
 # Empty state
 sources-empty = لا مصادر في هذا المشهد — أضف التقاط شاشة أو نافذة أو كاميرا ويب أو صورة أو لون أو نص عبر "+". اسحبها وحجّمها ودوّرها على اللوحة؛ الأزرار الجانبية تعيد ترتيب المكدس.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ إيقاف التسجيل مؤقتًا
 controls-reactions-label = التفاعلات (مدمجة في البرنامج)
 controls-reactions-title = أطلِق تفاعلًا فوق البرنامج — مُسجَّل ومَبثوث، فتُظهر الإعادة اللحظة بدقة. المشاهدون في الدردشة يُطلقونها أيضًا (تطفو إيموجي تفاعلهم تلقائيًا)؛ الفيضان يحدّ فقط ما يظهر على الشاشة.
 controls-react = تفاعل { $emoji }
-controls-virtual-camera-title = تحتاج الكاميرا الافتراضية إلى مكوّن مُشغّل موقّع خاص بها لكل نظام (Win11 MFCreateVirtualCamera / Win10 DirectShow / امتداد macOS CoreMediaIO / Linux v4l2loopback) — تأتي كمرحلة مستقلة. نموذج التغذية جاهز لها: البرنامج أو اللوحة العمودية أو مصدر واحد، مع ميكروفون افتراضي مقترن على Windows/Linux (لا يوجد في macOS واجهة برمجية لميكروفون افتراضي — نقولها بصراحة).
 controls-virtual-camera = ⌁ بدء الكاميرا الافتراضية
+controls-virtual-camera-stop = ⌁ إيقاف الكاميرا الافتراضية
+controls-virtual-camera-ready = انشر البرنامج ككاميرا يمكن للتطبيقات الأخرى اختيارها.
 controls-saved = محفوظ: { $path }
 
 # --- MixerDock.tsx ---
@@ -2779,3 +2779,7 @@ sources-browser-component-missing = يتطلب مكوّن Browser Runtime — ث
 sources-browser-component-unsupported = لا تنشر CEF إصدار Browser Runtime لهذه المنصة، لذا لا يمكن عرض هذا المصدر هنا.
 sources-browser-component-installing = جارٍ تثبيت مكوّن Browser Runtime… سيُعرض هذا المصدر بعد الانتهاء.
 sources-browser-component-error = تعذّر تثبيت مكوّن Browser Runtime: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = توقفت هذه اللوحة
+panel-error-hint = التسجيل والبث غير متأثرين. أغلقها وأعد فتحها.

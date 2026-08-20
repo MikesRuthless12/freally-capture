@@ -625,6 +625,17 @@ export async function spikeHost(
       }
     });
     call.on("error", (err) => setState({ status: `guest call error: ${err.type}` }));
+    // The screen branch above reaps on `close`; this one did not, and the only
+    // other reap path is the DATA channel's close. A peer that opens a media
+    // call but never a data connection (its `peer.connect()` failed, or it is
+    // not a Freally client) therefore kept its tile and its 1 Hz `getStats()`
+    // poll until the whole session stopped — permanently holding one of the
+    // MAX_GUESTS slots.
+    call.on("close", () => {
+      if (guest.call === call) {
+        void dropGuest(session, call.peer, "guest call ended");
+      }
+    });
     publishGuests();
   });
 }

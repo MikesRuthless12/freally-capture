@@ -535,12 +535,15 @@ fn run_stretch(
             if !read_exact_or_end(&mut stdout, &mut data) {
                 break StretchEnd::Ended;
             }
+            // Move the filled buffer into the frame and take a fresh one — a
+            // clone is a full-frame memcpy per frame (see `media::run_wire_stretch`).
+            let pixels = std::mem::replace(&mut data, vec![0u8; frame_bytes]);
             sender.send(Frame {
                 width: run.width,
                 height: run.height,
                 stride: run.width * 4,
                 format: PixelFormat::Rgba8,
-                data: data.clone(),
+                data: pixels,
                 captured_at: Instant::now(),
             });
             force_frame = false;

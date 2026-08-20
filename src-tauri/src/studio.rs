@@ -42,6 +42,10 @@ use crate::settings::write_atomic;
 
 const TICK: Duration = Duration::from_millis(16);
 const READBACK_INTERVAL: Duration = Duration::from_millis(33);
+/// CAP-N76: the nominal rate the virtual camera advertises. The transport is
+/// latest-wins, so this is descriptive rather than a pacing contract — the
+/// camera sees whatever cadence the program readback runs at.
+const PROGRAM_FPS: u32 = 60;
 const PROGRAM_EVENT_INTERVAL: Duration = Duration::from_secs(1);
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 /// Multiview thumbnails (CAP-M06) refresh slower than the program — they don't
@@ -1633,6 +1637,9 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
     let reactions_queue = app
         .state::<crate::reactions::ReactionState>()
         .queue_handle();
+    // CAP-N76: the virtual camera's OS object lives here, on the one thread
+    // allowed to touch it. The commands only set a latch; this reconciles.
+    let mut camera_host = crate::vcam::CameraHost::default();
     let mut last_readback = Instant::now() - READBACK_INTERVAL;
     let mut last_program_event = Instant::now();
     // Whether the Studio-Mode preview pane currently has a published frame
@@ -3897,6 +3904,11 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         // Freally Link (CAP-N12): only while a receiver is connected; the
         // link thread JPEG-encodes on its own time — this hands it an Arc.
         let link_due = linking.wants_frames();
+        // CAP-N76: the camera tees off this readback and never forces one of
+        // its own. `wanted` (not `wants_frames`) so the first tick after the
+        // operator clicks Start still reads back and brings the camera up.
+        let vcam = app.state::<crate::vcam::VirtualCameraState>();
+        let vcam_due = vcam.wanted() || camera_host.wants_frames();
         let preview_due = last_readback.elapsed() >= READBACK_INTERVAL;
 
         // CAP-N53: which composed items are flagged off each output this tick
@@ -3939,11 +3951,19 @@ fn run_studio<R: Runtime>(app: AppHandle<R>, core: Arc<Mutex<StudioCore>>) {
         let stream_shared = stream_due && !stream_split;
         let replay_shared = replay_due && !record_split;
         let link_shared = link_due && !stream_split;
-        if record_shared || stream_shared || replay_shared || link_shared || preview_due {
+        if record_shared || stream_shared || replay_shared || link_shared || preview_due || vcam_due
+        {
             match compositor.read_program() {
                 Ok(frame) => {
                     let (frame_w, frame_h) = (frame.width, frame.height);
                     let data = Arc::new(frame.data);
+                    // The camera is brought up against the geometry it will
+                    // actually be fed, so a canvas resize restarts it rather
+                    // than publishing into a stale frame region.
+                    if vcam_due {
+                        camera_host.reconcile(&vcam, frame_w, frame_h, PROGRAM_FPS);
+                        camera_host.push_frame(&vcam, &data, frame_w, frame_h);
+                    }
                     if record_shared {
                         recording.push_video(Arc::clone(&data));
                     }
@@ -6027,6 +6047,16 @@ mod tests {
             "//attacker/share/score.txt",
             "http://attacker/score.txt",
             "smb://attacker/score.txt",
+            // Win32 accepts either separator in the two-character UNC prefix.
+            // `GetFullPath("/\\localhost\\C$\\Windows")` really does return
+            // `\\localhost\C$\Windows`, so these are network paths too — and
+            // testing only the matched pairs above made every caller of this
+            // guard bypassable by one character.
+            "/\\attacker\\share\\score.txt",
+            "\\/attacker/share/score.txt",
+            // Leading whitespace is tolerated by Win32, so it must not hide one.
+            "  \\\\attacker\\share\\score.txt",
+            "\t//attacker/share/score.txt",
         ] {
             assert!(
                 crate::commands::studio::is_remote(hostile),
@@ -6035,6 +6065,9 @@ mod tests {
         }
         assert!(!crate::commands::studio::is_remote("C:/data/score.txt"));
         assert!(!crate::commands::studio::is_remote("/home/mike/score.txt"));
+        // A single leading separator is an ordinary absolute POSIX path.
+        assert!(!crate::commands::studio::is_remote("/var/lib/score.txt"));
+        assert!(!crate::commands::studio::is_remote("\\local\\score.txt"));
     }
 
     #[test]

@@ -46,6 +46,10 @@ pub struct Deinterlacer {
     /// The previous RAW (pre-deinterlace) frame — MotionAdaptive's temporal
     /// reference. Dropped whenever the frame geometry changes.
     prev: Option<(u32, u32, Vec<u8>)>,
+    /// The buffer `prev` displaced last frame, kept for reuse. MotionAdaptive
+    /// needs two full frames alive at once, so the two alternate — which turns
+    /// an 8 MB alloc + free per frame at 1080p into no allocation at all.
+    spare: Vec<u8>,
     /// Bob alternates the kept field per frame.
     bob_bottom: bool,
 }
@@ -56,6 +60,7 @@ impl Deinterlacer {
             mode,
             order,
             prev: None,
+            spare: Vec::new(),
             bob_bottom: false,
         }
     }
@@ -66,8 +71,15 @@ impl Deinterlacer {
             return;
         }
         let raw = match self.mode {
-            // Only the adaptive mode pays for the history copy.
-            Mode::MotionAdaptive => Some(frame.data.clone()),
+            // Only the adaptive mode pays for the history copy — and it refills
+            // the buffer the previous frame displaced rather than allocating a
+            // new one, so steady state does no allocation at all.
+            Mode::MotionAdaptive => {
+                let mut scratch = std::mem::take(&mut self.spare);
+                scratch.clear();
+                scratch.extend_from_slice(&frame.data);
+                Some(scratch)
+            }
             _ => None,
         };
         let dominant_bottom = match self.mode {
@@ -95,7 +107,10 @@ impl Deinterlacer {
             }
         }
         if let Some(raw) = raw {
-            self.prev = Some((frame.width, frame.height, raw));
+            // The frame we just displaced becomes next frame's scratch buffer.
+            if let Some((_, _, displaced)) = self.prev.replace((frame.width, frame.height, raw)) {
+                self.spare = displaced;
+            }
         }
     }
 }

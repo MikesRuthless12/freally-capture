@@ -146,7 +146,6 @@ sources-group-title = 소스 그룹화 — 두 개 이상의 항목을 선택한
 sources-group-aria = 소스 그룹화
 sources-arrange = 배치: 화면 + 모서리
 sources-add-source = 소스 추가
-sources-browser-source-note = 브라우저 소스는 별도의 온디맨드 컴포넌트 마일스톤으로 제공됩니다 (~180 MB Chromium 엔진 — 절대 번들되지 않음). 지금은: 윈도우 캡처 + 크로마/색상 키로 실제 브라우저 창을 캡처하거나, 채팅/알림을 독으로 여세요 (컨트롤 → 독).
 
 # Empty state
 sources-empty = 이 장면에 소스가 없습니다 — "+"로 디스플레이 캡처, 윈도우, 웹캠, 이미지, 색상 또는 텍스트를 추가하세요. 캔버스에서 드래그, 크기 조절, 회전할 수 있으며, 오른쪽 버튼으로 스택 순서를 바꿉니다.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ 녹화 일시정지
 controls-reactions-label = 리액션 (프로그램에 합성됨)
 controls-reactions-title = 프로그램 위에 리액션을 띄웁니다 — 녹화되고 방송되어 다시 보기에서 그 순간이 그대로 나옵니다. 채팅 시청자도 이를 트리거합니다 (시청자의 리액션 이모지가 자동으로 떠오릅니다). 폭주해도 화면에 표시되는 수만 제한됩니다.
 controls-react = 리액션 { $emoji }
-controls-virtual-camera-title = 가상 카메라는 OS별로 자체 서명된 드라이버 컴포넌트가 필요합니다 (Win11 MFCreateVirtualCamera / Win10 DirectShow / macOS CoreMediaIO 확장 / Linux v4l2loopback) — 자체 마일스톤으로 제공됩니다. 피드 모델은 준비되어 있습니다: 프로그램, 세로 캔버스, 또는 단일 소스를, Windows/Linux에서는 짝을 이루는 가상 마이크와 함께 (macOS에는 가상 마이크 API가 없습니다 — 정직하게 말합니다).
 controls-virtual-camera = ⌁ 가상 카메라 시작
+controls-virtual-camera-stop = ⌁ 가상 카메라 중지
+controls-virtual-camera-ready = 프로그램을 다른 앱이 선택할 수 있는 카메라로 게시합니다.
 controls-saved = 저장됨: { $path }
 
 # --- MixerDock.tsx ---
@@ -2792,3 +2792,7 @@ sources-browser-component-missing = Browser Runtime 구성 요소가 필요합�
 sources-browser-component-unsupported = CEF는 이 플랫폼용 Browser Runtime 빌드를 제공하지 않으므로 이 소스는 여기서 렌더링할 수 없습니다.
 sources-browser-component-installing = Browser Runtime 구성 요소를 설치하는 중… 완료되면 이 소스가 렌더링됩니다.
 sources-browser-component-error = Browser Runtime 구성 요소를 설치하지 못했습니다: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = 이 패널이 중지되었습니다
+panel-error-hint = 녹화와 스트리밍은 영향을 받지 않습니다. 닫았다가 다시 여세요.

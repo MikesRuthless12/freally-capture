@@ -202,12 +202,18 @@ pub fn start_browser(hub_id: &str, config: BrowserConfig) -> Result<CaptureSessi
                 if !read_exact_or_end(&mut stdout, &mut data) {
                     break; // host exited — the studio's auto-recover restarts us
                 }
+                // Hand the filled buffer over and take a fresh one, rather than
+                // copying it: a clone here is a full-frame memcpy every frame
+                // (8 MB at 1080p). The replacement is `alloc_zeroed`, which the
+                // OS serves as already-zero pages, and `read_exact_or_end`
+                // overwrites all of it before the next send anyway.
+                let frame = std::mem::replace(&mut data, vec![0u8; frame_bytes]);
                 sender.send(Frame {
                     width: w,
                     height: h,
                     stride: w * 4,
                     format: PixelFormat::Rgba8,
-                    data: data.clone(),
+                    data: frame,
                     captured_at: Instant::now(),
                 });
             }

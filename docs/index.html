@@ -80,29 +80,29 @@
         <div class="release-head">
           <div class="meta">
             <span class="badge">Latest</span>
-            <span class="date">1.2.0 · Aug 19, 2026</span>
+            <span class="date">1.2.1 · Aug 20, 2026</span>
           </div>
           <details class="dl">
             <summary>Download <span class="chev" aria-hidden="true">▾</span></summary>
             <div class="dl-menu" role="menu">
-              <span class="dl-note">v1.2.0 adds the last three additions to the app. <strong>Virtual camera</strong> — the composed program appears as “Freally Capture Virtual Camera” in Zoom/Meet/Discord/Teams (Windows; macOS and Linux are their own components). <strong>True browser source</strong> — any http/https page rendered offscreen through CEF at your chosen resolution and fps, with every navigation gated by an allowlist so a redirect to <code>file://</code> is cancelled, never followed; the runtime is fetched on first use, never bundled. <strong>Game capture</strong> — an injected GPU present-hook reaches exclusive-fullscreen titles that window capture cannot, strictly per-title opt-in after you accept the anti-cheat risk for that specific game, degrading to Window Capture rather than crashing when a title refuses. Also: the “More Freally apps” Central panel is gone. <em>Honest notes:</em> the virtual-camera source DLL and the CEF runtime are <strong>not yet code-signed</strong>, so Windows may warn or block them, and the live camera-in-a-call and inject-into-a-protected-title drills are still owed. Everything through 1.1.0 remains.</span>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.0/Freally.Capture_1.2.0_x64-setup.exe">
+              <span class="dl-note">v1.2.1 is the Operation_Optimization audit — no new features, and three from 1.2.0 that finally work. <strong>Game capture reaches modern titles</strong>: only <code>Present</code> was hooked, but flip-model games present through <code>Present1</code> and never touch that slot, so injection reported success and no frame ever arrived. Both are hooked now, device-lost recovers, multisampled buffers resolve, and the vtable is genuinely restored on unload. <strong>The virtual camera can be started</strong> — the backend was complete but nothing called it. <strong>The browser source is in the Add menu</strong> — it shipped hidden behind a disabled flag. Plus a full security pass: a network-path guard that every other path check depends on was bypassable by one character, injection now verifies the process it opens, WHIP is https-only, and a render error no longer blanks the whole studio mid-broadcast. <em>Honest notes:</em> the virtual-camera source DLL and the CEF runtime are still <strong>not code-signed</strong>, and the live camera-in-a-call and inject-into-a-protected-title drills are still owed. Everything through 1.2.0 remains.</span>
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.1/Freally.Capture_1.2.1_x64-setup.exe">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.4 10.6 4.2v7.1H3zM11.6 4 21 2.7v8.6h-9.4zM3 12.7h7.6v7.1L3 18.6zM11.6 12.7H21v8.6l-9.4-1.3z"/></svg>
                 Windows (64-bit installer)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.0/Freally.Capture_1.2.0_aarch64.dmg">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.1/Freally.Capture_1.2.1_aarch64.dmg">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2 .8-1.2 1.1-2.3 1.1-2.3-.1 0-2.2-.8-2.2-3.3zM15.5 6.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2z"/></svg>
                 macOS (Apple Silicon .dmg)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.0/Freally.Capture_1.2.0_x64.dmg">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.1/Freally.Capture_1.2.1_x64.dmg">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 12.7c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.4.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2 .8-1.2 1.1-2.3 1.1-2.3-.1 0-2.2-.8-2.2-3.3zM15.5 6.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2z"/></svg>
                 macOS (Intel .dmg)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.0/Freally.Capture_1.2.0_amd64.AppImage">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/download/v1.2.1/Freally.Capture_1.2.1_amd64.AppImage">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c-2 0-3.2 1.7-3.2 4 0 1.5.2 2.4-.6 3.5-.9 1.2-2.2 2.4-2.2 4.6 0 .8.3 1.4.8 1.8-.3.7-.8 1.3-.8 2 0 1.4 1.7 2 3.7 2.2 1 .1 1.7.6 2.5.6s1.5-.5 2.5-.6c2-.2 3.7-.8 3.7-2.2 0-.7-.5-1.3-.8-2 .5-.4.8-1 .8-1.8 0-2.2-1.3-3.4-2.2-4.6-.8-1.1-.6-2-.6-3.5 0-2.3-1.2-4-3.2-4zm-1.5 4.2c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zm3 0c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zM12 9.6c.8 0 1.6.4 1.6.8 0 .3-.8.7-1.6.7s-1.6-.4-1.6-.7c0-.4.8-.8 1.6-.8z"/></svg>
                 Linux (AppImage)
               </a>
-              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v1.2.0">
+              <a role="menuitem" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v1.2.1">
                 All installers &amp; formats (.msi, .deb, .rpm) — release page
               </a>
             </div>

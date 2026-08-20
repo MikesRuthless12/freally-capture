@@ -16,6 +16,7 @@
 
 use std::ffi::c_void;
 
+use windows::core::HSTRING;
 use windows::Win32::Foundation::{HINSTANCE, HWND};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
@@ -27,6 +28,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::{
     IDXGISwapChain, DXGI_SWAP_CHAIN_DESC, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
+use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::System::LibraryLoader::{DisableThreadLibraryCalls, FreeLibraryAndExitThread};
 use windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -52,8 +54,20 @@ pub unsafe extern "system" fn DllMain(
             spawn_arming_thread(module);
         }
         DLL_PROCESS_DETACH => {
-            // The vtable hook restores itself when HookState drops at process
-            // teardown; nothing to force here.
+            // Restore explicitly. The old comment here claimed the hook
+            // "restores itself when HookState drops at process teardown" — it
+            // does not: `HookState` lives in a `static OnceLock`, and Rust never
+            // drops statics, so that `Drop` never ran. Leaving the slot patched
+            // is harmless when the whole process is going away, but fatal if
+            // only this DLL is unloaded (an anti-cheat sweep, a future eject):
+            // the slot would point into freed pages and the next present would
+            // jump into them.
+            //
+            // Only one `VirtualProtect` and one aligned store, so it is safe
+            // under the loader lock, and it is a compare-and-swap — an overlay
+            // that hooked the slot after us is left alone rather than silently
+            // unhooked.
+            super::hook::restore();
         }
         _ => {}
     }
@@ -72,7 +86,20 @@ unsafe fn spawn_arming_thread(module: HINSTANCE) {
             // Best effort: if we can't build the dummy swap chain (unusual D3D
             // config), we simply never arm — the app falls back to WGC.
             if let Err(err) = arm_via_dummy_swapchain() {
-                eprintln!("freally-game-hook: could not arm: {err}");
+                // NOT `eprintln!`. This runs inside the game, which is a
+                // GUI-subsystem process with no stderr handle — and the release
+                // profile is `panic = "abort"`, so a failed write would abort
+                // the *game*, not just this thread. (That same setting is why
+                // the `catch_unwind` in `present_hook` cannot actually catch
+                // anything; an injected DLL must simply never panic.)
+                // `OutputDebugStringW` is always safe to call and is where a
+                // developer looks anyway.
+                // SAFETY: a valid null-terminated wide string for the duration.
+                unsafe {
+                    OutputDebugStringW(&HSTRING::from(format!(
+                        "freally-game-hook: could not arm: {err}"
+                    )));
+                }
             }
             // Whether or not arming succeeded, the DLL stays resident while the
             // hook is installed; unload happens at process exit. If arming

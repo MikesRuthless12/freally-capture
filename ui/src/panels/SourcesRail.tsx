@@ -199,14 +199,6 @@ const KIND_BADGE: Record<string, string> = {
 };
 
 // Values are i18n keys (see KIND_BADGE).
-/** CAP-N77: the Browser source's rendering runtime (the `freally-browser-host`
- * CEF component) ships in a later release. Until it does, the "Browser…"
- * add-menu entry is hidden so it is never a dead option — the whole source
- * kind (variant, dispatch, form, Properties) is in place and re-enables with
- * one flip. A Browser source loaded from an existing scene still edits + runs
- * (and fails readably if the runtime is absent). */
-const BROWSER_SOURCE_READY = false;
-
 const ADD_MENU: Array<[PickerMode, string]> = [
   ["display", "sources-add-display"],
   ["window", "sources-add-window"],
@@ -407,22 +399,17 @@ export function SourcesRail({
                 // this when the CAP-M15/M21 entries lengthened the menu).
                 className="absolute right-0 z-20 mt-1 max-h-72 w-48 overflow-y-auto rounded-lg border border-white/10 bg-havoc-panel p-1 shadow-xl"
               >
-                {ADD_MENU.filter(([mode]) => mode !== "browser" || BROWSER_SOURCE_READY).map(
-                  ([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => openPicker(mode)}
-                      className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
-                    >
-                      {t(label)}
-                    </button>
-                  ),
-                )}
-                <p className="m-0 border-t border-white/5 px-2 py-1.5 text-[10px] leading-snug text-havoc-muted">
-                  {t("sources-browser-source-note")}
-                </p>
+                {ADD_MENU.map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openPicker(mode)}
+                    className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-havoc-text hover:bg-white/5"
+                  >
+                    {t(label)}
+                  </button>
+                ))}
               </div>
             )}
           </div>

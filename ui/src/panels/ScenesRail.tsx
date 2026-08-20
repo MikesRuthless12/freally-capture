@@ -289,7 +289,13 @@ function BackdropDialog({
     if (item && isMedia) {
       studioMediaPaused(item.source).then(setPaused).catch(fail("backdrop pause state"));
     }
-  }, [item, item?.source, isMedia]);
+    // Depends on the source ID, NOT on `item`. `item` is recomputed from the
+    // `scene` prop on every render, and `scene` is a fresh object on every
+    // `studio` event — so including it re-ran this (and restarted the 500 ms
+    // poll below) on every unrelated scene mutation, turning a 2 Hz poll into
+    // a burst on every drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.source, isMedia]);
 
   // Poll the playhead while a media backdrop is shown (2 Hz is plenty for a
   // readout; the canvas itself is the real preview).
@@ -302,7 +308,10 @@ function BackdropDialog({
     tick();
     const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
-  }, [item, item?.source, isMedia]);
+    // As above: keyed on the source ID so an unrelated studio event does not
+    // tear down and rebuild the interval.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.source, isMedia]);
 
   /** Write one field of the media source's settings (loop / reverse). */
   const updateMedia = (change: { loop?: boolean; reverse?: boolean }) => {

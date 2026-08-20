@@ -81,6 +81,43 @@ impl VtableHook {
     pub fn original(&self) -> *mut c_void {
         self.original
     }
+
+    /// Put the original back, but **only if the slot still holds `ours`**.
+    ///
+    /// A blind restore is wrong when another overlay (Steam, Discord, RTSS,
+    /// MSI Afterburner) hooked the same slot *after* we did: writing our saved
+    /// pointer back would silently unhook them and send presents to a function
+    /// they no longer own. If the slot has moved on, the honest thing is to
+    /// leave it alone and stay chained — our hook still forwards.
+    ///
+    /// Returns whether the restore happened.
+    ///
+    /// # Safety
+    /// `slot` must still address a live vtable — true while the swap chain
+    /// whose vtable this is exists, i.e. for the process lifetime in practice.
+    pub unsafe fn restore_if_ours(&self, ours: *mut c_void) -> bool {
+        let size = std::mem::size_of::<*mut c_void>();
+        let mut old = PAGE_PROTECTION_FLAGS(0);
+        if VirtualProtect(
+            self.slot as *const c_void,
+            size,
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let restored = if std::ptr::read(self.slot) == ours {
+            std::ptr::write(self.slot, self.original);
+            true
+        } else {
+            false
+        };
+        let mut discard = PAGE_PROTECTION_FLAGS(0);
+        let _ = VirtualProtect(self.slot as *const c_void, size, old, &mut discard);
+        restored
+    }
 }
 
 impl Drop for VtableHook {

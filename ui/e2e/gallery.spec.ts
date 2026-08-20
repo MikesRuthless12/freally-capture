@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 // The visual-smoke gallery: boot the real built UI with the mocked Tauri IPC and
 // screenshot every feature panel. Each screenshot is a rendering confirmation.
@@ -73,6 +73,11 @@ for (const [file, menu, item] of MENU_DIALOGS) {
     await page.getByRole("menuitem", { name: menu }).click();
     await page.getByRole("menuitem", { name: item }).first().click();
     await page.waitForTimeout(700);
+    // A screenshot alone cannot fail: an unguarded render throw unmounts the
+    // whole tree and the shot is a blank page, which is exactly how
+    // 11-recordings and 19-profiles sat green while rendering nothing. Assert
+    // the dialog is actually up before photographing it.
+    await expect(page.getByRole("dialog")).toBeVisible();
     await page.screenshot({ path: `${DIR}/${file}.png` });
   });
 }

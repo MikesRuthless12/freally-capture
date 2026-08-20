@@ -1247,7 +1247,26 @@ pub struct MissingFile {
 /// Also the gate for CAP-M16's bound-text poll (`studio.rs` §5c) — an untrusted
 /// collection must never make the render loop reach out to an attacker's host.
 pub(crate) fn is_remote(path: &str) -> bool {
-    path.contains("://") || path.starts_with("\\\\") || path.starts_with("//")
+    // Win32 treats `/` and `\` interchangeably when it detects the two-separator
+    // UNC prefix, so testing only `\\` and `//` left `/\host\share\x` and
+    // `\/host\share\x` looking local — and they are not:
+    // `GetFullPath("/\localhost\C$\Windows")` returns `\\localhost\C$\Windows`,
+    // and opening it performs a real SMB round trip. Rust passes short paths to
+    // `CreateFileW` unmodified, so it reaches the same parser. Any mixture of
+    // the two separators must count, or every caller of this guard is
+    // bypassable by one character.
+    //
+    // Leading whitespace is trimmed first for the same reason: Win32 tolerates
+    // it, so an untrimmed compare would be a second way past the check.
+    let path = path.trim_start();
+    if path.contains("://") {
+        return true;
+    }
+    let mut bytes = path.bytes();
+    matches!(
+        (bytes.next(), bytes.next()),
+        (Some(b'\\' | b'/'), Some(b'\\' | b'/'))
+    )
 }
 
 /// A best-effort LAN address for the CAP-N11 ingest URL/QR — the web

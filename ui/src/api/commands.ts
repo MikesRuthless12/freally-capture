@@ -1177,6 +1177,17 @@ export function virtualCameraStatus(): Promise<VirtualCameraStatus> {
   return invoke<VirtualCameraStatus>("virtual_camera_status");
 }
 
+/** Ask the studio loop to bring the camera up. Rejects with the honest reason
+ * when no driver-backed camera can run here, so the UI never spins on it. */
+export function virtualCameraStart(): Promise<void> {
+  return invoke<void>("virtual_camera_start");
+}
+
+/** Ask the studio loop to tear the camera down. */
+export function virtualCameraStop(): Promise<void> {
+  return invoke<void>("virtual_camera_stop");
+}
+
 /** The EULA text + version + whether the current version is already accepted. */
 export function eulaStatus(): Promise<EulaStatus> {
   return invoke<EulaStatus>("eula_status");

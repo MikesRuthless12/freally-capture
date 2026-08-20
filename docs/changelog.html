@@ -24,8 +24,41 @@
     </header>
 
     <main>
-      <!-- 1.2.0 — deep capture & web -->
+      <!-- 1.2.1 — Operation_Optimization: audit, hardening & reachability -->
       <article class="release latest">
+        <div class="release-head">
+          <div class="meta">
+            <span class="badge">1.2.1</span>
+            <span class="date">Aug 20, 2026 · Operation_Optimization</span>
+          </div>
+          <a class="future" href="https://github.com/MikesRuthless12/freally-capture/releases/tag/v1.2.1">Download</a>
+        </div>
+
+        <h2>1.2.1 — Operation_Optimization</h2>
+        <p class="summary">
+          A full-codebase audit and the fixes it turned up. Nothing new was added. What changed is
+          that several things <em>shipped</em> in 1.2.0 now actually work: game capture reached no
+          modern title, the virtual camera could not be started at all, and the browser source was
+          hidden from the menu. Alongside those, a path guard that every other guard in the app
+          depends on was bypassable by a single character.
+        </p>
+        <ul class="features">
+          <li><strong>Game capture now works on modern titles.</strong> Only <code>IDXGISwapChain::Present</code> was hooked — but DXGI 1.2+ <em>flip-model</em> games, which is most of what runs in exclusive fullscreen, present through <code>Present1</code> and never touch that slot. Injection reported success and not one frame ever arrived. Both slots are hooked now, covered by a test that builds a real flip-model swap chain and reads the captured frame back. Device-lost recovers (a TDR or an alt-tab out of fullscreen used to kill capture for the session), multiple swap chains no longer rebuild the shared texture 60×/s, multisampled buffers resolve instead of failing silently, and the vtable is genuinely restored on unload.</li>
+          <li><strong>The virtual camera can be started.</strong> The backend was complete in 1.2.0 and nothing called it — there were no start/stop commands and the button was hardcoded disabled. Now wired end to end, teeing off the existing program readback so enabling it costs one extra publish per frame that was already being read.</li>
+          <li><strong>The browser source is in the Add menu.</strong> It shipped complete but behind a disabled flag, and the menu still told you to use Window Capture instead.</li>
+          <li><strong>Security.</strong> The network-path guard missed two UNC spellings Windows accepts (<code>/\</code> and <code>\/</code>), which bypassed it everywhere and could leak a credential hash to an attacker-named host. Game-capture injection now verifies the process it actually opened rather than trusting a possibly-reused process id. WHIP is https-only — its stream key <em>is</em> the bearer token. The remote-guest invite token moved out of the query string, and the SRT passphrase is masked like every other secret.</li>
+          <li><strong>A render error no longer blanks the studio.</strong> One throw used to unmount the whole UI while the app kept encoding and streaming — not off-air, but blind and unable to stop. Errors are now contained to the panel that raised them.</li>
+          <li><strong>Faster.</strong> Four decode paths copied the whole frame every frame; the compositor destroyed and rebuilt every filter-chain texture 60×/s; the game hook charged the game’s own render thread a 4&nbsp;ms wait on every present; and muted audio strips were burning 10–100× per sample on denormals.</li>
+        </ul>
+        <p class="summary">
+          <em>Still owed, unchanged:</em> the virtual-camera source DLL and the CEF runtime remain
+          <strong>unsigned</strong>, and the live camera-in-a-call and inject-into-a-protected-title
+          drills need real hardware.
+        </p>
+      </article>
+
+      <!-- 1.2.0 — deep capture & web -->
+      <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">1.2.0</span>

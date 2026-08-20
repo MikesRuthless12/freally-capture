@@ -71,9 +71,16 @@ export function inviteLink(token: string): string {
  * both together. */
 export const WEB_JOIN_BASE = "https://mikesruthless12.github.io/freally-capture/join.html";
 
-/** The browser form of an invite — what the QR encodes. */
+/** The browser form of an invite — what the QR encodes.
+ *
+ * The token rides in the **fragment**, not the query. Holding it is the
+ * capability to call the host and be admitted, and a query string is sent to
+ * the server — so `?token=` would land in GitHub Pages' access logs, in browser
+ * history, and in any cross-origin `Referer` the page emits. A fragment is
+ * never transmitted. `docs/join.html` already reads either form, so this
+ * needs no change on the page. */
 export function webJoinLink(token: string): string {
-  return `${WEB_JOIN_BASE}?token=${token}`;
+  return `${WEB_JOIN_BASE}#token=${token}`;
 }
 
 /**
@@ -83,7 +90,10 @@ export function webJoinLink(token: string): string {
  */
 export function parseInviteInput(input: string): string | null {
   const trimmed = input.trim();
-  const match = trimmed.match(/[?&]token=([^&\s]+)/);
+  // `#` as well as `?`/`&`: the web-join link puts the token in the fragment so
+  // it never reaches a server log, and a scanned QR still gets pasted back in
+  // here. The deep link (`freally://join?token=…`) keeps the query form.
+  const match = trimmed.match(/[?&#]token=([^&\s]+)/);
   if (match) {
     return decodeURIComponent(match[1]);
   }

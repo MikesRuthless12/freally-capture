@@ -26,15 +26,16 @@
 
 use std::path::{Path, PathBuf};
 
+use windows::core::PWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Memory::{
     VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
 };
 use windows::Win32::System::Threading::{
-    CreateRemoteThread, GetExitCodeThread, OpenProcess, WaitForSingleObject,
-    LPTHREAD_START_ROUTINE, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
-    PROCESS_VM_WRITE,
+    CreateRemoteThread, GetExitCodeThread, OpenProcess, QueryFullProcessImageNameW,
+    WaitForSingleObject, LPTHREAD_START_ROUTINE, PROCESS_CREATE_THREAD, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_WRITE,
 };
 
 /// How long to wait for the remote `LoadLibraryW` to finish before giving up.
@@ -116,11 +117,36 @@ pub fn inject(pid: u32, executable: &str, consent: &Consent) -> Result<(), Strin
             dll.display()
         ));
     }
-    inject_dll(pid, &dll)
+    inject_dll(pid, &dll, consent)
+}
+
+/// The image name of an already-open process, or `None` if it cannot be read.
+///
+/// Mirrors `win::mod`'s window-owner lookup: the file name only, since that is
+/// what a [`Consent`] records.
+fn image_name_of(process: HANDLE) -> Option<String> {
+    // Roomy enough for deep install paths (beyond legacy MAX_PATH).
+    let mut buf = [0u16; 512];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf`/`len` are locals; the PWSTR points into `buf`. `process`
+    // was opened with PROCESS_QUERY_INFORMATION, which this call requires.
+    let queried = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    if queried.is_err() {
+        return None;
+    }
+    let full = String::from_utf16_lossy(&buf[..len as usize]);
+    Some(full.rsplit(['\\', '/']).next().unwrap_or(&full).to_string())
 }
 
 /// The mechanical half, separated so [`inject`]'s policy is readable on its own.
-fn inject_dll(pid: u32, dll: &Path) -> Result<(), String> {
+fn inject_dll(pid: u32, dll: &Path, consent: &Consent) -> Result<(), String> {
     // The exact rights needed, nothing more — a protected/anti-cheat process
     // fails here, which is the honest "this title refuses the hook" answer.
     let access =
@@ -129,6 +155,28 @@ fn inject_dll(pid: u32, dll: &Path) -> Result<(), String> {
     let process = unsafe { OpenProcess(access, false, pid) }.map_err(|err| {
         format!("this game will not allow Game Capture (it refused access): {err}")
     })?;
+
+    // Re-check consent against the process we ACTUALLY opened, not against the
+    // name the caller passed. The pid was resolved from a window earlier; the
+    // game can exit in between and Windows reuses pids aggressively, so without
+    // this the most consequential operation in the app — loading our DLL into
+    // someone else's process — rests on a stale lookup. Cheap: the handle is
+    // already open with the rights this query needs.
+    let running = image_name_of(process);
+    let approved = running.as_deref().is_some_and(|name| consent.covers(name));
+    if !approved {
+        // SAFETY: pairs with the successful OpenProcess above.
+        unsafe {
+            let _ = CloseHandle(process);
+        }
+        return Err(match running {
+            Some(name) => format!(
+                "process {pid} is running {name}, which Game Capture has no consent for — \
+                 the game may have exited and the id been reused; pick it again"
+            ),
+            None => format!("could not confirm what process {pid} is running — not injecting"),
+        });
+    }
 
     let result = inject_into_open_process(process, dll);
     // SAFETY: `process` came from OpenProcess above and is closed exactly once.

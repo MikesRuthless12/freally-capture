@@ -146,7 +146,6 @@ sources-group-title = Сгруппировать источники — выбе
 sources-group-aria = Сгруппировать источники
 sources-arrange = Расположить: экран + углы
 sources-add-source = Добавить источник
-sources-browser-source-note = Браузерный источник поставляется как отдельный компонент по запросу (движок Chromium ~180 МБ — никогда не включается в сборку). Сейчас: захватите настоящее окно браузера через «Захват окна» + хромакей/ключ по цвету, либо откройте чат/уведомления как док (Управление → Доки).
 
 # Empty state
 sources-empty = В этой сцене нет источников — добавьте «Захват дисплея», окно, веб-камеру, изображение, цвет или текст через «+». Перетаскивайте, масштабируйте и вращайте их на холсте; кнопки справа меняют порядок в стеке.
@@ -445,8 +444,9 @@ controls-pause-recording = ⏸ Приостановить запись
 controls-reactions-label = Реакции (впечатаны в программу)
 controls-reactions-title = Пустить реакцию поверх программы — записывается И транслируется, так что в повторе виден точный момент. Зрители в чате тоже их запускают (их эмодзи-реакции всплывают автоматически); наплыв лишь ограничивает то, что на экране.
 controls-react = Реакция { $emoji }
-controls-virtual-camera-title = Виртуальной камере нужен собственный подписанный компонент драйвера для каждой ОС (Win11 MFCreateVirtualCamera / Win10 DirectShow / расширение CoreMediaIO для macOS / v4l2loopback для Linux) — она поставляется отдельной вехой. Модель вывода к ней готова: программа, вертикальный холст или один источник, с парным виртуальным микрофоном в Windows/Linux (в macOS нет API виртуального микрофона — говорим честно).
 controls-virtual-camera = ⌁ Запустить виртуальную камеру
+controls-virtual-camera-stop = ⌁ Остановить виртуальную камеру
+controls-virtual-camera-ready = Публикует программу как камеру, которую могут выбрать другие приложения.
 controls-saved = Сохранено: { $path }
 
 # --- MixerDock.tsx ---
@@ -2779,3 +2779,7 @@ sources-browser-component-missing = Требуется компонент Browse
 sources-browser-component-unsupported = CEF не публикует сборку Browser Runtime для этой платформы, поэтому источник здесь не отрисуется.
 sources-browser-component-installing = Устанавливается компонент Browser Runtime… источник отрисуется после завершения.
 sources-browser-component-error = Не удалось установить компонент Browser Runtime: { $message }
+
+# Shown when a dialog or dock hits a render error (ErrorBoundary).
+panel-error-title = Эта панель остановлена
+panel-error-hint = Запись и трансляция не затронуты. Закройте и откройте снова.
